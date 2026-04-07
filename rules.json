@@ -1,0 +1,80 @@
+{
+  "watchlist": ["BTCUSD", "ETHUSD", "SOLUSD"],
+  "default_timeframe": "1W",
+
+  "strategy": {
+    "name": "van de Poppe + Tone Vays BTC Strategy",
+    "sources": [
+      "Michaël van de Poppe (@CryptoMichNL) — EMA 21/50/200 pullback system",
+      "Tone Vays (@ToneVays) — MACD divergence + RSI confirmation"
+    ],
+    "primary_timeframes": [
+      "Weekly (macro bias)",
+      "Daily (entry timing)",
+      "4H (precise entry)"
+    ]
+  },
+
+  "indicators": {
+    "ema_21": "Short-term trend. Price bouncing off this = healthy uptrend.",
+    "ema_50": "Medium-term trend. EMA 21 above EMA 50 = bullish alignment.",
+    "ema_200": "Macro trend filter. Only take longs above this. Only take shorts below.",
+    "rsi_14": "Momentum filter. Pullback entry zone: 35–58. Overbought: >70. Oversold: <30.",
+    "macd_12_26_9": "Tone Vays momentum confirmation. Line above signal = bullish. Divergence = reversal warning."
+  },
+
+  "bias_criteria": {
+    "bullish": [
+      "Price is above the EMA 200",
+      "EMA 21 is above EMA 50 (golden alignment)",
+      "MACD line is above signal line",
+      "RSI is below 70 (room to run)"
+    ],
+    "bearish": [
+      "Price is below the EMA 200",
+      "EMA 21 is below EMA 50",
+      "MACD line is below signal line",
+      "RSI is above 30 (room to drop)"
+    ],
+    "neutral": [
+      "Price is chopping around the EMA 200",
+      "EMA 21 and EMA 50 are flat or intertwined",
+      "RSI is between 45 and 55"
+    ]
+  },
+
+  "entry_rules": {
+    "long": [
+      "Macro bias is BULLISH (price > EMA 200, EMA 21 > EMA 50)",
+      "Price pulls back into the EMA 21–50 zone",
+      "RSI cools to 35–58 range (not capitulation, just a healthy pullback)",
+      "MACD line remains above signal line (momentum intact)",
+      "Enter in two tranches: 50% on first touch of zone, 50% on confirmed bounce candle"
+    ],
+    "short": [
+      "Macro bias is BEARISH (price < EMA 200, EMA 21 < EMA 50)",
+      "Price retraces up into the EMA 21–50 zone",
+      "RSI in 42–65 range",
+      "MACD line below signal line"
+    ]
+  },
+
+  "exit_rules": [
+    "Take 33–50% profit at prior swing high or key resistance",
+    "Remaining position targets: 1.272 and 1.618 Fibonacci extensions from prior swing",
+    "Full exit if stop loss is hit — no averaging down into losers",
+    "Exit if MACD crosses bearish on the entry timeframe"
+  ],
+
+  "risk_rules": [
+    "Risk maximum 1–2% of portfolio per trade",
+    "Minimum R:R of 2:1 — prefer 3:1 or better",
+    "Stop loss placed below the 0.786 Fibonacci level or most recent swing low",
+    "Position size = risk amount divided by distance to stop loss",
+    "Maximum 2–3 open positions at once",
+    "If stop is hit, setup is invalid — do not re-enter immediately",
+    "No trading against the EMA 200 macro trend"
+  ],
+
+  "notes": "Add macro context here — e.g. upcoming Fed meetings, halving cycle position, key on-chain levels, Bitcoin dominance trend, anything that should affect bias this week."
+}

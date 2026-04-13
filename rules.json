@@ -1,50 +1,109 @@
 {
-  "watchlist": ["BTCUSDT"],
-  "default_timeframe": "1m",
+  "watchlist": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "HYPEUSDT", "XAUUSDT", "TAOUSDT", "SUIUSDT", "XAGUSDT", "PEPEUSDT", "LINKUSDT", "RIVERUSDT", "ADAUSDT", "DOGEUSDT", "ZECUSDT"],
+  "default_timeframe": "1H",
 
   "strategy": {
-    "name": "VWAP + RSI(3) + EMA(8) Scalping Strategy",
-    "sources": ["Lewis Jackson"],
-    "description": "Three indicators, each doing a different job. EMA(8) for trend direction, VWAP for session bias, RSI(3) for entry timing. All three must align before a trade fires."
+    "name": "Fib Golden Pocket + Market Structure — BTC 1H",
+    "description": "Trend-following mean-reversion hybrid za BTCUSDT Perpetual Futures na 1H timeframeu. Detektuje market strukturu (HH+HL uptrend / LH+LL downtrend) via pivot detekcije, pa ulazi samo kada cijena retrejsuje u Fibonacci Golden Pocket zonu (0.5–0.618). Sniper EMA potvrda (EMA9 > EMA21 za long, obrnuto za short). TP na 1.5× Fib ekstenziji, SL ispod swing low/high + ATR buffer.",
+    "sources": ["Vlastita strategija — razvijena i optimizirana na BINANCE:BTCUSDT.P 1H, Jan 2025 – Apr 2026"],
+    "performance": {
+      "profit_factor": "1.78",
+      "total_pnl": "+42.67%",
+      "win_rate": "46.77%",
+      "total_trades": "62",
+      "max_drawdown": "8.01%",
+      "backtest_period": "Jan 1 2025 — Apr 11 2026",
+      "initial_capital": "$10,000",
+      "commission": "0.05% per trade",
+      "slippage": "2 ticks"
+    }
   },
 
   "indicators": {
-    "ema_8": "Trend direction. Price above EMA(8) = bullish momentum. Below = bearish.",
-    "vwap": "Session bias. Price above VWAP = buyers in control. Below = sellers. Resets at midnight UTC.",
-    "rsi_3": "Entry timing. RSI on 3 candles only — extremely sensitive. Below 30 in an uptrend = snap-back setup. Above 70 in a downtrend = reversal likely."
+    "pivot_high_low": {
+      "lookback": 4,
+      "description": "Market struktura. HH + HL = uptrend (long bias). LH + LL = downtrend (short bias). Treba dva potvrđena pivot higha i dva pivot lowa."
+    },
+    "fib_golden_pocket": {
+      "zone_low": 0.5,
+      "zone_high": 0.618,
+      "description": "Entry zona. Mjeri se od posljednjeg swing lowa do swing higha (za long) ili obrnuto (za short). Ulaz samo kad cijena retrejsuje u tu zonu."
+    },
+    "ema_9": {
+      "period": 9,
+      "description": "Brzi EMA. Sniper momentum filter — long samo kad EMA9 > EMA21, short samo kad EMA9 < EMA21."
+    },
+    "ema_21": {
+      "period": 21,
+      "description": "Spori EMA. Referentna linija za Sniper filter."
+    },
+    "atr_14": {
+      "period": 14,
+      "description": "Stop loss buffer: SL = swing_low - ATR×0.5 (long) / swing_high + ATR×0.5 (short)."
+    }
   },
 
   "bias_criteria": {
-    "bullish": ["Price is above VWAP", "Price is above EMA(8)"],
-    "bearish": ["Price is below VWAP", "Price is below EMA(8)"]
+    "bullish": [
+      "Dva potvrđena pivot higha: ph1 > ph2 (Higher High)",
+      "Dva potvrđena pivot lowa: pl1 > pl2 (Higher Low)",
+      "EMA9 > EMA21 (momentum bullish)"
+    ],
+    "bearish": [
+      "Dva potvrđena pivot higha: ph1 < ph2 (Lower High)",
+      "Dva potvrđena pivot lowa: pl1 < pl2 (Lower Low)",
+      "EMA9 < EMA21 (momentum bearish)"
+    ],
+    "neutral": [
+      "Nema jasne HH+HL ili LH+LL strukture — čekaj",
+      "EMA9 i EMA21 se sjecaju često — preskači entry",
+      "Cijena nije u Golden Pocket zoni — čekaj retracement"
+    ]
   },
 
   "entry_rules": {
     "long": [
-      "Price is above VWAP — buyers in control for the session",
-      "Price is above EMA(8) — uptrend confirmed",
-      "RSI(3) has dropped below 30 — short-term pullback in an uptrend, snap-back likely"
+      "Uptrend potvrđen: ph1 > ph2 I pl1 > pl2 (Higher High + Higher Low)",
+      "Cijena je unutar Fib Golden Pocket zone: između 0.5 i 0.618 retracement od posljednjeg swinga",
+      "EMA9 > EMA21 (Sniper long potvrda)",
+      "Nema otvorene pozicije",
+      "Veličina pozicije = (Equity × 1.5%) / (cijena ulaza - Stop Loss)"
     ],
     "short": [
-      "Price is below VWAP — sellers in control",
-      "Price is below EMA(8) — downtrend confirmed",
-      "RSI(3) has spiked above 70 — overbought in a downtrend, reversal likely"
+      "Downtrend potvrđen: ph1 < ph2 I pl1 < pl2 (Lower High + Lower Low)",
+      "Cijena je unutar Fib Golden Pocket zone: između 0.5 i 0.618 retracement od posljednjeg swinga",
+      "EMA9 < EMA21 (Sniper short potvrda)",
+      "Nema otvorene pozicije",
+      "Veličina pozicije = (Equity × 1.5%) / (Stop Loss - cijena ulaza)"
     ]
   },
 
-  "exit_rules": [
-    "Exit when RSI(3) crosses back above 50 (for longs) or below 50 (for shorts)",
-    "Hard stop: 0.3% below entry for longs, 0.3% above entry for shorts",
-    "Take profit at next VWAP touch or EMA(8) cross"
-  ],
+  "exit_rules": {
+    "take_profit": [
+      "Long TP: swing_low + (swing_high - swing_low) × 1.5 — 1.5× Fib ekstenzija iznad swing higha",
+      "Short TP: swing_high - (swing_high - swing_low) × 1.5 — 1.5× Fib ekstenzija ispod swing lowa"
+    ],
+    "stop_loss": [
+      "Long SL: posljednji pivot low - ATR(14) × 0.5",
+      "Short SL: posljednji pivot high + ATR(14) × 0.5"
+    ]
+  },
 
   "risk_rules": [
-    "Risk maximum 1% of portfolio per trade",
-    "Maximum trade size capped by MAX_TRADE_SIZE_USD in .env",
-    "Maximum trades per day capped by MAX_TRADES_PER_DAY in .env",
-    "Do not trade if price is more than 1.5% away from VWAP — overextended",
-    "Paper trade first — validate this strategy on your specific asset before going live"
+    "Rizik po tradeu: 1.5% od account equity",
+    "Veličina pozicije je ATR-normalizirana — automatski manja u volatilnim uvjetima",
+    "Samo jedna pozicija otvorena u isto vrijeme — bez pyramidinga",
+    "Ulaz samo na potvrđenoj 1H svijećici — bez anticipacijskih entry-ja",
+    "Preskoči trade ako ijedan uvjet nije potpuno ispunjen",
+    "Dnevni limit gubitka: 5% accounta — zaustavi trading za taj dan",
+    "Ne trguj za vrijeme velikih macro događaja (FOMC, CPI, BTC ETF vijesti)"
   ],
 
-  "notes": "Scalping strategy — designed for 1m to 5m timeframes. RSI(3) is intentionally fast and sensitive. Do not apply to higher timeframes."
+  "market_conditions": {
+    "best_for": "Trending tržišta s jasnom swing strukturom — BTC bull i bear run gdje je HH/HL ili LH/LL sekvenca jasna",
+    "avoid_when": "Choppy/sideways tržišta gdje se pivoti stalno resetiraju bez jasnog smjera",
+    "regime_check": "Ako su EMA9 i EMA21 ravni i često se sjecaju — preskoči entry dok se trend ne uspostavi"
+  },
+
+  "notes": "Strategija optimizirana na BINANCE:BTCUSDT.P 1H, Jan 2025 – Apr 2026 (15 mjeseci). Profit Factor 1.78, +42.67% return, max drawdown 8.01%. Sa $1,000 kapitalom, 1.5% rizika i 5x leverageom — projekcija ~$2,134 profita u 15 mjeseci. Nije finansijski savjet — uvijek testiraj na paper tradingu prvo."
 }

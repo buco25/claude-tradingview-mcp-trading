@@ -1,18 +1,18 @@
 /**
- * Claude + TradingView MCP — Automated Trading Bot
+ * Claude + TradingView MCP — Fib Golden Pocket + Market Structure Bot
  *
- * Cloud mode: runs on Railway on a schedule. Pulls candle data direct from
- * Binance (free, no auth), calculates all indicators, runs safety check,
- * executes via BitGet if everything lines up.
+ * Strategija: Pivot detekcija (HH+HL / LH+LL) + Fib Golden Pocket (0.5-0.618)
+ *             + Sniper EMA9/EMA21 filter + ATR SL + 1.5x Fib TP
  *
- * Local mode: run manually — node bot.js
- * Cloud mode: deploy to Railway, set env vars, Railway triggers on cron schedule
+ * Backtest: BINANCE:BTCUSDT.P 1H | PF 1.78 | +42.67% | 8.01% DD (15 mj.)
+ *
+ * Local:  node bot.js
+ * Cloud:  Railway (cron svaki sat: "0 * * * *")
  */
 
 import "dotenv/config";
 import { readFileSync, writeFileSync, existsSync, appendFileSync } from "fs";
 import crypto from "crypto";
-import { execSync } from "child_process";
 
 // ─── Onboarding ───────────────────────────────────────────────────────────────
 
@@ -20,70 +20,48 @@ function checkOnboarding() {
   const required = ["BITGET_API_KEY", "BITGET_SECRET_KEY", "BITGET_PASSPHRASE"];
   const missing = required.filter((k) => !process.env[k]);
 
-  if (!existsSync(".env")) {
-    console.log(
-      "\n⚠️  No .env file found — opening it for you to fill in...\n",
-    );
-    writeFileSync(
-      ".env",
-      [
-        "# BitGet credentials",
-        "BITGET_API_KEY=",
-        "BITGET_SECRET_KEY=",
-        "BITGET_PASSPHRASE=",
-        "",
-        "# Trading config",
-        "PORTFOLIO_VALUE_USD=1000",
-        "MAX_TRADE_SIZE_USD=100",
-        "MAX_TRADES_PER_DAY=3",
-        "PAPER_TRADING=true",
-        "SYMBOL=BTCUSDT",
-        "TIMEFRAME=4H",
-      ].join("\n") + "\n",
-    );
-    try {
-      execSync("open .env");
-    } catch {}
-    console.log(
-      "Fill in your BitGet credentials in .env then re-run: node bot.js\n",
-    );
-    process.exit(0);
-  }
-
   if (missing.length > 0) {
-    console.log(`\n⚠️  Missing credentials in .env: ${missing.join(", ")}`);
-    console.log("Opening .env for you now...\n");
-    try {
-      execSync("open .env");
-    } catch {}
-    console.log("Add the missing values then re-run: node bot.js\n");
+    console.log(`\n⚠️  Nedostaju kredencijali u .env: ${missing.join(", ")}`);
+    console.log("Dodaj ih u .env fajl i ponovo pokreni: node bot.js\n");
     process.exit(0);
   }
 
-  // Always print the CSV location so users know where to find their trade log
   const csvPath = new URL("trades.csv", import.meta.url).pathname;
   console.log(`\n📄 Trade log: ${csvPath}`);
   console.log(
-    `   Open in Google Sheets or Excel any time — or tell Claude to move it:\n` +
-      `   "Move my trades.csv to ~/Desktop" or "Move it to my Documents folder"\n`,
+    `   Otvori u Google Sheets ili Excel — ili reci Claudeu:\n` +
+    `   "Premjesti trades.csv na Desktop"\n`
   );
 }
 
 // ─── Config ────────────────────────────────────────────────────────────────
 
 const CONFIG = {
-  symbol: process.env.SYMBOL || "BTCUSDT",
-  timeframe: process.env.TIMEFRAME || "4H",
-  portfolioValue: parseFloat(process.env.PORTFOLIO_VALUE_USD || "1000"),
-  maxTradeSizeUSD: parseFloat(process.env.MAX_TRADE_SIZE_USD || "100"),
-  maxTradesPerDay: parseInt(process.env.MAX_TRADES_PER_DAY || "3"),
-  paperTrading: process.env.PAPER_TRADING !== "false",
-  tradeMode: process.env.TRADE_MODE || "spot",
+  symbol:          process.env.SYMBOL           || "BTCUSDT",
+  timeframe:       process.env.TIMEFRAME         || "1H",
+  portfolioValue:  parseFloat(process.env.PORTFOLIO_VALUE_USD  || "1000"),
+  maxTradeSizeUSD: parseFloat(process.env.MAX_TRADE_SIZE_USD   || "50"),
+  maxTradesPerDay: parseInt(process.env.MAX_TRADES_PER_DAY     || "100"),
+  paperTrading:    process.env.PAPER_TRADING !== "false",
+  tradeMode:       process.env.TRADE_MODE        || "futures",
+  leverage:        parseInt(process.env.LEVERAGE  || "5"),
   bitget: {
-    apiKey: process.env.BITGET_API_KEY,
-    secretKey: process.env.BITGET_SECRET_KEY,
+    apiKey:     process.env.BITGET_API_KEY,
+    secretKey:  process.env.BITGET_SECRET_KEY,
     passphrase: process.env.BITGET_PASSPHRASE,
-    baseUrl: process.env.BITGET_BASE_URL || "https://api.bitget.com",
+    baseUrl:    process.env.BITGET_BASE_URL || "https://api.bitget.com",
+  },
+  // Strategija parametri
+  strategy: {
+    pivotLen:  4,      // Pivot lookback
+    fibLo:     0.5,    // Fib zona donja granica
+    fibHi:     0.618,  // Fib zona gornja granica
+    fibTp:     1.5,    // Fib TP ekstenzija
+    ema9Len:   9,      // EMA brzi
+    ema21Len:  21,     // EMA spori
+    atrLen:    14,     // ATR period
+    atrSlMult: 0.5,    // ATR × 0.5 za SL buffer
+    riskPct:   1.5,    // Rizik % po tradeu
   },
 };
 
@@ -103,214 +81,248 @@ function saveLog(log) {
 function countTodaysTrades(log) {
   const today = new Date().toISOString().slice(0, 10);
   return log.trades.filter(
-    (t) => t.timestamp.startsWith(today) && t.orderPlaced,
+    (t) => t.timestamp.startsWith(today) && t.orderPlaced
   ).length;
 }
 
-// ─── Market Data (Binance public API — free, no auth) ───────────────────────
+// ─── Market Data (BitGet Futures public API — besplatno, bez autentikacije) ──
 
-async function fetchCandles(symbol, interval, limit = 100) {
-  // Map our timeframe format to Binance interval format
+async function fetchCandles(symbol, interval, limit = 200) {
   const intervalMap = {
-    "1m": "1m",
-    "3m": "3m",
-    "5m": "5m",
-    "15m": "15m",
-    "30m": "30m",
-    "1H": "1h",
-    "4H": "4h",
-    "1D": "1d",
-    "1W": "1w",
+    "1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
+    "1H": "1H", "4H": "4H", "1D": "1D", "1W": "1W",
   };
-  const binanceInterval = intervalMap[interval] || "1m";
-
-  const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${binanceInterval}&limit=${limit}`;
+  const granularity = intervalMap[interval] || "1H";
+  const url = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=${granularity}&limit=${limit}`;
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`Binance API error: ${res.status}`);
-  const data = await res.json();
-
-  return data.map((k) => ({
-    time: k[0],
-    open: parseFloat(k[1]),
-    high: parseFloat(k[2]),
-    low: parseFloat(k[3]),
-    close: parseFloat(k[4]),
+  if (!res.ok) throw new Error(`BitGet API greška: ${res.status}`);
+  const json = await res.json();
+  if (json.code !== "00000") throw new Error(`BitGet greška: ${json.msg}`);
+  // BitGet vraća: [timestamp, open, high, low, close, volume, quoteVolume]
+  return json.data.map((k) => ({
+    time:   parseInt(k[0]),
+    open:   parseFloat(k[1]),
+    high:   parseFloat(k[2]),
+    low:    parseFloat(k[3]),
+    close:  parseFloat(k[4]),
     volume: parseFloat(k[5]),
-  }));
+  })).reverse(); // BitGet vraća od novijeg prema starijem — trebamo chronološki
 }
 
-// ─── Indicator Calculations ──────────────────────────────────────────────────
+// ─── Indikatori ─────────────────────────────────────────────────────────────
 
 function calcEMA(closes, period) {
-  const multiplier = 2 / (period + 1);
+  if (closes.length < period) return null;
+  const mult = 2 / (period + 1);
   let ema = closes.slice(0, period).reduce((a, b) => a + b, 0) / period;
   for (let i = period; i < closes.length; i++) {
-    ema = closes[i] * multiplier + ema * (1 - multiplier);
+    ema = closes[i] * mult + ema * (1 - mult);
   }
   return ema;
 }
 
-function calcRSI(closes, period = 14) {
-  if (closes.length < period + 1) return null;
-  let gains = 0,
-    losses = 0;
-  for (let i = closes.length - period; i < closes.length; i++) {
-    const diff = closes[i] - closes[i - 1];
-    if (diff > 0) gains += diff;
-    else losses -= diff;
+function calcATR(candles, period) {
+  if (candles.length < period + 1) return null;
+  const trs = [];
+  for (let i = 1; i < candles.length; i++) {
+    const high = candles[i].high;
+    const low  = candles[i].low;
+    const prevClose = candles[i - 1].close;
+    trs.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
   }
-  const avgGain = gains / period;
-  const avgLoss = losses / period;
-  if (avgLoss === 0) return 100;
-  const rs = avgGain / avgLoss;
-  return 100 - 100 / (1 + rs);
+  // Wilders smoothing
+  let atr = trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < trs.length; i++) {
+    atr = (atr * (period - 1) + trs[i]) / period;
+  }
+  return atr;
 }
 
-// VWAP — session-based, resets at midnight UTC
-function calcVWAP(candles) {
-  const midnightUTC = new Date();
-  midnightUTC.setUTCHours(0, 0, 0, 0);
-  const sessionCandles = candles.filter((c) => c.time >= midnightUTC.getTime());
-  if (sessionCandles.length === 0) return null;
-  const cumTPV = sessionCandles.reduce(
-    (sum, c) => sum + ((c.high + c.low + c.close) / 3) * c.volume,
-    0,
-  );
-  const cumVol = sessionCandles.reduce((sum, c) => sum + c.volume, 0);
-  return cumVol === 0 ? null : cumTPV / cumVol;
+// Pivot High: vrh gdje je high[i] > svih high-ova ±pivotLen
+function findPivots(candles, pivotLen) {
+  const pivotHighs = [];
+  const pivotLows  = [];
+
+  // Tražimo samo potvrđene pivote (ne zadnjih pivotLen svjeća — nema potvrde)
+  for (let i = pivotLen; i < candles.length - pivotLen; i++) {
+    const c = candles[i];
+
+    // Pivot High
+    let isHigh = true;
+    for (let j = i - pivotLen; j <= i + pivotLen; j++) {
+      if (j !== i && candles[j].high >= c.high) { isHigh = false; break; }
+    }
+    if (isHigh) pivotHighs.push({ index: i, price: c.high, time: c.time });
+
+    // Pivot Low
+    let isLow = true;
+    for (let j = i - pivotLen; j <= i + pivotLen; j++) {
+      if (j !== i && candles[j].low <= c.low) { isLow = false; break; }
+    }
+    if (isLow) pivotLows.push({ index: i, price: c.low, time: c.time });
+  }
+
+  return { pivotHighs, pivotLows };
+}
+
+// ─── Market Struktura + Fib Golden Pocket ───────────────────────────────────
+
+function analyzeMarket(candles, cfg) {
+  const { pivotLen, fibLo, fibHi, fibTp, ema9Len, ema21Len, atrLen, atrSlMult } = cfg;
+
+  const closes = candles.map((c) => c.close);
+  const price  = closes[closes.length - 1];
+
+  const ema9  = calcEMA(closes, ema9Len);
+  const ema21 = calcEMA(closes, ema21Len);
+  const atr   = calcATR(candles, atrLen);
+
+  const { pivotHighs, pivotLows } = findPivots(candles, pivotLen);
+
+  // Potrebna su min 2 pivot higha i 2 pivot lowa
+  if (pivotHighs.length < 2 || pivotLows.length < 2) {
+    return { price, ema9, ema21, atr, signal: "NEUTRAL", reason: "Nedovoljno pivota za strukturu" };
+  }
+
+  // Zadnja dva pivot higha i lowa (kronološki)
+  const ph1 = pivotHighs[pivotHighs.length - 1].price;
+  const ph2 = pivotHighs[pivotHighs.length - 2].price;
+  const pl1 = pivotLows[pivotLows.length - 1].price;
+  const pl2 = pivotLows[pivotLows.length - 2].price;
+
+  const uptrend   = ph1 > ph2 && pl1 > pl2;  // HH + HL
+  const downtrend = ph1 < ph2 && pl1 < pl2;  // LH + LL
+
+  // Fib zone za LONG (retracement od pl1 do ph1)
+  const gpBullHi = ph1 - (ph1 - pl1) * fibLo;   // 0.5 nivo
+  const gpBullLo = ph1 - (ph1 - pl1) * fibHi;   // 0.618 nivo
+  const bullTp   = pl1 + (ph1 - pl1) * fibTp;   // 1.5x ekstenzija
+  const longSl   = pl1 - atr * atrSlMult;
+
+  // Fib zone za SHORT (retracement od ph1 do pl1)
+  const gpBearLo = pl1 + (ph1 - pl1) * fibLo;
+  const gpBearHi = pl1 + (ph1 - pl1) * fibHi;
+  const bearTp   = ph1 - (ph1 - pl1) * fibTp;
+  const shortSl  = ph1 + atr * atrSlMult;
+
+  const inBullGp = price <= gpBullHi && price >= gpBullLo;
+  const inBearGp = price >= gpBearLo && price <= gpBearHi;
+
+  const sniperLong  = ema9 > ema21;
+  const sniperShort = ema9 < ema21;
+
+  return {
+    price, ema9, ema21, atr,
+    ph1, ph2, pl1, pl2,
+    uptrend, downtrend,
+    gpBullHi, gpBullLo, bullTp, longSl,
+    gpBearLo, gpBearHi, bearTp, shortSl,
+    inBullGp, inBearGp,
+    sniperLong, sniperShort,
+  };
 }
 
 // ─── Safety Check ───────────────────────────────────────────────────────────
 
-function runSafetyCheck(price, ema8, vwap, rsi3, rules) {
+function runSafetyCheck(m) {
   const results = [];
+  let signal = "NEUTRAL";
 
   const check = (label, required, actual, pass) => {
     results.push({ label, required, actual, pass });
-    const icon = pass ? "✅" : "🚫";
+    const icon = pass ? "✅" : "❌";
     console.log(`  ${icon} ${label}`);
-    console.log(`     Required: ${required} | Actual: ${actual}`);
+    console.log(`     Traži: ${required} | Stvarno: ${actual}`);
   };
 
   console.log("\n── Safety Check ─────────────────────────────────────────\n");
 
-  // Determine bias first
-  const bullishBias = price > vwap && price > ema8;
-  const bearishBias = price < vwap && price < ema8;
-
-  if (bullishBias) {
-    console.log("  Bias: BULLISH — checking long entry conditions\n");
-
-    // 1. Price above VWAP
-    check(
-      "Price above VWAP (buyers in control)",
-      `> ${vwap.toFixed(2)}`,
-      price.toFixed(2),
-      price > vwap,
-    );
-
-    // 2. Price above EMA(8)
-    check(
-      "Price above EMA(8) (uptrend confirmed)",
-      `> ${ema8.toFixed(2)}`,
-      price.toFixed(2),
-      price > ema8,
-    );
-
-    // 3. RSI(3) pullback
-    check(
-      "RSI(3) below 30 (snap-back setup in uptrend)",
-      "< 30",
-      rsi3.toFixed(2),
-      rsi3 < 30,
-    );
-
-    // 4. Not overextended from VWAP
-    const distFromVWAP = Math.abs((price - vwap) / vwap) * 100;
-    check(
-      "Price within 1.5% of VWAP (not overextended)",
-      "< 1.5%",
-      `${distFromVWAP.toFixed(2)}%`,
-      distFromVWAP < 1.5,
-    );
-  } else if (bearishBias) {
-    console.log("  Bias: BEARISH — checking short entry conditions\n");
+  if (m.uptrend) {
+    console.log(`  Struktura: 📈 UPTREND (HH+HL) — provjera LONG uvjeta\n`);
+    console.log(`  Pivot High 1: $${m.ph1?.toFixed(2)} | Pivot High 2: $${m.ph2?.toFixed(2)}`);
+    console.log(`  Pivot Low  1: $${m.pl1?.toFixed(2)} | Pivot Low  2: $${m.pl2?.toFixed(2)}`);
+    console.log(`  Fib zona:    $${m.gpBullLo?.toFixed(2)} – $${m.gpBullHi?.toFixed(2)} (0.618–0.5)\n`);
 
     check(
-      "Price below VWAP (sellers in control)",
-      `< ${vwap.toFixed(2)}`,
-      price.toFixed(2),
-      price < vwap,
+      "Uptrend potvrđen (HH + HL)",
+      "ph1 > ph2 i pl1 > pl2",
+      `ph1=${m.ph1?.toFixed(0)} > ph2=${m.ph2?.toFixed(0)}, pl1=${m.pl1?.toFixed(0)} > pl2=${m.pl2?.toFixed(0)}`,
+      m.uptrend
+    );
+    check(
+      "Cijena u Fib Golden Pocket zoni (0.5–0.618)",
+      `$${m.gpBullLo?.toFixed(2)} – $${m.gpBullHi?.toFixed(2)}`,
+      `$${m.price?.toFixed(2)}`,
+      m.inBullGp
+    );
+    check(
+      "EMA9 > EMA21 (Sniper long potvrda)",
+      `EMA9 > EMA21`,
+      `EMA9=${m.ema9?.toFixed(2)} | EMA21=${m.ema21?.toFixed(2)}`,
+      m.sniperLong
     );
 
-    check(
-      "Price below EMA(8) (downtrend confirmed)",
-      `< ${ema8.toFixed(2)}`,
-      price.toFixed(2),
-      price < ema8,
-    );
+    if (results.every((r) => r.pass)) {
+      signal = "LONG";
+      console.log(`\n  🎯 SL: $${m.longSl?.toFixed(2)} | TP: $${m.bullTp?.toFixed(2)}`);
+    }
+
+  } else if (m.downtrend) {
+    console.log(`  Struktura: 📉 DOWNTREND (LH+LL) — provjera SHORT uvjeta\n`);
+    console.log(`  Pivot High 1: $${m.ph1?.toFixed(2)} | Pivot High 2: $${m.ph2?.toFixed(2)}`);
+    console.log(`  Pivot Low  1: $${m.pl1?.toFixed(2)} | Pivot Low  2: $${m.pl2?.toFixed(2)}`);
+    console.log(`  Fib zona:    $${m.gpBearLo?.toFixed(2)} – $${m.gpBearHi?.toFixed(2)} (0.5–0.618)\n`);
 
     check(
-      "RSI(3) above 70 (reversal setup in downtrend)",
-      "> 70",
-      rsi3.toFixed(2),
-      rsi3 > 70,
+      "Downtrend potvrđen (LH + LL)",
+      "ph1 < ph2 i pl1 < pl2",
+      `ph1=${m.ph1?.toFixed(0)} < ph2=${m.ph2?.toFixed(0)}, pl1=${m.pl1?.toFixed(0)} < pl2=${m.pl2?.toFixed(0)}`,
+      m.downtrend
+    );
+    check(
+      "Cijena u Fib Golden Pocket zoni (0.5–0.618)",
+      `$${m.gpBearLo?.toFixed(2)} – $${m.gpBearHi?.toFixed(2)}`,
+      `$${m.price?.toFixed(2)}`,
+      m.inBearGp
+    );
+    check(
+      "EMA9 < EMA21 (Sniper short potvrda)",
+      `EMA9 < EMA21`,
+      `EMA9=${m.ema9?.toFixed(2)} | EMA21=${m.ema21?.toFixed(2)}`,
+      m.sniperShort
     );
 
-    const distFromVWAP = Math.abs((price - vwap) / vwap) * 100;
-    check(
-      "Price within 1.5% of VWAP (not overextended)",
-      "< 1.5%",
-      `${distFromVWAP.toFixed(2)}%`,
-      distFromVWAP < 1.5,
-    );
+    if (results.every((r) => r.pass)) {
+      signal = "SHORT";
+      console.log(`\n  🎯 SL: $${m.shortSl?.toFixed(2)} | TP: $${m.bearTp?.toFixed(2)}`);
+    }
+
   } else {
-    console.log("  Bias: NEUTRAL — no clear direction. No trade.\n");
-    results.push({
-      label: "Market bias",
-      required: "Bullish or bearish",
-      actual: "Neutral",
-      pass: false,
-    });
+    console.log("  Struktura: ⏸️  NEUTRAL — nema jasnog HH+HL ni LH+LL. Čekam.\n");
+    results.push({ label: "Market struktura", required: "Uptrend ili Downtrend", actual: "Neutral", pass: false });
   }
 
   const allPass = results.every((r) => r.pass);
-  return { results, allPass };
+  return { results, allPass, signal };
 }
 
 // ─── Trade Limits ────────────────────────────────────────────────────────────
 
-function checkTradeLimits(log) {
+function checkTradeLimits(log, tradeSize) {
   const todayCount = countTodaysTrades(log);
-
   console.log("\n── Trade Limits ─────────────────────────────────────────\n");
 
   if (todayCount >= CONFIG.maxTradesPerDay) {
-    console.log(
-      `🚫 Max trades per day reached: ${todayCount}/${CONFIG.maxTradesPerDay}`,
-    );
+    console.log(`❌ Dnevni limit dostignut: ${todayCount}/${CONFIG.maxTradesPerDay}`);
     return false;
   }
-
-  console.log(
-    `✅ Trades today: ${todayCount}/${CONFIG.maxTradesPerDay} — within limit`,
-  );
-
-  const tradeSize = Math.min(
-    CONFIG.portfolioValue * 0.01,
-    CONFIG.maxTradeSizeUSD,
-  );
+  console.log(`✅ Tradovi danas: ${todayCount}/${CONFIG.maxTradesPerDay}`);
 
   if (tradeSize > CONFIG.maxTradeSizeUSD) {
-    console.log(
-      `🚫 Trade size $${tradeSize.toFixed(2)} exceeds max $${CONFIG.maxTradeSizeUSD}`,
-    );
+    console.log(`❌ Trade size $${tradeSize.toFixed(2)} > max $${CONFIG.maxTradeSizeUSD}`);
     return false;
   }
-
-  console.log(
-    `✅ Trade size: $${tradeSize.toFixed(2)} — within max $${CONFIG.maxTradeSizeUSD}`,
-  );
+  console.log(`✅ Trade size: $${tradeSize.toFixed(2)} (max $${CONFIG.maxTradeSizeUSD})`);
 
   return true;
 }
@@ -319,30 +331,24 @@ function checkTradeLimits(log) {
 
 function signBitGet(timestamp, method, path, body = "") {
   const message = `${timestamp}${method}${path}${body}`;
-  return crypto
-    .createHmac("sha256", CONFIG.bitget.secretKey)
-    .update(message)
-    .digest("base64");
+  return crypto.createHmac("sha256", CONFIG.bitget.secretKey).update(message).digest("base64");
 }
 
-async function placeBitGetOrder(symbol, side, sizeUSD, price) {
-  const quantity = (sizeUSD / price).toFixed(6);
+async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp) {
+  const quantity  = (sizeUSD / price).toFixed(6);
   const timestamp = Date.now().toString();
-  const path =
-    CONFIG.tradeMode === "spot"
-      ? "/api/v2/spot/trade/placeOrder"
-      : "/api/v2/mix/order/placeOrder";
+  const path = "/api/v2/mix/order/placeOrder";
 
   const body = JSON.stringify({
-    symbol,
-    side,
-    orderType: "market",
-    quantity,
-    ...(CONFIG.tradeMode === "futures" && {
-      productType: "USDT-FUTURES",
-      marginMode: "isolated",
-      marginCoin: "USDT",
-    }),
+    symbol:      `${symbol}USDT_UMCBL`,
+    side:        side === "LONG" ? "open_long" : "open_short",
+    orderType:   "market",
+    size:        quantity,
+    productType: "umcbl",
+    marginCoin:  "USDT",
+    marginMode:  "isolated",
+    presetStopLossPrice:   sl?.toFixed(2),
+    presetTakeProfitPrice: tp?.toFixed(2),
   });
 
   const signature = signBitGet(timestamp, "POST", path, body);
@@ -350,144 +356,79 @@ async function placeBitGetOrder(symbol, side, sizeUSD, price) {
   const res = await fetch(`${CONFIG.bitget.baseUrl}${path}`, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
-      "ACCESS-KEY": CONFIG.bitget.apiKey,
-      "ACCESS-SIGN": signature,
-      "ACCESS-TIMESTAMP": timestamp,
+      "Content-Type":      "application/json",
+      "ACCESS-KEY":        CONFIG.bitget.apiKey,
+      "ACCESS-SIGN":       signature,
+      "ACCESS-TIMESTAMP":  timestamp,
       "ACCESS-PASSPHRASE": CONFIG.bitget.passphrase,
     },
     body,
   });
 
   const data = await res.json();
-  if (data.code !== "00000") {
-    throw new Error(`BitGet order failed: ${data.msg}`);
-  }
-
+  if (data.code !== "00000") throw new Error(`BitGet greška: ${data.msg}`);
   return data.data;
 }
 
-// ─── Tax CSV Logging ─────────────────────────────────────────────────────────
+// ─── Tax CSV ─────────────────────────────────────────────────────────────────
 
-const CSV_FILE = "trades.csv";
+const CSV_FILE    = "trades.csv";
+const CSV_HEADERS = ["Date","Time (UTC)","Exchange","Symbol","Side","Quantity","Price","Total USD","Fee (est.)","Net Amount","SL","TP","Order ID","Mode","Notes"].join(",");
 
-// Always ensure trades.csv exists with headers — open it in Excel/Sheets any time
 function initCsv() {
   if (!existsSync(CSV_FILE)) {
-    const funnyNote = `,,,,,,,,,,,"NOTE","Hey, if you're at this stage of the video, you must be enjoying it... perhaps you could hit subscribe now? :)"`;
-    writeFileSync(CSV_FILE, CSV_HEADERS + "\n" + funnyNote + "\n");
-    console.log(
-      `📄 Created ${CSV_FILE} — open in Google Sheets or Excel to track trades.`,
-    );
+    const note = `,,,,,,,,,,,,,"NOTE","Hey, if you're at this stage of the video, you must be enjoying it... perhaps you could hit subscribe now? :)"`;
+    writeFileSync(CSV_FILE, CSV_HEADERS + "\n" + note + "\n");
   }
 }
-const CSV_HEADERS = [
-  "Date",
-  "Time (UTC)",
-  "Exchange",
-  "Symbol",
-  "Side",
-  "Quantity",
-  "Price",
-  "Total USD",
-  "Fee (est.)",
-  "Net Amount",
-  "Order ID",
-  "Mode",
-  "Notes",
-].join(",");
 
-function writeTradeCsv(logEntry) {
-  const now = new Date(logEntry.timestamp);
+function writeTradeCsv(entry) {
+  const now  = new Date(entry.timestamp);
   const date = now.toISOString().slice(0, 10);
   const time = now.toISOString().slice(11, 19);
 
-  let side = "";
-  let quantity = "";
-  let totalUSD = "";
-  let fee = "";
-  let netAmount = "";
-  let orderId = "";
-  let mode = "";
-  let notes = "";
+  let side = "", qty = "", total = "", fee = "", net = "", sl = "", tp = "", orderId = "", mode = "", notes = "";
 
-  if (!logEntry.allPass) {
-    const failed = logEntry.conditions
-      .filter((c) => !c.pass)
-      .map((c) => c.label)
-      .join("; ");
-    mode = "BLOCKED";
-    orderId = "BLOCKED";
-    notes = `Failed: ${failed}`;
-  } else if (logEntry.paperTrading) {
-    side = "BUY";
-    quantity = (logEntry.tradeSize / logEntry.price).toFixed(6);
-    totalUSD = logEntry.tradeSize.toFixed(2);
-    fee = (logEntry.tradeSize * 0.001).toFixed(4);
-    netAmount = (logEntry.tradeSize - parseFloat(fee)).toFixed(2);
-    orderId = logEntry.orderId || "";
-    mode = "PAPER";
-    notes = "All conditions met";
+  if (!entry.allPass) {
+    const failed = entry.conditions.filter((c) => !c.pass).map((c) => c.label).join("; ");
+    mode = "BLOCKED"; orderId = "BLOCKED"; notes = `Blokirano: ${failed}`;
   } else {
-    side = "BUY";
-    quantity = (logEntry.tradeSize / logEntry.price).toFixed(6);
-    totalUSD = logEntry.tradeSize.toFixed(2);
-    fee = (logEntry.tradeSize * 0.001).toFixed(4);
-    netAmount = (logEntry.tradeSize - parseFloat(fee)).toFixed(2);
-    orderId = logEntry.orderId || "";
-    mode = "LIVE";
-    notes = logEntry.error ? `Error: ${logEntry.error}` : "All conditions met";
+    side    = entry.signal;
+    qty     = (entry.tradeSize / entry.price).toFixed(6);
+    total   = entry.tradeSize.toFixed(2);
+    fee     = (entry.tradeSize * 0.0005).toFixed(4);
+    net     = (entry.tradeSize - parseFloat(fee)).toFixed(2);
+    sl      = entry.sl?.toFixed(2) || "";
+    tp      = entry.tp?.toFixed(2) || "";
+    orderId = entry.orderId || "";
+    mode    = entry.paperTrading ? "PAPER" : "LIVE";
+    notes   = entry.error ? `Greška: ${entry.error}` : "Svi uvjeti ispunjeni";
   }
 
-  const row = [
-    date,
-    time,
-    "BitGet",
-    logEntry.symbol,
-    side,
-    quantity,
-    logEntry.price.toFixed(2),
-    totalUSD,
-    fee,
-    netAmount,
-    orderId,
-    mode,
-    `"${notes}"`,
-  ].join(",");
-
-  if (!existsSync(CSV_FILE)) {
-    writeFileSync(CSV_FILE, CSV_HEADERS + "\n");
-  }
-
+  const row = [date, time, "BitGet", entry.symbol, side, qty, entry.price?.toFixed(2), total, fee, net, sl, tp, orderId, mode, `"${notes}"`].join(",");
+  if (!existsSync(CSV_FILE)) writeFileSync(CSV_FILE, CSV_HEADERS + "\n");
   appendFileSync(CSV_FILE, row + "\n");
-  console.log(`Tax record saved → ${CSV_FILE}`);
+  console.log(`📄 Tax evidencija snimljena → ${CSV_FILE}`);
 }
 
-// Tax summary command: node bot.js --tax-summary
+// Tax summary: node bot.js --tax-summary
 function generateTaxSummary() {
-  if (!existsSync(CSV_FILE)) {
-    console.log("No trades.csv found — no trades have been recorded yet.");
-    return;
-  }
-
+  if (!existsSync(CSV_FILE)) { console.log("Nema trades.csv — još nema tradova."); return; }
   const lines = readFileSync(CSV_FILE, "utf8").trim().split("\n");
-  const rows = lines.slice(1).map((l) => l.split(","));
-
-  const live = rows.filter((r) => r[11] === "LIVE");
-  const paper = rows.filter((r) => r[11] === "PAPER");
-  const blocked = rows.filter((r) => r[11] === "BLOCKED");
-
-  const totalVolume = live.reduce((sum, r) => sum + parseFloat(r[7] || 0), 0);
-  const totalFees = live.reduce((sum, r) => sum + parseFloat(r[8] || 0), 0);
-
-  console.log("\n── Tax Summary ──────────────────────────────────────────\n");
-  console.log(`  Total decisions logged : ${rows.length}`);
-  console.log(`  Live trades executed   : ${live.length}`);
-  console.log(`  Paper trades           : ${paper.length}`);
-  console.log(`  Blocked by safety check: ${blocked.length}`);
-  console.log(`  Total volume (USD)     : $${totalVolume.toFixed(2)}`);
-  console.log(`  Total fees paid (est.) : $${totalFees.toFixed(4)}`);
-  console.log(`\n  Full record: ${CSV_FILE}`);
+  const rows  = lines.slice(1).map((l) => l.split(","));
+  const live    = rows.filter((r) => r[13] === "LIVE");
+  const paper   = rows.filter((r) => r[13] === "PAPER");
+  const blocked = rows.filter((r) => r[13] === "BLOCKED");
+  const totalVol  = live.reduce((s, r) => s + parseFloat(r[7] || 0), 0);
+  const totalFees = live.reduce((s, r) => s + parseFloat(r[8] || 0), 0);
+  console.log("\n── Tax Sažetak ──────────────────────────────────────────\n");
+  console.log(`  Ukupno odluka:          ${rows.length}`);
+  console.log(`  Live tradovi:           ${live.length}`);
+  console.log(`  Paper tradovi:          ${paper.length}`);
+  console.log(`  Blokirani:              ${blocked.length}`);
+  console.log(`  Ukupni volumen (USD):   $${totalVol.toFixed(2)}`);
+  console.log(`  Ukupne naknade (proc.): $${totalFees.toFixed(4)}`);
+  console.log(`\n  Kompletan zapis: ${CSV_FILE}`);
   console.log("─────────────────────────────────────────────────────────\n");
 }
 
@@ -496,123 +437,129 @@ function generateTaxSummary() {
 async function run() {
   checkOnboarding();
   initCsv();
+
   console.log("═══════════════════════════════════════════════════════════");
-  console.log("  Claude Trading Bot");
+  console.log("  Fib Golden Pocket Trading Bot");
   console.log(`  ${new Date().toISOString()}`);
-  console.log(
-    `  Mode: ${CONFIG.paperTrading ? "📋 PAPER TRADING" : "🔴 LIVE TRADING"}`,
-  );
+  console.log(`  Mod: ${CONFIG.paperTrading ? "📋 PAPER TRADING" : "🔴 LIVE TRADING"}`);
   console.log("═══════════════════════════════════════════════════════════");
 
-  // Load strategy
   const rules = JSON.parse(readFileSync("rules.json", "utf8"));
-  console.log(`\nStrategy: ${rules.strategy.name}`);
-  console.log(`Symbol: ${CONFIG.symbol} | Timeframe: ${CONFIG.timeframe}`);
+  console.log(`\nStrategija: ${rules.strategy.name}`);
+  console.log(`Timeframe: ${CONFIG.timeframe} | Leverage: ${CONFIG.leverage}x`);
 
-  // Load log and check daily limits
+  const watchlist = rules.watchlist || [CONFIG.symbol];
+  console.log(`\nWatchlist: ${watchlist.join(", ")}`);
+
   const log = loadLog();
-  const withinLimits = checkTradeLimits(log);
-  if (!withinLimits) {
-    console.log("\nBot stopping — trade limits reached for today.");
-    return;
-  }
 
-  // Fetch candle data — need enough for EMA(8) + full session for VWAP
-  console.log("\n── Fetching market data from Binance ───────────────────\n");
-  const candles = await fetchCandles(CONFIG.symbol, CONFIG.timeframe, 500);
-  const closes = candles.map((c) => c.close);
-  const price = closes[closes.length - 1];
-  console.log(`  Current price: $${price.toFixed(2)}`);
+  for (const symbol of watchlist) {
+    console.log(`\n${"═".repeat(57)}`);
+    console.log(`  📊 ${symbol}`);
+    console.log(`${"═".repeat(57)}`);
 
-  // Calculate indicators
-  const ema8 = calcEMA(closes, 8);
-  const vwap = calcVWAP(candles);
-  const rsi3 = calcRSI(closes, 3);
+    try {
+      // Dohvati svjeće
+      console.log("\n── Dohvaćanje podataka s Binance ───────────────────────\n");
+      const candles = await fetchCandles(symbol, CONFIG.timeframe, 200);
+      const price   = candles[candles.length - 1].close;
+      console.log(`  Trenutna cijena: $${price.toFixed(4)}`);
 
-  console.log(`  EMA(8):  $${ema8.toFixed(2)}`);
-  console.log(`  VWAP:    $${vwap ? vwap.toFixed(2) : "N/A"}`);
-  console.log(`  RSI(3):  ${rsi3 ? rsi3.toFixed(2) : "N/A"}`);
+      // Analiziraj tržište
+      const m = analyzeMarket(candles, CONFIG.strategy);
 
-  if (!vwap || !rsi3) {
-    console.log("\n⚠️  Not enough data to calculate indicators. Exiting.");
-    return;
-  }
-
-  // Run safety check
-  const { results, allPass } = runSafetyCheck(price, ema8, vwap, rsi3, rules);
-
-  // Calculate position size
-  const tradeSize = Math.min(
-    CONFIG.portfolioValue * 0.01,
-    CONFIG.maxTradeSizeUSD,
-  );
-
-  // Decision
-  console.log("\n── Decision ─────────────────────────────────────────────\n");
-
-  const logEntry = {
-    timestamp: new Date().toISOString(),
-    symbol: CONFIG.symbol,
-    timeframe: CONFIG.timeframe,
-    price,
-    indicators: { ema8, vwap, rsi3 },
-    conditions: results,
-    allPass,
-    tradeSize,
-    orderPlaced: false,
-    orderId: null,
-    paperTrading: CONFIG.paperTrading,
-    limits: {
-      maxTradeSizeUSD: CONFIG.maxTradeSizeUSD,
-      maxTradesPerDay: CONFIG.maxTradesPerDay,
-      tradesToday: countTodaysTrades(log),
-    },
-  };
-
-  if (!allPass) {
-    const failed = results.filter((r) => !r.pass).map((r) => r.label);
-    console.log(`🚫 TRADE BLOCKED`);
-    console.log(`   Failed conditions:`);
-    failed.forEach((f) => console.log(`   - ${f}`));
-  } else {
-    console.log(`✅ ALL CONDITIONS MET`);
-
-    if (CONFIG.paperTrading) {
-      console.log(
-        `\n📋 PAPER TRADE — would buy ${CONFIG.symbol} ~$${tradeSize.toFixed(2)} at market`,
-      );
-      console.log(`   (Set PAPER_TRADING=false in .env to place real orders)`);
-      logEntry.orderPlaced = true;
-      logEntry.orderId = `PAPER-${Date.now()}`;
-    } else {
-      console.log(
-        `\n🔴 PLACING LIVE ORDER — $${tradeSize.toFixed(2)} BUY ${CONFIG.symbol}`,
-      );
-      try {
-        const order = await placeBitGetOrder(
-          CONFIG.symbol,
-          "buy",
-          tradeSize,
-          price,
-        );
-        logEntry.orderPlaced = true;
-        logEntry.orderId = order.orderId;
-        console.log(`✅ ORDER PLACED — ${order.orderId}`);
-      } catch (err) {
-        console.log(`❌ ORDER FAILED — ${err.message}`);
-        logEntry.error = err.message;
+      if (!m.ema9 || !m.ema21 || !m.atr) {
+        console.log("⚠️  Nedovoljno podataka za indikatore. Preskačem.");
+        continue;
       }
+
+      console.log(`  EMA9:  $${m.ema9.toFixed(4)}`);
+      console.log(`  EMA21: $${m.ema21.toFixed(4)}`);
+      console.log(`  ATR14: $${m.atr.toFixed(4)}`);
+      if (m.ph1) console.log(`  Pivot High 1/2: $${m.ph1.toFixed(4)} / $${m.ph2?.toFixed(4)}`);
+      if (m.pl1) console.log(`  Pivot Low  1/2: $${m.pl1.toFixed(4)} / $${m.pl2?.toFixed(4)}`);
+
+      // Izračunaj veličinu pozicije
+      let slDist = 0;
+      if (m.uptrend && m.longSl)    slDist = Math.max(price - m.longSl, 0.0001);
+      if (m.downtrend && m.shortSl) slDist = Math.max(m.shortSl - price, 0.0001);
+
+      const riskAmount = CONFIG.portfolioValue * (CONFIG.strategy.riskPct / 100);
+      const rawQty     = riskAmount / slDist;
+      const tradeSize  = Math.min(rawQty * price, CONFIG.maxTradeSizeUSD);
+
+      // Provjeri dnevne limite
+      const withinLimits = checkTradeLimits(log, tradeSize);
+      if (!withinLimits) {
+        console.log("\nBot staje — dostignut dnevni limit.");
+        return;
+      }
+
+      // Safety check
+      const { results, allPass, signal } = runSafetyCheck(m);
+
+      console.log("\n── Odluka ───────────────────────────────────────────────\n");
+
+      const sl = signal === "LONG"  ? m.longSl  : signal === "SHORT" ? m.shortSl : null;
+      const tp = signal === "LONG"  ? m.bullTp  : signal === "SHORT" ? m.bearTp  : null;
+
+      const logEntry = {
+        timestamp:    new Date().toISOString(),
+        symbol,
+        timeframe:    CONFIG.timeframe,
+        price,
+        indicators:   { ema9: m.ema9, ema21: m.ema21, atr: m.atr },
+        pivots:       { ph1: m.ph1, ph2: m.ph2, pl1: m.pl1, pl2: m.pl2 },
+        signal,
+        sl,
+        tp,
+        conditions:   results,
+        allPass,
+        tradeSize,
+        orderPlaced:  false,
+        orderId:      null,
+        paperTrading: CONFIG.paperTrading,
+        error:        null,
+      };
+
+      if (!allPass) {
+        const failed = results.filter((r) => !r.pass).map((r) => r.label);
+        console.log(`🚫 TRADE BLOKIRAN`);
+        failed.forEach((f) => console.log(`   - ${f}`));
+      } else {
+        console.log(`✅ SVI UVJETI ISPUNJENI — Signal: ${signal}`);
+        console.log(`   Ulaz: $${price.toFixed(4)} | SL: $${sl?.toFixed(4)} | TP: $${tp?.toFixed(4)}`);
+        console.log(`   Veličina: $${tradeSize.toFixed(2)} | Leverage: ${CONFIG.leverage}x`);
+
+        if (CONFIG.paperTrading) {
+          console.log(`\n📋 PAPER TRADE — ${signal} ${symbol} ~$${tradeSize.toFixed(2)}`);
+          console.log(`   (Postavi PAPER_TRADING=false za prave naloge)`);
+          logEntry.orderPlaced = true;
+          logEntry.orderId = `PAPER-${Date.now()}`;
+        } else {
+          console.log(`\n🔴 POSTAVLJAM LIVE NALOG — ${signal} $${tradeSize.toFixed(2)} ${symbol}`);
+          try {
+            const order = await placeBitGetOrder(symbol, signal, tradeSize, price, sl, tp);
+            logEntry.orderPlaced = true;
+            logEntry.orderId = order?.orderId;
+            console.log(`✅ NALOG POSTAVLJEN — ${order?.orderId}`);
+          } catch (err) {
+            console.log(`❌ NALOG PAO — ${err.message}`);
+            logEntry.error = err.message;
+          }
+        }
+      }
+
+      log.trades.push(logEntry);
+      writeTradeCsv(logEntry);
+
+    } catch (err) {
+      console.log(`❌ Greška za ${symbol}: ${err.message}`);
     }
   }
 
-  // Save decision log
-  log.trades.push(logEntry);
   saveLog(log);
-  console.log(`\nDecision log saved → ${LOG_FILE}`);
-
-  // Write tax CSV row for every run (executed, paper, or blocked)
-  writeTradeCsv(logEntry);
-
+  console.log(`\nLog odluke snimljen → ${LOG_FILE}`);
   console.log("═══════════════════════════════════════════════════════════\n");
 }
 
@@ -620,7 +567,7 @@ if (process.argv.includes("--tax-summary")) {
   generateTaxSummary();
 } else {
   run().catch((err) => {
-    console.error("Bot error:", err);
+    console.error("Bot greška:", err);
     process.exit(1);
   });
 }

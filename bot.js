@@ -370,10 +370,123 @@ async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp) {
   return data.data;
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+// Dinamički broj decimala ovisno o veličini cijene
+function fmtPrice(price) {
+  if (!price && price !== 0) return "";
+  if (price >= 1000)  return price.toFixed(2);
+  if (price >= 1)     return price.toFixed(4);
+  if (price >= 0.001) return price.toFixed(6);
+  return price.toFixed(10);
+}
+
+// ─── Position Tracking ───────────────────────────────────────────────────────
+
+const POSITIONS_FILE = "open_positions.json";
+
+function loadPositions() {
+  if (!existsSync(POSITIONS_FILE)) return [];
+  try { return JSON.parse(readFileSync(POSITIONS_FILE, "utf8")); }
+  catch { return []; }
+}
+
+function savePositions(positions) {
+  writeFileSync(POSITIONS_FILE, JSON.stringify(positions, null, 2));
+}
+
+// Provjeri jesu li otvorene pozicije dostigle TP ili SL
+async function checkOpenPositions() {
+  const positions = loadPositions();
+  if (positions.length === 0) return [];
+
+  const closed = [];
+  const stillOpen = [];
+
+  console.log(`\n${"═".repeat(57)}`);
+  console.log(`  🔍 Provjera otvorenih pozicija (${positions.length})`);
+  console.log(`${"═".repeat(57)}`);
+
+  for (const pos of positions) {
+    try {
+      const candles = await fetchCandles(pos.symbol, CONFIG.timeframe, 5);
+      const current = candles[candles.length - 1];
+      const high    = current.high;
+      const low     = current.low;
+      const close   = current.close;
+
+      let exitReason = null;
+      let exitPrice  = null;
+
+      if (pos.side === "LONG") {
+        if (high >= pos.tp) {
+          exitReason = "TP dostignut";
+          exitPrice  = pos.tp;
+        } else if (low <= pos.sl) {
+          exitReason = "SL dostignut";
+          exitPrice  = pos.sl;
+        }
+      } else if (pos.side === "SHORT") {
+        if (low <= pos.tp) {
+          exitReason = "TP dostignut";
+          exitPrice  = pos.tp;
+        } else if (high >= pos.sl) {
+          exitReason = "SL dostignut";
+          exitPrice  = pos.sl;
+        }
+      }
+
+      if (exitReason) {
+        const pnl = pos.side === "LONG"
+          ? (exitPrice - pos.entryPrice) * pos.quantity
+          : (pos.entryPrice - exitPrice) * pos.quantity;
+        const pnlPct = (pnl / pos.totalUSD) * 100;
+
+        console.log(`\n  ${pnl >= 0 ? "✅ WIN" : "❌ LOSS"} ${pos.symbol} ${pos.side}`);
+        console.log(`     Ulaz: ${fmtPrice(pos.entryPrice)} → Izlaz: ${fmtPrice(exitPrice)}`);
+        console.log(`     P&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(4)} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%)`);
+
+        writeExitCsv(pos, exitPrice, exitReason, pnl);
+        closed.push({ ...pos, exitPrice, exitReason, pnl });
+      } else {
+        const unrealizedPnl = pos.side === "LONG"
+          ? (close - pos.entryPrice) * pos.quantity
+          : (pos.entryPrice - close) * pos.quantity;
+        console.log(`\n  ⏳ OPEN  ${pos.symbol} ${pos.side} | Ulaz: ${fmtPrice(pos.entryPrice)} | Sad: ${fmtPrice(close)} | P&L: ${unrealizedPnl >= 0 ? "+" : ""}$${unrealizedPnl.toFixed(4)}`);
+        stillOpen.push(pos);
+      }
+    } catch (err) {
+      console.log(`  ⚠️  Greška pri provjeri ${pos.symbol}: ${err.message}`);
+      stillOpen.push(pos);
+    }
+  }
+
+  savePositions(stillOpen);
+  return closed;
+}
+
+function addOpenPosition(entry) {
+  const positions = loadPositions();
+  const quantity  = entry.tradeSize / entry.price;
+  positions.push({
+    symbol:     entry.symbol,
+    side:       entry.signal,
+    entryPrice: entry.price,
+    quantity,
+    totalUSD:   entry.tradeSize,
+    sl:         entry.sl,
+    tp:         entry.tp,
+    orderId:    entry.orderId,
+    mode:       entry.paperTrading ? "PAPER" : "LIVE",
+    openedAt:   entry.timestamp,
+  });
+  savePositions(positions);
+}
+
 // ─── Tax CSV ─────────────────────────────────────────────────────────────────
 
 const CSV_FILE    = "trades.csv";
-const CSV_HEADERS = ["Date","Time (UTC)","Exchange","Symbol","Side","Quantity","Price","Total USD","Fee (est.)","Net Amount","SL","TP","Order ID","Mode","Notes"].join(",");
+const CSV_HEADERS = ["Date","Time (UTC)","Exchange","Symbol","Side","Quantity","Price","Total USD","Fee (est.)","Net P&L","SL","TP","Order ID","Mode","Notes"].join(",");
 
 function initCsv() {
   if (!existsSync(CSV_FILE)) {
@@ -393,22 +506,52 @@ function writeTradeCsv(entry) {
     const failed = entry.conditions.filter((c) => !c.pass).map((c) => c.label).join("; ");
     mode = "BLOCKED"; orderId = "BLOCKED"; notes = `Blokirano: ${failed}`;
   } else {
+    const quantity = entry.tradeSize / entry.price;
     side    = entry.signal;
-    qty     = (entry.tradeSize / entry.price).toFixed(6);
+    qty     = quantity.toFixed(6);
     total   = entry.tradeSize.toFixed(2);
     fee     = (entry.tradeSize * 0.0005).toFixed(4);
-    net     = (entry.tradeSize - parseFloat(fee)).toFixed(2);
-    sl      = entry.sl?.toFixed(2) || "";
-    tp      = entry.tp?.toFixed(2) || "";
+    net     = "OPEN";
+    sl      = fmtPrice(entry.sl);
+    tp      = fmtPrice(entry.tp);
     orderId = entry.orderId || "";
     mode    = entry.paperTrading ? "PAPER" : "LIVE";
     notes   = entry.error ? `Greška: ${entry.error}` : "Svi uvjeti ispunjeni";
   }
 
-  const row = [date, time, "BitGet", entry.symbol, side, qty, entry.price?.toFixed(2), total, fee, net, sl, tp, orderId, mode, `"${notes}"`].join(",");
+  const row = [date, time, "BitGet", entry.symbol, side, qty, fmtPrice(entry.price), total, fee, net, sl, tp, orderId, mode, `"${notes}"`].join(",");
   if (!existsSync(CSV_FILE)) writeFileSync(CSV_FILE, CSV_HEADERS + "\n");
   appendFileSync(CSV_FILE, row + "\n");
   console.log(`📄 Tax evidencija snimljena → ${CSV_FILE}`);
+}
+
+function writeExitCsv(pos, exitPrice, reason, pnl) {
+  const now  = new Date();
+  const date = now.toISOString().slice(0, 10);
+  const time = now.toISOString().slice(11, 19);
+
+  const exitSide = pos.side === "LONG" ? "CLOSE_LONG" : "CLOSE_SHORT";
+  const fee      = (pos.totalUSD * 0.0005).toFixed(4);
+  const netPnl   = (pnl - parseFloat(fee)).toFixed(4);
+  const icon     = pnl >= 0 ? "WIN" : "LOSS";
+
+  const row = [
+    date, time, "BitGet", pos.symbol,
+    exitSide,
+    pos.quantity.toFixed(6),
+    fmtPrice(exitPrice),
+    pos.totalUSD.toFixed(2),
+    fee,
+    netPnl,
+    fmtPrice(pos.sl),
+    fmtPrice(pos.tp),
+    pos.orderId || "",
+    pos.mode,
+    `"${icon}: ${reason} | Ulaz ${fmtPrice(pos.entryPrice)} → Izlaz ${fmtPrice(exitPrice)}"`,
+  ].join(",");
+
+  appendFileSync(CSV_FILE, row + "\n");
+  console.log(`📄 Exit snimljen → ${CSV_FILE}`);
 }
 
 // Tax summary: node bot.js --tax-summary
@@ -452,6 +595,9 @@ async function run() {
   console.log(`\nWatchlist: ${watchlist.join(", ")}`);
 
   const log = loadLog();
+
+  // Provjeri otvorene pozicije PRIJE skeniranja novih signala
+  await checkOpenPositions();
 
   for (const symbol of watchlist) {
     console.log(`\n${"═".repeat(57)}`);
@@ -536,6 +682,7 @@ async function run() {
           console.log(`   (Postavi PAPER_TRADING=false za prave naloge)`);
           logEntry.orderPlaced = true;
           logEntry.orderId = `PAPER-${Date.now()}`;
+          addOpenPosition(logEntry);
         } else {
           console.log(`\n🔴 POSTAVLJAM LIVE NALOG — ${signal} $${tradeSize.toFixed(2)} ${symbol}`);
           try {
@@ -543,6 +690,7 @@ async function run() {
             logEntry.orderPlaced = true;
             logEntry.orderId = order?.orderId;
             console.log(`✅ NALOG POSTAVLJEN — ${order?.orderId}`);
+            addOpenPosition(logEntry);
           } catch (err) {
             console.log(`❌ NALOG PAO — ${err.message}`);
             logEntry.error = err.message;

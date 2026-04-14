@@ -714,8 +714,105 @@ async function run() {
   console.log("═══════════════════════════════════════════════════════════\n");
 }
 
+// ─── Status Dashboard ─────────────────────────────────────────────────────────
+
+async function showStatus() {
+  console.log("\n═══════════════════════════════════════════════════════════");
+  console.log("  📊 TRADING BOT STATUS DASHBOARD");
+  console.log(`  ${new Date().toISOString()}`);
+  console.log("═══════════════════════════════════════════════════════════\n");
+
+  // ── Otvorene pozicije s live cijenom ──
+  const positions = loadPositions();
+  console.log(`── Otvorene pozicije (${positions.length}) ──────────────────────────────\n`);
+
+  if (positions.length === 0) {
+    console.log("  Nema otvorenih pozicija.\n");
+  } else {
+    for (const pos of positions) {
+      try {
+        const candles = await fetchCandles(pos.symbol, CONFIG.timeframe, 3);
+        const current = candles[candles.length - 1].close;
+        const pnl     = pos.side === "LONG"
+          ? (current - pos.entryPrice) * pos.quantity
+          : (pos.entryPrice - current) * pos.quantity;
+        const pnlPct  = (pnl / pos.totalUSD) * 100;
+        const riskAmt = Math.abs(pos.entryPrice - pos.sl) * pos.quantity;
+        const tpAmt   = Math.abs(pos.tp - pos.entryPrice) * pos.quantity;
+        const rr      = tpAmt / riskAmt;
+
+        const bar = pnl >= 0 ? "🟢" : "🔴";
+        console.log(`  ${bar} ${pos.symbol} ${pos.side} [${pos.mode}]`);
+        console.log(`     Ulaz:     ${fmtPrice(pos.entryPrice)}`);
+        console.log(`     Sad:      ${fmtPrice(current)}`);
+        console.log(`     SL:       ${fmtPrice(pos.sl)}   TP: ${fmtPrice(pos.tp)}`);
+        console.log(`     R:R       1 : ${rr.toFixed(2)}`);
+        console.log(`     P&L:      ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(4)}  (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%)`);
+        console.log(`     Notional: $${pos.totalUSD.toFixed(2)}  |  Margin: $${(pos.totalUSD / CONFIG.leverage).toFixed(2)}  |  ${CONFIG.leverage}x`);
+        console.log(`     Otvoreno: ${pos.openedAt}\n`);
+      } catch (e) {
+        console.log(`  ⚠️  ${pos.symbol}: ne mogu dohvatiti cijenu\n`);
+      }
+    }
+  }
+
+  // ── Statistika zatvorenih tradova iz CSV ──
+  if (!existsSync(CSV_FILE)) { console.log("Nema trades.csv."); return; }
+
+  const lines = readFileSync(CSV_FILE, "utf8").trim().split("\n").slice(2); // preskoči header i NOTE
+  const exits = lines
+    .map(l => l.split(","))
+    .filter(r => (r[4] === "CLOSE_LONG" || r[4] === "CLOSE_SHORT") && r[14]);
+
+  const wins   = exits.filter(r => r[14]?.includes("WIN"));
+  const losses = exits.filter(r => r[14]?.includes("LOSS"));
+  const totalPnl = exits.reduce((s, r) => s + parseFloat(r[9] || 0), 0);
+
+  const winRate = exits.length > 0 ? (wins.length / exits.length * 100).toFixed(1) : "—";
+
+  // Prosječni R:R iz zatvorenih tradova
+  let avgRR = "—";
+  if (exits.length > 0) {
+    const rrValues = exits.map(r => {
+      const notes = r[14] || "";
+      const ulazMatch = notes.match(/Ulaz ([\d.e-]+)/);
+      const izlazMatch = notes.match(/Izlaz ([\d.e-]+)/);
+      return ulazMatch && izlazMatch ? Math.abs(parseFloat(izlazMatch[1]) - parseFloat(ulazMatch[1])) : null;
+    }).filter(Boolean);
+    if (rrValues.length > 0) avgRR = (rrValues.reduce((a, b) => a + b, 0) / rrValues.length).toFixed(4);
+  }
+
+  console.log("── Statistika zatvorenih tradova ────────────────────────────\n");
+  console.log(`  Ukupno zatvorenih:  ${exits.length}`);
+  console.log(`  ✅ Win:             ${wins.length}`);
+  console.log(`  ❌ Loss:            ${losses.length}`);
+  console.log(`  Win rate:           ${winRate}%`);
+  console.log(`  Ukupni P&L:         ${totalPnl >= 0 ? "+" : ""}$${totalPnl.toFixed(4)}`);
+
+  // ── Zadnjih 5 zatvorenih tradova ──
+  if (exits.length > 0) {
+    console.log("\n── Zadnjih 5 zatvorenih ─────────────────────────────────────\n");
+    exits.slice(-5).reverse().forEach(r => {
+      const icon  = r[14]?.includes("WIN") ? "✅" : "❌";
+      const pnl   = parseFloat(r[9] || 0);
+      const notes = r[14]?.replace(/^"|"$/g, "") || "";
+      console.log(`  ${icon} ${r[0]} ${r[3]} ${r[4]?.replace("CLOSE_", "")}  P&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(4)}`);
+      console.log(`     ${notes}`);
+    });
+  }
+
+  console.log("\n─────────────────────────────────────────────────────────────\n");
+  console.log("  Pokreni bot:    node bot.js");
+  console.log("  Tax sažetak:   node bot.js --tax-summary");
+  console.log("═══════════════════════════════════════════════════════════\n");
+}
+
+// ─── Entry point ─────────────────────────────────────────────────────────────
+
 if (process.argv.includes("--tax-summary")) {
   generateTaxSummary();
+} else if (process.argv.includes("--status")) {
+  showStatus().catch(err => { console.error(err); process.exit(1); });
 } else {
   run().catch((err) => {
     console.error("Bot greška:", err);

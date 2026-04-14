@@ -43,6 +43,7 @@ const CONFIG = {
   maxTradeSizeUSD: parseFloat(process.env.MAX_TRADE_SIZE_USD   || "50"),
   maxTradesPerDay: parseInt(process.env.MAX_TRADES_PER_DAY     || "100"),
   paperTrading:    process.env.PAPER_TRADING !== "false",
+  bitgetDemo:      process.env.BITGET_DEMO === "true",
   tradeMode:       process.env.TRADE_MODE        || "futures",
   leverage:        parseInt(process.env.LEVERAGE  || "5"),
   bitget: {
@@ -353,15 +354,18 @@ async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp) {
 
   const signature = signBitGet(timestamp, "POST", path, body);
 
+  const headers = {
+    "Content-Type":      "application/json",
+    "ACCESS-KEY":        CONFIG.bitget.apiKey,
+    "ACCESS-SIGN":       signature,
+    "ACCESS-TIMESTAMP":  timestamp,
+    "ACCESS-PASSPHRASE": CONFIG.bitget.passphrase,
+  };
+  if (CONFIG.bitgetDemo) headers["x-simulated-trading"] = "1";
+
   const res = await fetch(`${CONFIG.bitget.baseUrl}${path}`, {
     method: "POST",
-    headers: {
-      "Content-Type":      "application/json",
-      "ACCESS-KEY":        CONFIG.bitget.apiKey,
-      "ACCESS-SIGN":       signature,
-      "ACCESS-TIMESTAMP":  timestamp,
-      "ACCESS-PASSPHRASE": CONFIG.bitget.passphrase,
-    },
+    headers,
     body,
   });
 
@@ -477,7 +481,7 @@ function addOpenPosition(entry) {
     sl:         entry.sl,
     tp:         entry.tp,
     orderId:    entry.orderId,
-    mode:       entry.paperTrading ? "PAPER" : "LIVE",
+    mode:       entry.paperTrading ? "PAPER" : entry.bitgetDemo ? "DEMO" : "LIVE",
     openedAt:   entry.timestamp,
   });
   savePositions(positions);
@@ -515,7 +519,7 @@ function writeTradeCsv(entry) {
     sl      = fmtPrice(entry.sl);
     tp      = fmtPrice(entry.tp);
     orderId = entry.orderId || "";
-    mode    = entry.paperTrading ? "PAPER" : "LIVE";
+    mode    = entry.paperTrading ? "PAPER" : entry.bitgetDemo ? "DEMO" : "LIVE";
     notes   = entry.error ? `Greška: ${entry.error}` : "Svi uvjeti ispunjeni";
   }
 
@@ -584,7 +588,8 @@ async function run() {
   console.log("═══════════════════════════════════════════════════════════");
   console.log("  Fib Golden Pocket Trading Bot");
   console.log(`  ${new Date().toISOString()}`);
-  console.log(`  Mod: ${CONFIG.paperTrading ? "📋 PAPER TRADING" : "🔴 LIVE TRADING"}`);
+  const modLabel = CONFIG.paperTrading ? "📋 PAPER TRADING" : CONFIG.bitgetDemo ? "🟡 BITGET DEMO" : "🔴 LIVE TRADING";
+  console.log(`  Mod: ${modLabel}`);
   console.log("═══════════════════════════════════════════════════════════");
 
   const rules = JSON.parse(readFileSync("rules.json", "utf8"));
@@ -668,6 +673,7 @@ async function run() {
         orderPlaced:  false,
         orderId:      null,
         paperTrading: CONFIG.paperTrading,
+        bitgetDemo:   CONFIG.bitgetDemo,
         error:        null,
       };
 

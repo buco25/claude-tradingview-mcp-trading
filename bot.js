@@ -630,9 +630,12 @@ async function run() {
       if (m.uptrend && m.longSl)    slDist = Math.max(price - m.longSl, 0.0001);
       if (m.downtrend && m.shortSl) slDist = Math.max(m.shortSl - price, 0.0001);
 
-      const riskAmount = CONFIG.portfolioValue * (CONFIG.strategy.riskPct / 100);
-      const rawQty     = riskAmount / slDist;
-      const tradeSize  = Math.min(rawQty * price, CONFIG.maxTradeSizeUSD);
+      const riskAmount  = CONFIG.portfolioValue * (CONFIG.strategy.riskPct / 100);
+      const rawQty      = riskAmount / slDist;
+      // maxTradeSizeUSD = max MARGIN (collateral), notional = margin × leverage
+      const maxNotional = CONFIG.maxTradeSizeUSD * CONFIG.leverage;
+      const tradeSize   = Math.min(rawQty * price, maxNotional);
+      const marginUsed  = tradeSize / CONFIG.leverage;
 
       // Provjeri dnevne limite
       const withinLimits = checkTradeLimits(log, tradeSize);
@@ -674,11 +677,11 @@ async function run() {
         failed.forEach((f) => console.log(`   - ${f}`));
       } else {
         console.log(`✅ SVI UVJETI ISPUNJENI — Signal: ${signal}`);
-        console.log(`   Ulaz: $${price.toFixed(4)} | SL: $${sl?.toFixed(4)} | TP: $${tp?.toFixed(4)}`);
-        console.log(`   Veličina: $${tradeSize.toFixed(2)} | Leverage: ${CONFIG.leverage}x`);
+        console.log(`   Ulaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}`);
+        console.log(`   Notional: $${tradeSize.toFixed(2)} | Margin: $${marginUsed.toFixed(2)} | Leverage: ${CONFIG.leverage}x`);
 
         if (CONFIG.paperTrading) {
-          console.log(`\n📋 PAPER TRADE — ${signal} ${symbol} ~$${tradeSize.toFixed(2)}`);
+          console.log(`\n📋 PAPER TRADE — ${signal} ${symbol} | Notional: $${tradeSize.toFixed(2)} | Margin: $${marginUsed.toFixed(2)} | ${CONFIG.leverage}x`);
           console.log(`   (Postavi PAPER_TRADING=false za prave naloge)`);
           logEntry.orderPlaced = true;
           logEntry.orderId = `PAPER-${Date.now()}`;

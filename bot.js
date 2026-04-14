@@ -54,8 +54,8 @@ const CONFIG = {
   // Strategija parametri
   strategy: {
     pivotLen:  4,      // Pivot lookback
-    fibLo:     0.5,    // Fib zona donja granica
-    fibHi:     0.618,  // Fib zona gornja granica
+    fibLo:     0.45,   // Fib zona donja granica
+    fibHi:     0.65,   // Fib zona gornja granica
     fibTp:     1.5,    // Fib TP ekstenzija
     ema9Len:   9,      // EMA brzi
     ema21Len:  21,     // EMA spori

@@ -336,21 +336,24 @@ function signBitGet(timestamp, method, path, body = "") {
 }
 
 async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp) {
-  const quantity  = (sizeUSD / price).toFixed(6);
+  const quantity  = (sizeUSD / price).toFixed(4);
   const timestamp = Date.now().toString();
-  const path = "/api/v2/mix/order/placeOrder";
+  const path      = "/api/v2/mix/order/placeOrder";
 
-  const body = JSON.stringify({
-    symbol:      `${symbol}USDT_UMCBL`,
-    side:        side === "LONG" ? "open_long" : "open_short",
+  const orderBody = {
+    symbol:      symbol,           // već sadrži USDT npr. "DOGEUSDT"
+    productType: "USDT-FUTURES",
+    marginMode:  "isolated",
+    marginCoin:  "USDT",
+    side:        side === "LONG" ? "buy" : "sell",
+    tradeSide:   "open",
     orderType:   "market",
     size:        quantity,
-    productType: "umcbl",
-    marginCoin:  "USDT",
-    marginMode:  "isolated",
-    presetStopLossPrice:   sl?.toFixed(2),
-    presetTakeProfitPrice: tp?.toFixed(2),
-  });
+  };
+  if (sl) orderBody.presetStopLossPrice   = fmtPrice(sl);
+  if (tp) orderBody.presetTakeProfitPrice = fmtPrice(tp);
+
+  const body = JSON.stringify(orderBody);
 
   const signature = signBitGet(timestamp, "POST", path, body);
 

@@ -309,23 +309,23 @@ function runSafetyCheck(m) {
 
 // ─── Trade Limits ────────────────────────────────────────────────────────────
 
-function checkTradeLimits(log, tradeSize) {
+function checkTradeLimits(log, marginUsed) {
   const todayCount = countTodaysTrades(log);
   console.log("\n── Trade Limits ─────────────────────────────────────────\n");
 
   if (todayCount >= CONFIG.maxTradesPerDay) {
     console.log(`❌ Dnevni limit dostignut: ${todayCount}/${CONFIG.maxTradesPerDay}`);
-    return false;
+    return { ok: false, stopAll: true };
   }
   console.log(`✅ Tradovi danas: ${todayCount}/${CONFIG.maxTradesPerDay}`);
 
-  if (tradeSize > CONFIG.maxTradeSizeUSD) {
-    console.log(`❌ Trade size $${tradeSize.toFixed(2)} > max $${CONFIG.maxTradeSizeUSD}`);
-    return false;
+  if (marginUsed > CONFIG.maxTradeSizeUSD) {
+    console.log(`❌ Margin $${marginUsed.toFixed(2)} > max $${CONFIG.maxTradeSizeUSD} — preskačem ovaj par`);
+    return { ok: false, stopAll: false };
   }
-  console.log(`✅ Trade size: $${tradeSize.toFixed(2)} (max $${CONFIG.maxTradeSizeUSD})`);
+  console.log(`✅ Margin: $${marginUsed.toFixed(2)} (max $${CONFIG.maxTradeSizeUSD})`);
 
-  return true;
+  return { ok: true, stopAll: false };
 }
 
 // ─── BitGet Execution ────────────────────────────────────────────────────────
@@ -611,7 +611,7 @@ async function run() {
 
     try {
       // Dohvati svjeće
-      console.log("\n── Dohvaćanje podataka s Binance ───────────────────────\n");
+      console.log("\n── Dohvaćanje podataka s BitGet ────────────────────────\n");
       const candles = await fetchCandles(symbol, CONFIG.timeframe, 200);
       const price   = candles[candles.length - 1].close;
       console.log(`  Trenutna cijena: $${price.toFixed(4)}`);
@@ -643,10 +643,13 @@ async function run() {
       const marginUsed  = tradeSize / CONFIG.leverage;
 
       // Provjeri dnevne limite
-      const withinLimits = checkTradeLimits(log, tradeSize);
-      if (!withinLimits) {
-        console.log("\nBot staje — dostignut dnevni limit.");
-        return;
+      const limits = checkTradeLimits(log, marginUsed);
+      if (!limits.ok) {
+        if (limits.stopAll) {
+          console.log("\nBot staje — dostignut dnevni limit.");
+          return;
+        }
+        continue; // Preskoči samo ovaj par, nastavi s ostalima
       }
 
       // Safety check

@@ -107,7 +107,7 @@ async function fetchCandles(symbol, interval, limit = 200) {
     low:    parseFloat(k[3]),
     close:  parseFloat(k[4]),
     volume: parseFloat(k[5]),
-  })).reverse(); // BitGet vraća od novijeg prema starijem — trebamo chronološki
+  })); // BitGet vraća od starijeg prema novijem — već chronološki, NE reversati
 }
 
 // ─── Indikatori ─────────────────────────────────────────────────────────────
@@ -137,6 +137,33 @@ function calcATR(candles, period) {
     atr = (atr * (period - 1) + trs[i]) / period;
   }
   return atr;
+}
+
+function calcRSI(closes, period) {
+  if (closes.length < period + 1) return null;
+  let gains = 0, losses = 0;
+  for (let i = closes.length - period; i < closes.length; i++) {
+    const diff = closes[i] - closes[i - 1];
+    if (diff > 0) gains += diff; else losses -= diff;
+  }
+  if (losses === 0) return 100;
+  const rs = (gains / period) / (losses / period);
+  return 100 - 100 / (1 + rs);
+}
+
+function calcMACD(closes, fast = 12, slow = 26, signal = 9) {
+  if (closes.length < slow + signal + 2) return null;
+  // Skupi MACD linije za svaki bar od indeksa `slow` nadalje
+  const diffs = [];
+  for (let i = slow; i <= closes.length; i++) {
+    const f = calcEMA(closes.slice(0, i), fast);
+    const s = calcEMA(closes.slice(0, i), slow);
+    if (f !== null && s !== null) diffs.push(f - s);
+  }
+  const sigLine = calcEMA(diffs, signal);
+  if (!sigLine) return null;
+  const macdLine = diffs[diffs.length - 1];
+  return macdLine - sigLine; // histogram
 }
 
 // Pivot High: vrh gdje je high[i] > svih high-ova ±pivotLen
@@ -221,6 +248,110 @@ function analyzeMarket(candles, cfg) {
     inBullGp, inBearGp,
     sniperLong, sniperShort,
   };
+}
+
+// ─── EMA Cross + RSI Strategy ───────────────────────────────────────────────
+
+function analyzeEmaRsi(candles, cfg) {
+  const { ema9Len, ema21Len, ema50Len, rsiLen, rsiLongLo, rsiLongHi, rsiShortLo, rsiShortHi, atrLen, atrSl, atrTp } = cfg;
+  const closes = candles.map(c => c.close);
+  const price  = closes[closes.length - 1];
+
+  const ema9  = calcEMA(closes, ema9Len);
+  const ema21 = calcEMA(closes, ema21Len);
+  const ema50 = calcEMA(closes, ema50Len);
+  const rsi   = calcRSI(closes, rsiLen);
+  const atr   = calcATR(candles, atrLen);
+
+  if (!ema9 || !ema21 || !ema50 || !rsi || !atr) return { price, signal: "NEUTRAL", reason: "Nedovoljno podataka" };
+
+  // Crossover detection (compare last two candles)
+  const prevCloses = closes.slice(0, -1);
+  const prevEma9  = calcEMA(prevCloses, ema9Len);
+  const prevEma21 = calcEMA(prevCloses, ema21Len);
+
+  const crossUp   = prevEma9 <= prevEma21 && ema9 > ema21;
+  const crossDown = prevEma9 >= prevEma21 && ema9 < ema21;
+
+  let signal = "NEUTRAL", sl = null, tp = null, reason = "";
+
+  if (price > ema50 && crossUp && rsi >= rsiLongLo && rsi <= rsiLongHi) {
+    signal = "LONG";
+    sl = price - atr * atrSl;
+    tp = price + atr * atrTp;
+    reason = `EMA cross UP | RSI ${rsi.toFixed(1)} | Cijena > EMA50`;
+  } else if (price < ema50 && crossDown && rsi >= rsiShortLo && rsi <= rsiShortHi) {
+    signal = "SHORT";
+    sl = price + atr * atrSl;
+    tp = price - atr * atrTp;
+    reason = `EMA cross DOWN | RSI ${rsi.toFixed(1)} | Cijena < EMA50`;
+  } else {
+    if (!crossUp && !crossDown) reason = "Nema EMA crossovera";
+    else if (price <= ema50 && crossUp) reason = "Cross UP ali cijena ispod EMA50";
+    else if (price >= ema50 && crossDown) reason = "Cross DOWN ali cijena iznad EMA50";
+    else if (crossUp && (rsi < rsiLongLo || rsi > rsiLongHi)) reason = `RSI ${rsi.toFixed(1)} izvan zone [${rsiLongLo}-${rsiLongHi}]`;
+    else if (crossDown && (rsi < rsiShortLo || rsi > rsiShortHi)) reason = `RSI ${rsi.toFixed(1)} izvan zone [${rsiShortLo}-${rsiShortHi}]`;
+    else reason = "Uvjeti nisu ispunjeni";
+  }
+
+  return { price, ema9, ema21, ema50, rsi, atr, signal, sl, tp, reason, crossUp, crossDown };
+}
+
+// ─── 3-Layer Strategy (Signal + Momentum + Trend) ───────────────────────────
+
+function analyzeThreeLayer(candles, cfg) {
+  const { ema9Len, ema21Len, ema145Len, macdFast, macdSlow, macdSignal, atrLen, atrSl, atrTp } = cfg;
+  const closes = candles.map(c => c.close);
+  const price  = closes[closes.length - 1];
+
+  const ema9   = calcEMA(closes, ema9Len);
+  const ema21  = calcEMA(closes, ema21Len);
+  const ema145 = calcEMA(closes, ema145Len);
+  const atr    = calcATR(candles, atrLen);
+  const hist   = calcMACD(closes, macdFast, macdSlow, macdSignal);
+
+  if (!ema9 || !ema21 || !ema145 || !atr || hist === null) {
+    return { price, signal: "NEUTRAL", reason: "Nedovoljno podataka (EMA/MACD/ATR)" };
+  }
+
+  // Layer 1 — EMA9/21 crossover (signal layer)
+  const prevCloses = closes.slice(0, -1);
+  const prevEma9   = calcEMA(prevCloses, ema9Len);
+  const prevEma21  = calcEMA(prevCloses, ema21Len);
+
+  const crossUp   = prevEma9 !== null && prevEma21 !== null && prevEma9 <= prevEma21 && ema9 > ema21;
+  const crossDown = prevEma9 !== null && prevEma21 !== null && prevEma9 >= prevEma21 && ema9 < ema21;
+
+  // Layer 2 — MACD histogram (momentum)
+  const bullMomentum = hist > 0;
+  const bearMomentum = hist < 0;
+
+  // Layer 3 — EMA145 trend filter
+  const uptrend   = price > ema145;
+  const downtrend = price < ema145;
+
+  let signal = "NEUTRAL", sl = null, tp = null, reason = "";
+
+  if (crossUp && bullMomentum && uptrend) {
+    signal = "LONG";
+    sl     = price - atr * atrSl;
+    tp     = price + atr * atrTp;
+    reason = `EMA9/21 cross UP | MACD hist ${hist.toFixed(6)} > 0 | Cijena > EMA145`;
+  } else if (crossDown && bearMomentum && downtrend) {
+    signal = "SHORT";
+    sl     = price + atr * atrSl;
+    tp     = price - atr * atrTp;
+    reason = `EMA9/21 cross DOWN | MACD hist ${hist.toFixed(6)} < 0 | Cijena < EMA145`;
+  } else {
+    if (!crossUp && !crossDown)      reason = "Nema EMA crossovera";
+    else if (!bullMomentum && crossUp)  reason = `MACD hist negativan (${hist.toFixed(6)}) — nema momentum`;
+    else if (!bearMomentum && crossDown) reason = `MACD hist pozitivan (${hist.toFixed(6)}) — nema momentum`;
+    else if (!uptrend && crossUp)    reason = `Cijena ispod EMA145 — trend filter odbio LONG`;
+    else if (!downtrend && crossDown) reason = `Cijena iznad EMA145 — trend filter odbio SHORT`;
+    else reason = "Uvjeti nisu ispunjeni";
+  }
+
+  return { price, ema9, ema21, ema145, atr, hist, signal, sl, tp, reason, crossUp, crossDown };
 }
 
 // ─── Safety Check ───────────────────────────────────────────────────────────
@@ -338,7 +469,7 @@ function signBitGet(timestamp, method, path, body = "") {
 async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp) {
   const quantity  = (sizeUSD / price).toFixed(4);
   const timestamp = Date.now().toString();
-  const path      = "/api/v2/mix/order/placeOrder";
+  const path      = "/api/v2/mix/order/place-order";
 
   const orderBody = {
     symbol:      symbol,           // već sadrži USDT npr. "DOGEUSDT"
@@ -596,47 +727,123 @@ async function run() {
   console.log("═══════════════════════════════════════════════════════════");
 
   const rules = JSON.parse(readFileSync("rules.json", "utf8"));
-  console.log(`\nStrategija: ${rules.strategy.name}`);
-  console.log(`Timeframe: ${CONFIG.timeframe} | Leverage: ${CONFIG.leverage}x`);
+  const watchlistGP  = rules.watchlist_fib_gp   || [];
+  const watchlistEMA = rules.watchlist_ema_rsi  || [];
+  const watchlist3L  = rules.watchlist_3layer   || [];
+  const watchlist = [...watchlistGP, ...watchlistEMA, ...watchlist3L];
+  const stratGP  = rules.strategies.fib_gp.params;
+  const stratEMA = rules.strategies.ema_rsi.params;
+  const strat3L  = rules.strategies.three_layer.params;
 
-  const watchlist = rules.watchlist || [CONFIG.symbol];
-  console.log(`\nWatchlist: ${watchlist.join(", ")}`);
+  console.log(`\n📊 Fib GP    (${watchlistGP.join(", ")})`);
+  console.log(`📊 EMA+RSI   (${watchlistEMA.join(", ")})`);
+  console.log(`📊 3-Layer   (${watchlist3L.join(", ")})`);
+  console.log(`Timeframe: ${CONFIG.timeframe} | Leverage: ${CONFIG.leverage}x`);
 
   const log = loadLog();
 
   // Provjeri otvorene pozicije PRIJE skeniranja novih signala
   await checkOpenPositions();
 
+  // Učitaj otvorene pozicije da preskočimo već otvorene parove
+  const openSymbols = loadPositions().map(p => p.symbol);
+
   for (const symbol of watchlist) {
     console.log(`\n${"═".repeat(57)}`);
     console.log(`  📊 ${symbol}`);
     console.log(`${"═".repeat(57)}`);
+
+    // Preskoči ako već imamo otvorenu poziciju za ovaj par
+    if (openSymbols.includes(symbol)) {
+      console.log(`  ⏭️  Pozicija već otvorena — preskačem.`);
+      continue;
+    }
 
     try {
       // Dohvati svjeće
       console.log("\n── Dohvaćanje podataka s BitGet ────────────────────────\n");
       const candles = await fetchCandles(symbol, CONFIG.timeframe, 200);
       const price   = candles[candles.length - 1].close;
-      console.log(`  Trenutna cijena: $${price.toFixed(4)}`);
+      console.log(`  Trenutna cijena: ${fmtPrice(price)}`);
 
-      // Analiziraj tržište
-      const m = analyzeMarket(candles, CONFIG.strategy);
+      // Odaberi strategiju i analiziraj tržište
+      const useGP = watchlistGP.includes(symbol);
+      const use3L = watchlist3L.includes(symbol);
+      const strategyName = useGP ? "Fib Golden Pocket" : use3L ? "3-Layer (EMA+MACD+EMA145)" : "EMA Cross + RSI";
+      console.log(`  Strategija: ${strategyName}`);
 
-      if (!m.ema9 || !m.ema21 || !m.atr) {
-        console.log("⚠️  Nedovoljno podataka za indikatore. Preskačem.");
-        continue;
+      let signal, sl, tp, logConditions, allPass;
+
+      if (useGP) {
+        const m = analyzeMarket(candles, { ...CONFIG.strategy, ...stratGP });
+        if (!m.ema9 || !m.ema21 || !m.atr) {
+          console.log("⚠️  Nedovoljno podataka. Preskačem.");
+          continue;
+        }
+        console.log(`  EMA9:  ${fmtPrice(m.ema9)}`);
+        console.log(`  EMA21: ${fmtPrice(m.ema21)}`);
+        console.log(`  ATR14: ${fmtPrice(m.atr)}`);
+        if (m.ph1) console.log(`  Pivot High 1/2: ${fmtPrice(m.ph1)} / ${fmtPrice(m.ph2)}`);
+        if (m.pl1) console.log(`  Pivot Low  1/2: ${fmtPrice(m.pl1)} / ${fmtPrice(m.pl2)}`);
+
+        const sc = runSafetyCheck(m);
+        signal       = sc.signal;
+        allPass      = sc.allPass;
+        logConditions = sc.results;
+        sl = signal === "LONG" ? m.longSl : signal === "SHORT" ? m.shortSl : null;
+        tp = signal === "LONG" ? m.bullTp : signal === "SHORT" ? m.bearTp  : null;
+
+      } else if (use3L) {
+        const t = analyzeThreeLayer(candles, strat3L);
+        if (!t.ema9 || !t.ema145) {
+          console.log("⚠️  Nedovoljno podataka. Preskačem.");
+          continue;
+        }
+        console.log(`  EMA9:   ${fmtPrice(t.ema9)}`);
+        console.log(`  EMA21:  ${fmtPrice(t.ema21)}`);
+        console.log(`  EMA145: ${fmtPrice(t.ema145)}`);
+        console.log(`  MACD hist: ${t.hist?.toFixed(6)}`);
+        console.log(`  ATR14:  ${fmtPrice(t.atr)}`);
+
+        signal  = t.signal;
+        sl      = t.sl;
+        tp      = t.tp;
+        allPass = signal !== "NEUTRAL";
+        logConditions = [{ label: t.reason, pass: allPass, required: "EMA cross + MACD hist + EMA145 trend", actual: t.reason }];
+
+        console.log(`\n── Analiza 3-Layer ───────────────────────────────────────\n`);
+        const icon3 = allPass ? "✅" : "❌";
+        console.log(`  ${icon3} ${t.reason}`);
+        if (allPass) console.log(`\n  🎯 SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}`);
+
+      } else {
+        const e = analyzeEmaRsi(candles, stratEMA);
+        if (!e.ema9 || !e.ema50) {
+          console.log("⚠️  Nedovoljno podataka. Preskačem.");
+          continue;
+        }
+        console.log(`  EMA9:  ${fmtPrice(e.ema9)}`);
+        console.log(`  EMA21: ${fmtPrice(e.ema21)}`);
+        console.log(`  EMA50: ${fmtPrice(e.ema50)}`);
+        console.log(`  RSI14: ${e.rsi?.toFixed(2)}`);
+        console.log(`  ATR14: ${fmtPrice(e.atr)}`);
+
+        signal  = e.signal;
+        sl      = e.sl;
+        tp      = e.tp;
+        allPass = signal !== "NEUTRAL";
+        logConditions = [{ label: e.reason, pass: allPass, required: "EMA cross + RSI zona + EMA50 filter", actual: e.reason }];
+
+        console.log(`\n── Analiza EMA+RSI ───────────────────────────────────────\n`);
+        const icon = allPass ? "✅" : "❌";
+        console.log(`  ${icon} ${e.reason}`);
+        if (allPass) console.log(`\n  🎯 SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}`);
       }
-
-      console.log(`  EMA9:  $${m.ema9.toFixed(4)}`);
-      console.log(`  EMA21: $${m.ema21.toFixed(4)}`);
-      console.log(`  ATR14: $${m.atr.toFixed(4)}`);
-      if (m.ph1) console.log(`  Pivot High 1/2: $${m.ph1.toFixed(4)} / $${m.ph2?.toFixed(4)}`);
-      if (m.pl1) console.log(`  Pivot Low  1/2: $${m.pl1.toFixed(4)} / $${m.pl2?.toFixed(4)}`);
 
       // Izračunaj veličinu pozicije
       let slDist = 0;
-      if (m.uptrend && m.longSl)    slDist = Math.max(price - m.longSl, 0.0001);
-      if (m.downtrend && m.shortSl) slDist = Math.max(m.shortSl - price, 0.0001);
+      if (sl) slDist = Math.abs(price - sl);
+      if (slDist === 0) slDist = 0.0001;
 
       const riskAmount  = CONFIG.portfolioValue * (CONFIG.strategy.riskPct / 100);
       const rawQty      = riskAmount / slDist;
@@ -655,25 +862,17 @@ async function run() {
         continue; // Preskoči samo ovaj par, nastavi s ostalima
       }
 
-      // Safety check
-      const { results, allPass, signal } = runSafetyCheck(m);
-
       console.log("\n── Odluka ───────────────────────────────────────────────\n");
-
-      const sl = signal === "LONG"  ? m.longSl  : signal === "SHORT" ? m.shortSl : null;
-      const tp = signal === "LONG"  ? m.bullTp  : signal === "SHORT" ? m.bearTp  : null;
 
       const logEntry = {
         timestamp:    new Date().toISOString(),
         symbol,
         timeframe:    CONFIG.timeframe,
         price,
-        indicators:   { ema9: m.ema9, ema21: m.ema21, atr: m.atr },
-        pivots:       { ph1: m.ph1, ph2: m.ph2, pl1: m.pl1, pl2: m.pl2 },
         signal,
         sl,
         tp,
-        conditions:   results,
+        conditions:   logConditions,
         allPass,
         tradeSize,
         orderPlaced:  false,
@@ -684,7 +883,7 @@ async function run() {
       };
 
       if (!allPass) {
-        const failed = results.filter((r) => !r.pass).map((r) => r.label);
+        const failed = logConditions.filter((r) => !r.pass).map((r) => r.label);
         console.log(`🚫 TRADE BLOKIRAN`);
         failed.forEach((f) => console.log(`   - ${f}`));
       } else {

@@ -1,109 +1,65 @@
 {
-  "watchlist": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "HYPEUSDT", "XAUUSDT", "TAOUSDT", "SUIUSDT", "XAGUSDT", "PEPEUSDT", "LINKUSDT", "RIVERUSDT", "ADAUSDT", "DOGEUSDT", "ZECUSDT"],
+  "watchlist_fib_gp":    ["RIVERUSDT", "ADAUSDT", "HYPEUSDT"],
+  "watchlist_ema_rsi":   ["XAUUSDT", "XAGUSDT", "LINKUSDT", "DOGEUSDT"],
+  "watchlist_3layer":    ["BTCUSDT", "ETHUSDT", "SOLUSDT", "ZECUSDT", "SUIUSDT", "PEPEUSDT", "XRPUSDT"],
+
   "default_timeframe": "1H",
 
-  "strategy": {
-    "name": "Fib Golden Pocket + Market Structure — BTC 1H",
-    "description": "Trend-following mean-reversion hybrid za BTCUSDT Perpetual Futures na 1H timeframeu. Detektuje market strukturu (HH+HL uptrend / LH+LL downtrend) via pivot detekcije, pa ulazi samo kada cijena retrejsuje u Fibonacci Golden Pocket zonu (0.5–0.618). Sniper EMA potvrda (EMA9 > EMA21 za long, obrnuto za short). TP na 1.5× Fib ekstenziji, SL ispod swing low/high + ATR buffer.",
-    "sources": ["Vlastita strategija — razvijena i optimizirana na BINANCE:BTCUSDT.P 1H, Jan 2025 – Apr 2026"],
-    "performance": {
-      "profit_factor": "1.78",
-      "total_pnl": "+42.67%",
-      "win_rate": "46.77%",
-      "total_trades": "62",
-      "max_drawdown": "8.01%",
-      "backtest_period": "Jan 1 2025 — Apr 11 2026",
-      "initial_capital": "$10,000",
-      "commission": "0.05% per trade",
-      "slippage": "2 ticks"
+  "strategies": {
+    "fib_gp": {
+      "name": "Fib Golden Pocket + Market Structure",
+      "symbols": ["RIVERUSDT", "ADAUSDT", "HYPEUSDT"],
+      "backtest": {
+        "RIVERUSDT": "PF 3.15 | +20.3% | DD 3.0%",
+        "ADAUSDT":   "PF 1.77 | +11.2% | DD 6.3%",
+        "HYPEUSDT":  "PF 1.62 | +16.4% | DD 5.5%"
+      },
+      "params": {
+        "pivotLen": 4, "fibLo": 0.45, "fibHi": 0.65, "fibTp": 1.5,
+        "ema9Len": 9, "ema21Len": 21, "atrLen": 14, "atrSlMult": 0.5
+      }
+    },
+    "ema_rsi": {
+      "name": "EMA Cross + RSI Pullback",
+      "symbols": ["XAUUSDT", "XAGUSDT", "LINKUSDT", "DOGEUSDT"],
+      "backtest": {
+        "XAUUSDT":  "PF 1.68 | +3.9% | DD 2.4%",
+        "XAGUSDT":  "PF 1.59 | +6.3% | DD 7.0%",
+        "LINKUSDT": "PF 1.53 | +4.2% | DD 6.6%",
+        "DOGEUSDT": "PF 1.36 | +4.7% | DD 4.9%"
+      },
+      "params": {
+        "ema9Len": 9, "ema21Len": 21, "ema50Len": 50,
+        "rsiLen": 14, "rsiLongLo": 35, "rsiLongHi": 58,
+        "rsiShortLo": 42, "rsiShortHi": 65,
+        "atrLen": 14, "atrSl": 1.0, "atrTp": 2.5
+      }
+    },
+    "three_layer": {
+      "name": "Signal + Momentum + Trend (3-Layer)",
+      "description": "EMA9/21 crossover (signal) + MACD histogram (momentum) + EMA145 trend filter. Ulaz samo kad sva 3 sloja potvrde smjer.",
+      "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "ZECUSDT", "SUIUSDT", "PEPEUSDT", "XRPUSDT"],
+      "backtest": {
+        "ZECUSDT":  "PF 2.85 | +11.5% | DD 3.0%",
+        "ETHUSDT":  "PF 2.64 | +9.5%  | DD 4.6%",
+        "SOLUSDT":  "PF 2.59 | +10.1% | DD 2.0%",
+        "BTCUSDT":  "PF 1.93 | +5.0%  | DD 2.9%",
+        "SUIUSDT":  "PF 1.68 | +6.1%  | DD 3.6%",
+        "PEPEUSDT": "PF 1.27 | +3.9%  | DD 5.3%",
+        "XRPUSDT":  "PF 1.24 | +2.0%  | DD 2.6%"
+      },
+      "params": {
+        "ema9Len": 9, "ema21Len": 21, "ema145Len": 145,
+        "macdFast": 12, "macdSlow": 26, "macdSignal": 9,
+        "atrLen": 14, "atrSl": 1.0, "atrTp": 1.5
+      }
     }
-  },
-
-  "indicators": {
-    "pivot_high_low": {
-      "lookback": 4,
-      "description": "Market struktura. HH + HL = uptrend (long bias). LH + LL = downtrend (short bias). Treba dva potvrđena pivot higha i dva pivot lowa."
-    },
-    "fib_golden_pocket": {
-      "zone_low": 0.5,
-      "zone_high": 0.618,
-      "description": "Entry zona. Mjeri se od posljednjeg swing lowa do swing higha (za long) ili obrnuto (za short). Ulaz samo kad cijena retrejsuje u tu zonu."
-    },
-    "ema_9": {
-      "period": 9,
-      "description": "Brzi EMA. Sniper momentum filter — long samo kad EMA9 > EMA21, short samo kad EMA9 < EMA21."
-    },
-    "ema_21": {
-      "period": 21,
-      "description": "Spori EMA. Referentna linija za Sniper filter."
-    },
-    "atr_14": {
-      "period": 14,
-      "description": "Stop loss buffer: SL = swing_low - ATR×0.5 (long) / swing_high + ATR×0.5 (short)."
-    }
-  },
-
-  "bias_criteria": {
-    "bullish": [
-      "Dva potvrđena pivot higha: ph1 > ph2 (Higher High)",
-      "Dva potvrđena pivot lowa: pl1 > pl2 (Higher Low)",
-      "EMA9 > EMA21 (momentum bullish)"
-    ],
-    "bearish": [
-      "Dva potvrđena pivot higha: ph1 < ph2 (Lower High)",
-      "Dva potvrđena pivot lowa: pl1 < pl2 (Lower Low)",
-      "EMA9 < EMA21 (momentum bearish)"
-    ],
-    "neutral": [
-      "Nema jasne HH+HL ili LH+LL strukture — čekaj",
-      "EMA9 i EMA21 se sjecaju često — preskači entry",
-      "Cijena nije u Golden Pocket zoni — čekaj retracement"
-    ]
-  },
-
-  "entry_rules": {
-    "long": [
-      "Uptrend potvrđen: ph1 > ph2 I pl1 > pl2 (Higher High + Higher Low)",
-      "Cijena je unutar Fib Golden Pocket zone: između 0.5 i 0.618 retracement od posljednjeg swinga",
-      "EMA9 > EMA21 (Sniper long potvrda)",
-      "Nema otvorene pozicije",
-      "Veličina pozicije = (Equity × 1.5%) / (cijena ulaza - Stop Loss)"
-    ],
-    "short": [
-      "Downtrend potvrđen: ph1 < ph2 I pl1 < pl2 (Lower High + Lower Low)",
-      "Cijena je unutar Fib Golden Pocket zone: između 0.5 i 0.618 retracement od posljednjeg swinga",
-      "EMA9 < EMA21 (Sniper short potvrda)",
-      "Nema otvorene pozicije",
-      "Veličina pozicije = (Equity × 1.5%) / (Stop Loss - cijena ulaza)"
-    ]
-  },
-
-  "exit_rules": {
-    "take_profit": [
-      "Long TP: swing_low + (swing_high - swing_low) × 1.5 — 1.5× Fib ekstenzija iznad swing higha",
-      "Short TP: swing_high - (swing_high - swing_low) × 1.5 — 1.5× Fib ekstenzija ispod swing lowa"
-    ],
-    "stop_loss": [
-      "Long SL: posljednji pivot low - ATR(14) × 0.5",
-      "Short SL: posljednji pivot high + ATR(14) × 0.5"
-    ]
   },
 
   "risk_rules": [
     "Rizik po tradeu: 1.5% od account equity",
-    "Veličina pozicije je ATR-normalizirana — automatski manja u volatilnim uvjetima",
-    "Samo jedna pozicija otvorena u isto vrijeme — bez pyramidinga",
-    "Ulaz samo na potvrđenoj 1H svijećici — bez anticipacijskih entry-ja",
-    "Preskoči trade ako ijedan uvjet nije potpuno ispunjen",
-    "Dnevni limit gubitka: 5% accounta — zaustavi trading za taj dan",
-    "Ne trguj za vrijeme velikih macro događaja (FOMC, CPI, BTC ETF vijesti)"
-  ],
-
-  "market_conditions": {
-    "best_for": "Trending tržišta s jasnom swing strukturom — BTC bull i bear run gdje je HH/HL ili LH/LL sekvenca jasna",
-    "avoid_when": "Choppy/sideways tržišta gdje se pivoti stalno resetiraju bez jasnog smjera",
-    "regime_check": "Ako su EMA9 i EMA21 ravni i često se sjecaju — preskoči entry dok se trend ne uspostavi"
-  },
-
-  "notes": "Strategija optimizirana na BINANCE:BTCUSDT.P 1H, Jan 2025 – Apr 2026 (15 mjeseci). Profit Factor 1.78, +42.67% return, max drawdown 8.01%. Sa $1,000 kapitalom, 1.5% rizika i 5x leverageom — projekcija ~$2,134 profita u 15 mjeseci. Nije finansijski savjet — uvijek testiraj na paper tradingu prvo."
+    "Max margin po tradeu: $250 (leverage 5x)",
+    "Samo jedna pozicija po simbolu istovremeno",
+    "Dnevni limit: 100 tradova"
+  ]
 }

@@ -62,8 +62,8 @@
         "BTCUSDT": "PF 1.79 | +5.7% | DD 1.9% | WR 58.6% (London+NY, 40 dana)"
       },
       "params": {
-        "sessionHours": [3, 9],
-        "sessionNote": "ET: London=03:00, New York=09:00 (EDT=UTC-4, EST=UTC-5)",
+        "sessionHours": [9, 15],
+        "sessionNote": "Hrvatsko vrijeme: London=09:00, New York=15:00 (CEST=UTC+2, CET=UTC+1)",
         "obLookback": 10,
         "ema21Len": 21,
         "ema50Len": 50,

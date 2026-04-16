@@ -153,17 +153,17 @@ function calcRSI(closes, period) {
 
 // ─── Timezone helper ─────────────────────────────────────────────────────────
 
-function getETHour() {
-  // Eastern Time: EDT = UTC-4 (ožujak–studeni), EST = UTC-5 (studeni–ožujak)
-  const now    = new Date();
-  const month  = now.getUTCMonth() + 1; // 1-12
-  const day    = now.getUTCDate();
-  // DST: drugi nedjelju u ožujku → prva nedjelja u studenom (aproksimacija)
-  const isDST  = (month > 3 && month < 11) ||
-                 (month === 3 && day >= 8)  ||
-                 (month === 11 && day < 7);
-  const offset = isDST ? -4 : -5;
-  return (now.getUTCHours() + 24 + offset) % 24;
+function getCROHour() {
+  // Hrvatsko vrijeme: CEST = UTC+2 (ožujak–listopad), CET = UTC+1 (listopad–ožujak)
+  const now   = new Date();
+  const month = now.getUTCMonth() + 1;
+  const day   = now.getUTCDate();
+  // DST: zadnja nedjelja u ožujku → zadnja nedjelja u listopadu (aproksimacija)
+  const isDST = (month > 3 && month < 10) ||
+                (month === 3 && day >= 25) ||
+                (month === 10 && day < 25);
+  const offset = isDST ? 2 : 1;
+  return (now.getUTCHours() + offset) % 24;
 }
 
 // ─── Order Block helpers ─────────────────────────────────────────────────────
@@ -209,7 +209,7 @@ function findObCandle(candles, trend, lookback = 10) {
 
 function analyzeOrderBlock(candles, cfg, symbol) {
   const { sessionHours, obLookback, ema21Len, ema50Len, rrRatio } = cfg;
-  const currentHour = getETHour();   // ET sati (EDT/EST)
+  const currentHour = getCROHour();  // Hrvatsko vrijeme (CEST/CET)
   const current     = candles[candles.length - 1];
   const price       = current.close;
 
@@ -246,7 +246,7 @@ function analyzeOrderBlock(candles, cfg, symbol) {
   saveObPending([...others, ...active]);
 
   // ── Session open: kreiraj novi setup ─────────────────────────────────────
-  const sessionName = currentHour === 3 ? "London" : currentHour === 9 ? "New York" : null;
+  const sessionName = currentHour === 9 ? "London" : currentHour === 15 ? "New York" : null;
   if (sessionHours.includes(currentHour) && sessionName) {
     const trend = getObTrend(candles, ema21Len, ema50Len);
     if (trend !== "NEUTRAL") {

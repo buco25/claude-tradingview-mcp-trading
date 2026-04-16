@@ -151,6 +151,21 @@ function calcRSI(closes, period) {
   return 100 - 100 / (1 + rs);
 }
 
+// ─── Timezone helper ─────────────────────────────────────────────────────────
+
+function getETHour() {
+  // Eastern Time: EDT = UTC-4 (ožujak–studeni), EST = UTC-5 (studeni–ožujak)
+  const now    = new Date();
+  const month  = now.getUTCMonth() + 1; // 1-12
+  const day    = now.getUTCDate();
+  // DST: drugi nedjelju u ožujku → prva nedjelja u studenom (aproksimacija)
+  const isDST  = (month > 3 && month < 11) ||
+                 (month === 3 && day >= 8)  ||
+                 (month === 11 && day < 7);
+  const offset = isDST ? -4 : -5;
+  return (now.getUTCHours() + 24 + offset) % 24;
+}
+
 // ─── Order Block helpers ─────────────────────────────────────────────────────
 
 const OB_PENDING_FILE = "ob_pending.json";
@@ -194,7 +209,7 @@ function findObCandle(candles, trend, lookback = 10) {
 
 function analyzeOrderBlock(candles, cfg, symbol) {
   const { sessionHours, obLookback, ema21Len, ema50Len, rrRatio } = cfg;
-  const currentHour = new Date().getUTCHours();
+  const currentHour = getETHour();   // ET sati (EDT/EST)
   const current     = candles[candles.length - 1];
   const price       = current.close;
 
@@ -231,7 +246,7 @@ function analyzeOrderBlock(candles, cfg, symbol) {
   saveObPending([...others, ...active]);
 
   // ── Session open: kreiraj novi setup ─────────────────────────────────────
-  const sessionName = currentHour === 7 ? "London" : currentHour === 14 ? "New York" : null;
+  const sessionName = currentHour === 3 ? "London" : currentHour === 9 ? "New York" : null;
   if (sessionHours.includes(currentHour) && sessionName) {
     const trend = getObTrend(candles, ema21Len, ema50Len);
     if (trend !== "NEUTRAL") {

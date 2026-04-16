@@ -19,7 +19,7 @@ const CFG = {
   maxMargin:    250,
   leverage:     5,
   rrRatio:      2.0,
-  sessionHours: [7, 14],       // UTC: London, New York (Korea izbačena)
+  sessionHours: [3, 9],        // ET: London 03:00, New York 09:00
   emaTrendLen:  21,
   ema2Len:      50,
   obLookback:   10,
@@ -70,9 +70,8 @@ function findOB(candles, trend) {
 }
 
 function getSession(hour) {
-  if (hour === 0)  return "Korea/Asia";
-  if (hour === 7)  return "London";
-  if (hour === 14) return "New York";
+  if (hour === 3)  return "London";
+  if (hour === 9)  return "New York";
   return null;
 }
 
@@ -81,14 +80,22 @@ async function run() {
     "https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1H&limit=1000"
   );
   const d = await res.json();
-  const all = d.data.map(k => ({
-    time:  parseInt(k[0]),
-    open:  parseFloat(k[1]),
-    high:  parseFloat(k[2]),
-    low:   parseFloat(k[3]),
-    close: parseFloat(k[4]),
-    hour:  new Date(parseInt(k[0])).getUTCHours(),
-  }));
+  const all = d.data.map(k => {
+    const ts   = parseInt(k[0]);
+    const d2   = new Date(ts);
+    const mon  = d2.getUTCMonth() + 1;
+    const day  = d2.getUTCDate();
+    const isDST = (mon > 3 && mon < 11) || (mon === 3 && day >= 8) || (mon === 11 && day < 7);
+    const etOff = isDST ? -4 : -5;
+    return {
+      time:  ts,
+      open:  parseFloat(k[1]),
+      high:  parseFloat(k[2]),
+      low:   parseFloat(k[3]),
+      close: parseFloat(k[4]),
+      hour:  (d2.getUTCHours() + 24 + etOff) % 24,  // ET sat
+    };
+  });
 
   const minLB = CFG.ema2Len + 5;
   let equity = CFG.portfolio;
@@ -220,7 +227,7 @@ async function run() {
 
   console.log("\n" + "═".repeat(68));
   console.log("  BTCUSDT — Order Block / One Candle Strategy (1H)");
-  console.log("  Korea (00 UTC) · London (07 UTC) · New York (14 UTC)");
+  console.log("  London (03:00 ET) · New York (09:00 ET)  |  EDT=UTC-4");
   console.log("═".repeat(68));
   console.log(`\n  📅 Period:          ${startDate} → ${endDate}`);
   console.log("  💰 Početni kapital: $1.000  |  Rizik: 1.5%/trade  |  5x leverage");

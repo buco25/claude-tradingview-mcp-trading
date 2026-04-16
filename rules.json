@@ -63,7 +63,7 @@
       },
       "params": {
         "sessionHours": [9, 15],
-        "sessionNote": "Hrvatsko vrijeme: London=09:00, New York=15:00 (CEST=UTC+2, CET=UTC+1)",
+        "sessionNote": "Hrvatsko vrijeme (CEST=UTC+2): London=09:00, New York=15:00 (NYSE otvara 15:30, 1H candle 15:00-16:00 sadržava open). Korea izbačena — WR 8%.",
         "obLookback": 10,
         "ema21Len": 21,
         "ema50Len": 50,

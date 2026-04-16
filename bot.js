@@ -246,7 +246,9 @@ function analyzeOrderBlock(candles, cfg, symbol) {
   saveObPending([...others, ...active]);
 
   // ── Session open: kreiraj novi setup ─────────────────────────────────────
-  const sessionName = currentHour === 9 ? "London" : currentHour === 15 ? "New York" : null;
+  const sessionName = currentHour === 9  ? "London/LSE"
+                    : currentHour === 15 ? "New York/NYSE"
+                    : null;
   if (sessionHours.includes(currentHour) && sessionName) {
     const trend = getObTrend(candles, ema21Len, ema50Len);
     if (trend !== "NEUTRAL") {

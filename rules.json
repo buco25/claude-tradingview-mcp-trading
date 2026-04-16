@@ -1,7 +1,8 @@
 {
   "watchlist_fib_gp":    ["RIVERUSDT", "ADAUSDT", "HYPEUSDT"],
   "watchlist_ema_rsi":   ["XAUUSDT", "XAGUSDT", "LINKUSDT", "DOGEUSDT"],
-  "watchlist_3layer":    ["BTCUSDT", "ETHUSDT", "SOLUSDT", "ZECUSDT", "SUIUSDT", "PEPEUSDT", "XRPUSDT"],
+  "watchlist_3layer":    ["ETHUSDT", "SOLUSDT", "ZECUSDT", "SUIUSDT", "PEPEUSDT", "XRPUSDT"],
+  "watchlist_ob":        ["BTCUSDT"],
 
   "default_timeframe": "1H",
 
@@ -37,13 +38,12 @@
     },
     "three_layer": {
       "name": "Signal + Momentum + Trend (3-Layer)",
-      "description": "EMA9/21 crossover (signal) + MACD histogram (momentum) + EMA145 trend filter. Ulaz samo kad sva 3 sloja potvrde smjer.",
-      "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "ZECUSDT", "SUIUSDT", "PEPEUSDT", "XRPUSDT"],
+      "description": "EMA9/21 crossover (signal) + MACD histogram (momentum) + EMA145 trend filter.",
+      "symbols": ["ETHUSDT", "SOLUSDT", "ZECUSDT", "SUIUSDT", "PEPEUSDT", "XRPUSDT"],
       "backtest": {
         "ZECUSDT":  "PF 2.85 | +11.5% | DD 3.0%",
         "ETHUSDT":  "PF 2.64 | +9.5%  | DD 4.6%",
         "SOLUSDT":  "PF 2.59 | +10.1% | DD 2.0%",
-        "BTCUSDT":  "PF 1.93 | +5.0%  | DD 2.9%",
         "SUIUSDT":  "PF 1.68 | +6.1%  | DD 3.6%",
         "PEPEUSDT": "PF 1.27 | +3.9%  | DD 5.3%",
         "XRPUSDT":  "PF 1.24 | +2.0%  | DD 2.6%"
@@ -52,6 +52,21 @@
         "ema9Len": 9, "ema21Len": 21, "ema145Len": 145,
         "macdFast": 12, "macdSlow": 26, "macdSignal": 9,
         "atrLen": 14, "atrSl": 1.0, "atrTp": 1.5
+      }
+    },
+    "order_block": {
+      "name": "Order Block — Session Open (London + New York)",
+      "description": "Bearish OB u uptrend / Bullish OB u downtrend. Entry samo na London (07 UTC) i NY (14 UTC) otvaranju kad cijena retestira OB body zonu. SL: OB low/high. TP: 1:2.",
+      "symbols": ["BTCUSDT"],
+      "backtest": {
+        "BTCUSDT": "PF 1.79 | +5.7% | DD 1.9% | WR 58.6% (London+NY, 40 dana)"
+      },
+      "params": {
+        "sessionHours": [7, 14],
+        "obLookback": 10,
+        "ema21Len": 21,
+        "ema50Len": 50,
+        "rrRatio": 2.0
       }
     }
   },

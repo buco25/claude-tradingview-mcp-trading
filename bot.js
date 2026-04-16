@@ -151,6 +151,110 @@ function calcRSI(closes, period) {
   return 100 - 100 / (1 + rs);
 }
 
+// ─── Order Block helpers ─────────────────────────────────────────────────────
+
+const OB_PENDING_FILE = "ob_pending.json";
+
+function loadObPending() {
+  if (!existsSync(OB_PENDING_FILE)) return [];
+  try { return JSON.parse(readFileSync(OB_PENDING_FILE, "utf8")); }
+  catch { return []; }
+}
+
+function saveObPending(list) {
+  writeFileSync(OB_PENDING_FILE, JSON.stringify(list, null, 2));
+}
+
+function getObTrend(candles, e21Len = 21, e50Len = 50) {
+  const closes = candles.map(c => c.close);
+  const e21 = calcEMA(closes, e21Len);
+  const e50 = calcEMA(closes, e50Len);
+  if (!e21 || !e50) return "NEUTRAL";
+  const price = closes[closes.length - 1];
+  if (price > e21 && e21 > e50) return "UP";
+  if (price < e21 && e21 < e50) return "DOWN";
+  return "NEUTRAL";
+}
+
+function findObCandle(candles, trend, lookback = 10) {
+  const lb = Math.min(lookback, candles.length - 2);
+  for (let i = candles.length - 1; i >= candles.length - lb; i--) {
+    const c     = candles[i];
+    const later = candles.slice(i + 1);
+    if (!later.length) continue;
+    // Uptrend: bearish svjeća (down-close) potvrđena probijanjem iznad nje
+    if (trend === "UP" && c.close < c.open && later.some(l => l.high > c.high))
+      return { high: c.high, low: c.low, bodyTop: c.open, bodyBot: c.close };
+    // Downtrend: bullish svjeća (up-close) potvrđena probijanjem ispod nje
+    if (trend === "DOWN" && c.close > c.open && later.some(l => l.low < c.low))
+      return { high: c.high, low: c.low, bodyTop: c.close, bodyBot: c.open };
+  }
+  return null;
+}
+
+function analyzeOrderBlock(candles, cfg, symbol) {
+  const { sessionHours, obLookback, ema21Len, ema50Len, rrRatio } = cfg;
+  const currentHour = new Date().getUTCHours();
+  const current     = candles[candles.length - 1];
+  const price       = current.close;
+
+  // ── Provjeri postoje li aktivni setups za ovaj simbol ────────────────────
+  const all    = loadObPending();
+  const maxAge = 3 * 60 * 60 * 1000; // 3h window
+  const now    = Date.now();
+  const active = all.filter(p => p.symbol === symbol && (now - p.createdAt) < maxAge);
+  const others = all.filter(p => p.symbol !== symbol);
+
+  for (const setup of active) {
+    const { ob, trend } = setup;
+    const inZone = current.low <= ob.bodyTop && current.high >= ob.bodyBot;
+
+    if (trend === "UP" && inZone) {
+      const entryPrice = price;
+      const sl = ob.low;
+      const tp = entryPrice + rrRatio * (entryPrice - sl);
+      saveObPending([...others, ...active.filter(p => p.id !== setup.id)]);
+      return { signal: "LONG",  price: entryPrice, sl, tp,
+               reason: `OB retest — ${setup.session} | Zona ${ob.bodyBot.toFixed(0)}–${ob.bodyTop.toFixed(0)}` };
+    }
+    if (trend === "DOWN" && inZone) {
+      const entryPrice = price;
+      const sl = ob.high;
+      const tp = entryPrice - rrRatio * (sl - entryPrice);
+      saveObPending([...others, ...active.filter(p => p.id !== setup.id)]);
+      return { signal: "SHORT", price: entryPrice, sl, tp,
+               reason: `OB retest — ${setup.session} | Zona ${ob.bodyBot.toFixed(0)}–${ob.bodyTop.toFixed(0)}` };
+    }
+  }
+
+  // Spremi očišćenu listu (istekli uklonjeni)
+  saveObPending([...others, ...active]);
+
+  // ── Session open: kreiraj novi setup ─────────────────────────────────────
+  const sessionName = currentHour === 7 ? "London" : currentHour === 14 ? "New York" : null;
+  if (sessionHours.includes(currentHour) && sessionName) {
+    const trend = getObTrend(candles, ema21Len, ema50Len);
+    if (trend !== "NEUTRAL") {
+      const ob = findObCandle(candles, trend, obLookback);
+      if (ob) {
+        const setup = { id: now, symbol, ob, trend, session: sessionName, createdAt: now };
+        saveObPending([...others, ...active, setup]);
+        console.log(`  📌 OB Setup snimljen — ${sessionName} | ${trend} | Zona: ${ob.bodyBot.toFixed(0)}–${ob.bodyTop.toFixed(0)}`);
+      } else {
+        console.log(`  ℹ️  Session open (${sessionName}) — nema validnog OB u zadnjih ${obLookback} svjeća`);
+      }
+    } else {
+      console.log(`  ℹ️  Session open (${sessionName}) — trend NEUTRAL, preskačem`);
+    }
+    return { signal: "NEUTRAL", price, reason: `${sessionName} session open — setup kreiran, čekam retest` };
+  }
+
+  const waitMsg = active.length > 0
+    ? `Čekam retest OB zone (${active.length} setup aktivan, zona: ${active[0].ob.bodyBot.toFixed(0)}–${active[0].ob.bodyTop.toFixed(0)})`
+    : "Nije session open, nema aktivnih OB setupova";
+  return { signal: "NEUTRAL", price, reason: waitMsg };
+}
+
 function calcMACD(closes, fast = 12, slow = 26, signal = 9) {
   if (closes.length < slow + signal + 2) return null;
   // Skupi MACD linije za svaki bar od indeksa `slow` nadalje
@@ -730,14 +834,17 @@ async function run() {
   const watchlistGP  = rules.watchlist_fib_gp   || [];
   const watchlistEMA = rules.watchlist_ema_rsi  || [];
   const watchlist3L  = rules.watchlist_3layer   || [];
-  const watchlist = [...watchlistGP, ...watchlistEMA, ...watchlist3L];
+  const watchlistOB  = rules.watchlist_ob       || [];
+  const watchlist = [...watchlistGP, ...watchlistEMA, ...watchlist3L, ...watchlistOB];
   const stratGP  = rules.strategies.fib_gp.params;
   const stratEMA = rules.strategies.ema_rsi.params;
   const strat3L  = rules.strategies.three_layer.params;
+  const stratOB  = rules.strategies.order_block.params;
 
-  console.log(`\n📊 Fib GP    (${watchlistGP.join(", ")})`);
-  console.log(`📊 EMA+RSI   (${watchlistEMA.join(", ")})`);
-  console.log(`📊 3-Layer   (${watchlist3L.join(", ")})`);
+  console.log(`\n📊 Fib GP      (${watchlistGP.join(", ")})`);
+  console.log(`📊 EMA+RSI     (${watchlistEMA.join(", ")})`);
+  console.log(`📊 3-Layer     (${watchlist3L.join(", ")})`);
+  console.log(`📊 Order Block (${watchlistOB.join(", ")}) — London 07:00 + NY 14:00 UTC`);
   console.log(`Timeframe: ${CONFIG.timeframe} | Leverage: ${CONFIG.leverage}x`);
 
   const log = loadLog();
@@ -769,7 +876,11 @@ async function run() {
       // Odaberi strategiju i analiziraj tržište
       const useGP = watchlistGP.includes(symbol);
       const use3L = watchlist3L.includes(symbol);
-      const strategyName = useGP ? "Fib Golden Pocket" : use3L ? "3-Layer (EMA+MACD+EMA145)" : "EMA Cross + RSI";
+      const useOB = watchlistOB.includes(symbol);
+      const strategyName = useGP ? "Fib Golden Pocket"
+                         : use3L ? "3-Layer (EMA+MACD+EMA145)"
+                         : useOB ? "Order Block (Session Open)"
+                         : "EMA Cross + RSI";
       console.log(`  Strategija: ${strategyName}`);
 
       let signal, sl, tp, logConditions, allPass;
@@ -814,6 +925,21 @@ async function run() {
         console.log(`\n── Analiza 3-Layer ───────────────────────────────────────\n`);
         const icon3 = allPass ? "✅" : "❌";
         console.log(`  ${icon3} ${t.reason}`);
+        if (allPass) console.log(`\n  🎯 SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}`);
+
+      } else if (useOB) {
+        const o = analyzeOrderBlock(candles, stratOB, symbol);
+        console.log(`  ATR14:  ${fmtPrice(calcATR(candles, 14))}`);
+
+        signal  = o.signal;
+        sl      = o.sl || null;
+        tp      = o.tp || null;
+        allPass = signal !== "NEUTRAL";
+        logConditions = [{ label: o.reason, pass: allPass, required: "OB retest na session open", actual: o.reason }];
+
+        console.log(`\n── Analiza Order Block ───────────────────────────────────\n`);
+        const iconOB = allPass ? "✅" : "⏳";
+        console.log(`  ${iconOB} ${o.reason}`);
         if (allPass) console.log(`\n  🎯 SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}`);
 
       } else {

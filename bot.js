@@ -568,13 +568,19 @@ function analyzeMega(candles, cfg) {
     return { price, signal: "NEUTRAL", reason: "Nedovoljno podataka" };
   }
 
-  const prevCloses = closes.slice(0, -1);
-  const prevEma9   = calcEMA(prevCloses, ema9Len);
-  const prevEma21  = calcEMA(prevCloses, ema21Len);
+  // Crossover prozor: provjeri zadnje 2 svjeće da ne propustimo signal zbog Railway timing-a
+  // (bot radi svakih 5 min, crossover može biti svježi na prethodnoj svjeći)
+  const prevCloses  = closes.slice(0, -1);
+  const prev2Closes = closes.slice(0, -2);
+  const prevEma9    = calcEMA(prevCloses, ema9Len);
+  const prevEma21   = calcEMA(prevCloses, ema21Len);
+  const prev2Ema9   = calcEMA(prev2Closes, ema9Len);
+  const prev2Ema21  = calcEMA(prev2Closes, ema21Len);
   if (!prevEma9 || !prevEma21) return { price, signal: "NEUTRAL", reason: "Nedovoljno podataka za cross" };
 
-  const crossUp   = prevEma9 <= prevEma21 && ema9 > ema21;
-  const crossDown = prevEma9 >= prevEma21 && ema9 < ema21;
+  // Svježi cross na zadnjoj ILI predzadnjoj svjeći (10-minutni prozor za 5m TF)
+  const crossUp   = (prev2Ema9 <= prev2Ema21 && prevEma9 > prevEma21) || (prevEma9 <= prevEma21 && ema9 > ema21);
+  const crossDown = (prev2Ema9 >= prev2Ema21 && prevEma9 < prevEma21) || (prevEma9 >= prevEma21 && ema9 < ema21);
 
   const trendUp   = price > ema55 && (!ema200 || price > ema200);
   const trendDown = price < ema55 && (!ema200 || price < ema200);

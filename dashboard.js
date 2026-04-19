@@ -202,11 +202,13 @@ async function scanAllSymbols(rules) {
       if (stratKey === "mega") {
         adx  = _adx(candles, mp.adxLen  || 14);
         chop = _chop(candles, mp.chopLen || 14);
-        if (ema9 && ema21 && ema55 && ema200 && closes.length >= 2) {
-          const prev9  = _ema(closes.slice(0, -1), 9);
-          const prev21 = _ema(closes.slice(0, -1), 21);
-          const crossUp   = prev9 < prev21 && ema9 > ema21;
-          const crossDown = prev9 > prev21 && ema9 < ema21;
+        if (ema9 && ema21 && ema55 && ema200 && closes.length >= 3) {
+          const prev9   = _ema(closes.slice(0, -1), 9);
+          const prev21  = _ema(closes.slice(0, -1), 21);
+          const prev29  = _ema(closes.slice(0, -2), 9);
+          const prev221 = _ema(closes.slice(0, -2), 21);
+          const crossUp   = (prev29 <= prev221 && prev9 > prev21) || (prev9 <= prev21 && ema9 > ema21);
+          const crossDown = (prev29 >= prev221 && prev9 < prev21) || (prev9 >= prev21 && ema9 < ema21);
           const tUp = price > ema55 && price > ema200;
           const tDn = price < ema55 && price < ema200;
           const adxOK  = adx  == null || adx  > (mp.adxMin  || 18);

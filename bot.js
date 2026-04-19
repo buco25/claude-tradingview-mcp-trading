@@ -65,7 +65,34 @@ const CONFIG = {
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
 if (DATA_DIR !== "." && !existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
 
-const LOG_FILE = `${DATA_DIR}/safety-check-log.json`;
+const LOG_FILE       = `${DATA_DIR}/safety-check-log.json`;
+const HEARTBEAT_FILE = `${DATA_DIR}/heartbeat.json`;
+
+// ─── Heartbeat ───────────────────────────────────────────────────────────────
+
+function writeHeartbeat(status = "ok", extra = {}) {
+  writeFileSync(HEARTBEAT_FILE, JSON.stringify({
+    ts:      new Date().toISOString(),
+    status,
+    version: "2.0",
+    ...extra,
+  }));
+}
+
+// ─── Telegram ────────────────────────────────────────────────────────────────
+
+async function tg(msg) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: "HTML" }),
+    });
+  } catch { /* ne blokira bot */ }
+}
 
 // ─── Logging ────────────────────────────────────────────────────────────────
 
@@ -922,6 +949,9 @@ async function run() {
 
   console.log(`[${new Date().toISOString().slice(0,16)}] ${modLabel} | ${watchlist.length} simbola | ${CONFIG.leverage}x | UTC ${utcHour}:${String(utcMin).padStart(2,"0")}`);
 
+  // Heartbeat — odmah na početku runa
+  writeHeartbeat("running", { symbols: watchlist.length, leverage: CONFIG.leverage });
+
   const log = loadLog();
 
   // Provjeri otvorene pozicije PRIJE skeniranja novih signala
@@ -1032,11 +1062,18 @@ async function run() {
       };
 
       if (allPass) {
+        const modeTag = CONFIG.paperTrading ? "📋 PAPER" : "🔴 LIVE";
+        const tgMsg = `${modeTag} ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b>\n` +
+          `Strategija: ${logEntry.timeframe}\n` +
+          `Ulaz: <b>${fmtPrice(price)}</b> | SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}\n` +
+          `Notional: $${tradeSize.toFixed(2)} | Margin: $${marginUsed.toFixed(2)} | ${CONFIG.leverage}x`;
+
         if (CONFIG.paperTrading) {
           console.log(`📋 PAPER ${signal} ${symbol} | Notional $${tradeSize.toFixed(2)} | Margin $${marginUsed.toFixed(2)} | ${CONFIG.leverage}x`);
           logEntry.orderPlaced = true;
           logEntry.orderId = `PAPER-${Date.now()}`;
           addOpenPosition(logEntry);
+          await tg(tgMsg);
         } else {
           console.log(`🔴 LIVE NALOG — ${signal} ${symbol} $${tradeSize.toFixed(2)}`);
           try {
@@ -1045,9 +1082,11 @@ async function run() {
             logEntry.orderId = order?.orderId;
             console.log(`✅ NALOG POSTAVLJEN — ${order?.orderId}`);
             addOpenPosition(logEntry);
+            await tg(tgMsg + `\nID: ${order?.orderId}`);
           } catch (err) {
             console.log(`❌ NALOG PAO — ${err.message}`);
             logEntry.error = err.message;
+            await tg(`❌ NALOG PAO: ${signal} ${symbol}\n${err.message}`);
           }
         }
       }
@@ -1061,6 +1100,7 @@ async function run() {
   }
 
   saveLog(log);
+  writeHeartbeat("ok", { symbols: watchlist.length, leverage: CONFIG.leverage });
 }
 
 // ─── Status Dashboard ─────────────────────────────────────────────────────────
@@ -1163,8 +1203,10 @@ if (process.argv.includes("--tax-summary")) {
 } else if (process.argv.includes("--status")) {
   showStatus().catch(err => { console.error(err); process.exit(1); });
 } else {
-  run().catch((err) => {
-    console.error("Bot greška:", err);
+  run().catch(async (err) => {
+    console.error("Bot greška:", err.message);
+    writeHeartbeat("error", { error: err.message });
+    await tg(`🚨 <b>BOT GREŠKA</b>\n${err.message}\n${new Date().toISOString()}`);
     process.exit(1);
   });
 }

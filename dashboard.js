@@ -283,6 +283,12 @@ function pnlBadge(pnl) {
   return `<span style="color:${col}">${pnl > 0 ? "+" : ""}$${pnl.toFixed(2)}</span>`;
 }
 
+function loadHeartbeat() {
+  const f = `${DATA_DIR}/heartbeat.json`;
+  if (!existsSync(f)) return null;
+  try { return JSON.parse(readFileSync(f, "utf8")); } catch { return null; }
+}
+
 function renderHtml(data, positions, rules, obPending, scanData = []) {
   const { exits, entries, blocked, recentBlocked, errors, wins, losses, totalPnl, winRate, pnlSeries, portfolio, STARTING_CAPITAL, daily, weekly, monthly } = data;
   const pnlColor   = totalPnl >= 0 ? "var(--green)" : "var(--red)";
@@ -290,6 +296,17 @@ function renderHtml(data, positions, rules, obPending, scanData = []) {
   const portPct    = ((portfolio - STARTING_CAPITAL) / STARTING_CAPITAL * 100).toFixed(2);
   const portGrowth = Math.max(0, Math.min(100, ((portfolio - STARTING_CAPITAL) / STARTING_CAPITAL * 100)));
   const modeLabel  = process.env.PAPER_TRADING !== "false" ? "PAPER" : process.env.BITGET_DEMO === "true" ? "DEMO" : "LIVE";
+
+  // Heartbeat
+  const hb = loadHeartbeat();
+  const hbAgeSec = hb ? Math.floor((Date.now() - new Date(hb.ts).getTime()) / 1000) : null;
+  const hbOk = hbAgeSec !== null && hbAgeSec < 600;
+  const hbLabel = hb
+    ? (hbAgeSec < 60 ? `${hbAgeSec}s ago` : `${Math.floor(hbAgeSec/60)}m ago`)
+    : "never";
+  const hbBadge = hbOk
+    ? `<span class="badge" style="background:rgba(0,196,140,0.15);color:var(--green);border:1px solid var(--green)">🟢 Bot ${hbLabel}</span>`
+    : `<span class="badge" style="background:rgba(255,77,77,0.15);color:var(--red);border:1px solid var(--red)">🔴 Bot ${hb ? hbLabel + ' — STAO!' : 'nikad nije radio'}</span>`;
   const modeBadgeClass = modeLabel === "PAPER" ? "badge paper" : modeLabel === "DEMO" ? "badge demo" : "badge live";
 
   const recentExits = [...exits].reverse().slice(0, 15);
@@ -910,6 +927,7 @@ function renderHtml(data, positions, rules, obPending, scanData = []) {
     <span style="font-size:11px;color:var(--text-muted)">Fib GP · EMA+RSI · 3-Layer · OB · MEGA · BitGet Futures</span>
   </div>
   <div class="header-right">
+    ${hbBadge}
     <span class="clock-badge" id="live-clock">00:00:00 CRO</span>
     <span class="refresh-badge">Auto-refresh 15s</span>
   </div>
@@ -1275,6 +1293,15 @@ const server = http.createServer(async (req, res) => {
     const prices = await fetchLivePrices([sym]);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ symbol: sym, price: prices[sym] || null }));
+    return;
+  }
+  if (url.pathname === "/health") {
+    const hbFile = `${DATA_DIR}/heartbeat.json`;
+    const hb = existsSync(hbFile) ? JSON.parse(readFileSync(hbFile, "utf8")) : null;
+    const ageSec = hb ? Math.floor((Date.now() - new Date(hb.ts).getTime()) / 1000) : null;
+    const botOk  = ageSec !== null && ageSec < 600; // < 10 min
+    res.writeHead(botOk ? 200 : 503, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ status: botOk ? "ok" : "stale", bot: hb, ageSec, dashboard: "ok" }));
     return;
   }
 

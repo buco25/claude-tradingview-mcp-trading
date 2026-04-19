@@ -11,7 +11,7 @@
  */
 
 import "dotenv/config";
-import { readFileSync, writeFileSync, existsSync, appendFileSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, appendFileSync, mkdirSync } from "fs";
 import crypto from "crypto";
 
 // ─── Onboarding ───────────────────────────────────────────────────────────────
@@ -26,12 +26,7 @@ function checkOnboarding() {
     process.exit(0);
   }
 
-  const csvPath = new URL("trades.csv", import.meta.url).pathname;
-  console.log(`\n📄 Trade log: ${csvPath}`);
-  console.log(
-    `   Otvori u Google Sheets ili Excel — ili reci Claudeu:\n` +
-    `   "Premjesti trades.csv na Desktop"\n`
-  );
+  // onboarding done
 }
 
 // ─── Config ────────────────────────────────────────────────────────────────
@@ -66,7 +61,11 @@ const CONFIG = {
   },
 };
 
-const LOG_FILE = "safety-check-log.json";
+// ─── Perzistentni data direktorij (Railway Volume na /app/data, lokalno ./data) ─
+const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
+if (DATA_DIR !== "." && !existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
+
+const LOG_FILE = `${DATA_DIR}/safety-check-log.json`;
 
 // ─── Logging ────────────────────────────────────────────────────────────────
 
@@ -151,6 +150,51 @@ function calcRSI(closes, period) {
   return 100 - 100 / (1 + rs);
 }
 
+function calcADX(candles, period = 14) {
+  if (candles.length < period * 3) return null;
+  const trs = [], plusDMs = [], minusDMs = [];
+  for (let i = 1; i < candles.length; i++) {
+    const h = candles[i].high, l = candles[i].low;
+    const ph = candles[i-1].high, pl = candles[i-1].low, pc = candles[i-1].close;
+    trs.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+    const up = h - ph, dn = pl - l;
+    plusDMs.push(up > dn && up > 0 ? up : 0);
+    minusDMs.push(dn > up && dn > 0 ? dn : 0);
+  }
+  let smTR = trs.slice(0, period).reduce((a, b) => a + b, 0);
+  let smPDM = plusDMs.slice(0, period).reduce((a, b) => a + b, 0);
+  let smMDM = minusDMs.slice(0, period).reduce((a, b) => a + b, 0);
+  const dxArr = [];
+  for (let i = period; i < trs.length; i++) {
+    smTR  = smTR  - smTR  / period + trs[i];
+    smPDM = smPDM - smPDM / period + plusDMs[i];
+    smMDM = smMDM - smMDM / period + minusDMs[i];
+    const pdi = smTR > 0 ? 100 * smPDM / smTR : 0;
+    const mdi = smTR > 0 ? 100 * smMDM / smTR : 0;
+    const diSum = pdi + mdi;
+    dxArr.push(diSum > 0 ? 100 * Math.abs(pdi - mdi) / diSum : 0);
+  }
+  if (dxArr.length < period) return null;
+  let adx = dxArr.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < dxArr.length; i++) adx = (adx * (period - 1) + dxArr[i]) / period;
+  return adx;
+}
+
+function calcChop(candles, period = 14) {
+  if (candles.length < period + 1) return null;
+  const sl = candles.slice(-(period + 1));
+  let atrSum = 0;
+  for (let i = 1; i < sl.length; i++) {
+    const h = sl[i].high, l = sl[i].low, pc = sl[i-1].close;
+    atrSum += Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
+  }
+  const hh = Math.max(...sl.slice(1).map(c => c.high));
+  const ll = Math.min(...sl.slice(1).map(c => c.low));
+  const range = hh - ll;
+  if (range === 0 || atrSum === 0) return null;
+  return 100 * Math.log10(atrSum / range) / Math.log10(period);
+}
+
 // ─── Timezone helper ─────────────────────────────────────────────────────────
 
 function getCROHour() {
@@ -168,7 +212,7 @@ function getCROHour() {
 
 // ─── Order Block helpers ─────────────────────────────────────────────────────
 
-const OB_PENDING_FILE = "ob_pending.json";
+const OB_PENDING_FILE = `${DATA_DIR}/ob_pending.json`;
 
 function loadObPending() {
   if (!existsSync(OB_PENDING_FILE)) return [];
@@ -256,12 +300,9 @@ function analyzeOrderBlock(candles, cfg, symbol) {
       if (ob) {
         const setup = { id: now, symbol, ob, trend, session: sessionName, createdAt: now };
         saveObPending([...others, ...active, setup]);
-        console.log(`  📌 OB Setup snimljen — ${sessionName} | ${trend} | Zona: ${ob.bodyBot.toFixed(0)}–${ob.bodyTop.toFixed(0)}`);
-      } else {
-        console.log(`  ℹ️  Session open (${sessionName}) — nema validnog OB u zadnjih ${obLookback} svjeća`);
+        console.log(`  📌 OB ${symbol} ${sessionName} | ${trend} | $${ob.bodyBot.toFixed(0)}–$${ob.bodyTop.toFixed(0)}`);
       }
     } else {
-      console.log(`  ℹ️  Session open (${sessionName}) — trend NEUTRAL, preskačem`);
     }
     return { signal: "NEUTRAL", price, reason: `${sessionName} session open — setup kreiran, čekam retest` };
   }
@@ -475,6 +516,70 @@ function analyzeThreeLayer(candles, cfg) {
   return { price, ema9, ema21, ema145, atr, hist, signal, sl, tp, reason, crossUp, crossDown };
 }
 
+// ─── MEGA Strategy ──────────────────────────────────────────────────────────
+
+function analyzeMega(candles, cfg) {
+  const {
+    ema9Len = 9, ema21Len = 21, ema55Len = 55, ema200Len = 200,
+    rsiLen = 14, adxLen = 14, adxMin = 18, chopLen = 14, chopMax = 61.8,
+    rsiLongLo = 30, rsiLongHi = 60, rsiShortLo = 40, rsiShortHi = 70,
+    atrLen = 14, slMult = 1.5, tpMult = 3.0,
+  } = cfg;
+
+  const closes  = candles.map(c => c.close);
+  const price   = closes[closes.length - 1];
+  const ema9    = calcEMA(closes, ema9Len);
+  const ema21   = calcEMA(closes, ema21Len);
+  const ema55   = calcEMA(closes, ema55Len);
+  const ema200  = calcEMA(closes, ema200Len);
+  const rsi     = calcRSI(closes, rsiLen);
+  const atr     = calcATR(candles, atrLen);
+  const adx     = calcADX(candles, adxLen);
+  const chop    = calcChop(candles, chopLen);
+
+  if (!ema9 || !ema21 || !ema55 || !atr || rsi === null) {
+    return { price, signal: "NEUTRAL", reason: "Nedovoljno podataka" };
+  }
+
+  const prevCloses = closes.slice(0, -1);
+  const prevEma9   = calcEMA(prevCloses, ema9Len);
+  const prevEma21  = calcEMA(prevCloses, ema21Len);
+  if (!prevEma9 || !prevEma21) return { price, signal: "NEUTRAL", reason: "Nedovoljno podataka za cross" };
+
+  const crossUp   = prevEma9 <= prevEma21 && ema9 > ema21;
+  const crossDown = prevEma9 >= prevEma21 && ema9 < ema21;
+
+  const trendUp   = price > ema55 && (!ema200 || price > ema200);
+  const trendDown = price < ema55 && (!ema200 || price < ema200);
+  const trending  = adx === null || adx > adxMin;
+  const notChoppy = chop === null || chop < chopMax;
+
+  let signal = "NEUTRAL", sl = null, tp = null, reason = "";
+
+  if (crossUp && trendUp && rsi > rsiLongLo && rsi < rsiLongHi && trending && notChoppy) {
+    signal = "LONG";
+    sl     = price - atr * slMult;
+    tp     = price + atr * tpMult;
+    reason = `EMA9/21 cross UP | RSI ${rsi.toFixed(1)} | ADX ${adx?.toFixed(1) ?? "n/a"} | Chop ${chop?.toFixed(1) ?? "n/a"}`;
+  } else if (crossDown && trendDown && rsi > rsiShortLo && rsi < rsiShortHi && trending && notChoppy) {
+    signal = "SHORT";
+    sl     = price + atr * slMult;
+    tp     = price - atr * tpMult;
+    reason = `EMA9/21 cross DOWN | RSI ${rsi.toFixed(1)} | ADX ${adx?.toFixed(1) ?? "n/a"} | Chop ${chop?.toFixed(1) ?? "n/a"}`;
+  } else {
+    const why = [];
+    if (!crossUp && !crossDown)               why.push("Nema EMA9/21 crossovera");
+    if ((crossUp && !trendUp) || (crossDown && !trendDown)) why.push("Trend filter (EMA55/200) nije potvrđen");
+    if (crossUp   && !(rsi > rsiLongLo && rsi < rsiLongHi))   why.push(`RSI ${rsi.toFixed(1)} van zone ${rsiLongLo}-${rsiLongHi}`);
+    if (crossDown && !(rsi > rsiShortLo && rsi < rsiShortHi)) why.push(`RSI ${rsi.toFixed(1)} van zone ${rsiShortLo}-${rsiShortHi}`);
+    if (!trending)  why.push(`ADX ${adx?.toFixed(1) ?? "n/a"} < ${adxMin}`);
+    if (!notChoppy) why.push(`Chop ${chop?.toFixed(1) ?? "n/a"} > ${chopMax}`);
+    reason = why.join(" | ") || "Uvjeti nisu ispunjeni";
+  }
+
+  return { price, ema9, ema21, ema55, ema200, rsi, atr, adx, chop, signal, sl, tp, reason };
+}
+
 // ─── Safety Check ───────────────────────────────────────────────────────────
 
 function runSafetyCheck(m) {
@@ -483,76 +588,26 @@ function runSafetyCheck(m) {
 
   const check = (label, required, actual, pass) => {
     results.push({ label, required, actual, pass });
-    const icon = pass ? "✅" : "❌";
-    console.log(`  ${icon} ${label}`);
-    console.log(`     Traži: ${required} | Stvarno: ${actual}`);
   };
 
-  console.log("\n── Safety Check ─────────────────────────────────────────\n");
-
   if (m.uptrend) {
-    console.log(`  Struktura: 📈 UPTREND (HH+HL) — provjera LONG uvjeta\n`);
-    console.log(`  Pivot High 1: $${m.ph1?.toFixed(2)} | Pivot High 2: $${m.ph2?.toFixed(2)}`);
-    console.log(`  Pivot Low  1: $${m.pl1?.toFixed(2)} | Pivot Low  2: $${m.pl2?.toFixed(2)}`);
-    console.log(`  Fib zona:    $${m.gpBullLo?.toFixed(2)} – $${m.gpBullHi?.toFixed(2)} (0.618–0.5)\n`);
-
-    check(
-      "Uptrend potvrđen (HH + HL)",
-      "ph1 > ph2 i pl1 > pl2",
-      `ph1=${m.ph1?.toFixed(0)} > ph2=${m.ph2?.toFixed(0)}, pl1=${m.pl1?.toFixed(0)} > pl2=${m.pl2?.toFixed(0)}`,
-      m.uptrend
-    );
-    check(
-      "Cijena u Fib Golden Pocket zoni (0.5–0.618)",
-      `$${m.gpBullLo?.toFixed(2)} – $${m.gpBullHi?.toFixed(2)}`,
-      `$${m.price?.toFixed(2)}`,
-      m.inBullGp
-    );
-    check(
-      "EMA9 > EMA21 (Sniper long potvrda)",
-      `EMA9 > EMA21`,
-      `EMA9=${m.ema9?.toFixed(2)} | EMA21=${m.ema21?.toFixed(2)}`,
-      m.sniperLong
-    );
-
-    if (results.every((r) => r.pass)) {
-      signal = "LONG";
-      console.log(`\n  🎯 SL: $${m.longSl?.toFixed(2)} | TP: $${m.bullTp?.toFixed(2)}`);
-    }
-
+    check("Uptrend potvrđen (HH + HL)", "ph1 > ph2 i pl1 > pl2",
+      `ph1=${m.ph1?.toFixed(0)} > ph2=${m.ph2?.toFixed(0)}, pl1=${m.pl1?.toFixed(0)} > pl2=${m.pl2?.toFixed(0)}`, m.uptrend);
+    check("Cijena u Fib Golden Pocket zoni (0.5–0.618)",
+      `$${m.gpBullLo?.toFixed(2)} – $${m.gpBullHi?.toFixed(2)}`, `$${m.price?.toFixed(2)}`, m.inBullGp);
+    check("EMA9 > EMA21 (Sniper long potvrda)", `EMA9 > EMA21`,
+      `EMA9=${m.ema9?.toFixed(2)} | EMA21=${m.ema21?.toFixed(2)}`, m.sniperLong);
+    if (results.every((r) => r.pass)) signal = "LONG";
   } else if (m.downtrend) {
-    console.log(`  Struktura: 📉 DOWNTREND (LH+LL) — provjera SHORT uvjeta\n`);
-    console.log(`  Pivot High 1: $${m.ph1?.toFixed(2)} | Pivot High 2: $${m.ph2?.toFixed(2)}`);
-    console.log(`  Pivot Low  1: $${m.pl1?.toFixed(2)} | Pivot Low  2: $${m.pl2?.toFixed(2)}`);
-    console.log(`  Fib zona:    $${m.gpBearLo?.toFixed(2)} – $${m.gpBearHi?.toFixed(2)} (0.5–0.618)\n`);
-
-    check(
-      "Downtrend potvrđen (LH + LL)",
-      "ph1 < ph2 i pl1 < pl2",
-      `ph1=${m.ph1?.toFixed(0)} < ph2=${m.ph2?.toFixed(0)}, pl1=${m.pl1?.toFixed(0)} < pl2=${m.pl2?.toFixed(0)}`,
-      m.downtrend
-    );
-    check(
-      "Cijena u Fib Golden Pocket zoni (0.5–0.618)",
-      `$${m.gpBearLo?.toFixed(2)} – $${m.gpBearHi?.toFixed(2)}`,
-      `$${m.price?.toFixed(2)}`,
-      m.inBearGp
-    );
-    check(
-      "EMA9 < EMA21 (Sniper short potvrda)",
-      `EMA9 < EMA21`,
-      `EMA9=${m.ema9?.toFixed(2)} | EMA21=${m.ema21?.toFixed(2)}`,
-      m.sniperShort
-    );
-
-    if (results.every((r) => r.pass)) {
-      signal = "SHORT";
-      console.log(`\n  🎯 SL: $${m.shortSl?.toFixed(2)} | TP: $${m.bearTp?.toFixed(2)}`);
-    }
-
+    check("Downtrend potvrđen (LH + LL)", "ph1 < ph2 i pl1 < pl2",
+      `ph1=${m.ph1?.toFixed(0)} < ph2=${m.ph2?.toFixed(0)}, pl1=${m.pl1?.toFixed(0)} < pl2=${m.pl2?.toFixed(0)}`, m.downtrend);
+    check("Cijena u Fib Golden Pocket zoni (0.5–0.618)",
+      `$${m.gpBearLo?.toFixed(2)} – $${m.gpBearHi?.toFixed(2)}`, `$${m.price?.toFixed(2)}`, m.inBearGp);
+    check("EMA9 < EMA21 (Sniper short potvrda)", `EMA9 < EMA21`,
+      `EMA9=${m.ema9?.toFixed(2)} | EMA21=${m.ema21?.toFixed(2)}`, m.sniperShort);
+    if (results.every((r) => r.pass)) signal = "SHORT";
   } else {
-    console.log("  Struktura: ⏸️  NEUTRAL — nema jasnog HH+HL ni LH+LL. Čekam.\n");
-    results.push({ label: "Market struktura", required: "Uptrend ili Downtrend", actual: "Neutral", pass: false });
+    results.push({ label: "Market struktura NEUTRAL", required: "Uptrend ili Downtrend", actual: "Neutral", pass: false });
   }
 
   const allPass = results.every((r) => r.pass);
@@ -563,21 +618,14 @@ function runSafetyCheck(m) {
 
 function checkTradeLimits(log, marginUsed) {
   const todayCount = countTodaysTrades(log);
-  console.log("\n── Trade Limits ─────────────────────────────────────────\n");
-
   if (todayCount >= CONFIG.maxTradesPerDay) {
     console.log(`❌ Dnevni limit dostignut: ${todayCount}/${CONFIG.maxTradesPerDay}`);
     return { ok: false, stopAll: true };
   }
-  console.log(`✅ Tradovi danas: ${todayCount}/${CONFIG.maxTradesPerDay}`);
-
   if (marginUsed > CONFIG.maxTradeSizeUSD) {
-    console.log(`❌ Margin $${marginUsed.toFixed(2)} > max $${CONFIG.maxTradeSizeUSD} — preskačem ovaj par`);
     return { ok: false, stopAll: false };
   }
-  console.log(`✅ Margin: $${marginUsed.toFixed(2)} (max $${CONFIG.maxTradeSizeUSD})`);
-
-  return { ok: true, stopAll: false };
+  return { ok: true, stopAll: false, todayCount };
 }
 
 // ─── BitGet Execution ────────────────────────────────────────────────────────
@@ -642,7 +690,7 @@ function fmtPrice(price) {
 
 // ─── Position Tracking ───────────────────────────────────────────────────────
 
-const POSITIONS_FILE = "open_positions.json";
+const POSITIONS_FILE = `${DATA_DIR}/open_positions.json`;
 
 function loadPositions() {
   if (!existsSync(POSITIONS_FILE)) return [];
@@ -662,9 +710,7 @@ async function checkOpenPositions() {
   const closed = [];
   const stillOpen = [];
 
-  console.log(`\n${"═".repeat(57)}`);
-  console.log(`  🔍 Provjera otvorenih pozicija (${positions.length})`);
-  console.log(`${"═".repeat(57)}`);
+  if (positions.length > 0) console.log(`  🔍 Provjera ${positions.length} otvorenih pozicija`);
 
   for (const pos of positions) {
     try {
@@ -701,9 +747,7 @@ async function checkOpenPositions() {
           : (pos.entryPrice - exitPrice) * pos.quantity;
         const pnlPct = (pnl / pos.totalUSD) * 100;
 
-        console.log(`\n  ${pnl >= 0 ? "✅ WIN" : "❌ LOSS"} ${pos.symbol} ${pos.side}`);
-        console.log(`     Ulaz: ${fmtPrice(pos.entryPrice)} → Izlaz: ${fmtPrice(exitPrice)}`);
-        console.log(`     P&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(4)} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%)`);
+        console.log(`  ${pnl >= 0 ? "✅ WIN" : "❌ LOSS"} ${pos.symbol} ${pos.side} | Ulaz ${fmtPrice(pos.entryPrice)} → ${fmtPrice(exitPrice)} | P&L ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(4)} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%)`);
 
         writeExitCsv(pos, exitPrice, exitReason, pnl);
         closed.push({ ...pos, exitPrice, exitReason, pnl });
@@ -711,7 +755,7 @@ async function checkOpenPositions() {
         const unrealizedPnl = pos.side === "LONG"
           ? (close - pos.entryPrice) * pos.quantity
           : (pos.entryPrice - close) * pos.quantity;
-        console.log(`\n  ⏳ OPEN  ${pos.symbol} ${pos.side} | Ulaz: ${fmtPrice(pos.entryPrice)} | Sad: ${fmtPrice(close)} | P&L: ${unrealizedPnl >= 0 ? "+" : ""}$${unrealizedPnl.toFixed(4)}`);
+        console.log(`  ⏳ ${pos.symbol} ${pos.side} | Ulaz ${fmtPrice(pos.entryPrice)} | Sad ${fmtPrice(close)} | P&L ${unrealizedPnl >= 0 ? "+" : ""}$${unrealizedPnl.toFixed(4)}`);
         stillOpen.push(pos);
       }
     } catch (err) {
@@ -744,7 +788,7 @@ function addOpenPosition(entry) {
 
 // ─── Tax CSV ─────────────────────────────────────────────────────────────────
 
-const CSV_FILE    = "trades.csv";
+const CSV_FILE    = `${DATA_DIR}/trades.csv`;
 const CSV_HEADERS = ["Date","Time (UTC)","Exchange","Symbol","Side","Quantity","Price","Total USD","Fee (est.)","Net P&L","SL","TP","Order ID","Mode","Notes"].join(",");
 
 function initCsv() {
@@ -781,7 +825,6 @@ function writeTradeCsv(entry) {
   const row = [date, time, "BitGet", entry.symbol, side, qty, fmtPrice(entry.price), total, fee, net, sl, tp, orderId, mode, `"${notes}"`].join(",");
   if (!existsSync(CSV_FILE)) writeFileSync(CSV_FILE, CSV_HEADERS + "\n");
   appendFileSync(CSV_FILE, row + "\n");
-  console.log(`📄 Tax evidencija snimljena → ${CSV_FILE}`);
 }
 
 function writeExitCsv(pos, exitPrice, reason, pnl) {
@@ -810,7 +853,6 @@ function writeExitCsv(pos, exitPrice, reason, pnl) {
   ].join(",");
 
   appendFileSync(CSV_FILE, row + "\n");
-  console.log(`📄 Exit snimljen → ${CSV_FILE}`);
 }
 
 // Tax summary: node bot.js --tax-summary
@@ -840,29 +882,45 @@ async function run() {
   checkOnboarding();
   initCsv();
 
-  console.log("═══════════════════════════════════════════════════════════");
-  console.log("  Fib Golden Pocket Trading Bot");
-  console.log(`  ${new Date().toISOString()}`);
-  const modLabel = CONFIG.paperTrading ? "📋 PAPER TRADING" : CONFIG.bitgetDemo ? "🟡 BITGET DEMO" : "🔴 LIVE TRADING";
-  console.log(`  Mod: ${modLabel}`);
-  console.log("═══════════════════════════════════════════════════════════");
+  const modLabel = CONFIG.paperTrading ? "PAPER" : CONFIG.bitgetDemo ? "DEMO" : "LIVE";
 
   const rules = JSON.parse(readFileSync("rules.json", "utf8"));
-  const watchlistGP  = rules.watchlist_fib_gp   || [];
-  const watchlistEMA = rules.watchlist_ema_rsi  || [];
-  const watchlist3L  = rules.watchlist_3layer   || [];
-  const watchlistOB  = rules.watchlist_ob       || [];
-  const watchlist = [...watchlistGP, ...watchlistEMA, ...watchlist3L, ...watchlistOB];
-  const stratGP  = rules.strategies.fib_gp.params;
-  const stratEMA = rules.strategies.ema_rsi.params;
-  const strat3L  = rules.strategies.three_layer.params;
-  const stratOB  = rules.strategies.order_block.params;
+  const watchlistGP   = rules.watchlist_fib_gp   || [];
+  const watchlistEMA  = rules.watchlist_ema_rsi  || [];
+  const watchlist3L   = rules.watchlist_3layer   || [];
+  const watchlistOB   = rules.watchlist_ob       || [];
+  const watchlistMEGA = rules.watchlist_mega     || [];
+  const symbolTFs     = rules.symbol_timeframes  || {};
+  const watchlist = [...watchlistGP, ...watchlistEMA, ...watchlist3L, ...watchlistOB, ...watchlistMEGA];
+  const stratGP   = rules.strategies.fib_gp.params;
+  const stratEMA  = rules.strategies.ema_rsi.params;
+  const strat3L   = rules.strategies.three_layer.params;
+  const stratOB   = rules.strategies.order_block.params;
+  const stratMEGA = rules.strategies.mega.params;
 
-  console.log(`\n📊 Fib GP      (${watchlistGP.join(", ")})`);
-  console.log(`📊 EMA+RSI     (${watchlistEMA.join(", ")})`);
-  console.log(`📊 3-Layer     (${watchlist3L.join(", ")})`);
-  console.log(`📊 Order Block (${watchlistOB.join(", ")}) — London 07:00 + NY 14:00 UTC`);
-  console.log(`Timeframe: ${CONFIG.timeframe} | Leverage: ${CONFIG.leverage}x`);
+  // Per-symbol timeframe — sve strategije podržavaju vlastiti TF
+  const utcNow = new Date();
+  const utcMin = utcNow.getUTCMinutes();
+  const utcHour = utcNow.getUTCHours();
+
+  function getSymbolTF(symbol) {
+    return symbolTFs[symbol] || rules.default_timeframe || "1H";
+  }
+
+  function shouldRunNow(tf) {
+    switch (tf) {
+      case "1m":  return true;
+      case "5m":  return true;
+      case "15m": return utcMin % 15 === 0;
+      case "30m": return utcMin % 30 === 0;
+      case "1H":  return utcMin === 0;
+      case "4H":  return utcMin === 0 && utcHour % 4 === 0;
+      case "1D":  return utcMin === 0 && utcHour === 0;
+      default:    return utcMin === 0;
+    }
+  }
+
+  console.log(`[${new Date().toISOString().slice(0,16)}] ${modLabel} | ${watchlist.length} simbola | ${CONFIG.leverage}x | UTC ${utcHour}:${String(utcMin).padStart(2,"0")}`);
 
   const log = loadLog();
 
@@ -873,144 +931,92 @@ async function run() {
   const openSymbols = loadPositions().map(p => p.symbol);
 
   for (const symbol of watchlist) {
-    console.log(`\n${"═".repeat(57)}`);
-    console.log(`  📊 ${symbol}`);
-    console.log(`${"═".repeat(57)}`);
-
-    // Preskoči ako već imamo otvorenu poziciju za ovaj par
     if (openSymbols.includes(symbol)) {
-      console.log(`  ⏭️  Pozicija već otvorena — preskačem.`);
+      console.log(`  ⏭️  ${symbol} — pozicija već otvorena`);
       continue;
     }
 
     try {
-      // Dohvati svjeće
-      console.log("\n── Dohvaćanje podataka s BitGet ────────────────────────\n");
-      const candles = await fetchCandles(symbol, CONFIG.timeframe, 200);
-      const price   = candles[candles.length - 1].close;
-      console.log(`  Trenutna cijena: ${fmtPrice(price)}`);
+      const symTF = getSymbolTF(symbol);
+      if (!shouldRunNow(symTF)) continue; // silent skip — ne logiramo svaki TF skip
 
-      // Odaberi strategiju i analiziraj tržište
-      const useGP = watchlistGP.includes(symbol);
-      const use3L = watchlist3L.includes(symbol);
-      const useOB = watchlistOB.includes(symbol);
-      const strategyName = useGP ? "Fib Golden Pocket"
-                         : use3L ? "3-Layer (EMA+MACD+EMA145)"
-                         : useOB ? "Order Block (Session Open)"
-                         : "EMA Cross + RSI";
-      console.log(`  Strategija: ${strategyName}`);
+      const useMEGA = watchlistMEGA.includes(symbol);
+      const useGP   = watchlistGP.includes(symbol);
+      const use3L   = watchlist3L.includes(symbol);
+      const useOB   = watchlistOB.includes(symbol);
+
+      const candles = await fetchCandles(symbol, symTF, 200);
+      const price   = candles[candles.length - 1].close;
 
       let signal, sl, tp, logConditions, allPass;
 
-      if (useGP) {
-        const m = analyzeMarket(candles, { ...CONFIG.strategy, ...stratGP });
-        if (!m.ema9 || !m.ema21 || !m.atr) {
-          console.log("⚠️  Nedovoljno podataka. Preskačem.");
-          continue;
-        }
-        console.log(`  EMA9:  ${fmtPrice(m.ema9)}`);
-        console.log(`  EMA21: ${fmtPrice(m.ema21)}`);
-        console.log(`  ATR14: ${fmtPrice(m.atr)}`);
-        if (m.ph1) console.log(`  Pivot High 1/2: ${fmtPrice(m.ph1)} / ${fmtPrice(m.ph2)}`);
-        if (m.pl1) console.log(`  Pivot Low  1/2: ${fmtPrice(m.pl1)} / ${fmtPrice(m.pl2)}`);
+      if (useMEGA) {
+        const mg = analyzeMega(candles, stratMEGA);
+        signal  = mg.signal;
+        sl      = mg.sl;
+        tp      = mg.tp;
+        allPass = signal !== "NEUTRAL";
+        logConditions = [{ label: mg.reason, pass: allPass, required: "EMA cross + EMA55/200 + RSI + ADX + Chop", actual: mg.reason }];
+        if (allPass) console.log(`🎯 SIGNAL ${symbol} MEGA ${signal} @ ${fmtPrice(price)} | SL ${fmtPrice(sl)} | TP ${fmtPrice(tp)}`);
+        else console.log(`  🚫 ${symbol} MEGA — ${mg.reason}`);
 
+      } else if (useGP) {
+        const m = analyzeMarket(candles, { ...CONFIG.strategy, ...stratGP });
+        if (!m.ema9 || !m.ema21 || !m.atr) { console.log(`  ⚠️  ${symbol} — nedovoljno podataka`); continue; }
         const sc = runSafetyCheck(m);
-        signal       = sc.signal;
-        allPass      = sc.allPass;
+        signal        = sc.signal;
+        allPass       = sc.allPass;
         logConditions = sc.results;
         sl = signal === "LONG" ? m.longSl : signal === "SHORT" ? m.shortSl : null;
         tp = signal === "LONG" ? m.bullTp : signal === "SHORT" ? m.bearTp  : null;
+        if (allPass) console.log(`🎯 SIGNAL ${symbol} FibGP ${signal} @ ${fmtPrice(price)} | SL ${fmtPrice(sl)} | TP ${fmtPrice(tp)}`);
 
       } else if (use3L) {
         const t = analyzeThreeLayer(candles, strat3L);
-        if (!t.ema9 || !t.ema145) {
-          console.log("⚠️  Nedovoljno podataka. Preskačem.");
-          continue;
-        }
-        console.log(`  EMA9:   ${fmtPrice(t.ema9)}`);
-        console.log(`  EMA21:  ${fmtPrice(t.ema21)}`);
-        console.log(`  EMA145: ${fmtPrice(t.ema145)}`);
-        console.log(`  MACD hist: ${t.hist?.toFixed(6)}`);
-        console.log(`  ATR14:  ${fmtPrice(t.atr)}`);
-
+        if (!t.ema9 || !t.ema145) { console.log(`  ⚠️  ${symbol} — nedovoljno podataka`); continue; }
         signal  = t.signal;
         sl      = t.sl;
         tp      = t.tp;
         allPass = signal !== "NEUTRAL";
         logConditions = [{ label: t.reason, pass: allPass, required: "EMA cross + MACD hist + EMA145 trend", actual: t.reason }];
-
-        console.log(`\n── Analiza 3-Layer ───────────────────────────────────────\n`);
-        const icon3 = allPass ? "✅" : "❌";
-        console.log(`  ${icon3} ${t.reason}`);
-        if (allPass) console.log(`\n  🎯 SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}`);
+        if (allPass) console.log(`🎯 SIGNAL ${symbol} 3-Layer ${signal} @ ${fmtPrice(price)} | SL ${fmtPrice(sl)} | TP ${fmtPrice(tp)}`);
+        else console.log(`  🚫 ${symbol} 3-Layer — ${t.reason}`);
 
       } else if (useOB) {
         const o = analyzeOrderBlock(candles, stratOB, symbol);
-        console.log(`  ATR14:  ${fmtPrice(calcATR(candles, 14))}`);
-
         signal  = o.signal;
         sl      = o.sl || null;
         tp      = o.tp || null;
         allPass = signal !== "NEUTRAL";
         logConditions = [{ label: o.reason, pass: allPass, required: "OB retest na session open", actual: o.reason }];
-
-        console.log(`\n── Analiza Order Block ───────────────────────────────────\n`);
-        const iconOB = allPass ? "✅" : "⏳";
-        console.log(`  ${iconOB} ${o.reason}`);
-        if (allPass) console.log(`\n  🎯 SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}`);
+        if (allPass) console.log(`🎯 SIGNAL ${symbol} OB ${signal} @ ${fmtPrice(price)} | SL ${fmtPrice(sl)} | TP ${fmtPrice(tp)}`);
 
       } else {
         const e = analyzeEmaRsi(candles, stratEMA);
-        if (!e.ema9 || !e.ema50) {
-          console.log("⚠️  Nedovoljno podataka. Preskačem.");
-          continue;
-        }
-        console.log(`  EMA9:  ${fmtPrice(e.ema9)}`);
-        console.log(`  EMA21: ${fmtPrice(e.ema21)}`);
-        console.log(`  EMA50: ${fmtPrice(e.ema50)}`);
-        console.log(`  RSI14: ${e.rsi?.toFixed(2)}`);
-        console.log(`  ATR14: ${fmtPrice(e.atr)}`);
-
+        if (!e.ema9 || !e.ema50) { console.log(`  ⚠️  ${symbol} — nedovoljno podataka`); continue; }
         signal  = e.signal;
         sl      = e.sl;
         tp      = e.tp;
         allPass = signal !== "NEUTRAL";
         logConditions = [{ label: e.reason, pass: allPass, required: "EMA cross + RSI zona + EMA50 filter", actual: e.reason }];
-
-        console.log(`\n── Analiza EMA+RSI ───────────────────────────────────────\n`);
-        const icon = allPass ? "✅" : "❌";
-        console.log(`  ${icon} ${e.reason}`);
-        if (allPass) console.log(`\n  🎯 SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}`);
+        if (allPass) console.log(`🎯 SIGNAL ${symbol} EMA+RSI ${signal} @ ${fmtPrice(price)} | SL ${fmtPrice(sl)} | TP ${fmtPrice(tp)}`);
+        else console.log(`  🚫 ${symbol} EMA+RSI — ${e.reason}`);
       }
 
-      // Izračunaj veličinu pozicije
-      let slDist = 0;
-      if (sl) slDist = Math.abs(price - sl);
-      if (slDist === 0) slDist = 0.0001;
+      // Veličina pozicije
+      const marginUsed = CONFIG.portfolioValue * (CONFIG.strategy.riskPct / 100);
+      const tradeSize  = marginUsed * CONFIG.leverage;
 
-      const riskAmount  = CONFIG.portfolioValue * (CONFIG.strategy.riskPct / 100);
-      const rawQty      = riskAmount / slDist;
-      // maxTradeSizeUSD = max MARGIN (collateral), notional = margin × leverage
-      const maxNotional = CONFIG.maxTradeSizeUSD * CONFIG.leverage;
-      const tradeSize   = Math.min(rawQty * price, maxNotional);
-      const marginUsed  = tradeSize / CONFIG.leverage;
-
-      // Provjeri dnevne limite
       const limits = checkTradeLimits(log, marginUsed);
       if (!limits.ok) {
-        if (limits.stopAll) {
-          console.log("\nBot staje — dostignut dnevni limit.");
-          return;
-        }
-        continue; // Preskoči samo ovaj par, nastavi s ostalima
+        if (limits.stopAll) { console.log("Bot staje — dostignut dnevni limit."); return; }
+        continue;
       }
-
-      console.log("\n── Odluka ───────────────────────────────────────────────\n");
 
       const logEntry = {
         timestamp:    new Date().toISOString(),
         symbol,
-        timeframe:    CONFIG.timeframe,
+        timeframe:    symTF,
         price,
         signal,
         sl,
@@ -1025,23 +1031,14 @@ async function run() {
         error:        null,
       };
 
-      if (!allPass) {
-        const failed = logConditions.filter((r) => !r.pass).map((r) => r.label);
-        console.log(`🚫 TRADE BLOKIRAN`);
-        failed.forEach((f) => console.log(`   - ${f}`));
-      } else {
-        console.log(`✅ SVI UVJETI ISPUNJENI — Signal: ${signal}`);
-        console.log(`   Ulaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}`);
-        console.log(`   Notional: $${tradeSize.toFixed(2)} | Margin: $${marginUsed.toFixed(2)} | Leverage: ${CONFIG.leverage}x`);
-
+      if (allPass) {
         if (CONFIG.paperTrading) {
-          console.log(`\n📋 PAPER TRADE — ${signal} ${symbol} | Notional: $${tradeSize.toFixed(2)} | Margin: $${marginUsed.toFixed(2)} | ${CONFIG.leverage}x`);
-          console.log(`   (Postavi PAPER_TRADING=false za prave naloge)`);
+          console.log(`📋 PAPER ${signal} ${symbol} | Notional $${tradeSize.toFixed(2)} | Margin $${marginUsed.toFixed(2)} | ${CONFIG.leverage}x`);
           logEntry.orderPlaced = true;
           logEntry.orderId = `PAPER-${Date.now()}`;
           addOpenPosition(logEntry);
         } else {
-          console.log(`\n🔴 POSTAVLJAM LIVE NALOG — ${signal} $${tradeSize.toFixed(2)} ${symbol}`);
+          console.log(`🔴 LIVE NALOG — ${signal} ${symbol} $${tradeSize.toFixed(2)}`);
           try {
             const order = await placeBitGetOrder(symbol, signal, tradeSize, price, sl, tp);
             logEntry.orderPlaced = true;
@@ -1064,8 +1061,6 @@ async function run() {
   }
 
   saveLog(log);
-  console.log(`\nLog odluke snimljen → ${LOG_FILE}`);
-  console.log("═══════════════════════════════════════════════════════════\n");
 }
 
 // ─── Status Dashboard ─────────────────────────────────────────────────────────

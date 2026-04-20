@@ -1266,8 +1266,34 @@ function fmtP(price) {
 
 // ─── Server ───────────────────────────────────────────────────────────────────
 
+// ─── Basic Auth helper ────────────────────────────────────────────────────────
+
+function checkAuth(req, res) {
+  // Ako env varijable nisu postavljene — auth je isključen (lokalni dev)
+  const DASH_USER = process.env.DASHBOARD_USER;
+  const DASH_PASS = process.env.DASHBOARD_PASSWORD;
+  if (!DASH_USER || !DASH_PASS) return true; // bez zaštite lokalno
+
+  const auth = req.headers["authorization"] || "";
+  if (auth.startsWith("Basic ")) {
+    const [user, pass] = Buffer.from(auth.slice(6), "base64").toString().split(":");
+    if (user === DASH_USER && pass === DASH_PASS) return true;
+  }
+  res.writeHead(401, {
+    "WWW-Authenticate": 'Basic realm="Trading Bot Dashboard"',
+    "Content-Type": "text/plain",
+  });
+  res.end("401 Unauthorized");
+  return false;
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost`);
+
+  // /health i /api/live ne trebaju auth (Railway health check + live price polling)
+  if (url.pathname !== "/health" && url.pathname !== "/api/live") {
+    if (!checkAuth(req, res)) return;
+  }
 
   if (url.pathname === "/api/trades") {
     res.writeHead(200, { "Content-Type": "application/json" });

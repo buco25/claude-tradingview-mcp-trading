@@ -1048,7 +1048,7 @@ async function run() {
       if (signal !== "NEUTRAL" && allPass) {
         const qty      = tradeSize / price;
         const slDist   = marginUsed / qty;           // cijenski pomak koji = $15 gubitak
-        const rrRatio  = useOB ? 2.0 : useMEGA ? 2.0 : use3L ? 1.5 : 2.5; // po strategiji
+        const rrRatio  = 3.0; // sve strategije 1:3 — riskiram $15, cilj $45
         const tpDist   = slDist * rrRatio;
         sl = signal === "LONG"  ? price - slDist : price + slDist;
         tp = signal === "LONG"  ? price + tpDist : price - tpDist;

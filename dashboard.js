@@ -7,6 +7,7 @@
 import "dotenv/config";
 import http from "http";
 import { readFileSync, existsSync } from "fs";
+import { run as botRun } from "./bot.js";
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -1306,6 +1307,28 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({ status: botOk ? "ok" : "stale", bot: hb, ageSec, dashboard: "ok" }));
     return;
   }
+  if (url.pathname === "/api/debug") {
+    const csvFile  = `${DATA_DIR}/trades.csv`;
+    const posFile  = `${DATA_DIR}/open_positions.json`;
+    const hbFile   = `${DATA_DIR}/heartbeat.json`;
+    const csvLines = existsSync(csvFile)  ? readFileSync(csvFile, "utf8").trim().split("\n").length : 0;
+    const posData  = existsSync(posFile)  ? JSON.parse(readFileSync(posFile, "utf8")) : [];
+    const hbData   = existsSync(hbFile)   ? JSON.parse(readFileSync(hbFile, "utf8")) : null;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      DATA_DIR,
+      cwd: process.cwd(),
+      csvExists: existsSync(csvFile),
+      csvLines,
+      posExists: existsSync(posFile),
+      openPositions: posData.length,
+      heartbeat: hbData,
+      pid: process.pid,
+      uptime: Math.floor(process.uptime()) + "s",
+      now: new Date().toISOString(),
+    }, null, 2));
+    return;
+  }
 
   const data      = apiTrades();
   const positions = loadPositions();
@@ -1322,30 +1345,18 @@ server.listen(PORT, () => {
   console.log("   Pritisni Ctrl+C za zaustavljanje.\n");
 });
 
-// ─── Embedded bot scheduler (Railway web service — state se drži u procesu) ──
-// Umjesto Railway cron-a, bot se vrti ovdje svakih 5 minuta.
-// Web server radi 24/7 → open_positions.json ostaje između runova.
+// ─── Embedded bot scheduler (isti proces — bot piše fajlove na isto mjesto) ──
+// Direktni import eliminira sve path/filesystem razlike između procesa.
 
 async function runBotCycle() {
   try {
-    const { execFile } = await import("child_process");
-    const { promisify } = await import("util");
-    const execFileP = promisify(execFile);
-    const { stdout, stderr } = await execFileP("node", ["bot.js"], {
-      env: { ...process.env },
-      cwd: process.cwd(),
-      timeout: 60000,
-    });
-    if (stdout) process.stdout.write(stdout);
-    if (stderr) process.stderr.write(stderr);
+    await botRun();
   } catch (e) {
     console.error(`[scheduler] Bot greška: ${e.message}`);
   }
 }
 
-// Pokreni odmah pri startu, pa svake 5 minute
-if (process.env.RUN_BOT_EMBEDDED === "true") {
-  console.log("⚙️  Embedded bot scheduler aktivan (svake 5 min)\n");
-  runBotCycle();
-  setInterval(runBotCycle, 5 * 60 * 1000);
-}
+// Uvijek pokreni scheduler — bot mora raditi na Railway
+console.log("⚙️  Bot scheduler aktivan (svake 5 min)\n");
+runBotCycle(); // odmah na startu
+setInterval(runBotCycle, 5 * 60 * 1000);

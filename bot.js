@@ -13,20 +13,18 @@
 import "dotenv/config";
 import { readFileSync, writeFileSync, existsSync, appendFileSync, mkdirSync } from "fs";
 import crypto from "crypto";
+import { fileURLToPath } from "url";
 
 // ─── Onboarding ───────────────────────────────────────────────────────────────
 
 function checkOnboarding() {
+  // Paper trading ne treba prave kredencijale
+  if (process.env.PAPER_TRADING !== "false") return;
   const required = ["BITGET_API_KEY", "BITGET_SECRET_KEY", "BITGET_PASSPHRASE"];
   const missing = required.filter((k) => !process.env[k]);
-
   if (missing.length > 0) {
-    console.log(`\n⚠️  Nedostaju kredencijali u .env: ${missing.join(", ")}`);
-    console.log("Dodaj ih u .env fajl i ponovo pokreni: node bot.js\n");
-    process.exit(0);
+    throw new Error(`Nedostaju kredencijali u .env: ${missing.join(", ")}`);
   }
-
-  // onboarding done
 }
 
 // ─── Config ────────────────────────────────────────────────────────────────
@@ -1213,17 +1211,26 @@ async function showStatus() {
   console.log("═══════════════════════════════════════════════════════════\n");
 }
 
-// ─── Entry point ─────────────────────────────────────────────────────────────
+// ─── Entry point (samo kad se bot.js pokreće direktno, ne kad se importira) ──
 
-if (process.argv.includes("--tax-summary")) {
-  generateTaxSummary();
-} else if (process.argv.includes("--status")) {
-  showStatus().catch(err => { console.error(err); process.exit(1); });
-} else {
-  run().catch(async (err) => {
-    console.error("Bot greška:", err.message);
-    writeHeartbeat("error", { error: err.message });
-    await tg(`🚨 <b>BOT GREŠKA</b>\n${err.message}\n${new Date().toISOString()}`);
-    process.exit(1);
-  });
+const _botFile = fileURLToPath(import.meta.url);
+const _isMain  = process.argv[1] === _botFile
+              || process.argv[1]?.endsWith("/bot.js")
+              || process.argv[1]?.endsWith("\\bot.js");
+
+if (_isMain) {
+  if (process.argv.includes("--tax-summary")) {
+    generateTaxSummary();
+  } else if (process.argv.includes("--status")) {
+    showStatus().catch(err => { console.error(err); process.exit(1); });
+  } else {
+    run().catch(async (err) => {
+      console.error("Bot greška:", err.message);
+      writeHeartbeat("error", { error: err.message });
+      await tg(`🚨 <b>BOT GREŠKA</b>\n${err.message}\n${new Date().toISOString()}`);
+      process.exit(1);
+    });
+  }
 }
+
+export { run };

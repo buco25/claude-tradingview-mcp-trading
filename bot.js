@@ -1043,6 +1043,17 @@ async function run() {
       const marginUsed = CONFIG.portfolioValue * (CONFIG.strategy.riskPct / 100);
       const tradeSize  = marginUsed * CONFIG.leverage;
 
+      // Fixed dollar risk model: SL = gubim točno marginUsed ($15), TP = 2× ili 3×
+      // Neovisno o ATR — uvijek riskiram $15, dobijem $30 (MEGA/OB 1:2) ili $45 (3:1)
+      if (signal !== "NEUTRAL" && allPass) {
+        const qty      = tradeSize / price;
+        const slDist   = marginUsed / qty;           // cijenski pomak koji = $15 gubitak
+        const rrRatio  = useOB ? 2.0 : useMEGA ? 2.0 : use3L ? 1.5 : 2.5; // po strategiji
+        const tpDist   = slDist * rrRatio;
+        sl = signal === "LONG"  ? price - slDist : price + slDist;
+        tp = signal === "LONG"  ? price + tpDist : price - tpDist;
+      }
+
       const limits = checkTradeLimits(log, marginUsed);
       if (!limits.ok) {
         if (limits.stopAll) { console.log("Bot staje — dostignut dnevni limit."); return; }

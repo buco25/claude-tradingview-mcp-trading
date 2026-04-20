@@ -1321,3 +1321,31 @@ server.listen(PORT, () => {
   console.log(`\n📊 Dashboard: http://localhost:${PORT}`);
   console.log("   Pritisni Ctrl+C za zaustavljanje.\n");
 });
+
+// ─── Embedded bot scheduler (Railway web service — state se drži u procesu) ──
+// Umjesto Railway cron-a, bot se vrti ovdje svakih 5 minuta.
+// Web server radi 24/7 → open_positions.json ostaje između runova.
+
+async function runBotCycle() {
+  try {
+    const { execFile } = await import("child_process");
+    const { promisify } = await import("util");
+    const execFileP = promisify(execFile);
+    const { stdout, stderr } = await execFileP("node", ["bot.js"], {
+      env: { ...process.env },
+      cwd: process.cwd(),
+      timeout: 60000,
+    });
+    if (stdout) process.stdout.write(stdout);
+    if (stderr) process.stderr.write(stderr);
+  } catch (e) {
+    console.error(`[scheduler] Bot greška: ${e.message}`);
+  }
+}
+
+// Pokreni odmah pri startu, pa svake 5 minute
+if (process.env.RUN_BOT_EMBEDDED === "true") {
+  console.log("⚙️  Embedded bot scheduler aktivan (svake 5 min)\n");
+  runBotCycle();
+  setInterval(runBotCycle, 5 * 60 * 1000);
+}

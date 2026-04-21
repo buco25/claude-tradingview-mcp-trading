@@ -129,8 +129,9 @@
   },
 
   "risk_rules": [
-    "Margin po tradeu: 1.5% od trenutne banke (raste s portfoliom)",
-    "Notional = margin × 7x leverage | Primjer: $1000 → $15 margin → $105 pozicija",
+    "Margin po tradeu: 2.0% od trenutne banke (raste s portfoliom)",
+    "Notional = margin × 15x leverage | Primjer: $1000 → $20 margin → $300 pozicija",
+    "SL = ATR(14) × 1.5 | TP = ATR(14) × 3.0 | R:R = 1:2",
     "Samo jedna pozicija po simbolu istovremeno",
     "Dnevni limit: 100 tradova"
   ]

@@ -55,7 +55,7 @@ const CONFIG = {
     ema21Len:  21,     // EMA spori
     atrLen:    14,     // ATR period
     atrSlMult: 0.5,    // ATR × 0.5 za SL buffer
-    riskPct:   1.5,    // Rizik % po tradeu
+    riskPct:   2.0,    // Rizik % po tradeu
   },
 };
 

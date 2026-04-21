@@ -1,19 +1,42 @@
 {
-  "watchlist_fib_gp":    ["RIVERUSDT", "ADAUSDT", "HYPEUSDT"],
-  "watchlist_ema_rsi":   ["XAUUSDT", "XAGUSDT", "LINKUSDT", "DOGEUSDT"],
-  "watchlist_3layer":    ["ETHUSDT", "SOLUSDT", "ZECUSDT", "SUIUSDT", "PEPEUSDT", "XRPUSDT"],
-  "watchlist_ob":        ["BTCUSDT"],
+  "watchlist_fib_gp":    [],
+  "watchlist_ema_rsi":   ["XAUUSDT", "DOGEUSDT", "NEARUSDT", "AVAXUSDT", "RIVERUSDT", "ADAUSDT"],
+  "watchlist_3layer":    ["ETHUSDT", "SUIUSDT", "AAVEUSDT", "ORDIUSDT", "TAOUSDT", "WLDUSDT", "TRUMPUSDT", "XRPUSDT"],
+  "watchlist_ob":        ["XRPUSDT"],
+  "watchlist_mega":      ["SOLUSDT", "XAGUSDT", "HYPEUSDT", "LINKUSDT", "PEPEUSDT", "ZECUSDT", "BTCUSDT"],
+
+  "symbol_timeframes": {
+    "BTCUSDT":   "15m",
+    "SOLUSDT":   "1H",
+    "XAGUSDT":   "30m",
+    "HYPEUSDT":  "5m",
+    "LINKUSDT":  "5m",
+    "PEPEUSDT":  "5m",
+    "ZECUSDT":   "30m",
+    "ORDIUSDT":  "30m",
+    "TAOUSDT":   "30m"
+  },
+
+  "mega_timeframes": {
+    "BTCUSDT":  "15m",
+    "SOLUSDT":  "1H",
+    "XAGUSDT":  "30m",
+    "HYPEUSDT": "5m",
+    "LINKUSDT": "5m",
+    "PEPEUSDT": "5m",
+    "ZECUSDT":  "30m"
+  },
 
   "default_timeframe": "1H",
 
   "strategies": {
     "fib_gp": {
       "name": "Fib Golden Pocket + Market Structure",
-      "symbols": ["RIVERUSDT", "ADAUSDT", "HYPEUSDT"],
+      "symbols": [],
+      "note": "Deaktivirana — PF < 1.0 na svim TF-ovima. RIVER i ADA premješteni na EMA+RSI.",
       "backtest": {
-        "RIVERUSDT": "PF 3.15 | +20.3% | DD 3.0%",
-        "ADAUSDT":   "PF 1.77 | +11.2% | DD 6.3%",
-        "HYPEUSDT":  "PF 1.62 | +16.4% | DD 5.5%"
+        "RIVERUSDT": "FibGP PF 0.89 ❌ → EMA+RSI PF 2.04 ✅",
+        "ADAUSDT":   "FibGP PF 0.51 ❌ → EMA+RSI PF 2.92 ✅"
       },
       "params": {
         "pivotLen": 4, "fibLo": 0.45, "fibHi": 0.65, "fibTp": 1.5,
@@ -22,12 +45,14 @@
     },
     "ema_rsi": {
       "name": "EMA Cross + RSI Pullback",
-      "symbols": ["XAUUSDT", "XAGUSDT", "LINKUSDT", "DOGEUSDT"],
+      "symbols": ["XAUUSDT", "DOGEUSDT", "NEARUSDT", "AVAXUSDT", "RIVERUSDT", "ADAUSDT"],
       "backtest": {
-        "XAUUSDT":  "PF 1.68 | +3.9% | DD 2.4%",
-        "XAGUSDT":  "PF 1.59 | +6.3% | DD 7.0%",
-        "LINKUSDT": "PF 1.53 | +4.2% | DD 6.6%",
-        "DOGEUSDT": "PF 1.36 | +4.7% | DD 4.9%"
+        "XAUUSDT":   "PF 1.68 | +3.9%  | DD 2.4%",
+        "DOGEUSDT":  "PF 1.36 | +4.7%  | DD 4.9%",
+        "NEARUSDT":  "PF 2.91 | WR 57% | 7 trades  | TF: 1H",
+        "AVAXUSDT":  "PF 2.51 | WR 53% | 13 trades | TF: 1H",
+        "RIVERUSDT": "PF 2.04 | WR 50% | 8 trades  | TF: 1H (bio FibGP PF 0.89)",
+        "ADAUSDT":   "PF 2.92 | WR 57% | 7 trades  | TF: 1H (bio FibGP PF 0.51)"
       },
       "params": {
         "ema9Len": 9, "ema21Len": 21, "ema50Len": 50,
@@ -39,14 +64,15 @@
     "three_layer": {
       "name": "Signal + Momentum + Trend (3-Layer)",
       "description": "EMA9/21 crossover (signal) + MACD histogram (momentum) + EMA145 trend filter.",
-      "symbols": ["ETHUSDT", "SOLUSDT", "ZECUSDT", "SUIUSDT", "PEPEUSDT", "XRPUSDT"],
+      "symbols": ["ETHUSDT", "SUIUSDT", "AAVEUSDT", "ORDIUSDT", "TAOUSDT", "WLDUSDT", "TRUMPUSDT"],
       "backtest": {
-        "ZECUSDT":  "PF 2.85 | +11.5% | DD 3.0%",
-        "ETHUSDT":  "PF 2.64 | +9.5%  | DD 4.6%",
-        "SOLUSDT":  "PF 2.59 | +10.1% | DD 2.0%",
-        "SUIUSDT":  "PF 1.68 | +6.1%  | DD 3.6%",
-        "PEPEUSDT": "PF 1.27 | +3.9%  | DD 5.3%",
-        "XRPUSDT":  "PF 1.24 | +2.0%  | DD 2.6%"
+        "ETHUSDT":   "PF 2.64 | +9.5%  | DD 4.6%",
+        "SUIUSDT":   "PF 1.68 | +6.1%  | DD 3.6%",
+        "AAVEUSDT":  "PF 3.38 | WR 71% | 7 trades  | TF: 1H",
+        "ORDIUSDT":  "PF 4.41 | WR 75% | 8 trades  | TF: 30m",
+        "TAOUSDT":   "PF 2.00 | WR 61% | 13 trades | TF: 30m",
+        "WLDUSDT":   "PF 2.58 | WR 66% | 12 trades | TF: 1H",
+        "TRUMPUSDT": "PF 2.45 | WR 57% | 7 trades  | TF: 1H"
       },
       "params": {
         "ema9Len": 9, "ema21Len": 21, "ema145Len": 145,
@@ -56,25 +82,55 @@
     },
     "order_block": {
       "name": "Order Block — Session Open (London + New York)",
-      "description": "Bearish OB u uptrend / Bullish OB u downtrend. Entry samo na London (07 UTC) i NY (14 UTC) otvaranju kad cijena retestira OB body zonu. SL: OB low/high. TP: 1:2.",
-      "symbols": ["BTCUSDT"],
+      "description": "Bearish OB u uptrend / Bullish OB u downtrend. Entry na London 09:00 i NY 15:00 CRO. SL: OB low/high. TP: 1:2.",
+      "symbols": ["BTCUSDT", "XRPUSDT"],
       "backtest": {
-        "BTCUSDT": "PF 1.79 | +5.7% | DD 1.9% | WR 58.6% (London+NY, 40 dana)"
+        "BTCUSDT": "PF 2.03 | +5.7% | DD 2.6% | WR 56% (London+NY, CRO 09+15)",
+        "XRPUSDT": "PF 1.67 | +$53.17 | WR 56% (London+NY, CRO 09+15)"
       },
       "params": {
         "sessionHours": [9, 15],
-        "sessionNote": "Hrvatsko vrijeme (CEST=UTC+2): London=09:00, New York=15:00 (NYSE otvara 15:30, 1H candle 15:00-16:00 sadržava open). Korea izbačena — WR 8%.",
+        "sessionNote": "Hrvatsko vrijeme (CEST=UTC+2): London=09:00, NY=15:00. Korea isključena (WR 8%).",
         "obLookback": 10,
         "ema21Len": 21,
         "ema50Len": 50,
         "rrRatio": 2.0
       }
+    },
+    "mega": {
+      "name": "MEGA — EMA9/21 Cross + EMA55/200 Trend + RSI + ADX + Choppiness",
+      "description": "Kombinacija 7 strategija: EMA cross (Sniper) + trend filter (Floppro EMA55/200) + RSI extreme zone (RSI Entry) + ADX trend strength + Choppiness anti-chop filter. Per-simbol optimalni timeframe.",
+      "symbols": ["SOLUSDT", "XAGUSDT", "HYPEUSDT", "LINKUSDT", "PEPEUSDT", "ZECUSDT"],
+      "backtest": {
+        "SOLUSDT":  "PF 5.19 | +$125 | WR 71% | DD 3.0% | TF: 1H",
+        "LINKUSDT": "PF 3.91 | +$125 | WR 62% | DD 1.3% | TF: 5m",
+        "HYPEUSDT": "PF 3.63 | +$125 | WR 64% | DD 3.2% | TF: 5m",
+        "ZECUSDT":  "PF 2.99 | +$60  | WR 60% | DD 1.5% | TF: 30m",
+        "XAGUSDT":  "PF 2.96 | +$60  | WR 60% | DD 1.5% | TF: 30m",
+        "PEPEUSDT": "PF 2.41 | +$61  | WR 50% | DD 1.5% | TF: 5m"
+      },
+      "params": {
+        "ema9Len":   9,
+        "ema21Len":  21,
+        "ema55Len":  55,
+        "ema200Len": 200,
+        "rsiLen":    14,
+        "adxLen":    14,
+        "adxMin":    18,
+        "chopLen":   14,
+        "chopMax":   61.8,
+        "rsiLongLo": 30, "rsiLongHi": 60,
+        "rsiShortLo":40, "rsiShortHi":70,
+        "atrLen":    14,
+        "slMult":    1.5,
+        "tpMult":    3.0
+      }
     }
   },
 
   "risk_rules": [
-    "Rizik po tradeu: 1.5% od account equity",
-    "Max margin po tradeu: $250 (leverage 5x)",
+    "Margin po tradeu: 1.5% od trenutne banke (raste s portfoliom)",
+    "Notional = margin × 7x leverage | Primjer: $1000 → $15 margin → $105 pozicija",
     "Samo jedna pozicija po simbolu istovremeno",
     "Dnevni limit: 100 tradova"
   ]

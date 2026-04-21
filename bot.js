@@ -38,7 +38,7 @@ const CONFIG = {
   paperTrading:    process.env.PAPER_TRADING !== "false",
   bitgetDemo:      process.env.BITGET_DEMO === "true",
   tradeMode:       process.env.TRADE_MODE        || "futures",
-  leverage:        parseInt(process.env.LEVERAGE  || "5"),
+  leverage:        parseInt(process.env.LEVERAGE  || "15"),
   bitget: {
     apiKey:     process.env.BITGET_API_KEY,
     secretKey:  process.env.BITGET_SECRET_KEY,
@@ -1046,7 +1046,7 @@ async function run() {
       if (signal !== "NEUTRAL" && allPass) {
         const qty      = tradeSize / price;
         const slDist   = marginUsed / qty;           // cijenski pomak koji = $15 gubitak
-        const rrRatio  = 3.0; // sve strategije 1:3 — riskiram $15, cilj $45
+        const rrRatio  = 2.5; // sve strategije 1:2.5 — riskiram $15, cilj $37.50
         const tpDist   = slDist * rrRatio;
         sl = signal === "LONG"  ? price - slDist : price + slDist;
         tp = signal === "LONG"  ? price + tpDist : price - tpDist;

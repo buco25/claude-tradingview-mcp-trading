@@ -548,7 +548,7 @@ function analyzeMega(candles, cfg) {
     ema9Len = 9, ema21Len = 21, ema55Len = 55, ema200Len = 200,
     rsiLen = 14, adxLen = 14, adxMin = 18, chopLen = 14, chopMax = 61.8,
     rsiLongLo = 30, rsiLongHi = 60, rsiShortLo = 40, rsiShortHi = 70,
-    atrLen = 14, slMult = 1.0, tpMult = 1.5,
+    slPct = 2.5, tpPct = 5.0,
   } = cfg;
 
   const closes  = candles.map(c => c.close);
@@ -558,11 +558,10 @@ function analyzeMega(candles, cfg) {
   const ema55   = calcEMA(closes, ema55Len);
   const ema200  = calcEMA(closes, ema200Len);
   const rsi     = calcRSI(closes, rsiLen);
-  const atr     = calcATR(candles, atrLen);
   const adx     = calcADX(candles, adxLen);
   const chop    = calcChop(candles, chopLen);
 
-  if (!ema9 || !ema21 || !ema55 || !atr || rsi === null) {
+  if (!ema9 || !ema21 || !ema55 || rsi === null) {
     return { price, signal: "NEUTRAL", reason: "Nedovoljno podataka" };
   }
 
@@ -587,16 +586,20 @@ function analyzeMega(candles, cfg) {
 
   let signal = "NEUTRAL", sl = null, tp = null, reason = "";
 
+  // Fiksni % SL/TP — neovisno o volatilnosti
+  const slDist = price * (slPct / 100);
+  const tpDist = price * (tpPct / 100);
+
   if (crossUp && trendUp && rsi > rsiLongLo && rsi < rsiLongHi && trending && notChoppy) {
     signal = "LONG";
-    sl     = price - atr * slMult;
-    tp     = price + atr * tpMult;
-    reason = `EMA9/21 cross UP | RSI ${rsi.toFixed(1)} | ADX ${adx?.toFixed(1) ?? "n/a"} | Chop ${chop?.toFixed(1) ?? "n/a"}`;
+    sl     = price - slDist;
+    tp     = price + tpDist;
+    reason = `EMA9/21 cross UP | RSI ${rsi.toFixed(1)} | ADX ${adx?.toFixed(1) ?? "n/a"} | Chop ${chop?.toFixed(1) ?? "n/a"} | SL -${slPct}% TP +${tpPct}%`;
   } else if (crossDown && trendDown && rsi > rsiShortLo && rsi < rsiShortHi && trending && notChoppy) {
     signal = "SHORT";
-    sl     = price + atr * slMult;
-    tp     = price - atr * tpMult;
-    reason = `EMA9/21 cross DOWN | RSI ${rsi.toFixed(1)} | ADX ${adx?.toFixed(1) ?? "n/a"} | Chop ${chop?.toFixed(1) ?? "n/a"}`;
+    sl     = price + slDist;
+    tp     = price - tpDist;
+    reason = `EMA9/21 cross DOWN | RSI ${rsi.toFixed(1)} | ADX ${adx?.toFixed(1) ?? "n/a"} | Chop ${chop?.toFixed(1) ?? "n/a"} | SL +${slPct}% TP -${tpPct}%`;
   } else {
     const why = [];
     if (!crossUp && !crossDown)               why.push("Nema EMA9/21 crossovera");

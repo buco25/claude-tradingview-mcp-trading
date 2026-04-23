@@ -110,13 +110,45 @@ function _macdHist(closes, fast=12, slow=26, sig=9) {
 
 // ─── Scanner — run all 3 strategies on one symbol ──────────────────────────────
 
+// Compute full EMA series — koristi za detekciju crossa u zadnjih N barova
+function _emaSeries(closes, p) {
+  const k = 2 / (p + 1);
+  const r = new Array(closes.length).fill(null);
+  if (closes.length < p) return r;
+  let v = closes.slice(0, p).reduce((a, b) => a + b, 0) / p;
+  r[p - 1] = v;
+  for (let i = p; i < closes.length; i++) { v = closes[i] * k + v * (1 - k); r[i] = v; }
+  return r;
+}
+
+// Provjeri je li EMA9/21 cross bio u zadnjih BARS barova
+function hadCross(e9, e21, bars = 5) {
+  const n = e9.length;
+  let up = false, dn = false;
+  for (let i = Math.max(1, n - bars); i < n; i++) {
+    if (e9[i-1] === null || e21[i-1] === null || e9[i] === null || e21[i] === null) continue;
+    if (e9[i-1] <= e21[i-1] && e9[i] > e21[i]) up = true;
+    if (e9[i-1] >= e21[i-1] && e9[i] < e21[i]) dn = true;
+  }
+  return { up, dn };
+}
+
 function scanSymbol(candles, emaRsiCfg, threeLayerCfg, megaCfg) {
   const closes = candles.map(c => c.close);
   const price  = closes[closes.length - 1];
+  const n      = closes.length;
 
-  // Shared indicators
-  const ema9   = _ema(closes, 9);
-  const ema21  = _ema(closes, 21);
+  // Compute full EMA series for cross detection
+  const e9Arr  = _emaSeries(closes, 9);
+  const e21Arr = _emaSeries(closes, 21);
+
+  // Cross in last 5 bars (scanner window — bot uses 1-2 bar window)
+  const SCAN_BARS = 5;
+  const { up: crossUp, dn: crossDown } = hadCross(e9Arr, e21Arr, SCAN_BARS);
+
+  // Current values
+  const ema9   = e9Arr[n - 1];
+  const ema21  = e21Arr[n - 1];
   const ema50  = _ema(closes, 50);
   const ema55  = _ema(closes, 55);
   const ema145 = _ema(closes, 145);
@@ -126,50 +158,70 @@ function scanSymbol(candles, emaRsiCfg, threeLayerCfg, megaCfg) {
   const chop   = _chop(candles, 14);
   const hist   = _macdHist(closes, 12, 26, 9);
 
-  const prevC  = closes.slice(0,-1);
-  const pEma9  = _ema(prevC, 9);
-  const pEma21 = _ema(prevC, 21);
-  const p2Ema9 = closes.length > 2 ? _ema(closes.slice(0,-2), 9)  : null;
-  const p2Ema21= closes.length > 2 ? _ema(closes.slice(0,-2), 21) : null;
+  // EMA bias (neovisno o crossu — uvijek vidljivo)
+  const emaBias = ema9 && ema21 ? (ema9 > ema21 ? "↑" : "↓") : "—";
 
-  const crossUp1   = pEma9  !== null && pEma21  !== null && pEma9  <= pEma21  && ema9 > ema21;
-  const crossDown1 = pEma9  !== null && pEma21  !== null && pEma9  >= pEma21  && ema9 < ema21;
-
-  // EMA+RSI signal
+  // ── EMA+RSI signal ──
   let emaRsiSig = "—";
   if (ema9 && ema21 && ema50 && rsi !== null) {
     const { rsiLongLo=35, rsiLongHi=58, rsiShortLo=42, rsiShortHi=65 } = emaRsiCfg;
-    if (price > ema50 && crossUp1   && rsi >= rsiLongLo  && rsi <= rsiLongHi)  emaRsiSig = "LONG";
-    if (price < ema50 && crossDown1 && rsi >= rsiShortLo && rsi <= rsiShortHi) emaRsiSig = "SHORT";
+    if (crossUp   && price > ema50 && rsi >= rsiLongLo  && rsi <= rsiLongHi)  emaRsiSig = "LONG";
+    if (crossDown && price < ema50 && rsi >= rsiShortLo && rsi <= rsiShortHi) emaRsiSig = "SHORT";
+    // Setup (uvjeti OK, ali nema svježeg crossa) — prikaži bias
+    if (emaRsiSig === "—") {
+      const setupLong  = price > ema50 && rsi >= rsiLongLo  && rsi <= rsiLongHi  && ema9 > ema21;
+      const setupShort = price < ema50 && rsi >= rsiShortLo && rsi <= rsiShortHi && ema9 < ema21;
+      if (setupLong)  emaRsiSig = "SETUP↑";
+      if (setupShort) emaRsiSig = "SETUP↓";
+    }
   }
 
-  // 3-Layer signal
+  // ── 3-Layer signal ──
   let threeLayerSig = "—";
   if (ema9 && ema21 && ema145 && hist !== null) {
-    if (crossUp1   && hist > 0 && price > ema145) threeLayerSig = "LONG";
-    if (crossDown1 && hist < 0 && price < ema145) threeLayerSig = "SHORT";
+    if (crossUp   && hist > 0 && price > ema145) threeLayerSig = "LONG";
+    if (crossDown && hist < 0 && price < ema145) threeLayerSig = "SHORT";
+    if (threeLayerSig === "—") {
+      const setupLong  = hist > 0 && price > ema145 && ema9 > ema21;
+      const setupShort = hist < 0 && price < ema145 && ema9 < ema21;
+      if (setupLong)  threeLayerSig = "SETUP↑";
+      if (setupShort) threeLayerSig = "SETUP↓";
+    }
   }
 
-  // MEGA signal (2-bar cross window)
+  // ── MEGA signal ──
   let megaSig = "—";
   if (ema9 && ema21 && ema55 && rsi !== null) {
     const { rsiLongLo=30, rsiLongHi=60, rsiShortLo=40, rsiShortHi=70, adxMin=18, chopMax=61.8 } = megaCfg;
-    const crossUpM   = (p2Ema9 !== null && p2Ema9 <= p2Ema21 && pEma9 > pEma21) || crossUp1;
-    const crossDownM = (p2Ema9 !== null && p2Ema9 >= p2Ema21 && pEma9 < pEma21) || crossDown1;
     const tUp   = price > ema55 && (!ema200 || price > ema200);
     const tDn   = price < ema55 && (!ema200 || price < ema200);
-    const trend = adx === null || adx > adxMin;
-    const notCh = chop === null || chop < chopMax;
-    if (crossUpM   && tUp && rsi > rsiLongLo  && rsi < rsiLongHi  && trend && notCh) megaSig = "LONG";
-    if (crossDownM && tDn && rsi > rsiShortLo && rsi < rsiShortHi && trend && notCh) megaSig = "SHORT";
+    const trending  = adx === null || adx > adxMin;
+    const notChoppy = chop === null || chop < chopMax;
+    if (crossUp   && tUp && rsi > rsiLongLo  && rsi < rsiLongHi  && trending && notChoppy) megaSig = "LONG";
+    if (crossDown && tDn && rsi > rsiShortLo && rsi < rsiShortHi && trending && notChoppy) megaSig = "SHORT";
+    if (megaSig === "—") {
+      const setupLong  = tUp && rsi > rsiLongLo  && rsi < rsiLongHi  && ema9 > ema21 && trending && notChoppy;
+      const setupShort = tDn && rsi > rsiShortLo && rsi < rsiShortHi && ema9 < ema21 && trending && notChoppy;
+      if (setupLong)  megaSig = "SETUP↑";
+      if (setupShort) megaSig = "SETUP↓";
+    }
   }
 
-  // Trend label
-  const trend = ema55
-    ? (price > ema55 ? (ema200 ? (price > ema200 ? "↑↑ Bull" : "↑ Weak bull") : "↑ Bull") : (ema200 ? (price < ema200 ? "↓↓ Bear" : "↓ Weak bear") : "↓ Bear"))
+  // Trend label (EMA55/200)
+  const trendLabel = ema55
+    ? (price > ema55
+        ? (ema200 ? (price > ema200 ? "↑↑ Bull" : "↑ Weak") : "↑ Bull")
+        : (ema200 ? (price < ema200 ? "↓↓ Bear" : "↓ Weak") : "↓ Bear"))
     : "—";
 
-  return { price, rsi: rsi?.toFixed(1) ?? "—", adx: adx?.toFixed(1) ?? "—", chop: chop?.toFixed(1) ?? "—", trend, emaRsiSig, threeLayerSig, megaSig };
+  return {
+    price, emaBias,
+    rsi: rsi?.toFixed(1) ?? "—",
+    adx: adx?.toFixed(1) ?? "—",
+    chop: chop?.toFixed(1) ?? "—",
+    trend: trendLabel,
+    emaRsiSig, threeLayerSig, megaSig,
+  };
 }
 
 // ─── Scanner cache ─────────────────────────────────────────────────────────────
@@ -622,6 +674,7 @@ function renderHtml(allStats, allPositions, hb) {
             <th>#</th>
             <th>Symbol</th>
             <th>Cijena</th>
+            <th>EMA</th>
             <th>RSI</th>
             <th>ADX</th>
             <th>Trend</th>
@@ -676,8 +729,10 @@ function renderHtml(allStats, allPositions, hb) {
 
 // Live Scanner
 function sigHtml(s) {
-  if (s === "LONG")  return '<span class="sig-long">▲ LONG</span>';
-  if (s === "SHORT") return '<span class="sig-short">▼ SHORT</span>';
+  if (s === "LONG")    return '<span class="sig-long" title="Cross u zadnjih 5 barova + svi filteri OK">▲ LONG</span>';
+  if (s === "SHORT")   return '<span class="sig-short" title="Cross u zadnjih 5 barova + svi filteri OK">▼ SHORT</span>';
+  if (s === "SETUP↑")  return '<span style="color:#f0a500;font-weight:600" title="Svi filteri OK, čeka cross">◈ SETUP ↑</span>';
+  if (s === "SETUP↓")  return '<span style="color:#f0a500;font-weight:600" title="Svi filteri OK, čeka cross">◈ SETUP ↓</span>';
   return '<span class="sig-none">—</span>';
 }
 
@@ -704,23 +759,29 @@ async function doScan() {
     document.getElementById("scan-ts").textContent = "Ažurirano: " + (d.ts || "").slice(0,16).replace("T"," ") + " UTC";
 
     const results = d.results || [];
-    // Sort: symbols with any signal first
-    results.sort((a, b) => {
-      const aHas = (a.emaRsiSig !== "—" || a.threeLayerSig !== "—" || a.megaSig !== "—") ? 0 : 1;
-      const bHas = (b.emaRsiSig !== "—" || b.threeLayerSig !== "—" || b.megaSig !== "—") ? 0 : 1;
-      return aHas - bHas;
-    });
+
+    // Priority sort: LONG/SHORT first, SETUP second, neutral last
+    function priority(s) {
+      const hasSignal = s.emaRsiSig==="LONG"||s.emaRsiSig==="SHORT"||s.threeLayerSig==="LONG"||s.threeLayerSig==="SHORT"||s.megaSig==="LONG"||s.megaSig==="SHORT";
+      const hasSetup  = s.emaRsiSig?.startsWith("SETUP")||s.threeLayerSig?.startsWith("SETUP")||s.megaSig?.startsWith("SETUP");
+      return hasSignal ? 0 : hasSetup ? 1 : 2;
+    }
+    results.sort((a, b) => priority(a) - priority(b));
 
     tbody.innerHTML = results.map((s, i) => {
-      if (s.error) return '<tr><td colspan="9" style="color:#ff4d4d">' + s.symbol + ': ' + s.error + '</td></tr>';
-      const hasSignal = s.emaRsiSig !== "—" || s.threeLayerSig !== "—" || s.megaSig !== "—";
+      if (s.error) return '<tr><td colspan="10" style="color:#ff4d4d">' + s.symbol + ': ' + s.error + '</td></tr>';
+      const hasSignal = ["LONG","SHORT"].includes(s.emaRsiSig) || ["LONG","SHORT"].includes(s.threeLayerSig) || ["LONG","SHORT"].includes(s.megaSig);
+      const hasSetup  = (s.emaRsiSig||"").startsWith("SETUP") || (s.threeLayerSig||"").startsWith("SETUP") || (s.megaSig||"").startsWith("SETUP");
+      const rowCls = hasSignal ? "any-signal" : "";
       const trendCol = s.trend && s.trend.includes("↑") ? "#00c48c" : s.trend && s.trend.includes("↓") ? "#ff4d4d" : "#8b949e";
       const rsiNum = parseFloat(s.rsi);
       const rsiCol = isNaN(rsiNum) ? "#8b949e" : rsiNum > 70 ? "#ff4d4d" : rsiNum < 30 ? "#00c48c" : "#e6edf3";
-      return '<tr class="' + (hasSignal ? "any-signal" : "") + '">' +
+      const biasCol = s.emaBias === "↑" ? "#00c48c" : s.emaBias === "↓" ? "#ff4d4d" : "#8b949e";
+      return '<tr class="' + rowCls + '">' +
         '<td style="color:#8b949e;font-size:11px">' + (i+1) + '</td>' +
         '<td style="font-weight:700">' + s.symbol + '</td>' +
         '<td style="font-weight:600">' + fmtLive(s.price) + '</td>' +
+        '<td style="color:' + biasCol + ';font-weight:700;font-size:15px" title="EMA9 vs EMA21">' + (s.emaBias||"—") + '</td>' +
         '<td style="color:' + rsiCol + '">' + (s.rsi || "—") + '</td>' +
         '<td style="color:#8b949e">' + (s.adx || "—") + '</td>' +
         '<td style="color:' + trendCol + ';font-size:12px">' + (s.trend || "—") + '</td>' +
@@ -730,10 +791,11 @@ async function doScan() {
         '</tr>';
     }).join("");
 
-    // Count signals
+    // Count
     const longs  = results.filter(s => s.emaRsiSig==="LONG"  || s.threeLayerSig==="LONG"  || s.megaSig==="LONG").length;
     const shorts = results.filter(s => s.emaRsiSig==="SHORT" || s.threeLayerSig==="SHORT" || s.megaSig==="SHORT").length;
-    document.getElementById("scan-ts").textContent += " | ▲ " + longs + " LONG · ▼ " + shorts + " SHORT";
+    const setups = results.filter(s => (s.emaRsiSig||"").startsWith("SETUP") || (s.threeLayerSig||"").startsWith("SETUP") || (s.megaSig||"").startsWith("SETUP")).length;
+    document.getElementById("scan-ts").textContent += " | ▲ " + longs + " LONG · ▼ " + shorts + " SHORT · ◈ " + setups + " SETUP";
 
   } catch(e) {
     tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#ff4d4d">Greška: ' + e.message + '</td></tr>';

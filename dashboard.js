@@ -6,7 +6,7 @@
 
 import "dotenv/config";
 import http from "http";
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, existsSync } from "fs";
 import { run as botRun } from "./bot.js";
 
 const PORT = process.env.PORT || 3000;

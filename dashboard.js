@@ -1333,6 +1333,15 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({ status: botOk ? "ok" : "stale", bot: hb, ageSec, dashboard: "ok" }));
     return;
   }
+  // Reset endpoint — briše sve otvorene pozicije s Volumea
+  if (url.pathname === "/api/reset-positions" && req.method === "POST") {
+    const posFile = `${DATA_DIR}/open_positions.json`;
+    writeFileSync(posFile, "[]");
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ success: true, message: "Sve pozicije obrisane", timestamp: new Date().toISOString() }));
+    return;
+  }
+
   if (url.pathname === "/api/debug") {
     const csvFile  = `${DATA_DIR}/trades.csv`;
     const posFile  = `${DATA_DIR}/open_positions.json`;

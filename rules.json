@@ -5,27 +5,9 @@
   "watchlist_ob":        ["XRPUSDT"],
   "watchlist_mega":      ["SOLUSDT", "XAGUSDT", "HYPEUSDT", "LINKUSDT", "PEPEUSDT", "ZECUSDT", "BTCUSDT"],
 
-  "symbol_timeframes": {
-    "BTCUSDT":   "15m",
-    "SOLUSDT":   "1H",
-    "XAGUSDT":   "30m",
-    "HYPEUSDT":  "5m",
-    "LINKUSDT":  "5m",
-    "PEPEUSDT":  "5m",
-    "ZECUSDT":   "30m",
-    "ORDIUSDT":  "30m",
-    "TAOUSDT":   "30m"
-  },
+  "symbol_timeframes": {},
 
-  "mega_timeframes": {
-    "BTCUSDT":  "15m",
-    "SOLUSDT":  "1H",
-    "XAGUSDT":  "30m",
-    "HYPEUSDT": "5m",
-    "LINKUSDT": "5m",
-    "PEPEUSDT": "5m",
-    "ZECUSDT":  "30m"
-  },
+  "mega_timeframes": {},
 
   "default_timeframe": "1H",
 

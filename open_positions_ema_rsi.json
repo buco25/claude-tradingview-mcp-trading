@@ -1,0 +1,16 @@
+[
+  {
+    "symbol": "NEARUSDT",
+    "side": "LONG",
+    "entryPrice": 1.397,
+    "quantity": 214.74588403722262,
+    "totalUSD": 300,
+    "sl": 1.36906,
+    "tp": 1.45288,
+    "orderId": "PAPER-1776978053590",
+    "mode": "PAPER",
+    "openedAt": "2026-04-23T21:00:53.590Z",
+    "portfolio": "ema_rsi",
+    "strategy": "ema_rsi"
+  }
+]

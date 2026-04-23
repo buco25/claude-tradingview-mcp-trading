@@ -110,10 +110,11 @@
   },
 
   "risk_rules": [
-    "Margin po tradeu: 2.0% od trenutne banke (raste s portfoliom)",
-    "Notional = margin × 15x leverage | Primjer: $1000 → $20 margin → $300 pozicija",
-    "SL = 2.5% fiksni | TP = 5.0% fiksni | R:R = 1:2",
+    "3 neovisna portfolia × $1000 startni kapital",
+    "Margin po tradeu: 2.0% × $1000 = $20 | Notional = $20 × 15x = $300",
+    "SL = 2.0% fiksni | TP = 4.0% fiksni | R:R = 1:2",
     "Samo jedna pozicija po simbolu istovremeno",
-    "Dnevni limit: 100 tradova"
+    "Dnevni limit: 100 tradova",
+    "Svi simboli na 1H timeframeu"
   ]
 }

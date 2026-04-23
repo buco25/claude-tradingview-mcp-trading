@@ -548,7 +548,7 @@ function analyzeMega(candles, cfg) {
     ema9Len = 9, ema21Len = 21, ema55Len = 55, ema200Len = 200,
     rsiLen = 14, adxLen = 14, adxMin = 18, chopLen = 14, chopMax = 61.8,
     rsiLongLo = 30, rsiLongHi = 60, rsiShortLo = 40, rsiShortHi = 70,
-    atrLen = 14, slMult = 1.5, tpMult = 3.0,
+    atrLen = 14, slMult = 1.0, tpMult = 1.5,
   } = cfg;
 
   const closes  = candles.map(c => c.close);

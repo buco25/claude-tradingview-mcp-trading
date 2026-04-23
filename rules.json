@@ -122,8 +122,8 @@
         "rsiLongLo": 30, "rsiLongHi": 60,
         "rsiShortLo":40, "rsiShortHi":70,
         "atrLen":    14,
-        "slMult":    1.5,
-        "tpMult":    3.0
+        "slMult":    1.0,
+        "tpMult":    1.5
       }
     }
   },
@@ -131,7 +131,7 @@
   "risk_rules": [
     "Margin po tradeu: 2.0% od trenutne banke (raste s portfoliom)",
     "Notional = margin × 15x leverage | Primjer: $1000 → $20 margin → $300 pozicija",
-    "SL = ATR(14) × 1.5 | TP = ATR(14) × 3.0 | R:R = 1:2",
+    "SL = ATR(14) × 1.0 | TP = ATR(14) × 1.5 | R:R = 1:1.5 | Brzi profit",
     "Samo jedna pozicija po simbolu istovremeno",
     "Dnevni limit: 100 tradova"
   ]

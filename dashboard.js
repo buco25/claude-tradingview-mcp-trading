@@ -417,7 +417,7 @@ function renderHtml(allStats, allPositions, hb) {
         <span style="font-size:22px">${def.emoji}</span>
         <div>
           <div class="port-name" style="color:${def.color}">${def.name}</div>
-          <div class="port-subtitle">Portfolio ${i + 1} · 1H · SL 2% / TP 4%</div>
+          <div class="port-subtitle">Portfolio ${i + 1} · 1H · SL 2% / TP 4% · 25x</div>
         </div>
       </div>
       <div class="port-equity" style="color:${eqCol}">$${s.equity.toFixed(2)}</div>
@@ -635,7 +635,7 @@ function renderHtml(allStats, allPositions, hb) {
       <div class="logo">🤖</div>
       <div>
         <div class="title">Trading Bot — 3 Portfolia</div>
-        <div class="subtitle">EMA+RSI · 3-Layer · MEGA &nbsp;|&nbsp; 1H · SL 2% / TP 4% · 15x</div>
+        <div class="subtitle">EMA+RSI · 3-Layer · MEGA &nbsp;|&nbsp; 1H · SL 2% / TP 4% · 25x</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">

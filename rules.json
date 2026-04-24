@@ -76,7 +76,7 @@
 
   "risk_rules": [
     "3 neovisna portfolia × $1000 startni kapital — jedan simbol može biti otvoren u sva 3 istovremeno",
-    "Margin po tradeu: 2.0% × $1000 = $20 | Notional = $20 × 15x = $300",
+    "Margin po tradeu: 2.0% × $1000 = $20 | Notional = $20 × 25x = $500",
     "SL = 2.0% fiksni | TP = 4.0% fiksni | R:R = 1:2",
     "Samo jedna pozicija po simbolu PO PORTFOLIJU istovremeno",
     "Dnevni limit: 100 tradova",

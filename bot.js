@@ -42,7 +42,7 @@ const HEARTBEAT_FILE = `${DATA_DIR}/heartbeat.json`;
 
 // ─── Portfolio definicije ──────────────────────────────────────────────────────
 
-const PORTFOLIO_IDS = ["ema_rsi", "three_layer", "mega"];
+const PORTFOLIO_IDS = ["ema_rsi", "three_layer", "mega", "synapse7"];
 
 function buildPortfolios(rules) {
   const tfs = rules.portfolio_timeframes || {};
@@ -70,6 +70,14 @@ function buildPortfolios(rules) {
       strategy:  "mega",
       params:    rules.strategies.mega.params,
       timeframe: tfs.mega        || "15m",
+    },
+    synapse7: {
+      id:        "synapse7",
+      name:      "SYNAPSE-7",
+      symbols:   rules.watchlist_synapse7  || [],
+      strategy:  "synapse7",
+      params:    rules.strategies.synapse7?.params || {},
+      timeframe: tfs.synapse7    || "15m",
     },
   };
 }
@@ -359,6 +367,180 @@ function analyzeMega(candles, cfg) {
   return { price, ema9, ema21, ema55, ema200, rsi, adx, chop, signal, reason };
 }
 
+// ─── SYNAPSE-7 helpers ─────────────────────────────────────────────────────────
+
+function _emaSeries(arr, p) {
+  const k = 2 / (p + 1), r = new Array(arr.length).fill(null);
+  if (arr.length < p) return r;
+  let v = arr.slice(0, p).reduce((a, b) => a + b, 0) / p;
+  r[p - 1] = v;
+  for (let i = p; i < arr.length; i++) { v = arr[i] * k + v * (1 - k); r[i] = v; }
+  return r;
+}
+
+function _rmaSeries(arr, p) {
+  const r = new Array(arr.length).fill(null);
+  if (arr.length < p) return r;
+  let v = arr.slice(0, p).reduce((a, b) => a + b, 0) / p;
+  r[p - 1] = v;
+  for (let i = p; i < arr.length; i++) { v = (v * (p - 1) + arr[i]) / p; r[i] = v; }
+  return r;
+}
+
+function _rsiSeries(closes, p = 14) {
+  const r = new Array(closes.length).fill(null);
+  const g = [], l = [];
+  for (let i = 1; i < closes.length; i++) {
+    const d = closes[i] - closes[i - 1];
+    g.push(d > 0 ? d : 0); l.push(d < 0 ? -d : 0);
+  }
+  const ag = _rmaSeries(g, p), al = _rmaSeries(l, p);
+  for (let i = 0; i < ag.length; i++) {
+    if (ag[i] === null) continue;
+    r[i + 1] = al[i] === 0 ? 100 : 100 - 100 / (1 + ag[i] / al[i]);
+  }
+  return r;
+}
+
+// AutoTune Ehlers — simplified (uses fixed dominant cycle estimate)
+function _autoTuneBP(closes, wlen = 20) {
+  // High-pass filter
+  const w  = 1.414 * Math.PI / wlen;
+  const q  = Math.exp(-w);
+  const c1 = 2 * q * Math.cos(w), c2 = q * q;
+  const a0 = 0.25 * (1 + c1 + c2);
+  const hp = new Array(closes.length).fill(0);
+  for (let i = 4; i < closes.length; i++)
+    hp[i] = a0*(closes[i]-2*closes[i-1]+closes[i-2]) + c1*hp[i-1] - c2*hp[i-2];
+
+  // Dominant cycle via autocorrelation (last wlen bars)
+  const n = closes.length, win = hp.slice(Math.max(0, n - wlen));
+  let minCorr = Infinity, minLag = wlen;
+  const sx = win.reduce((a,b)=>a+b,0), sxx = win.reduce((a,b)=>a+b*b,0);
+  for (let lag = 1; lag <= Math.min(wlen, Math.floor(n / 2)); lag++) {
+    const lw = hp.slice(Math.max(0, n-wlen-lag), n-lag);
+    if (lw.length < wlen) continue;
+    const sy = lw.reduce((a,b)=>a+b,0), syy = lw.reduce((a,b)=>a+b*b,0);
+    let sxy = 0;
+    for (let j = 0; j < wlen; j++) sxy += (win[j]||0) * (lw[j]||0);
+    const cov = wlen*sxy - sx*sy, vx = wlen*sxx-sx*sx, vy = wlen*syy-sy*sy;
+    const den = Math.sqrt(vx*vy);
+    const corr = den > 0 ? cov/den : 0;
+    if (corr < minCorr) { minCorr = corr; minLag = lag; }
+  }
+  const dc = Math.min(Math.max(minLag * 2, 4), 100);
+
+  // Band-pass at dominant cycle
+  const w0 = 2*Math.PI/dc, l1 = Math.cos(w0), g1 = Math.cos(w0*0.25);
+  const s1 = 1/g1 - Math.sqrt(1/(g1*g1)-1);
+  const bp = new Array(closes.length).fill(0);
+  for (let i = 3; i < closes.length; i++)
+    bp[i] = 0.5*(1-s1)*(closes[i]-closes[i-2]) + l1*(1+s1)*bp[i-1] - s1*bp[i-2];
+  return bp;
+}
+
+function analyzeSynapse7(candles, cfg) {
+  const { minSig = 3 } = cfg;
+  const closes = candles.map(c => c.close);
+  const n      = closes.length;
+  const price  = closes[n - 1];
+
+  if (n < 80) return { price, signal: "NEUTRAL", reason: "Nedovoljno podataka" };
+
+  // ── 1. AI kNN (simplified: log-return momentum pattern) ──
+  const logRet = closes.map((c, i) => i === 0 ? 0 : Math.log(c / closes[i-1]));
+  const mom5   = closes.map((c, i) => i < 5 ? 0 : (c - closes[i-5]) / closes[i-5]);
+  const rsiArr = _rsiSeries(closes, 14);
+  const patLen = 8;
+  const kMem   = 15;
+  const patterns = [], labels = [];
+  let kPred = 0;
+  for (let i = 40; i < n - 1; i++) {
+    const pat = [];
+    for (let j = patLen - 1; j >= 0; j--) {
+      const idx = i - j;
+      pat.push(logRet[idx]||0, mom5[idx]||0, ((rsiArr[idx]||50)-50)/50);
+    }
+    if (patterns.length >= kMem) { patterns.shift(); labels.shift(); }
+    if (i < n - 1) {
+      patterns.push(pat);
+      labels.push(Math.log(closes[i+1]/closes[i]) > 0 ? 1 : -1);
+    }
+  }
+  // Predict current bar
+  if (patterns.length > 0) {
+    const curPat = [];
+    for (let j = patLen - 1; j >= 0; j--) {
+      const idx = n - 1 - j;
+      curPat.push(logRet[idx]||0, mom5[idx]||0, ((rsiArr[idx]||50)-50)/50);
+    }
+    const dists = patterns.map((p, pi) => {
+      let d = 0;
+      for (let x = 0; x < curPat.length; x++) d += (curPat[x]-p[x])**2;
+      return { d: Math.sqrt(d), label: labels[pi] };
+    }).sort((a,b)=>a.d-b.d).slice(0, 5);
+    const sumD = dists.reduce((s,x)=>s+x.d,0);
+    for (const t of dists) {
+      const w = dists.length > 1 ? (sumD > 0 ? 1 - t.d/sumD : 1) : 1;
+      kPred += t.label * w;
+    }
+  }
+  // kNN oscillator via EMA smoothing
+  const kOscVal = kPred;
+  const aiSignal = kOscVal > 0.05 ? 1 : kOscVal < -0.05 ? -1 : 0;
+
+  // ── 2. AutoTune BP ──
+  const bp   = _autoTuneBP(closes, 20);
+  const atSig = (bp[n-1] > 0 && bp[n-1] > bp[n-2]) ? 1 :
+                (bp[n-1] < 0 && bp[n-1] < bp[n-2]) ? -1 : 0;
+
+  // ── 3. 6-Scale EMA Consensus ──
+  const pairs = [[3,11],[5,15],[11,21],[17,27],[27,37],[45,55]];
+  let upCnt = 0, dnCnt = 0;
+  for (const [f, s] of pairs) {
+    const ef = _emaSeries(closes, f), es = _emaSeries(closes, s);
+    if (ef[n-1] !== null && es[n-1] !== null) {
+      if (ef[n-1] > es[n-1]) upCnt++; else dnCnt++;
+    }
+  }
+  const scSig = upCnt >= 3 ? 1 : dnCnt >= 3 ? -1 : 0;
+
+  // ── 4. RSI Pumori ──
+  const rsiEma = _emaSeries(rsiArr.map(v => v ?? 0), 14);
+  const rv = rsiEma[n-1], rv1 = rsiEma[n-2];
+  const rsSig = (rv !== null && rv1 !== null)
+    ? (rv > 50 && rv > rv1 ? 1 : rv < 50 && rv < rv1 ? -1 : 0) : 0;
+
+  // ── 5. CVD Delta ──
+  const barDelta = candles.map(c => c.volume * Math.sign(c.close - c.open));
+  let cvdSum = 0;
+  for (let i = Math.max(0, n-20); i < n; i++) cvdSum += barDelta[i];
+  const cvdSmArr = _emaSeries(barDelta.map((_, i) => {
+    let s=0; for(let j=Math.max(0,i-19);j<=i;j++) s+=barDelta[j]; return s;
+  }), 9);
+  const cvdV = cvdSmArr[n-1] ?? 0;
+  const cvdSig = (cvdSum > 0 && cvdSum > cvdV) ? 1 :
+                 (cvdSum < 0 && cvdSum < cvdV) ? -1 : 0;
+
+  // ── Combination ──
+  const bullScore = [aiSignal,atSig,scSig,rsSig,cvdSig].filter(v=>v===1).length;
+  const bearScore = [aiSignal,atSig,scSig,rsSig,cvdSig].filter(v=>v===-1).length;
+
+  let signal = "NEUTRAL", reason = "";
+
+  if (bullScore >= minSig) {
+    signal = "LONG";
+    reason = `SYNAPSE-7 LONG | Score ${bullScore}/5 | kNN↑${aiSignal>0?'✓':''} AT↑${atSig>0?'✓':''} SC ${upCnt}/6 RSI${rv?.toFixed(0)} CVD↑${cvdSig>0?'✓':''}`;
+  } else if (bearScore >= minSig) {
+    signal = "SHORT";
+    reason = `SYNAPSE-7 SHORT | Score ${bearScore}/5 | kNN↓${aiSignal<0?'✓':''} AT↓${atSig<0?'✓':''} SC ${dnCnt}/6 RSI${rv?.toFixed(0)} CVD↓${cvdSig<0?'✓':''}`;
+  } else {
+    reason = `Score ↑${bullScore}/5 ↓${bearScore}/5 — min ${minSig} potrebno`;
+  }
+
+  return { price, aiSignal, atSig, scSig, rsSig, cvdSig, bullScore, bearScore, signal, reason };
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────────
 
 function fmtPrice(p) {
@@ -596,6 +778,7 @@ export async function run() {
         switch (pDef.strategy) {
           case "mega":        result = analyzeMega(candles, pDef.params);        break;
           case "three_layer": result = analyzeThreeLayer(candles, pDef.params);  break;
+          case "synapse7":    result = analyzeSynapse7(candles, pDef.params);    break;
           default:            result = analyzeEmaRsi(candles, pDef.params);      break;
         }
 

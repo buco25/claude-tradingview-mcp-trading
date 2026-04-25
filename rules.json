@@ -23,11 +23,17 @@
     "ETHUSDT","SUIUSDT","AAVEUSDT","ORDIUSDT","TAOUSDT","WLDUSDT","TRUMPUSDT","XRPUSDT",
     "SOLUSDT","XAGUSDT","HYPEUSDT","LINKUSDT","PEPEUSDT","ZECUSDT","BTCUSDT"
   ],
+  "watchlist_synapse7": [
+    "XAUUSDT","DOGEUSDT","NEARUSDT","AVAXUSDT","RIVERUSDT","ADAUSDT",
+    "ETHUSDT","SUIUSDT","AAVEUSDT","ORDIUSDT","TAOUSDT","WLDUSDT","TRUMPUSDT","XRPUSDT",
+    "SOLUSDT","XAGUSDT","HYPEUSDT","LINKUSDT","PEPEUSDT","ZECUSDT","BTCUSDT"
+  ],
 
   "portfolio_timeframes": {
     "ema_rsi":     "1H",
     "three_layer": "4H",
-    "mega":        "15m"
+    "mega":        "15m",
+    "synapse7":    "15m"
   },
 
   "symbol_timeframes": {},
@@ -67,6 +73,19 @@
       "params": {
         "sessionHours": [9, 15], "obLookback": 10,
         "ema21Len": 21, "ema50Len": 50, "rrRatio": 2.0
+      }
+    },
+    "synapse7": {
+      "name": "SYNAPSE-7 — AI kNN + AutoTune + 6-Scale + RSI + CVD",
+      "description": "Kombinira 5 podsustava: AI kNN predikcija + Ehlers AutoTune + 6-skalni EMA konsenzus + RSI Pumori momentum + CVD delta. Min 3/5 signala za ulaz.",
+      "params": {
+        "kLen": 10, "kMem": 20, "kK": 5, "kSmth": 5, "kSigLn": 5,
+        "atWin": 20,
+        "yzMin": 3,
+        "rsiLen": 14, "rsiMaLen": 14,
+        "cvdLen": 20,
+        "minSig": 3,
+        "slPct": 2.0, "tpPct": 4.0
       }
     },
     "mega": {

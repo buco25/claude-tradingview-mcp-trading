@@ -13,9 +13,10 @@ const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" 
 const START_CAPITAL = 1000;
 
 const PORTFOLIO_DEFS = [
-  { id: "ema_rsi",     name: "EMA+RSI",  color: "#388bfd", emoji: "📊" },
-  { id: "three_layer", name: "3-Layer",  color: "#bc8cff", emoji: "🔷" },
-  { id: "mega",        name: "MEGA",     color: "#00c48c", emoji: "🚀" },
+  { id: "ema_rsi",     name: "EMA+RSI",   color: "#388bfd", emoji: "📊" },
+  { id: "three_layer", name: "3-Layer",   color: "#bc8cff", emoji: "🔷" },
+  { id: "mega",        name: "MEGA",      color: "#00c48c", emoji: "🚀" },
+  { id: "synapse7",    name: "SYNAPSE-7", color: "#f7b731", emoji: "🧠" },
 ];
 
 // ─── All symbols ───────────────────────────────────────────────────────────────
@@ -565,8 +566,9 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   .green { color:var(--green); }
 
   /* Portfolio cards */
-  .port-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:32px; }
-  @media(max-width:900px){ .port-grid { grid-template-columns:1fr; } }
+  .port-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:32px; }
+  @media(max-width:1100px){ .port-grid { grid-template-columns:repeat(2,1fr); } }
+  @media(max-width:600px){  .port-grid { grid-template-columns:1fr; } }
   .port-card { background:var(--bg-secondary); border-radius:12px; padding:20px; border:1px solid var(--border); }
   .port-header { display:flex; align-items:center; gap:12px; margin-bottom:16px; }
   .port-name { font-size:16px; font-weight:700; }
@@ -637,7 +639,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="logo">🤖</div>
       <div>
         <div class="title">Trading Bot — 3 Portfolia</div>
-        <div class="subtitle">EMA+RSI(${tfMap.ema_rsi||"1H"}) · 3-Layer(${tfMap.three_layer||"4H"}) · MEGA(${tfMap.mega||"15m"}) &nbsp;|&nbsp; SL 2% / TP 4% · 25x</div>
+        <div class="subtitle">EMA+RSI(${tfMap.ema_rsi||"1H"}) · 3-Layer(${tfMap.three_layer||"4H"}) · MEGA(${tfMap.mega||"15m"}) · 🧠SYNAPSE-7(${tfMap.synapse7||"15m"}) &nbsp;|&nbsp; SL 2% / TP 4% · 25x</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">

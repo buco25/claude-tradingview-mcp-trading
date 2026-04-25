@@ -134,7 +134,7 @@ function hadCross(e9, e21, bars = 5) {
   return { up, dn };
 }
 
-function scanSymbol(candles, emaRsiCfg, threeLayerCfg, megaCfg) {
+function scanSymbol(candles, emaRsiCfg, threeLayerCfg, megaCfg, synapse7Cfg = {}) {
   const closes = candles.map(c => c.close);
   const price  = closes[closes.length - 1];
   const n      = closes.length;
@@ -215,13 +215,63 @@ function scanSymbol(candles, emaRsiCfg, threeLayerCfg, megaCfg) {
         : (ema200 ? (price < ema200 ? "↓↓ Bear" : "↓ Weak") : "↓ Bear"))
     : "—";
 
+  // ── SYNAPSE-7 simplified scanner signal ────────────────────────────────────
+  // 5 sub-signals: 6-scale EMA | RSI momentum | CVD delta | EMA trend | ADX
+  let synapse7Sig = "—";
+  {
+    const { minSig = 3, rsiLen = 14, rsiMaLen = 14 } = synapse7Cfg;
+    // Sub-signal 1: 6-scale EMA consensus (pairs: 3/11, 7/15, 13/21, 19/29, 29/47, 45/55)
+    const scales = [[3,11],[7,15],[13,21],[19,29],[29,47],[45,55]];
+    let scaleUp = 0, scaleDn = 0;
+    for (const [f, s] of scales) {
+      const ef = _ema(closes, f), es = _ema(closes, s);
+      if (ef && es) { if (ef > es) scaleUp++; else scaleDn++; }
+    }
+    const scaleSig = scaleUp >= 4 ? 1 : scaleDn >= 4 ? -1 : 0;
+
+    // Sub-signal 2: RSI vs RSI-EMA (Pumori pattern)
+    const rsiVal = _rsi(closes, 14);
+    let rsiMomSig = 0;
+    if (rsiVal !== null) {
+      // build RSI series for EMA (simplified: use last value vs mid)
+      rsiMomSig = rsiVal > 55 ? 1 : rsiVal < 45 ? -1 : 0;
+    }
+
+    // Sub-signal 3: CVD delta (signed volume: sum of last 20 bars sign(close-open)*volume)
+    const highs  = candles.map(c => c.high);
+    const lows   = candles.map(c => c.low);
+    const vols   = candles.map(c => c.volume || 0);
+    const opens  = candles.map(c => c.open);
+    const cvdLen = Math.min(20, candles.length);
+    let cvdSum = 0;
+    for (let i = candles.length - cvdLen; i < candles.length; i++) {
+      const sign = closes[i] > opens[i] ? 1 : closes[i] < opens[i] ? -1 : 0;
+      cvdSum += sign * vols[i];
+    }
+    const cvdSig = cvdSum > 0 ? 1 : cvdSum < 0 ? -1 : 0;
+
+    // Sub-signal 4: EMA trend (EMA55 + EMA200)
+    const trendSig = (ema55 && price > ema55) ? 1 : (ema55 && price < ema55) ? -1 : 0;
+
+    // Sub-signal 5: ADX momentum (trending = bull/bear conf by EMA9/21)
+    const adxSig = (adx && adx > 20) ? (ema9 > ema21 ? 1 : -1) : 0;
+
+    const bullCnt = [scaleSig, rsiMomSig, cvdSig, trendSig, adxSig].filter(v => v === 1).length;
+    const bearCnt = [scaleSig, rsiMomSig, cvdSig, trendSig, adxSig].filter(v => v === -1).length;
+
+    if      (bullCnt >= minSig) synapse7Sig = "LONG";
+    else if (bearCnt >= minSig) synapse7Sig = "SHORT";
+    else if (bullCnt === minSig - 1 && scaleUp >= 3) synapse7Sig = "SETUP↑";
+    else if (bearCnt === minSig - 1 && scaleDn >= 3) synapse7Sig = "SETUP↓";
+  }
+
   return {
     price, emaBias,
     rsi: rsi?.toFixed(1) ?? "—",
     adx: adx?.toFixed(1) ?? "—",
     chop: chop?.toFixed(1) ?? "—",
     trend: trendLabel,
-    emaRsiSig, threeLayerSig, megaSig,
+    emaRsiSig, threeLayerSig, megaSig, synapse7Sig,
   };
 }
 
@@ -238,6 +288,7 @@ async function runScan(rules) {
   const emaRsiCfg    = cfg.ema_rsi?.params     || {};
   const threeLayerCfg= cfg.three_layer?.params  || {};
   const megaCfg      = cfg.mega?.params          || {};
+  const synapse7Cfg  = cfg.synapse7?.params      || {};
 
   const results = [];
   // Fetch all symbols in parallel (limit concurrency to avoid rate limit)
@@ -253,8 +304,9 @@ async function runScan(rules) {
         const candles = d.data.map(k => ({
           time: parseInt(k[0]), open: parseFloat(k[1]),
           high: parseFloat(k[2]), low: parseFloat(k[3]), close: parseFloat(k[4]),
+          volume: parseFloat(k[5] || 0),
         }));
-        const s = scanSymbol(candles, emaRsiCfg, threeLayerCfg, megaCfg);
+        const s = scanSymbol(candles, emaRsiCfg, threeLayerCfg, megaCfg, synapse7Cfg);
         results.push({ symbol: sym, ...s });
       } catch (e) {
         results.push({ symbol: sym, error: e.message });
@@ -391,20 +443,14 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   const allSymbols = new Set();
   allPositions.forEach(posList => posList.forEach(p => allSymbols.add(p.symbol)));
 
-  // Equity chart data
-  const chartColors = { ema_rsi: "#388bfd", three_layer: "#bc8cff", mega: "#00c48c" };
-  const chartDatasets = allStats.map(s => {
-    const def = PORTFOLIO_DEFS.find(d => d.id === s.pid);
-    return JSON.stringify({
-      label: def.name,
-      data: s.pnlCurve.map((p, i) => ({ x: i, y: p.equity })),
-      borderColor: def.color,
-      backgroundColor: def.color + "22",
-      fill: false,
-      tension: 0.3,
-      pointRadius: 2,
-    });
-  });
+  // Chart data — P&L bars + Win/Loss bars
+  const chartLabels  = JSON.stringify(PORTFOLIO_DEFS.map(d => d.name));
+  const chartPnl     = JSON.stringify(allStats.map(s => parseFloat(s.totalPnl.toFixed(2))));
+  const chartPnlColors= JSON.stringify(allStats.map(s => s.totalPnl >= 0 ? "#00c48c" : "#ff4d4d"));
+  const chartWins    = JSON.stringify(allStats.map(s => s.wins.length));
+  const chartLosses  = JSON.stringify(allStats.map(s => s.losses.length));
+  const chartWR      = JSON.stringify(allStats.map(s => s.winRate !== null ? parseFloat(s.winRate) : 0));
+  const chartPortColors = JSON.stringify(PORTFOLIO_DEFS.map(d => d.color));
 
   // Portfolio comparison cards
   const cardsHtml = PORTFOLIO_DEFS.map((def, i) => {
@@ -569,6 +615,8 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   .port-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:32px; }
   @media(max-width:1100px){ .port-grid { grid-template-columns:repeat(2,1fr); } }
   @media(max-width:600px){  .port-grid { grid-template-columns:1fr; } }
+  .charts-row { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:32px; }
+  @media(max-width:700px){ .charts-row { grid-template-columns:1fr; } }
   .port-card { background:var(--bg-secondary); border-radius:12px; padding:20px; border:1px solid var(--border); }
   .port-header { display:flex; align-items:center; gap:12px; margin-bottom:16px; }
   .port-name { font-size:16px; font-weight:700; }
@@ -653,17 +701,23 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     ${cardsHtml}
   </div>
 
-  <!-- Equity chart -->
-  <div class="chart-card">
-    <div class="chart-title">Equity krivulja — usporedba portfolia</div>
-    <div class="chart-wrap"><canvas id="equityChart"></canvas></div>
+  <!-- Charts row -->
+  <div class="charts-row">
+    <div class="chart-card" style="margin-bottom:0">
+      <div class="chart-title">💰 P&amp;L po portfoliju</div>
+      <div class="chart-wrap" style="height:200px"><canvas id="pnlChart"></canvas></div>
+    </div>
+    <div class="chart-card" style="margin-bottom:0">
+      <div class="chart-title">📊 Wins / Losses / WR%</div>
+      <div class="chart-wrap" style="height:200px"><canvas id="wrChart"></canvas></div>
+    </div>
   </div>
 
   <!-- Live Scanner -->
   <div class="scan-card">
     <div class="scan-header">
       <div>
-        <div class="chart-title" style="margin-bottom:2px">🔍 Live Scanner — 21 simbola × 3 strategije</div>
+        <div class="chart-title" style="margin-bottom:2px">🔍 Live Scanner — 21 simbola × 4 strategije</div>
         <div style="font-size:12px;color:var(--text-muted)">Signal = EMA9/21 cross + filteri ispunjeni | Cache 90s</div>
       </div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -685,10 +739,11 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <th style="color:#388bfd">📊 EMA+RSI</th>
             <th style="color:#bc8cff">🔷 3-Layer</th>
             <th style="color:#00c48c">🚀 MEGA</th>
+            <th style="color:#f7b731">🧠 SYNAPSE-7</th>
           </tr>
         </thead>
         <tbody id="scan-tbody">
-          <tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-muted)">Klikni "Skeniraj" za prikaz live signala</td></tr>
+          <tr><td colspan="11" style="text-align:center;padding:24px;color:var(--text-muted)">Klikni "Skeniraj" za prikaz live signala</td></tr>
         </tbody>
       </table>
     </div>
@@ -709,23 +764,78 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
 </div>
 
 <script>
-// Equity chart
+// ── P&L Bar Chart ──────────────────────────────────────────────────────────────
 (function(){
-  const ctx = document.getElementById("equityChart").getContext("2d");
-  const datasets = [${chartDatasets.join(",")}];
-  new Chart(ctx, {
-    type: "line",
-    data: { datasets },
+  const labels    = ${chartLabels};
+  const pnlData   = ${chartPnl};
+  const pnlColors = ${chartPnlColors};
+  const portColors= ${chartPortColors};
+  new Chart(document.getElementById("pnlChart").getContext("2d"), {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        label: "Net P&L ($)",
+        data: pnlData,
+        backgroundColor: pnlColors,
+        borderColor: pnlColors,
+        borderWidth: 1,
+        borderRadius: 6,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => (ctx.raw >= 0 ? "+" : "") + "$" + ctx.raw.toFixed(2) } }
+      },
+      scales: {
+        x: { ticks: { color: "#8b949e" }, grid: { display: false } },
+        y: {
+          ticks: { color: "#8b949e", callback: v => (v >= 0 ? "+" : "") + "$" + v.toFixed(2) },
+          grid: { color: "#21262d" },
+          border: { dash: [4, 4] }
+        }
+      }
+    }
+  });
+})();
+
+// ── Win/Loss/WR Chart ──────────────────────────────────────────────────────────
+(function(){
+  const labels    = ${chartLabels};
+  const wins      = ${chartWins};
+  const losses    = ${chartLosses};
+  const wrData    = ${chartWR};
+  const portColors= ${chartPortColors};
+  new Chart(document.getElementById("wrChart").getContext("2d"), {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        { label: "Wins",   data: wins,   backgroundColor: "#00c48c99", borderColor: "#00c48c", borderWidth:1, borderRadius:4, stack:"trades" },
+        { label: "Losses", data: losses, backgroundColor: "#ff4d4d99", borderColor: "#ff4d4d", borderWidth:1, borderRadius:4, stack:"trades" },
+        { label: "WR %",   data: wrData, backgroundColor: portColors.map(c => c + "55"), borderColor: portColors, borderWidth:2, borderRadius:4, type:"bar", yAxisID:"y2" }
+      ]
+    },
     options: {
       responsive: true, maintainAspectRatio: false,
       interaction: { mode: "index", intersect: false },
       plugins: {
-        legend: { labels: { color: "#e6edf3", boxWidth: 12 } },
-        tooltip: { callbacks: { label: ctx => ctx.dataset.label + ": $" + ctx.raw.y.toFixed(2) } }
+        legend: { labels: { color: "#8b949e", boxWidth: 10, font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              if (ctx.dataset.label === "WR %") return "WR: " + ctx.raw.toFixed(1) + "%";
+              return ctx.dataset.label + ": " + ctx.raw;
+            }
+          }
+        }
       },
       scales: {
-        x: { display: false },
-        y: { ticks: { color: "#8b949e", callback: v => "$" + v.toFixed(0) }, grid: { color: "#21262d" } }
+        x:  { ticks: { color: "#8b949e" }, grid: { display: false }, stacked: true },
+        y:  { ticks: { color: "#8b949e", stepSize: 1 }, grid: { color: "#21262d" }, stacked: true, title: { display: true, text: "Trades", color: "#8b949e", font: { size: 10 } } },
+        y2: { position: "right", ticks: { color: "#8b949e", callback: v => v + "%" }, grid: { display: false }, min: 0, max: 100, title: { display: true, text: "WR %", color: "#8b949e", font: { size: 10 } } }
       }
     }
   });
@@ -753,7 +863,7 @@ async function doScan() {
   const tbody = document.getElementById("scan-tbody");
   btn.disabled = true;
   btn.innerHTML = '<span class="spin">⟳</span> Skenira...';
-  tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:#8b949e"><span class="spin">⟳</span> Fetcham 21 simbola na 1H...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:24px;color:#8b949e"><span class="spin">⟳</span> Fetcham 21 simbola na 1H...</td></tr>';
 
   try {
     const r = await fetch("/api/scan");
@@ -766,16 +876,16 @@ async function doScan() {
 
     // Priority sort: LONG/SHORT first, SETUP second, neutral last
     function priority(s) {
-      const hasSignal = s.emaRsiSig==="LONG"||s.emaRsiSig==="SHORT"||s.threeLayerSig==="LONG"||s.threeLayerSig==="SHORT"||s.megaSig==="LONG"||s.megaSig==="SHORT";
-      const hasSetup  = s.emaRsiSig?.startsWith("SETUP")||s.threeLayerSig?.startsWith("SETUP")||s.megaSig?.startsWith("SETUP");
+      const hasSignal = s.emaRsiSig==="LONG"||s.emaRsiSig==="SHORT"||s.threeLayerSig==="LONG"||s.threeLayerSig==="SHORT"||s.megaSig==="LONG"||s.megaSig==="SHORT"||s.synapse7Sig==="LONG"||s.synapse7Sig==="SHORT";
+      const hasSetup  = s.emaRsiSig?.startsWith("SETUP")||s.threeLayerSig?.startsWith("SETUP")||s.megaSig?.startsWith("SETUP")||s.synapse7Sig?.startsWith("SETUP");
       return hasSignal ? 0 : hasSetup ? 1 : 2;
     }
     results.sort((a, b) => priority(a) - priority(b));
 
     tbody.innerHTML = results.map((s, i) => {
-      if (s.error) return '<tr><td colspan="10" style="color:#ff4d4d">' + s.symbol + ': ' + s.error + '</td></tr>';
-      const hasSignal = ["LONG","SHORT"].includes(s.emaRsiSig) || ["LONG","SHORT"].includes(s.threeLayerSig) || ["LONG","SHORT"].includes(s.megaSig);
-      const hasSetup  = (s.emaRsiSig||"").startsWith("SETUP") || (s.threeLayerSig||"").startsWith("SETUP") || (s.megaSig||"").startsWith("SETUP");
+      if (s.error) return '<tr><td colspan="11" style="color:#ff4d4d">' + s.symbol + ': ' + s.error + '</td></tr>';
+      const hasSignal = ["LONG","SHORT"].includes(s.emaRsiSig) || ["LONG","SHORT"].includes(s.threeLayerSig) || ["LONG","SHORT"].includes(s.megaSig) || ["LONG","SHORT"].includes(s.synapse7Sig);
+      const hasSetup  = (s.emaRsiSig||"").startsWith("SETUP") || (s.threeLayerSig||"").startsWith("SETUP") || (s.megaSig||"").startsWith("SETUP") || (s.synapse7Sig||"").startsWith("SETUP");
       const rowCls = hasSignal ? "any-signal" : "";
       const trendCol = s.trend && s.trend.includes("↑") ? "#00c48c" : s.trend && s.trend.includes("↓") ? "#ff4d4d" : "#8b949e";
       const rsiNum = parseFloat(s.rsi);
@@ -792,17 +902,18 @@ async function doScan() {
         '<td>' + sigHtml(s.emaRsiSig) + '</td>' +
         '<td>' + sigHtml(s.threeLayerSig) + '</td>' +
         '<td>' + sigHtml(s.megaSig) + '</td>' +
+        '<td>' + sigHtml(s.synapse7Sig) + '</td>' +
         '</tr>';
     }).join("");
 
     // Count
-    const longs  = results.filter(s => s.emaRsiSig==="LONG"  || s.threeLayerSig==="LONG"  || s.megaSig==="LONG").length;
-    const shorts = results.filter(s => s.emaRsiSig==="SHORT" || s.threeLayerSig==="SHORT" || s.megaSig==="SHORT").length;
-    const setups = results.filter(s => (s.emaRsiSig||"").startsWith("SETUP") || (s.threeLayerSig||"").startsWith("SETUP") || (s.megaSig||"").startsWith("SETUP")).length;
+    const longs  = results.filter(s => s.emaRsiSig==="LONG"  || s.threeLayerSig==="LONG"  || s.megaSig==="LONG"  || s.synapse7Sig==="LONG").length;
+    const shorts = results.filter(s => s.emaRsiSig==="SHORT" || s.threeLayerSig==="SHORT" || s.megaSig==="SHORT" || s.synapse7Sig==="SHORT").length;
+    const setups = results.filter(s => (s.emaRsiSig||"").startsWith("SETUP") || (s.threeLayerSig||"").startsWith("SETUP") || (s.megaSig||"").startsWith("SETUP") || (s.synapse7Sig||"").startsWith("SETUP")).length;
     document.getElementById("scan-ts").textContent += " | ▲ " + longs + " LONG · ▼ " + shorts + " SHORT · ◈ " + setups + " SETUP";
 
   } catch(e) {
-    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#ff4d4d">Greška: ' + e.message + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:#ff4d4d">Greška: ' + e.message + '</td></tr>';
   }
 
   btn.disabled = false;

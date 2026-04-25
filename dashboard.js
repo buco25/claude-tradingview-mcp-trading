@@ -376,7 +376,8 @@ function pnlHtml(pnl) {
   return `<span style="color:${col}">${pnl > 0 ? "+" : ""}$${pnl.toFixed(2)}</span>`;
 }
 
-function renderHtml(allStats, allPositions, hb) {
+function renderHtml(allStats, allPositions, hb, rules = {}) {
+  const tfMap = rules?.portfolio_timeframes || {};
   const hbAgeSec = hb ? Math.floor((Date.now() - new Date(hb.ts).getTime()) / 1000) : null;
   const hbOk     = hbAgeSec !== null && hbAgeSec < 600;
   const hbLabel  = hb ? (hbAgeSec < 60 ? `${hbAgeSec}s ago` : `${Math.floor(hbAgeSec/60)}m ago`) : "never";
@@ -411,13 +412,14 @@ function renderHtml(allStats, allPositions, hb) {
     const pctStr = (pcts >= 0 ? "+" : "") + pcts.toFixed(2) + "%";
     const eqCol  = s.equity >= START_CAPITAL ? "#00c48c" : "#ff4d4d";
     const openCount = allPositions[i].length;
+    const tf = tfMap[def.id] || "1H";
     return `
     <div class="port-card" style="border-top:3px solid ${def.color}">
       <div class="port-header">
         <span style="font-size:22px">${def.emoji}</span>
         <div>
           <div class="port-name" style="color:${def.color}">${def.name}</div>
-          <div class="port-subtitle">Portfolio ${i + 1} · 1H · SL 2% / TP 4% · 25x</div>
+          <div class="port-subtitle">Portfolio ${i + 1} · ${tf} · SL 2% / TP 4% · 25x</div>
         </div>
       </div>
       <div class="port-equity" style="color:${eqCol}">$${s.equity.toFixed(2)}</div>
@@ -635,7 +637,7 @@ function renderHtml(allStats, allPositions, hb) {
       <div class="logo">🤖</div>
       <div>
         <div class="title">Trading Bot — 3 Portfolia</div>
-        <div class="subtitle">EMA+RSI · 3-Layer · MEGA &nbsp;|&nbsp; 1H · SL 2% / TP 4% · 25x</div>
+        <div class="subtitle">EMA+RSI(${tfMap.ema_rsi||"1H"}) · 3-Layer(${tfMap.three_layer||"4H"}) · MEGA(${tfMap.mega||"15m"}) &nbsp;|&nbsp; SL 2% / TP 4% · 25x</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -920,7 +922,8 @@ const server = http.createServer(async (req, res) => {
   const allPositions = PORTFOLIO_DEFS.map(d => loadPositions(d.id));
   const hbFile       = `${DATA_DIR}/heartbeat.json`;
   const hb           = existsSync(hbFile) ? JSON.parse(readFileSync(hbFile, "utf8")) : null;
-  const html         = renderHtml(allStats, allPositions, hb);
+  const dashRules    = loadRules();
+  const html         = renderHtml(allStats, allPositions, hb, dashRules);
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html);
 });

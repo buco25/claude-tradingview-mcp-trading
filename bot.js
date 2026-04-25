@@ -1,11 +1,12 @@
 /**
  * Trading Bot — 3-Portfolio Mode
  *
- * Portfolio 1 — EMA+RSI:   XAUUSDT DOGEUSDT NEARUSDT AVAXUSDT RIVERUSDT ADAUSDT
- * Portfolio 2 — 3-Layer:   ETHUSDT SUIUSDT AAVEUSDT ORDIUSDT TAOUSDT WLDUSDT TRUMPUSDT XRPUSDT
- * Portfolio 3 — MEGA:      SOLUSDT XAGUSDT HYPEUSDT LINKUSDT PEPEUSDT ZECUSDT BTCUSDT
+ * Portfolio 1 — EMA+RSI  → 1H  | XAUUSDT DOGEUSDT NEARUSDT AVAXUSDT RIVERUSDT ADAUSDT ...
+ * Portfolio 2 — 3-Layer  → 4H  | ETHUSDT SUIUSDT AAVEUSDT ORDIUSDT TAOUSDT WLDUSDT ...
+ * Portfolio 3 — MEGA     → 15m | SOLUSDT XAGUSDT HYPEUSDT LINKUSDT PEPEUSDT ZECUSDT ...
  *
- * Fiksni SL 2% / TP 4% / R:R 1:2 | Margin 2% × $1000 | 15x leverage | 1H TF
+ * Fiksni SL 2% / TP 4% / R:R 1:2 | Margin 2% × $1000 | 25x leverage
+ * Razdvojeni TF-ovi smanjuju korelaciju između portfolia
  */
 
 import "dotenv/config";
@@ -44,29 +45,48 @@ const HEARTBEAT_FILE = `${DATA_DIR}/heartbeat.json`;
 const PORTFOLIO_IDS = ["ema_rsi", "three_layer", "mega"];
 
 function buildPortfolios(rules) {
+  const tfs = rules.portfolio_timeframes || {};
   return {
     ema_rsi: {
-      id:       "ema_rsi",
-      name:     "EMA+RSI",
-      symbols:  rules.watchlist_ema_rsi   || [],
-      strategy: "ema_rsi",
-      params:   rules.strategies.ema_rsi.params,
+      id:        "ema_rsi",
+      name:      "EMA+RSI",
+      symbols:   rules.watchlist_ema_rsi   || [],
+      strategy:  "ema_rsi",
+      params:    rules.strategies.ema_rsi.params,
+      timeframe: tfs.ema_rsi     || "1H",
     },
     three_layer: {
-      id:       "three_layer",
-      name:     "3-Layer",
-      symbols:  rules.watchlist_3layer    || [],
-      strategy: "three_layer",
-      params:   rules.strategies.three_layer.params,
+      id:        "three_layer",
+      name:      "3-Layer",
+      symbols:   rules.watchlist_3layer    || [],
+      strategy:  "three_layer",
+      params:    rules.strategies.three_layer.params,
+      timeframe: tfs.three_layer || "4H",
     },
     mega: {
-      id:       "mega",
-      name:     "MEGA",
-      symbols:  rules.watchlist_mega      || [],
-      strategy: "mega",
-      params:   rules.strategies.mega.params,
+      id:        "mega",
+      name:      "MEGA",
+      symbols:   rules.watchlist_mega      || [],
+      strategy:  "mega",
+      params:    rules.strategies.mega.params,
+      timeframe: tfs.mega        || "15m",
     },
   };
+}
+
+// Pokreni portfolio samo kad se zatvori njegova svjeća
+function shouldRunNow(tf, utcHour, utcMin) {
+  switch (tf) {
+    case "1m":  return true;
+    case "5m":  return utcMin % 5  === 0;
+    case "15m": return utcMin % 15 === 0;
+    case "30m": return utcMin % 30 === 0;
+    case "1H":  return utcMin <= 1;
+    case "2H":  return utcMin <= 1 && utcHour % 2 === 0;
+    case "4H":  return utcMin <= 1 && utcHour % 4 === 0;
+    case "1D":  return utcMin <= 1 && utcHour === 0;
+    default:    return utcMin <= 1;
+  }
 }
 
 // ─── Heartbeat ─────────────────────────────────────────────────────────────────
@@ -379,6 +399,7 @@ function addPosition(pid, entry) {
     openedAt:   entry.timestamp,
     portfolio:  pid,
     strategy:   entry.strategy,
+    timeframe:  entry.timeframe || "1H",
   });
   savePositions(pid, positions);
 }
@@ -392,7 +413,7 @@ async function checkPortfolioPositions(pid) {
 
   for (const pos of positions) {
     try {
-      const candles = await fetchCandles(pos.symbol, TIMEFRAME, 5);
+      const candles = await fetchCandles(pos.symbol, pos.timeframe || "1H", 5);
       const bar     = candles[candles.length - 1];
       let exitPrice = null, exitReason = null;
 
@@ -553,6 +574,12 @@ export async function run() {
 
   // Skeniraj svaki portfolio
   for (const [pid, pDef] of Object.entries(portfolios)) {
+    // Pokreni entry logiku samo kad se zatvori svjeća ovog TF-a
+    if (!shouldRunNow(pDef.timeframe, utcHour, utcMin)) {
+      console.log(`  ⏭️  [${pDef.name}] Preskačem skeniranje — TF ${pDef.timeframe} još nije zatvoren`);
+      continue;
+    }
+
     const openSymbols = loadPositions(pid).map(p => p.symbol);
 
     for (const symbol of pDef.symbols) {
@@ -561,14 +588,8 @@ export async function run() {
         continue;
       }
 
-      // Na 1H — pokreni samo na početku sata
-      if (utcMin !== 0 && utcMin !== 1) {
-        // Preskočiti - nije početak sata. Provjera pozicija je i dalje aktiva.
-        continue;
-      }
-
       try {
-        const candles = await fetchCandles(symbol, TIMEFRAME, 250);
+        const candles = await fetchCandles(symbol, pDef.timeframe, 250);
         const price   = candles[candles.length - 1].close;
 
         let result;
@@ -604,12 +625,12 @@ export async function run() {
 
         const timestamp = new Date().toISOString();
         const orderId   = `PAPER-${Date.now()}`;
-        const entry = { symbol, signal, price, sl, tp, tradeSize, orderId, timestamp, strategy: pDef.strategy };
+        const entry = { symbol, signal, price, sl, tp, tradeSize, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe };
 
         if (PAPER_TRADING) {
           addPosition(pid, entry);
           writeEntryCsv(pid, entry);
-          await tg(`📋 PAPER [${pDef.name}] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b>\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}\nNotional: $${tradeSize.toFixed(0)} | Margin: $${margin.toFixed(0)} | ${LEVERAGE}x`);
+          await tg(`📋 PAPER [${pDef.name}/${pDef.timeframe}] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b>\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}\nNotional: $${tradeSize.toFixed(0)} | Margin: $${margin.toFixed(0)} | ${LEVERAGE}x`);
         } else {
           try {
             const order = await placeBitGetOrder(symbol, signal, tradeSize, price, sl, tp);

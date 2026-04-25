@@ -24,6 +24,12 @@
     "SOLUSDT","XAGUSDT","HYPEUSDT","LINKUSDT","PEPEUSDT","ZECUSDT","BTCUSDT"
   ],
 
+  "portfolio_timeframes": {
+    "ema_rsi":     "1H",
+    "three_layer": "4H",
+    "mega":        "15m"
+  },
+
   "symbol_timeframes": {},
   "mega_timeframes":   {},
   "default_timeframe": "1H",

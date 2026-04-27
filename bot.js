@@ -84,17 +84,19 @@ function buildPortfolios(rules) {
 
 // Pokreni portfolio samo kad se zatvori njegova svjeća
 function shouldRunNow(tf, utcHour, utcMin) {
-  // Koristimo toleranciju ±1 min da bot ne ovisi o točnom alignmentu 5-min timera
+  // Prozor od 5 min garantira da svaki 5-min bot run uvijek pogodi svaki TF,
+  // bez obzira kad je Railway restartao bot (offset-neovisno).
+  // Dokaz: za step=5 i prozor=5, u svakom TF-bloku postoji točno jedan run s min%TF < 5.
   switch (tf) {
     case "1m":  return true;
-    case "5m":  return utcMin % 5  <= 1;
-    case "15m": return utcMin % 15 <= 1;
-    case "30m": return utcMin % 30 <= 1;
-    case "1H":  return utcMin <= 1;
-    case "2H":  return utcMin <= 1 && utcHour % 2 === 0;
-    case "4H":  return utcMin <= 1 && utcHour % 4 === 0;
-    case "1D":  return utcMin <= 1 && utcHour === 0;
-    default:    return utcMin <= 1;
+    case "5m":  return true;                              // svaki run = nova 5m svjeća
+    case "15m": return utcMin % 15 < 5;
+    case "30m": return utcMin % 30 < 5;
+    case "1H":  return utcMin < 5;
+    case "2H":  return utcMin < 5 && utcHour % 2 === 0;
+    case "4H":  return utcMin < 5 && utcHour % 4 === 0;
+    case "1D":  return utcMin < 5 && utcHour === 0;
+    default:    return utcMin < 5;
   }
 }
 

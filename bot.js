@@ -745,9 +745,10 @@ export async function run() {
   for (const pid of PORTFOLIO_IDS) initCsv(pid);
 
   const totalSymbols = Object.values(portfolios).reduce((s, p) => s + p.symbols.length, 0);
-  console.log(`[${utcNow.toISOString().slice(0,16)}] ${modLabel} | 3 portfolia | ${totalSymbols} simbola | ${LEVERAGE}x | UTC ${utcHour}:${String(utcMin).padStart(2,"0")}`);
+  const nPort = Object.keys(portfolios).length;
+  console.log(`[${utcNow.toISOString().slice(0,16)}] ${modLabel} | ${nPort} portfolia | ${totalSymbols} simbola | ${LEVERAGE}x | UTC ${utcHour}:${String(utcMin).padStart(2,"0")}`);
 
-  writeHeartbeat("running", { portfolios: 3, symbols: totalSymbols, leverage: LEVERAGE });
+  writeHeartbeat("running", { portfolios: nPort, symbols: totalSymbols, leverage: LEVERAGE });
 
   // Provjeri otvorene pozicije svih portfolia
   for (const pid of PORTFOLIO_IDS) {
@@ -832,7 +833,7 @@ export async function run() {
     }
   }
 
-  writeHeartbeat("ok", { portfolios: 3, symbols: totalSymbols, leverage: LEVERAGE });
+  writeHeartbeat("ok", { portfolios: nPort, symbols: totalSymbols, leverage: LEVERAGE });
 }
 
 // ─── Entry point ───────────────────────────────────────────────────────────────

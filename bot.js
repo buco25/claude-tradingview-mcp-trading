@@ -84,11 +84,12 @@ function buildPortfolios(rules) {
 
 // Pokreni portfolio samo kad se zatvori njegova svjeća
 function shouldRunNow(tf, utcHour, utcMin) {
+  // Koristimo toleranciju ±1 min da bot ne ovisi o točnom alignmentu 5-min timera
   switch (tf) {
     case "1m":  return true;
-    case "5m":  return utcMin % 5  === 0;
-    case "15m": return utcMin % 15 === 0;
-    case "30m": return utcMin % 30 === 0;
+    case "5m":  return utcMin % 5  <= 1;
+    case "15m": return utcMin % 15 <= 1;
+    case "30m": return utcMin % 30 <= 1;
     case "1H":  return utcMin <= 1;
     case "2H":  return utcMin <= 1 && utcHour % 2 === 0;
     case "4H":  return utcMin <= 1 && utcHour % 4 === 0;

@@ -726,23 +726,38 @@ function writeEntryCsv(pid, entry) {
 }
 
 // ─── Portfolio Equity ────────────────────────────────────────────────────────────
-// Čita CSV i vraća START_CAPITAL + suma svih zatvorenih Net P&L redova.
-// "OPEN" u koloni Net P&L su entry redovi — preskačemo ih.
+// Stvarna raspoloživa equity = START_CAPITAL + zatvoreni P&L − rizik otvorenih pozicija.
+// Svaka otvorena pozicija "zaključava" točno riskAmount = tradeSize × slPct/100.
+// Na taj način sljedeći trade se uvijek veliča prema trenutno raspoloživom kapitalu.
 function getPortfolioEquity(pid) {
+  // 1) Baza: START_CAPITAL + suma zatvorenih Net P&L iz CSV-a
+  let closedEquity = START_CAPITAL;
   const f = csvFilePath(pid);
-  if (!existsSync(f)) return START_CAPITAL;
-  try {
-    const lines = readFileSync(f, "utf8").trim().split("\n");
-    let closedPnl = 0;
-    for (let i = 1; i < lines.length; i++) {   // preskoči header
-      const cols = lines[i].split(",");
-      const netPnlStr = cols[9]?.trim();        // indeks 9 = Net P&L
-      if (!netPnlStr || netPnlStr === "OPEN") continue;
-      const val = parseFloat(netPnlStr);
-      if (isFinite(val)) closedPnl += val;
+  if (existsSync(f)) {
+    try {
+      const lines = readFileSync(f, "utf8").trim().split("\n");
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(",");
+        const netPnlStr = cols[9]?.trim();          // indeks 9 = Net P&L
+        if (!netPnlStr || netPnlStr === "OPEN") continue;
+        const val = parseFloat(netPnlStr);
+        if (isFinite(val)) closedEquity += val;
+      }
+    } catch { /* nastavi s START_CAPITAL */ }
+  }
+
+  // 2) Oduzmi rizik svih trenutno otvorenih pozicija
+  //    riskAmount = totalUSD × |entryPrice − sl| / entryPrice
+  //    (rekonstruiramo slPct iz stvarnih cijena — slPct nije pohranjen u JSON-u)
+  let lockedRisk = 0;
+  for (const pos of loadPositions(pid)) {
+    if (pos.totalUSD && pos.entryPrice && pos.sl) {
+      const slPctReal = Math.abs(pos.entryPrice - pos.sl) / pos.entryPrice;
+      lockedRisk += pos.totalUSD * slPctReal;
     }
-    return START_CAPITAL + closedPnl;
-  } catch { return START_CAPITAL; }
+  }
+
+  return closedEquity - lockedRisk;
 }
 
 function writeExitCsv(pid, pos, exitPrice, reason, pnl) {

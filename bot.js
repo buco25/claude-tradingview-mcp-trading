@@ -42,7 +42,7 @@ const HEARTBEAT_FILE = `${DATA_DIR}/heartbeat.json`;
 
 // ─── Portfolio definicije ──────────────────────────────────────────────────────
 
-const PORTFOLIO_IDS = ["ema_rsi", "three_layer", "mega", "synapse7"];
+const PORTFOLIO_IDS = ["ema_rsi", "mega", "synapse7", "synapse_t"];
 
 function buildPortfolios(rules) {
   const tfs = rules.portfolio_timeframes || {};
@@ -50,34 +50,38 @@ function buildPortfolios(rules) {
     ema_rsi: {
       id:        "ema_rsi",
       name:      "EMA+RSI",
-      symbols:   rules.watchlist_ema_rsi   || [],
+      symbols:   rules.watchlist_ema_rsi    || [],
       strategy:  "ema_rsi",
       params:    rules.strategies.ema_rsi.params,
-      timeframe: tfs.ema_rsi     || "1H",
-    },
-    three_layer: {
-      id:        "three_layer",
-      name:      "3-Layer",
-      symbols:   rules.watchlist_3layer    || [],
-      strategy:  "three_layer",
-      params:    rules.strategies.three_layer.params,
-      timeframe: tfs.three_layer || "4H",
+      timeframe: tfs.ema_rsi      || "1H",
+      slPct:     2.0, tpPct: 4.0,
     },
     mega: {
       id:        "mega",
       name:      "MEGA",
-      symbols:   rules.watchlist_mega      || [],
+      symbols:   rules.watchlist_mega       || [],
       strategy:  "mega",
       params:    rules.strategies.mega.params,
-      timeframe: tfs.mega        || "15m",
+      timeframe: tfs.mega         || "15m",
+      slPct:     2.0, tpPct: 4.0,
     },
     synapse7: {
       id:        "synapse7",
       name:      "SYNAPSE-7",
-      symbols:   rules.watchlist_synapse7  || [],
+      symbols:   rules.watchlist_synapse7   || [],
       strategy:  "synapse7",
-      params:    rules.strategies.synapse7?.params || {},
-      timeframe: tfs.synapse7    || "15m",
+      params:    rules.strategies.synapse7?.params  || {},
+      timeframe: tfs.synapse7     || "15m",
+      slPct:     2.0, tpPct: 4.0,
+    },
+    synapse_t: {
+      id:        "synapse_t",
+      name:      "SYNAPSE-T",
+      symbols:   rules.watchlist_synapse_t  || [],
+      strategy:  "synapse_t",
+      params:    rules.strategies.synapse_t?.params || {},
+      timeframe: tfs.synapse_t    || "15m",
+      slPct:     1.5, tpPct: 3.0,
     },
   };
 }
@@ -544,6 +548,61 @@ function analyzeSynapse7(candles, cfg) {
   return { price, aiSignal, atSig, scSig, rsSig, cvdSig, bullScore, bearScore, signal, reason };
 }
 
+// ─── SYNAPSE-T: SYNAPSE-7 + obvezan ADX trend filter + minSig 4/5 ─────────────
+function analyzeSynapseT(candles, cfg) {
+  const { minSig = 4, adxMin = 22 } = cfg;
+
+  // Obvezan pre-filter: ADX mora biti > adxMin (trend, ne konsolidacija)
+  const closes = candles.map(c => c.close);
+  const n      = closes.length;
+  const price  = closes[n - 1];
+
+  if (n < 80) return { price, signal: "NEUTRAL", reason: "Nedovoljno podataka" };
+
+  // ADX kalkulacija (Wilder RMA metoda)
+  function _adxVal(cands, p = 14) {
+    if (cands.length < p * 3) return null;
+    const trs = [], pDMs = [], mDMs = [];
+    for (let i = 1; i < cands.length; i++) {
+      const h = cands[i].high, l = cands[i].low;
+      const ph = cands[i-1].high, pl = cands[i-1].low, pc = cands[i-1].close;
+      trs.push(Math.max(h-l, Math.abs(h-pc), Math.abs(l-pc)));
+      const up = h-ph, dn = pl-l;
+      pDMs.push(up > dn && up > 0 ? up : 0);
+      mDMs.push(dn > up && dn > 0 ? dn : 0);
+    }
+    let smTR = trs.slice(0,p).reduce((a,b)=>a+b,0);
+    let smP  = pDMs.slice(0,p).reduce((a,b)=>a+b,0);
+    let smM  = mDMs.slice(0,p).reduce((a,b)=>a+b,0);
+    const dx = [];
+    for (let i = p; i < trs.length; i++) {
+      smTR = smTR - smTR/p + trs[i]; smP = smP - smP/p + pDMs[i]; smM = smM - smM/p + mDMs[i];
+      const pdi = smTR > 0 ? 100*smP/smTR : 0, mdi = smTR > 0 ? 100*smM/smTR : 0;
+      const s = pdi+mdi; dx.push(s > 0 ? 100*Math.abs(pdi-mdi)/s : 0);
+    }
+    if (dx.length < p) return null;
+    let adx = dx.slice(0,p).reduce((a,b)=>a+b,0)/p;
+    for (let i = p; i < dx.length; i++) adx = (adx*(p-1)+dx[i])/p;
+    return adx;
+  }
+
+  const adxVal = _adxVal(candles, 14);
+  if (adxVal === null || adxVal < adxMin) {
+    return { price, signal: "NEUTRAL", reason: `SYNAPSE-T: ADX ${adxVal?.toFixed(1)||"?"} < ${adxMin} — konsolidacija, preskačem` };
+  }
+
+  // Proslijedi na SYNAPSE-7 logiku s minSig=4
+  const result = analyzeSynapse7(candles, { ...cfg, minSig });
+
+  // Prepiši reason s SYNAPSE-T labelom
+  if (result.signal !== "NEUTRAL") {
+    result.reason = result.reason.replace("SYNAPSE-7", "SYNAPSE-T") + ` ADX:${adxVal.toFixed(1)}`;
+  } else {
+    result.reason = `SYNAPSE-T: Score ↑${result.bullScore}/5 ↓${result.bearScore}/5 (min ${minSig}) | ADX:${adxVal.toFixed(1)}`;
+  }
+  return result;
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────────
 
 function fmtPrice(p) {
@@ -658,7 +717,7 @@ function writeEntryCsv(pid, entry) {
     fee, "OPEN",
     fmtPrice(entry.sl), fmtPrice(entry.tp),
     entry.orderId || "", mode, pid,
-    `"${entry.strategy} | SL ${SL_PCT}% TP ${TP_PCT}%"`,
+    `"${entry.strategy} | SL ${entry.slPct??SL_PCT}% TP ${entry.tpPct??TP_PCT}%"`,
   ].join(",");
 
   appendFileSync(csvFilePath(pid), row + "\n");
@@ -780,10 +839,10 @@ export async function run() {
 
         let result;
         switch (pDef.strategy) {
-          case "mega":        result = analyzeMega(candles, pDef.params);        break;
-          case "three_layer": result = analyzeThreeLayer(candles, pDef.params);  break;
-          case "synapse7":    result = analyzeSynapse7(candles, pDef.params);    break;
-          default:            result = analyzeEmaRsi(candles, pDef.params);      break;
+          case "mega":        result = analyzeMega(candles, pDef.params);           break;
+          case "synapse7":    result = analyzeSynapse7(candles, pDef.params);       break;
+          case "synapse_t":   result = analyzeSynapseT(candles, pDef.params);       break;
+          default:            result = analyzeEmaRsi(candles, pDef.params);         break;
         }
 
         const { signal, reason } = result;
@@ -793,9 +852,11 @@ export async function run() {
           continue;
         }
 
-        // Fiksni SL 2% / TP 4%
-        const slDist = price * (SL_PCT / 100);
-        const tpDist = price * (TP_PCT / 100);
+        // SL/TP — per-portfolio (fallback na globalne konstante)
+        const slPct  = pDef.slPct ?? SL_PCT;
+        const tpPct  = pDef.tpPct ?? TP_PCT;
+        const slDist = price * (slPct / 100);
+        const tpDist = price * (tpPct / 100);
         const sl = signal === "LONG" ? price - slDist : price + slDist;
         const tp = signal === "LONG" ? price + tpDist : price - tpDist;
 
@@ -812,7 +873,7 @@ export async function run() {
 
         const timestamp = new Date().toISOString();
         const orderId   = `PAPER-${Date.now()}`;
-        const entry = { symbol, signal, price, sl, tp, tradeSize, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe };
+        const entry = { symbol, signal, price, sl, tp, tradeSize, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct };
 
         if (PAPER_TRADING) {
           addPosition(pid, entry);

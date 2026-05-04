@@ -13,10 +13,10 @@ const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" 
 const START_CAPITAL = 1000;
 
 const PORTFOLIO_DEFS = [
-  { id: "ema_rsi",     name: "EMA+RSI",   color: "#388bfd", emoji: "📊" },
-  { id: "three_layer", name: "3-Layer",   color: "#bc8cff", emoji: "🔷" },
-  { id: "mega",        name: "MEGA",      color: "#00c48c", emoji: "🚀" },
-  { id: "synapse7",    name: "SYNAPSE-7", color: "#f7b731", emoji: "🧠" },
+  { id: "ema_rsi",   name: "EMA+RSI",   color: "#388bfd", emoji: "📊" },
+  { id: "mega",      name: "MEGA",      color: "#00c48c", emoji: "🚀" },
+  { id: "synapse7",  name: "SYNAPSE-7", color: "#f7b731", emoji: "🧠" },
+  { id: "synapse_t", name: "SYNAPSE-T", color: "#e85d9a", emoji: "🎯" },
 ];
 
 // ─── All symbols ───────────────────────────────────────────────────────────────
@@ -134,7 +134,7 @@ function hadCross(e9, e21, bars = 5) {
   return { up, dn };
 }
 
-function scanSymbol(candles, emaRsiCfg, threeLayerCfg, megaCfg, synapse7Cfg = {}) {
+function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, synapseTCfg = {}) {
   const closes = candles.map(c => c.close);
   const price  = closes[closes.length - 1];
   const n      = closes.length;
@@ -152,12 +152,10 @@ function scanSymbol(candles, emaRsiCfg, threeLayerCfg, megaCfg, synapse7Cfg = {}
   const ema21  = e21Arr[n - 1];
   const ema50  = _ema(closes, 50);
   const ema55  = _ema(closes, 55);
-  const ema145 = _ema(closes, 145);
   const ema200 = _ema(closes, 200);
   const rsi    = _rsi(closes, 14);
   const adx    = _adx(candles, 14);
   const chop   = _chop(candles, 14);
-  const hist   = _macdHist(closes, 12, 26, 9);
 
   // EMA bias (neovisno o crossu — uvijek vidljivo)
   const emaBias = ema9 && ema21 ? (ema9 > ema21 ? "↑" : "↓") : "—";
@@ -174,19 +172,6 @@ function scanSymbol(candles, emaRsiCfg, threeLayerCfg, megaCfg, synapse7Cfg = {}
       const setupShort = price < ema50 && rsi >= rsiShortLo && rsi <= rsiShortHi && ema9 < ema21;
       if (setupLong)  emaRsiSig = "SETUP↑";
       if (setupShort) emaRsiSig = "SETUP↓";
-    }
-  }
-
-  // ── 3-Layer signal ──
-  let threeLayerSig = "—";
-  if (ema9 && ema21 && ema145 && hist !== null) {
-    if (crossUp   && hist > 0 && price > ema145) threeLayerSig = "LONG";
-    if (crossDown && hist < 0 && price < ema145) threeLayerSig = "SHORT";
-    if (threeLayerSig === "—") {
-      const setupLong  = hist > 0 && price > ema145 && ema9 > ema21;
-      const setupShort = hist < 0 && price < ema145 && ema9 < ema21;
-      if (setupLong)  threeLayerSig = "SETUP↑";
-      if (setupShort) threeLayerSig = "SETUP↓";
     }
   }
 
@@ -265,13 +250,48 @@ function scanSymbol(candles, emaRsiCfg, threeLayerCfg, megaCfg, synapse7Cfg = {}
     else if (bearCnt === minSig - 1 && scaleDn >= 3) synapse7Sig = "SETUP↓";
   }
 
+  // ── SYNAPSE-T: SYNAPSE-7 + ADX obvezan + minSig 4/5 ──────────────────────
+  let synapseTSig = "—";
+  {
+    const { minSig = 4, adxMin = 22 } = synapseTCfg;
+    // ADX pre-filter — ako ADX prenizak, preskačemo (konsolidacija)
+    if (adx !== null && adx >= adxMin) {
+      const scales = [[3,11],[7,15],[13,21],[19,29],[29,47],[45,55]];
+      let scaleUp = 0, scaleDn = 0;
+      for (const [f, s] of scales) {
+        const ef = _ema(closes, f), es = _ema(closes, s);
+        if (ef && es) { if (ef > es) scaleUp++; else scaleDn++; }
+      }
+      const scaleSig = scaleUp >= 4 ? 1 : scaleDn >= 4 ? -1 : 0;
+      const rsiVal   = _rsi(closes, 14);
+      const rsiMomSig = rsiVal !== null ? (rsiVal > 55 ? 1 : rsiVal < 45 ? -1 : 0) : 0;
+      const opens = candles.map(c => c.open);
+      const vols  = candles.map(c => c.volume || 0);
+      const cvdLen = Math.min(20, candles.length);
+      let cvdSum = 0;
+      for (let i = candles.length - cvdLen; i < candles.length; i++) {
+        const sign = closes[i] > opens[i] ? 1 : closes[i] < opens[i] ? -1 : 0;
+        cvdSum += sign * vols[i];
+      }
+      const cvdSig   = cvdSum > 0 ? 1 : cvdSum < 0 ? -1 : 0;
+      const trendSig = (ema55 && price > ema55) ? 1 : (ema55 && price < ema55) ? -1 : 0;
+      const adxSig   = ema9 > ema21 ? 1 : -1;  // ADX already confirmed trending
+      const bullCnt  = [scaleSig, rsiMomSig, cvdSig, trendSig, adxSig].filter(v => v === 1).length;
+      const bearCnt  = [scaleSig, rsiMomSig, cvdSig, trendSig, adxSig].filter(v => v === -1).length;
+      if      (bullCnt >= minSig) synapseTSig = "LONG";
+      else if (bearCnt >= minSig) synapseTSig = "SHORT";
+      else if (bullCnt === minSig - 1) synapseTSig = "SETUP↑";
+      else if (bearCnt === minSig - 1) synapseTSig = "SETUP↓";
+    }
+  }
+
   return {
     price, emaBias,
     rsi: rsi?.toFixed(1) ?? "—",
     adx: adx?.toFixed(1) ?? "—",
     chop: chop?.toFixed(1) ?? "—",
     trend: trendLabel,
-    emaRsiSig, threeLayerSig, megaSig, synapse7Sig,
+    emaRsiSig, megaSig, synapse7Sig, synapseTSig,
   };
 }
 
@@ -285,10 +305,10 @@ async function runScan(rules) {
   if (_scanRunning) return _scanCache;
   _scanRunning = true;
   const cfg = rules?.strategies || {};
-  const emaRsiCfg    = cfg.ema_rsi?.params     || {};
-  const threeLayerCfg= cfg.three_layer?.params  || {};
-  const megaCfg      = cfg.mega?.params          || {};
-  const synapse7Cfg  = cfg.synapse7?.params      || {};
+  const emaRsiCfg   = cfg.ema_rsi?.params    || {};
+  const megaCfg     = cfg.mega?.params        || {};
+  const synapse7Cfg = cfg.synapse7?.params    || {};
+  const synapseTCfg = cfg.synapse_t?.params   || {};
 
   const results = [];
   // Fetch all symbols in parallel (limit concurrency to avoid rate limit)
@@ -306,7 +326,7 @@ async function runScan(rules) {
           high: parseFloat(k[2]), low: parseFloat(k[3]), close: parseFloat(k[4]),
           volume: parseFloat(k[5] || 0),
         }));
-        const s = scanSymbol(candles, emaRsiCfg, threeLayerCfg, megaCfg, synapse7Cfg);
+        const s = scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg, synapseTCfg);
         results.push({ symbol: sym, ...s });
       } catch (e) {
         results.push({ symbol: sym, error: e.message });
@@ -466,7 +486,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <span style="font-size:22px">${def.emoji}</span>
         <div>
           <div class="port-name" style="color:${def.color}">${def.name}</div>
-          <div class="port-subtitle">Portfolio ${i + 1} · ${tf} · SL 2% / TP 4% · 25x</div>
+          <div class="port-subtitle">Portfolio ${i + 1} · ${tf} · SL ${def.id==="synapse_t"?"1.5":"2"}% / TP ${def.id==="synapse_t"?"3":"4"}% · 25x</div>
         </div>
       </div>
       <div class="port-equity" style="color:${eqCol}">$${s.equity.toFixed(2)}</div>
@@ -687,7 +707,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="logo">🤖</div>
       <div>
         <div class="title">Trading Bot — 3 Portfolia</div>
-        <div class="subtitle">EMA+RSI(${tfMap.ema_rsi||"1H"}) · 3-Layer(${tfMap.three_layer||"4H"}) · MEGA(${tfMap.mega||"15m"}) · 🧠SYNAPSE-7(${tfMap.synapse7||"15m"}) &nbsp;|&nbsp; SL 2% / TP 4% · 25x</div>
+        <div class="subtitle">EMA+RSI(${tfMap.ema_rsi||"1H"}) · MEGA(${tfMap.mega||"15m"}) · 🧠SYNAPSE-7(${tfMap.synapse7||"15m"}) · 🎯SYNAPSE-T(${tfMap.synapse_t||"15m"}) &nbsp;|&nbsp; 25x</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -737,9 +757,9 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <th>ADX</th>
             <th>Trend</th>
             <th style="color:#388bfd">📊 EMA+RSI</th>
-            <th style="color:#bc8cff">🔷 3-Layer</th>
             <th style="color:#00c48c">🚀 MEGA</th>
             <th style="color:#f7b731">🧠 SYNAPSE-7</th>
+            <th style="color:#e85d9a">🎯 SYNAPSE-T</th>
           </tr>
         </thead>
         <tbody id="scan-tbody">
@@ -876,16 +896,16 @@ async function doScan() {
 
     // Priority sort: LONG/SHORT first, SETUP second, neutral last
     function priority(s) {
-      const hasSignal = s.emaRsiSig==="LONG"||s.emaRsiSig==="SHORT"||s.threeLayerSig==="LONG"||s.threeLayerSig==="SHORT"||s.megaSig==="LONG"||s.megaSig==="SHORT"||s.synapse7Sig==="LONG"||s.synapse7Sig==="SHORT";
-      const hasSetup  = s.emaRsiSig?.startsWith("SETUP")||s.threeLayerSig?.startsWith("SETUP")||s.megaSig?.startsWith("SETUP")||s.synapse7Sig?.startsWith("SETUP");
+      const hasSignal = s.emaRsiSig==="LONG"||s.emaRsiSig==="SHORT"||s.megaSig==="LONG"||s.megaSig==="SHORT"||s.synapse7Sig==="LONG"||s.synapse7Sig==="SHORT"||s.synapseTSig==="LONG"||s.synapseTSig==="SHORT";
+      const hasSetup  = s.emaRsiSig?.startsWith("SETUP")||s.megaSig?.startsWith("SETUP")||s.synapse7Sig?.startsWith("SETUP")||s.synapseTSig?.startsWith("SETUP");
       return hasSignal ? 0 : hasSetup ? 1 : 2;
     }
     results.sort((a, b) => priority(a) - priority(b));
 
     tbody.innerHTML = results.map((s, i) => {
       if (s.error) return '<tr><td colspan="11" style="color:#ff4d4d">' + s.symbol + ': ' + s.error + '</td></tr>';
-      const hasSignal = ["LONG","SHORT"].includes(s.emaRsiSig) || ["LONG","SHORT"].includes(s.threeLayerSig) || ["LONG","SHORT"].includes(s.megaSig) || ["LONG","SHORT"].includes(s.synapse7Sig);
-      const hasSetup  = (s.emaRsiSig||"").startsWith("SETUP") || (s.threeLayerSig||"").startsWith("SETUP") || (s.megaSig||"").startsWith("SETUP") || (s.synapse7Sig||"").startsWith("SETUP");
+      const hasSignal = ["LONG","SHORT"].includes(s.emaRsiSig) || ["LONG","SHORT"].includes(s.megaSig) || ["LONG","SHORT"].includes(s.synapse7Sig) || ["LONG","SHORT"].includes(s.synapseTSig);
+      const hasSetup  = (s.emaRsiSig||"").startsWith("SETUP") || (s.megaSig||"").startsWith("SETUP") || (s.synapse7Sig||"").startsWith("SETUP") || (s.synapseTSig||"").startsWith("SETUP");
       const rowCls = hasSignal ? "any-signal" : "";
       const trendCol = s.trend && s.trend.includes("↑") ? "#00c48c" : s.trend && s.trend.includes("↓") ? "#ff4d4d" : "#8b949e";
       const rsiNum = parseFloat(s.rsi);
@@ -900,16 +920,16 @@ async function doScan() {
         '<td style="color:#8b949e">' + (s.adx || "—") + '</td>' +
         '<td style="color:' + trendCol + ';font-size:12px">' + (s.trend || "—") + '</td>' +
         '<td>' + sigHtml(s.emaRsiSig) + '</td>' +
-        '<td>' + sigHtml(s.threeLayerSig) + '</td>' +
         '<td>' + sigHtml(s.megaSig) + '</td>' +
         '<td>' + sigHtml(s.synapse7Sig) + '</td>' +
+        '<td>' + sigHtml(s.synapseTSig) + '</td>' +
         '</tr>';
     }).join("");
 
     // Count
-    const longs  = results.filter(s => s.emaRsiSig==="LONG"  || s.threeLayerSig==="LONG"  || s.megaSig==="LONG"  || s.synapse7Sig==="LONG").length;
-    const shorts = results.filter(s => s.emaRsiSig==="SHORT" || s.threeLayerSig==="SHORT" || s.megaSig==="SHORT" || s.synapse7Sig==="SHORT").length;
-    const setups = results.filter(s => (s.emaRsiSig||"").startsWith("SETUP") || (s.threeLayerSig||"").startsWith("SETUP") || (s.megaSig||"").startsWith("SETUP") || (s.synapse7Sig||"").startsWith("SETUP")).length;
+    const longs  = results.filter(s => s.emaRsiSig==="LONG"  || s.megaSig==="LONG"  || s.synapse7Sig==="LONG"  || s.synapseTSig==="LONG").length;
+    const shorts = results.filter(s => s.emaRsiSig==="SHORT" || s.megaSig==="SHORT" || s.synapse7Sig==="SHORT" || s.synapseTSig==="SHORT").length;
+    const setups = results.filter(s => (s.emaRsiSig||"").startsWith("SETUP") || (s.megaSig||"").startsWith("SETUP") || (s.synapse7Sig||"").startsWith("SETUP") || (s.synapseTSig||"").startsWith("SETUP")).length;
     document.getElementById("scan-ts").textContent += " | ▲ " + longs + " LONG · ▼ " + shorts + " SHORT · ◈ " + setups + " SETUP";
 
   } catch(e) {

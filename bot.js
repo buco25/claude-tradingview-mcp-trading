@@ -1,12 +1,14 @@
 /**
- * Trading Bot — 3-Portfolio Mode
+ * Trading Bot — 4-Portfolio Mode
  *
- * Portfolio 1 — EMA+RSI  → 1H  | XAUUSDT DOGEUSDT NEARUSDT AVAXUSDT RIVERUSDT ADAUSDT ...
- * Portfolio 2 — 3-Layer  → 4H  | ETHUSDT SUIUSDT AAVEUSDT ORDIUSDT TAOUSDT WLDUSDT ...
- * Portfolio 3 — MEGA     → 15m | SOLUSDT XAGUSDT HYPEUSDT LINKUSDT PEPEUSDT ZECUSDT ...
+ * Portfolio 1 — EMA+RSI    → 1H  | SL 2%  / TP 4%
+ * Portfolio 2 — MEGA       → 15m | SL 2%  / TP 4%
+ * Portfolio 3 — SYNAPSE-7  → 15m | SL 2%  / TP 4%
+ * Portfolio 4 — SYNAPSE-T  → 15m | SL 1.5%/ TP 3%  (ADX filter + minSig 4/5)
  *
- * Fiksni SL 2% / TP 4% / R:R 1:2 | Margin 2% × $1000 | 25x leverage
- * Razdvojeni TF-ovi smanjuju korelaciju između portfolia
+ * Risk-based sizing: notional = (equity × 2%) / slPct%
+ *   → SL hit = točno 2% equity gubitak, bez obzira na SL%
+ *   → 25x leverage | START_CAPITAL $1000 po portfoliju
  */
 
 import "dotenv/config";
@@ -723,6 +725,26 @@ function writeEntryCsv(pid, entry) {
   appendFileSync(csvFilePath(pid), row + "\n");
 }
 
+// ─── Portfolio Equity ────────────────────────────────────────────────────────────
+// Čita CSV i vraća START_CAPITAL + suma svih zatvorenih Net P&L redova.
+// "OPEN" u koloni Net P&L su entry redovi — preskačemo ih.
+function getPortfolioEquity(pid) {
+  const f = csvFilePath(pid);
+  if (!existsSync(f)) return START_CAPITAL;
+  try {
+    const lines = readFileSync(f, "utf8").trim().split("\n");
+    let closedPnl = 0;
+    for (let i = 1; i < lines.length; i++) {   // preskoči header
+      const cols = lines[i].split(",");
+      const netPnlStr = cols[9]?.trim();        // indeks 9 = Net P&L
+      if (!netPnlStr || netPnlStr === "OPEN") continue;
+      const val = parseFloat(netPnlStr);
+      if (isFinite(val)) closedPnl += val;
+    }
+    return START_CAPITAL + closedPnl;
+  } catch { return START_CAPITAL; }
+}
+
 function writeExitCsv(pid, pos, exitPrice, reason, pnl) {
   const now     = new Date();
   const date    = now.toISOString().slice(0, 10);
@@ -860,9 +882,12 @@ export async function run() {
         const sl = signal === "LONG" ? price - slDist : price + slDist;
         const tp = signal === "LONG" ? price + tpDist : price - tpDist;
 
-        // Veličina pozicije: 2% × $1000 = $20 margin | $300 notional
-        const margin    = START_CAPITAL * (RISK_PCT / 100);
-        const tradeSize = margin * LEVERAGE;
+        // Risk-based position sizing: SL gubitak = točno RISK_PCT% trenutne equity
+        // notional = riskAmount / slPct  →  SL hit = -riskAmount, TP hit = +riskAmount*(tpPct/slPct)
+        const equity     = getPortfolioEquity(pid);           // $1000 + sve zatvorene dobiti/gubitke
+        const riskAmount = equity * (RISK_PCT / 100);         // 2% equity (npr. $20 na startu)
+        const tradeSize  = riskAmount / (slPct / 100);        // notional (npr. $20/0.02=$1000 ili $20/0.015=$1333)
+        const margin     = tradeSize / LEVERAGE;              // za prikaz (npr. $40 ili $53.33)
 
         if (!checkDailyLimit(pid)) {
           console.log(`  ❌ [${pDef.name}] Dnevni limit dostignut`);
@@ -878,7 +903,7 @@ export async function run() {
         if (PAPER_TRADING) {
           addPosition(pid, entry);
           writeEntryCsv(pid, entry);
-          await tg(`📋 PAPER [${pDef.name}/${pDef.timeframe}] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b>\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}\nNotional: $${tradeSize.toFixed(0)} | Margin: $${margin.toFixed(0)} | ${LEVERAGE}x`);
+          await tg(`📋 PAPER [${pDef.name}/${pDef.timeframe}] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b>\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}\nEquity: $${equity.toFixed(2)} | Risk: $${riskAmount.toFixed(2)} | Notional: $${tradeSize.toFixed(0)} | Margin: $${margin.toFixed(2)} | ${LEVERAGE}x`);
         } else {
           try {
             const order = await placeBitGetOrder(symbol, signal, tradeSize, price, sl, tp);

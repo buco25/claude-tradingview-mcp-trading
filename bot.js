@@ -638,6 +638,7 @@ function addPosition(pid, entry) {
     entryPrice: entry.price,
     quantity:   entry.tradeSize / entry.price,
     totalUSD:   entry.tradeSize,
+    margin:     entry.margin,
     sl:         entry.sl,
     tp:         entry.tp,
     orderId:    entry.orderId,
@@ -913,7 +914,7 @@ export async function run() {
 
         const timestamp = new Date().toISOString();
         const orderId   = `PAPER-${Date.now()}`;
-        const entry = { symbol, signal, price, sl, tp, tradeSize, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct };
+        const entry = { symbol, signal, price, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct };
 
         if (PAPER_TRADING) {
           addPosition(pid, entry);

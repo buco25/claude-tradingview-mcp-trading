@@ -520,6 +520,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <div><label>SL</label><span class="red">${fmtP(p.sl)}</span></div>
             <div><label>TP</label><span class="green">${fmtP(p.tp)}</span></div>
             <div><label>Notional</label><span>$${p.totalUSD.toFixed(2)}</span></div>
+            <div><label>Margin (tvoj $)</label><span style="color:#f7b731;font-weight:700">$${(p.margin ?? p.totalUSD / 25).toFixed(2)}</span></div>
             <div><label>Qty</label><span>${p.quantity.toFixed(4)}</span></div>
             <div><label>Otvoreno</label><span>${(p.openedAt || "").slice(0,16).replace("T"," ")}</span></div>
           </div>

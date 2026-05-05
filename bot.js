@@ -25,6 +25,7 @@ const RISK_PCT      = 2.0;    // % margine po tradeu
 const SL_PCT        = 2.0;    // fiksni SL %
 const TP_PCT        = 4.0;    // fiksni TP %
 const MAX_TRADES_PER_DAY = 100;
+const MAX_OPEN_PER_PORTFOLIO = 5;  // max otvorenih pozicija po portfoliju
 
 const PAPER_TRADING = process.env.PAPER_TRADING !== "false";
 const BITGET_DEMO   = process.env.BITGET_DEMO === "true";
@@ -863,12 +864,24 @@ export async function run() {
       continue;
     }
 
-    const openSymbols = loadPositions(pid).map(p => p.symbol);
+    const openPositions = loadPositions(pid);
+    const openSymbols   = openPositions.map(p => p.symbol);
+
+    if (openPositions.length >= MAX_OPEN_PER_PORTFOLIO) {
+      console.log(`  🔒 [${pDef.name}] Max ${MAX_OPEN_PER_PORTFOLIO} otvorenih pozicija dostignut (${openPositions.length}) — preskačem skeniranje`);
+      continue;
+    }
 
     for (const symbol of pDef.symbols) {
       if (openSymbols.includes(symbol)) {
         console.log(`  ⏭️  [${pDef.name}] ${symbol} — pozicija već otvorena`);
         continue;
+      }
+
+      // Provjeri limit ponovo unutar petlje jer se može popuniti
+      if (loadPositions(pid).length >= MAX_OPEN_PER_PORTFOLIO) {
+        console.log(`  🔒 [${pDef.name}] Max ${MAX_OPEN_PER_PORTFOLIO} dostignut — zaustavljam skeniranje`);
+        break;
       }
 
       try {

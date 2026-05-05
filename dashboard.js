@@ -22,9 +22,10 @@ const PORTFOLIO_DEFS = [
 // ─── All symbols ───────────────────────────────────────────────────────────────
 
 const ALL_SYMBOLS = [
-  "XAUUSDT","DOGEUSDT","NEARUSDT","AVAXUSDT","RIVERUSDT","ADAUSDT",
-  "ETHUSDT","SUIUSDT","AAVEUSDT","ORDIUSDT","TAOUSDT","WLDUSDT","TRUMPUSDT","XRPUSDT",
+  "XAUUSDT","DOGEUSDT","NEARUSDT","RIVERUSDT","ADAUSDT",
+  "ETHUSDT","SUIUSDT","TAOUSDT",
   "SOLUSDT","XAGUSDT","HYPEUSDT","LINKUSDT","PEPEUSDT","ZECUSDT","BTCUSDT",
+  // Uklonjeni (loš WR): ORDIUSDT, WLDUSDT, TRUMPUSDT, XRPUSDT, AVAXUSDT, AAVEUSDT
 ];
 
 // ─── Scanner indicator helpers ─────────────────────────────────────────────────

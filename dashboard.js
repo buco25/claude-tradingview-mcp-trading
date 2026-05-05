@@ -739,7 +739,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <div class="scan-card">
     <div class="scan-header">
       <div>
-        <div class="chart-title" style="margin-bottom:2px">🔍 Live Scanner — 21 simbola × 4 strategije</div>
+        <div class="chart-title" style="margin-bottom:2px">🔍 Live Scanner — ${ALL_SYMBOLS.length} simbola × 4 strategije</div>
         <div style="font-size:12px;color:var(--text-muted)">Signal = EMA9/21 cross + filteri ispunjeni | Cache 90s</div>
       </div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -885,7 +885,7 @@ async function doScan() {
   const tbody = document.getElementById("scan-tbody");
   btn.disabled = true;
   btn.innerHTML = '<span class="spin">⟳</span> Skenira...';
-  tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:24px;color:#8b949e"><span class="spin">⟳</span> Fetcham 21 simbola na 1H...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:24px;color:#8b949e"><span class="spin">⟳</span> Fetcham ${ALL_SYMBOLS.length} simbola...</td></tr>';
 
   try {
     const r = await fetch("/api/scan");

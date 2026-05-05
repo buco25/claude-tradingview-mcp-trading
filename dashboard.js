@@ -980,13 +980,25 @@ const server = http.createServer(async (req, res) => {
   // Sve ostalo — auth
   if (!checkAuth(req, res)) return;
 
-  // Reset positions
+  // Reset positions (samo otvorene)
   if (url.pathname === "/api/reset-positions" && req.method === "POST") {
     for (const def of PORTFOLIO_DEFS) {
       writeFileSync(`${DATA_DIR}/open_positions_${def.id}.json`, "[]");
     }
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ success: true, message: "Sve 3 portfolia resetirana", timestamp: new Date().toISOString() }));
+    res.end(JSON.stringify({ success: true, message: `${PORTFOLIO_DEFS.length} portfolia resetirana (samo open)`, timestamp: new Date().toISOString() }));
+    return;
+  }
+
+  // Full reset — briše i CSV povijest i open pozicije → equity natrag na $1000
+  if (url.pathname === "/api/reset-full" && req.method === "POST") {
+    const CSV_HEADERS = "Date,Time (UTC),Exchange,Symbol,Side,Quantity,Price,Total USD,Fee (est.),Net P&L,SL,TP,Order ID,Mode,Portfolio,Notes";
+    for (const def of PORTFOLIO_DEFS) {
+      writeFileSync(`${DATA_DIR}/open_positions_${def.id}.json`, "[]");
+      writeFileSync(`${DATA_DIR}/trades_${def.id}.csv`, CSV_HEADERS + "\n");
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ success: true, message: `Full reset — ${PORTFOLIO_DEFS.length} portfolia, equity natrag na $1000`, timestamp: new Date().toISOString() }));
     return;
   }
 

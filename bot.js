@@ -854,8 +854,14 @@ function writeExitCsv(pid, pos, exitPrice, reason, pnl) {
 // ─── BitGet Execution ────────────────────────────────────────────────────────────
 
 function signBitGet(timestamp, method, path, body = "") {
-  return crypto.createHmac("sha256", BITGET.secretKey)
+  return crypto.createHmac("sha256", BITGET.secretKey.trim())
     .update(`${timestamp}${method}${path}${body}`).digest("base64");
+}
+
+// BitGet V2 zahtijeva HMAC-SHA256 potpis i za passphrase
+function signedPassphrase() {
+  return crypto.createHmac("sha256", BITGET.secretKey.trim())
+    .update(BITGET.passphrase.trim()).digest("base64");
 }
 
 async function bitgetPost(path, body) {
@@ -863,14 +869,18 @@ async function bitgetPost(path, body) {
   const b = JSON.stringify(body);
   const headers = {
     "Content-Type": "application/json",
-    "ACCESS-KEY":        BITGET.apiKey,
+    "ACCESS-KEY":        BITGET.apiKey.trim(),
     "ACCESS-SIGN":       signBitGet(timestamp, "POST", path, b),
     "ACCESS-TIMESTAMP":  timestamp,
-    "ACCESS-PASSPHRASE": BITGET.passphrase,
+    "ACCESS-PASSPHRASE": signedPassphrase(),
   };
   if (BITGET_DEMO) headers["x-simulated-trading"] = "1";
   const res = await fetch(`${BITGET.baseUrl}${path}`, { method: "POST", headers, body: b });
-  return res.json();
+  const data = await res.json();
+  if (data.code !== "00000") {
+    console.log(`  ⚠️  bitgetPost ${path} → code=${data.code} msg=${data.msg}`);
+  }
+  return data;
 }
 
 async function setupSymbol(symbol) {
@@ -909,14 +919,15 @@ async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp) {
   const body = JSON.stringify(orderBody);
   const headers = {
     "Content-Type": "application/json",
-    "ACCESS-KEY":        BITGET.apiKey,
+    "ACCESS-KEY":        BITGET.apiKey.trim(),
     "ACCESS-SIGN":       signBitGet(timestamp, "POST", path, body),
     "ACCESS-TIMESTAMP":  timestamp,
-    "ACCESS-PASSPHRASE": BITGET.passphrase,
+    "ACCESS-PASSPHRASE": signedPassphrase(),
   };
   if (BITGET_DEMO) headers["x-simulated-trading"] = "1";
   const res  = await fetch(`${BITGET.baseUrl}${path}`, { method: "POST", headers, body });
   const data = await res.json();
+  console.log(`  📨 BitGet order response: code=${data.code} msg=${data.msg}`);
   if (data.code !== "00000") throw new Error(`BitGet: ${data.msg}`);
   return data.data;
 }

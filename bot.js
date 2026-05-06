@@ -890,16 +890,25 @@ async function setupSymbol(symbol) {
   });
   if (mm.code !== "00000") console.log(`  ⚠️  marginMode ${symbol}: ${mm.msg}`);
 
-  // 2) Leverage 30x za long i short (hedge mode)
+  // 2) Leverage za long i short (hedge mode) — fallback na 20x/10x ako simbol ne podržava LEVERAGE
   for (const holdSide of ["long", "short"]) {
-    const lv = await bitgetPost("/api/v2/mix/account/set-leverage", {
-      symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
-      leverage: String(LEVERAGE), holdSide,
-    });
-    if (lv.code !== "00000") console.log(`  ⚠️  leverage ${symbol} ${holdSide}: ${lv.msg}`);
+    let set = false;
+    for (const lev of [LEVERAGE, 20, 10]) {
+      const lv = await bitgetPost("/api/v2/mix/account/set-leverage", {
+        symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
+        leverage: String(lev), holdSide,
+      });
+      if (lv.code === "00000") {
+        if (lev !== LEVERAGE) console.log(`  ℹ️  ${symbol} ${holdSide}: max leverage je ${lev}x (ne ${LEVERAGE}x)`);
+        set = true;
+        break;
+      }
+      console.log(`  ⚠️  leverage ${symbol} ${holdSide} ${lev}x: ${lv.msg}`);
+    }
+    if (!set) console.log(`  ❌  Nije uspjelo postaviti leverage za ${symbol} ${holdSide}`);
   }
 
-  console.log(`  ⚙️  ${symbol}: isolated + ${LEVERAGE}x (long+short)`);
+  console.log(`  ⚙️  ${symbol}: isolated + leverage set (long+short)`);
 }
 
 async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp) {

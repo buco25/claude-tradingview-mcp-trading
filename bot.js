@@ -858,7 +858,35 @@ function signBitGet(timestamp, method, path, body = "") {
     .update(`${timestamp}${method}${path}${body}`).digest("base64");
 }
 
+async function setLeverage(symbol) {
+  const timestamp = Date.now().toString();
+  const path      = "/api/v2/mix/account/set-all-leverage";
+  const orderBody = {
+    symbol, productType: "USDT-FUTURES",
+    marginCoin: "USDT",
+    leverage: String(LEVERAGE),
+  };
+  const body = JSON.stringify(orderBody);
+  const headers = {
+    "Content-Type": "application/json",
+    "ACCESS-KEY":        BITGET.apiKey,
+    "ACCESS-SIGN":       signBitGet(timestamp, "POST", path, body),
+    "ACCESS-TIMESTAMP":  timestamp,
+    "ACCESS-PASSPHRASE": BITGET.passphrase,
+  };
+  if (BITGET_DEMO) headers["x-simulated-trading"] = "1";
+  const res  = await fetch(`${BITGET.baseUrl}${path}`, { method: "POST", headers, body });
+  const data = await res.json();
+  if (data.code !== "00000") {
+    console.log(`  ⚠️  setLeverage ${symbol}: ${data.msg}`);
+  } else {
+    console.log(`  ⚙️  Leverage ${LEVERAGE}x postavljen za ${symbol}`);
+  }
+}
+
 async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp) {
+  // Postavi leverage prije svakog naloga
+  await setLeverage(symbol);
   const quantity  = (sizeUSD / price).toFixed(4);
   const timestamp = Date.now().toString();
   const path      = "/api/v2/mix/order/place-order";

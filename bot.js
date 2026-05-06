@@ -858,38 +858,43 @@ function signBitGet(timestamp, method, path, body = "") {
     .update(`${timestamp}${method}${path}${body}`).digest("base64");
 }
 
-async function setLeverage(symbol) {
-  // Postavlja leverage za long i short (hedge mode zahtijeva oba)
-  const path = "/api/v2/mix/account/set-leverage";
+async function bitgetPost(path, body) {
+  const timestamp = Date.now().toString();
+  const b = JSON.stringify(body);
+  const headers = {
+    "Content-Type": "application/json",
+    "ACCESS-KEY":        BITGET.apiKey,
+    "ACCESS-SIGN":       signBitGet(timestamp, "POST", path, b),
+    "ACCESS-TIMESTAMP":  timestamp,
+    "ACCESS-PASSPHRASE": BITGET.passphrase,
+  };
+  if (BITGET_DEMO) headers["x-simulated-trading"] = "1";
+  const res = await fetch(`${BITGET.baseUrl}${path}`, { method: "POST", headers, body: b });
+  return res.json();
+}
+
+async function setupSymbol(symbol) {
+  // 1) Isolated margin mode
+  const mm = await bitgetPost("/api/v2/mix/account/set-margin-mode", {
+    symbol, productType: "USDT-FUTURES", marginCoin: "USDT", marginMode: "isolated",
+  });
+  if (mm.code !== "00000") console.log(`  ⚠️  marginMode ${symbol}: ${mm.msg}`);
+
+  // 2) Leverage 30x za long i short (hedge mode)
   for (const holdSide of ["long", "short"]) {
-    const timestamp = Date.now().toString();
-    const orderBody = {
-      symbol, productType: "USDT-FUTURES",
-      marginCoin: "USDT",
-      leverage: String(LEVERAGE),
-      holdSide,
-    };
-    const body = JSON.stringify(orderBody);
-    const headers = {
-      "Content-Type": "application/json",
-      "ACCESS-KEY":        BITGET.apiKey,
-      "ACCESS-SIGN":       signBitGet(timestamp, "POST", path, body),
-      "ACCESS-TIMESTAMP":  timestamp,
-      "ACCESS-PASSPHRASE": BITGET.passphrase,
-    };
-    if (BITGET_DEMO) headers["x-simulated-trading"] = "1";
-    const res  = await fetch(`${BITGET.baseUrl}${path}`, { method: "POST", headers, body });
-    const data = await res.json();
-    if (data.code !== "00000") {
-      console.log(`  ⚠️  setLeverage ${symbol} ${holdSide}: ${data.msg}`);
-    }
+    const lv = await bitgetPost("/api/v2/mix/account/set-leverage", {
+      symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
+      leverage: String(LEVERAGE), holdSide,
+    });
+    if (lv.code !== "00000") console.log(`  ⚠️  leverage ${symbol} ${holdSide}: ${lv.msg}`);
   }
-  console.log(`  ⚙️  Leverage ${LEVERAGE}x postavljen za ${symbol} (long+short)`);
+
+  console.log(`  ⚙️  ${symbol}: isolated + ${LEVERAGE}x (long+short)`);
 }
 
 async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp) {
-  // Postavi leverage prije svakog naloga
-  await setLeverage(symbol);
+  // Postavi isolated margin + leverage prije svakog naloga
+  await setupSymbol(symbol);
   const quantity  = (sizeUSD / price).toFixed(4);
   const timestamp = Date.now().toString();
   const path      = "/api/v2/mix/order/place-order";

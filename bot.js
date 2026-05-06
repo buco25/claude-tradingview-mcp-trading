@@ -945,9 +945,8 @@ async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp) {
     marginMode: "isolated", marginCoin: "USDT",
     side: side === "LONG" ? "buy" : "sell",
     tradeSide: "open", orderType: "market", size: quantity,
+    // Bez presetSL/TP — bot sam prati SL/TP svake 5 min (izbjegava okidanje od stale cijene)
   };
-  if (sl) orderBody.presetStopLossPrice   = fmtPrice(sl);
-  if (tp) orderBody.presetTakeProfitPrice = fmtPrice(tp);
   const body = JSON.stringify(orderBody);
   const headers = {
     "Content-Type": "application/json",

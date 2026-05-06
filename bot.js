@@ -38,6 +38,33 @@ const BITGET = {
 // Debug: provjeri jesu li kredencijali učitani
 console.log(`🔑 BitGet key: ${BITGET.apiKey.slice(0,8)}... len=${BITGET.apiKey.length} | pass len=${BITGET.passphrase.length} | secret len=${BITGET.secretKey.length}`);
 
+// Startup auth test — provjera potpisa pri startu
+async function testBitGetAuth() {
+  try {
+    const path = "/api/v2/mix/account/accounts?productType=USDT-FUTURES";
+    const timestamp = Date.now().toString();
+    const sign = crypto.createHmac("sha256", BITGET.secretKey)
+      .update(`${timestamp}GET${path}`).digest("base64");
+    const res = await fetch(`${BITGET.baseUrl}${path}`, {
+      headers: {
+        "ACCESS-KEY":        BITGET.apiKey,
+        "ACCESS-SIGN":       sign,
+        "ACCESS-TIMESTAMP":  timestamp,
+        "ACCESS-PASSPHRASE": BITGET.passphrase,
+        "Content-Type":      "application/json",
+      },
+    });
+    const data = await res.json();
+    if (data.code === "00000") {
+      console.log(`✅ BitGet auth OK — accounts: ${JSON.stringify(data.data?.slice(0,1))}`);
+    } else {
+      console.log(`❌ BitGet auth FAIL — code=${data.code} msg=${data.msg}`);
+    }
+  } catch (e) {
+    console.log(`❌ BitGet auth ERROR: ${e.message}`);
+  }
+}
+
 // ─── Perzistentni direktorij ───────────────────────────────────────────────────
 
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -1022,6 +1049,9 @@ export async function run() {
 
   // Init CSVs
   for (const pid of PORTFOLIO_IDS) initCsv(pid);
+
+  // Provjeri BitGet autentikaciju pri svakom startu
+  if (!PAPER_TRADING) await testBitGetAuth();
 
   const totalSymbols = Object.values(portfolios).reduce((s, p) => s + p.symbols.length, 0);
   const nPort = Object.keys(portfolios).length;

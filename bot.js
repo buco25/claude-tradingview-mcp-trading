@@ -897,6 +897,67 @@ function checkDailyLimit(pid) {
   return true;
 }
 
+// ─── Circuit Breaker ────────────────────────────────────────────────────────────
+// Ako portfolio ima 5 uzastopnih gubitaka → pauza 8 sati.
+// Stanje se čuva na disku (preživi restart).
+
+const CB_LOSSES    = 5;           // broj uzastopnih gubitaka
+const CB_COOLDOWN  = 8 * 60 * 60 * 1000;  // 8 sati u ms
+const CB_FILE      = `${DATA_DIR}/circuit_breaker.json`;
+
+function loadCircuitBreaker() {
+  try { return existsSync(CB_FILE) ? JSON.parse(readFileSync(CB_FILE, "utf8")) : {}; }
+  catch { return {}; }
+}
+
+function saveCircuitBreaker(cb) {
+  writeFileSync(CB_FILE, JSON.stringify(cb, null, 2));
+}
+
+// Vraća true ako smije tradati, false ako je u cooldownu.
+async function checkCircuitBreaker(pid, pName) {
+  const cb = loadCircuitBreaker();
+
+  // 1) Provjeri aktivan cooldown
+  if (cb[pid]?.until) {
+    const remaining = cb[pid].until - Date.now();
+    if (remaining > 0) {
+      const hrs = (remaining / 3600000).toFixed(1);
+      console.log(`  🛑 [${pName}] Circuit breaker aktivan — još ${hrs}h pauze`);
+      return false;
+    }
+  }
+
+  // 2) Provjeri zadnjih N zatvorenih tradova iz CSV-a
+  const f = csvFilePath(pid);
+  if (!existsSync(f)) return true;
+  try {
+    const lines = readFileSync(f, "utf8").trim().split("\n");
+    const exits = lines.slice(1)
+      .filter(l => l.includes("CLOSE_LONG") || l.includes("CLOSE_SHORT"))
+      .slice(-CB_LOSSES);  // zadnjih 5 zatvorenih
+
+    if (exits.length < CB_LOSSES) return true;  // nema dovoljno podataka
+
+    const allLosses = exits.every(l => {
+      const cols = l.split(",");
+      return parseFloat(cols[9] || 0) < 0;  // Net P&L < 0
+    });
+
+    if (allLosses) {
+      const until = Date.now() + CB_COOLDOWN;
+      cb[pid] = { until, triggeredAt: new Date().toISOString(), losses: CB_LOSSES };
+      saveCircuitBreaker(cb);
+      const untilStr = new Date(until).toISOString().slice(11, 16) + " UTC";
+      console.log(`  🛑 [${pName}] CIRCUIT BREAKER — ${CB_LOSSES} uzastopnih gubitaka! Pauza do ${untilStr}`);
+      await tg(`🛑 <b>CIRCUIT BREAKER [${pName}]</b>\n${CB_LOSSES} uzastopnih gubitaka — trading pauziran 8h\nNastavak: ${untilStr}`);
+      return false;
+    }
+  } catch { /* nastavi */ }
+
+  return true;
+}
+
 // ─── Main ───────────────────────────────────────────────────────────────────────
 
 export async function run() {
@@ -928,6 +989,9 @@ export async function run() {
       console.log(`  ⏭️  [${pDef.name}] Preskačem skeniranje — TF ${pDef.timeframe} još nije zatvoren`);
       continue;
     }
+
+    // Circuit breaker — 5 uzastopnih gubitaka → 8h pauza
+    if (!await checkCircuitBreaker(pid, pDef.name)) continue;
 
     const openPositions = loadPositions(pid);
     const openSymbols   = openPositions.map(p => p.symbol);

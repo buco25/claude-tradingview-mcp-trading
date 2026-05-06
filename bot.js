@@ -652,24 +652,86 @@ function addPosition(pid, entry) {
   savePositions(pid, positions);
 }
 
+// ─── Trailing SL/TP ─────────────────────────────────────────────────────────────
+// Aktivira se za strategije s trail podrškom (synapse_t).
+// Koraci od 0.5%: svaki put kad gain dostigne trigger, SL i TP se pomiču gore.
+// Formula:
+//   steps = floor((gainPct − TRAIL_TRIGGER) / TRAIL_STEP)   (0, 1, 2, ...)
+//   newSlPct = TRAIL_TRIGGER + steps × TRAIL_STEP          (2.5, 3.0, 3.5, ...)
+//   newTpPct = origTpPct   + (steps+1) × TRAIL_STEP        (3.5, 4.0, 4.5, ...)
+
+const TRAIL_STRATEGIES = ["synapse_t"];  // koje strategije koriste trail
+const TRAIL_TRIGGER    = 2.5;            // % gain koji aktivira trail
+const TRAIL_STEP       = 0.5;            // korak pomaka SL i TP (%)
+
+function applyTrail(pos, currentPrice) {
+  if (!TRAIL_STRATEGIES.includes(pos.strategy)) return false;
+
+  const entry = pos.entryPrice;
+  const gainPct = pos.side === "LONG"
+    ? (currentPrice - entry) / entry * 100
+    : (entry - currentPrice) / entry * 100;
+
+  if (gainPct < TRAIL_TRIGGER) return false;
+
+  const steps     = Math.floor((gainPct - TRAIL_TRIGGER) / TRAIL_STEP);
+  const origTpPct = pos.side === "LONG"
+    ? (pos.origTp ?? pos.tp - entry) / entry * 100   // origTp za referentni TP
+    : (entry - (pos.origTp ?? pos.tp)) / entry * 100;
+
+  // Izračun novih razina
+  const newSlPct = TRAIL_TRIGGER + steps * TRAIL_STEP;
+  const newTpPct = (pos.origTpPct ?? origTpPct) + (steps + 1) * TRAIL_STEP;
+
+  let newSl, newTp;
+  if (pos.side === "LONG") {
+    newSl = entry * (1 + newSlPct / 100);
+    newTp = entry * (1 + newTpPct / 100);
+    if (newSl <= pos.sl && newTp <= pos.tp) return false;  // ništa novo
+    pos.sl = Math.max(pos.sl, newSl);
+    pos.tp = Math.max(pos.tp, newTp);
+  } else {
+    newSl = entry * (1 - newSlPct / 100);
+    newTp = entry * (1 - newTpPct / 100);
+    if (newSl >= pos.sl && newTp >= pos.tp) return false;
+    pos.sl = Math.min(pos.sl, newSl);
+    pos.tp = Math.min(pos.tp, newTp);
+  }
+
+  // Pohrani originalni TP% za referencu (samo prvi put)
+  if (!pos.origTpPct) pos.origTpPct = origTpPct;
+
+  return true;  // pozicija ažurirana
+}
+
 async function checkPortfolioPositions(pid) {
   const positions = loadPositions(pid);
   if (positions.length === 0) return;
   console.log(`  🔍 [${pid}] Provjera ${positions.length} pozicija`);
 
   const stillOpen = [];
+  let positionsModified = false;
 
   for (const pos of positions) {
     try {
       const candles = await fetchCandles(pos.symbol, pos.timeframe || "1H", 5);
       const bar     = candles[candles.length - 1];
-      let exitPrice = null, exitReason = null;
 
+      // 1) Trail SL/TP ažuriranje (prije provjere SL/TP hita)
+      const trailed = applyTrail(pos, bar.close);
+      if (trailed) {
+        positionsModified = true;
+        console.log(`  📈 TRAIL [${pid}] ${pos.symbol} ${pos.side} | SL→${fmtPrice(pos.sl)} | TP→${fmtPrice(pos.tp)} | Gain: ${((pos.side==="LONG"?(bar.close-pos.entryPrice):(pos.entryPrice-bar.close))/pos.entryPrice*100).toFixed(2)}%`);
+        await tg(`📈 TRAIL [${pid}] ${pos.symbol} ${pos.side}\nNovi SL: ${fmtPrice(pos.sl)} | Novi TP: ${fmtPrice(pos.tp)}`);
+      }
+
+      // 2) Provjera SL/TP hita
+      let exitPrice = null, exitReason = null;
       if (pos.side === "LONG") {
-        if (bar.high >= pos.tp)   { exitPrice = pos.tp; exitReason = "TP dostignut"; }
-        else if (bar.low <= pos.sl) { exitPrice = pos.sl; exitReason = "SL dostignut"; }
+        if (bar.high >= pos.tp)    { exitPrice = pos.tp; exitReason = "TP dostignut"; }
+        else if (bar.low <= pos.sl){ exitPrice = pos.sl; exitReason = "SL dostignut"; }
       } else {
-        if (bar.low  <= pos.tp)   { exitPrice = pos.tp; exitReason = "TP dostignut"; }
+        if (bar.low  <= pos.tp)    { exitPrice = pos.tp; exitReason = "TP dostignut"; }
         else if (bar.high >= pos.sl){ exitPrice = pos.sl; exitReason = "SL dostignut"; }
       }
 
@@ -680,6 +742,7 @@ async function checkPortfolioPositions(pid) {
         console.log(`  ${pnl >= 0 ? "✅ WIN" : "❌ LOSS"} [${pid}] ${pos.symbol} ${pos.side} | P&L ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(4)}`);
         writeExitCsv(pid, pos, exitPrice, exitReason, pnl);
         await tg(`${pnl >= 0 ? "✅ WIN" : "❌ LOSS"} [${pid}] ${pos.symbol} ${pos.side}\nP&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)} | ${exitReason}`);
+        positionsModified = true;
       } else {
         const unrealized = pos.side === "LONG"
           ? (bar.close - pos.entryPrice) * pos.quantity

@@ -495,7 +495,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <div class="port-name" style="color:${def.color}">${def.name}</div>
             ${modeBadge}
           </div>
-          <div class="port-subtitle">Portfolio ${i + 1} · ${tf} · SL ${def.id==="synapse_t"?"1.5":"2"}% / TP ${def.id==="synapse_t"?"3":"4"}% · 25x</div>
+          <div class="port-subtitle">Portfolio ${i + 1} · ${tf} · SL ${def.id==="synapse_t"?"1.5":"2"}% / TP ${def.id==="synapse_t"?"3":"4"}% · 30x</div>
         </div>
       </div>
       <div class="port-equity" style="color:${eqCol}">$${s.equity.toFixed(2)}</div>
@@ -717,7 +717,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="logo">🤖</div>
       <div>
         <div class="title">Trading Bot — 3 Portfolia</div>
-        <div class="subtitle">EMA+RSI(${tfMap.ema_rsi||"1H"}) · MEGA(${tfMap.mega||"15m"}) · 🧠SYNAPSE-7(${tfMap.synapse7||"15m"}) · 🎯SYNAPSE-T(${tfMap.synapse_t||"15m"}) &nbsp;|&nbsp; 25x</div>
+        <div class="subtitle">EMA+RSI(${tfMap.ema_rsi||"1H"}) · MEGA(${tfMap.mega||"15m"}) · 🧠SYNAPSE-7(${tfMap.synapse7||"15m"}) · 🎯SYNAPSE-T(${tfMap.synapse_t||"15m"}) &nbsp;|&nbsp; 30x</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">

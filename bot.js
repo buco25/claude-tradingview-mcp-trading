@@ -19,7 +19,7 @@ import { fileURLToPath } from "url";
 // ─── Config ────────────────────────────────────────────────────────────────────
 
 const TIMEFRAME     = "1H";
-const LEVERAGE      = 25;
+const LEVERAGE      = 30;
 const START_CAPITAL = 1000;   // po portfoliju
 const RISK_PCT      = 2.0;    // % margine po tradeu
 const SL_PCT        = 2.0;    // fiksni SL %

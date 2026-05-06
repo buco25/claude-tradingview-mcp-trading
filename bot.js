@@ -78,13 +78,15 @@ function buildPortfolios(rules) {
       slPct:     2.0, tpPct: 4.0,
     },
     synapse_t: {
-      id:        "synapse_t",
-      name:      "SYNAPSE-T",
-      symbols:   rules.watchlist_synapse_t  || [],
-      strategy:  "synapse_t",
-      params:    rules.strategies.synapse_t?.params || {},
-      timeframe: tfs.synapse_t    || "15m",
-      slPct:     1.5, tpPct: 3.0,
+      id:           "synapse_t",
+      name:         "SYNAPSE-T",
+      symbols:      rules.watchlist_synapse_t  || [],
+      strategy:     "synapse_t",
+      params:       rules.strategies.synapse_t?.params || {},
+      timeframe:    tfs.synapse_t    || "15m",
+      slPct:        1.5, tpPct: 3.0,
+      live:         true,           // ← LIVE trading
+      startCapital: 400,            // ← $400 početni kapital
     },
   };
 }
@@ -794,9 +796,9 @@ function writeEntryCsv(pid, entry) {
 // Stvarna raspoloživa equity = START_CAPITAL + zatvoreni P&L − rizik otvorenih pozicija.
 // Svaka otvorena pozicija "zaključava" točno riskAmount = tradeSize × slPct/100.
 // Na taj način sljedeći trade se uvijek veliča prema trenutno raspoloživom kapitalu.
-function getPortfolioEquity(pid) {
-  // 1) Baza: START_CAPITAL + suma zatvorenih Net P&L iz CSV-a
-  let closedEquity = START_CAPITAL;
+function getPortfolioEquity(pid, startCapital = START_CAPITAL) {
+  // 1) Baza: startCapital + suma zatvorenih Net P&L iz CSV-a
+  let closedEquity = startCapital;
   const f = csvFilePath(pid);
   if (existsSync(f)) {
     try {
@@ -976,10 +978,11 @@ export async function run() {
 
         // Risk-based position sizing: SL gubitak = točno RISK_PCT% trenutne equity
         // notional = riskAmount / slPct  →  SL hit = -riskAmount, TP hit = +riskAmount*(tpPct/slPct)
-        const equity     = getPortfolioEquity(pid);           // $1000 + sve zatvorene dobiti/gubitke
-        const riskAmount = equity * (RISK_PCT / 100);         // 2% equity (npr. $20 na startu)
-        const tradeSize  = riskAmount / (slPct / 100);        // notional (npr. $20/0.02=$1000 ili $20/0.015=$1333)
-        const margin     = tradeSize / LEVERAGE;              // za prikaz (npr. $40 ili $53.33)
+        const startCap   = pDef.startCapital ?? START_CAPITAL;
+        const equity     = getPortfolioEquity(pid, startCap);
+        const riskAmount = equity * (RISK_PCT / 100);
+        const tradeSize  = riskAmount / (slPct / 100);
+        const margin     = tradeSize / LEVERAGE;
 
         if (!checkDailyLimit(pid)) {
           console.log(`  ❌ [${pDef.name}] Dnevni limit dostignut`);
@@ -988,11 +991,13 @@ export async function run() {
 
         console.log(`🎯 [${pDef.name}] ${signal} ${symbol} @ ${fmtPrice(price)} | SL ${fmtPrice(sl)} | TP ${fmtPrice(tp)} | $${tradeSize.toFixed(0)}`);
 
+        const isLive    = pDef.live === true && !PAPER_TRADING;  // live samo ako portfolio to zahtijeva I globalni flag nije paper
         const timestamp = new Date().toISOString();
-        const orderId   = `PAPER-${Date.now()}`;
-        const entry = { symbol, signal, price, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct };
+        const orderId   = `${isLive ? "LIVE" : "PAPER"}-${Date.now()}`;
+        const mode      = isLive ? (BITGET_DEMO ? "DEMO" : "LIVE") : "PAPER";
+        const entry = { symbol, signal, price, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode };
 
-        if (PAPER_TRADING) {
+        if (!isLive) {
           addPosition(pid, entry);
           writeEntryCsv(pid, entry);
           await tg(`📋 PAPER [${pDef.name}/${pDef.timeframe}] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b>\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}\nEquity: $${equity.toFixed(2)} | Risk: $${riskAmount.toFixed(2)} | Notional: $${tradeSize.toFixed(0)} | Margin: $${margin.toFixed(2)} | ${LEVERAGE}x`);
@@ -1002,9 +1007,11 @@ export async function run() {
             entry.orderId = order?.orderId || orderId;
             addPosition(pid, entry);
             writeEntryCsv(pid, entry);
-            console.log(`  ✅ NALOG POSTAVLJEN — ${entry.orderId}`);
+            console.log(`  ✅ LIVE NALOG [${pDef.name}] — ${entry.orderId}`);
+            await tg(`🔴 LIVE [${pDef.name}/${pDef.timeframe}] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b>\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}\nEquity: $${equity.toFixed(2)} | Risk: $${riskAmount.toFixed(2)} | Notional: $${tradeSize.toFixed(0)} | Margin: $${margin.toFixed(2)} | ${LEVERAGE}x`);
           } catch (err) {
-            console.log(`  ❌ NALOG PAO — ${err.message}`);
+            console.log(`  ❌ LIVE NALOG PAO — ${err.message}`);
+            await tg(`❌ LIVE GREŠKA [${pDef.name}] ${symbol}\n${err.message}`);
           }
         }
 

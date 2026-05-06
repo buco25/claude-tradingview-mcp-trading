@@ -859,29 +859,32 @@ function signBitGet(timestamp, method, path, body = "") {
 }
 
 async function setLeverage(symbol) {
-  const timestamp = Date.now().toString();
-  const path      = "/api/v2/mix/account/set-all-leverage";
-  const orderBody = {
-    symbol, productType: "USDT-FUTURES",
-    marginCoin: "USDT",
-    leverage: String(LEVERAGE),
-  };
-  const body = JSON.stringify(orderBody);
-  const headers = {
-    "Content-Type": "application/json",
-    "ACCESS-KEY":        BITGET.apiKey,
-    "ACCESS-SIGN":       signBitGet(timestamp, "POST", path, body),
-    "ACCESS-TIMESTAMP":  timestamp,
-    "ACCESS-PASSPHRASE": BITGET.passphrase,
-  };
-  if (BITGET_DEMO) headers["x-simulated-trading"] = "1";
-  const res  = await fetch(`${BITGET.baseUrl}${path}`, { method: "POST", headers, body });
-  const data = await res.json();
-  if (data.code !== "00000") {
-    console.log(`  ⚠️  setLeverage ${symbol}: ${data.msg}`);
-  } else {
-    console.log(`  ⚙️  Leverage ${LEVERAGE}x postavljen za ${symbol}`);
+  // Postavlja leverage za long i short (hedge mode zahtijeva oba)
+  const path = "/api/v2/mix/account/set-leverage";
+  for (const holdSide of ["long", "short"]) {
+    const timestamp = Date.now().toString();
+    const orderBody = {
+      symbol, productType: "USDT-FUTURES",
+      marginCoin: "USDT",
+      leverage: String(LEVERAGE),
+      holdSide,
+    };
+    const body = JSON.stringify(orderBody);
+    const headers = {
+      "Content-Type": "application/json",
+      "ACCESS-KEY":        BITGET.apiKey,
+      "ACCESS-SIGN":       signBitGet(timestamp, "POST", path, body),
+      "ACCESS-TIMESTAMP":  timestamp,
+      "ACCESS-PASSPHRASE": BITGET.passphrase,
+    };
+    if (BITGET_DEMO) headers["x-simulated-trading"] = "1";
+    const res  = await fetch(`${BITGET.baseUrl}${path}`, { method: "POST", headers, body });
+    const data = await res.json();
+    if (data.code !== "00000") {
+      console.log(`  ⚠️  setLeverage ${symbol} ${holdSide}: ${data.msg}`);
+    }
   }
+  console.log(`  ⚙️  Leverage ${LEVERAGE}x postavljen za ${symbol} (long+short)`);
 }
 
 async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp) {

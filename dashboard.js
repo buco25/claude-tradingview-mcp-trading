@@ -16,7 +16,7 @@ const PORTFOLIO_DEFS = [
   { id: "ema_rsi",   name: "EMA+RSI",   color: "#388bfd", emoji: "📊", startCapital: 1000, live: false },
   { id: "mega",      name: "MEGA",      color: "#00c48c", emoji: "🚀", startCapital: 1000, live: false },
   { id: "synapse7",  name: "SYNAPSE-7", color: "#f7b731", emoji: "🧠", startCapital: 1000, live: false },
-  { id: "synapse_t", name: "SYNAPSE-T", color: "#e85d9a", emoji: "🎯", startCapital:  400, live: true  },
+  { id: "synapse_t", name: "SYNAPSE-T", color: "#e85d9a", emoji: "🎯", startCapital:  399.84, live: true  },
 ];
 
 // ─── All symbols ───────────────────────────────────────────────────────────────
@@ -998,15 +998,19 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Full reset — briše i CSV povijest i open pozicije → equity natrag na $1000
+  // Full reset — briše i CSV povijest i open pozicije za sve ili jedan portfolio
   if (url.pathname === "/api/reset-full" && req.method === "POST") {
     const CSV_HEADERS = "Date,Time (UTC),Exchange,Symbol,Side,Quantity,Price,Total USD,Fee (est.),Net P&L,SL,TP,Order ID,Mode,Portfolio,Notes";
-    for (const def of PORTFOLIO_DEFS) {
+    const body = await new Promise(r => { let d=""; req.on("data",c=>d+=c); req.on("end",()=>r(d)); });
+    let pid = null;
+    try { pid = JSON.parse(body).pid; } catch {}
+    const targets = pid ? PORTFOLIO_DEFS.filter(d => d.id === pid) : PORTFOLIO_DEFS;
+    for (const def of targets) {
       writeFileSync(`${DATA_DIR}/open_positions_${def.id}.json`, "[]");
       writeFileSync(`${DATA_DIR}/trades_${def.id}.csv`, CSV_HEADERS + "\n");
     }
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ success: true, message: `Full reset — ${PORTFOLIO_DEFS.length} portfolia, equity natrag na $1000`, timestamp: new Date().toISOString() }));
+    res.end(JSON.stringify({ success: true, message: `Full reset — ${targets.map(d=>d.id).join(", ")}`, timestamp: new Date().toISOString() }));
     return;
   }
 

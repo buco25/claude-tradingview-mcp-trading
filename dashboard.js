@@ -13,10 +13,10 @@ const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" 
 const START_CAPITAL = 1000;
 
 const PORTFOLIO_DEFS = [
-  { id: "ema_rsi",   name: "EMA+RSI",   color: "#388bfd", emoji: "📊" },
-  { id: "mega",      name: "MEGA",      color: "#00c48c", emoji: "🚀" },
-  { id: "synapse7",  name: "SYNAPSE-7", color: "#f7b731", emoji: "🧠" },
-  { id: "synapse_t", name: "SYNAPSE-T", color: "#e85d9a", emoji: "🎯" },
+  { id: "ema_rsi",   name: "EMA+RSI",   color: "#388bfd", emoji: "📊", startCapital: 1000, live: false },
+  { id: "mega",      name: "MEGA",      color: "#00c48c", emoji: "🚀", startCapital: 1000, live: false },
+  { id: "synapse7",  name: "SYNAPSE-7", color: "#f7b731", emoji: "🧠", startCapital: 1000, live: false },
+  { id: "synapse_t", name: "SYNAPSE-T", color: "#e85d9a", emoji: "🎯", startCapital:  400, live: true  },
 ];
 
 // ─── All symbols ───────────────────────────────────────────────────────────────
@@ -393,6 +393,9 @@ function parseCsvFile(pid) {
 }
 
 function buildPortfolioStats(pid) {
+  const def   = PORTFOLIO_DEFS.find(d => d.id === pid) || {};
+  const startCap = def.startCapital ?? START_CAPITAL;
+
   const rows  = parseCsvFile(pid);
   const exits = rows.filter(r => r["Side"] === "CLOSE_LONG" || r["Side"] === "CLOSE_SHORT");
   const entries= rows.filter(r => r["Side"] === "LONG" || r["Side"] === "SHORT");
@@ -401,22 +404,21 @@ function buildPortfolioStats(pid) {
   const losses   = exits.filter(r => parseFloat(r["Net P&L"] || 0) < 0);
   const totalPnl = exits.reduce((s, r) => s + parseFloat(r["Net P&L"] || 0), 0);
   const winRate  = exits.length > 0 ? (wins.length / exits.length * 100).toFixed(1) : null;
-  const equity   = START_CAPITAL + totalPnl;
+  const equity   = startCap + totalPnl;
 
   // P&L curve
   const pnlCurve = [];
-  let running = START_CAPITAL;
+  let running = startCap;
   exits.forEach(r => {
     running += parseFloat(r["Net P&L"] || 0);
     pnlCurve.push({ ts: r["Date"] + " " + r["Time (UTC)"], equity: parseFloat(running.toFixed(4)) });
   });
-  // Add start point
-  if (pnlCurve.length === 0) pnlCurve.push({ ts: "start", equity: START_CAPITAL });
+  if (pnlCurve.length === 0) pnlCurve.push({ ts: "start", equity: startCap });
 
   // Recent 20 closed trades
   const recentExits = [...exits].reverse().slice(0, 20);
 
-  return { pid, rows, exits, entries, wins, losses, totalPnl, winRate, equity, pnlCurve, recentExits };
+  return { pid, startCap, rows, exits, entries, wins, losses, totalPnl, winRate, equity, pnlCurve, recentExits };
 }
 
 async function fetchLivePrices(symbols) {
@@ -476,23 +478,29 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   // Portfolio comparison cards
   const cardsHtml = PORTFOLIO_DEFS.map((def, i) => {
     const s      = allStats[i];
-    const pcts   = ((s.equity - START_CAPITAL) / START_CAPITAL * 100);
+    const pcts   = ((s.equity - def.startCapital) / def.startCapital * 100);
     const pctStr = (pcts >= 0 ? "+" : "") + pcts.toFixed(2) + "%";
-    const eqCol  = s.equity >= START_CAPITAL ? "#00c48c" : "#ff4d4d";
+    const eqCol  = s.equity >= def.startCapital ? "#00c48c" : "#ff4d4d";
     const openCount = allPositions[i].length;
     const tf = tfMap[def.id] || "1H";
+    const modeBadge = def.live
+      ? `<span class="badge" style="background:rgba(255,77,77,0.15);color:#ff4d4d;border:1px solid #ff4d4d;font-size:10px;padding:2px 7px">🔴 LIVE</span>`
+      : `<span class="badge badge-paper" style="font-size:10px;padding:2px 7px">PAPER</span>`;
     return `
     <div class="port-card" style="border-top:3px solid ${def.color}">
       <div class="port-header">
         <span style="font-size:22px">${def.emoji}</span>
-        <div>
-          <div class="port-name" style="color:${def.color}">${def.name}</div>
+        <div style="flex:1">
+          <div style="display:flex;align-items:center;gap:8px">
+            <div class="port-name" style="color:${def.color}">${def.name}</div>
+            ${modeBadge}
+          </div>
           <div class="port-subtitle">Portfolio ${i + 1} · ${tf} · SL ${def.id==="synapse_t"?"1.5":"2"}% / TP ${def.id==="synapse_t"?"3":"4"}% · 25x</div>
         </div>
       </div>
       <div class="port-equity" style="color:${eqCol}">$${s.equity.toFixed(2)}</div>
       <div class="port-return" style="color:${eqCol}">${pctStr}</div>
-      <div class="port-row"><span class="muted">Start</span><span>$${START_CAPITAL.toFixed(0)}</span></div>
+      <div class="port-row"><span class="muted">Start</span><span>$${def.startCapital.toFixed(0)}</span></div>
       <div class="port-row"><span class="muted">P&amp;L</span><span>${pnlHtml(s.totalPnl)}</span></div>
       <div class="port-row"><span class="muted">Trades</span><span>${s.exits.length}</span></div>
       <div class="port-row"><span class="muted">Win Rate</span><span>${s.winRate !== null ? s.winRate + "%" : "—"}</span></div>

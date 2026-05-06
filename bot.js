@@ -30,11 +30,13 @@ const MAX_OPEN_PER_PORTFOLIO = 5;  // max otvorenih pozicija po portfoliju
 const PAPER_TRADING = process.env.PAPER_TRADING !== "false";
 const BITGET_DEMO   = process.env.BITGET_DEMO === "true";
 const BITGET = {
-  apiKey:     process.env.BITGET_API_KEY,
-  secretKey:  process.env.BITGET_SECRET_KEY,
-  passphrase: process.env.BITGET_PASSPHRASE,
-  baseUrl:    process.env.BITGET_BASE_URL || "https://api.bitget.com",
+  apiKey:     (process.env.BITGET_API_KEY     || "").trim(),
+  secretKey:  (process.env.BITGET_SECRET_KEY  || "").trim(),
+  passphrase: (process.env.BITGET_PASSPHRASE  || "").trim(),
+  baseUrl:    (process.env.BITGET_BASE_URL    || "https://api.bitget.com").trim(),
 };
+// Debug: provjeri jesu li kredencijali učitani
+console.log(`🔑 BitGet key: ${BITGET.apiKey.slice(0,8)}... len=${BITGET.apiKey.length} | pass len=${BITGET.passphrase.length} | secret len=${BITGET.secretKey.length}`);
 
 // ─── Perzistentni direktorij ───────────────────────────────────────────────────
 
@@ -858,12 +860,6 @@ function signBitGet(timestamp, method, path, body = "") {
     .update(`${timestamp}${method}${path}${body}`).digest("base64");
 }
 
-// BitGet V2 zahtijeva HMAC-SHA256 potpis i za passphrase
-function signedPassphrase() {
-  return crypto.createHmac("sha256", BITGET.secretKey.trim())
-    .update(BITGET.passphrase.trim()).digest("base64");
-}
-
 async function bitgetPost(path, body) {
   const timestamp = Date.now().toString();
   const b = JSON.stringify(body);
@@ -872,7 +868,7 @@ async function bitgetPost(path, body) {
     "ACCESS-KEY":        BITGET.apiKey.trim(),
     "ACCESS-SIGN":       signBitGet(timestamp, "POST", path, b),
     "ACCESS-TIMESTAMP":  timestamp,
-    "ACCESS-PASSPHRASE": signedPassphrase(),
+    "ACCESS-PASSPHRASE": BITGET.passphrase.trim(),
   };
   if (BITGET_DEMO) headers["x-simulated-trading"] = "1";
   const res = await fetch(`${BITGET.baseUrl}${path}`, { method: "POST", headers, body: b });
@@ -931,7 +927,7 @@ async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp) {
     "ACCESS-KEY":        BITGET.apiKey.trim(),
     "ACCESS-SIGN":       signBitGet(timestamp, "POST", path, body),
     "ACCESS-TIMESTAMP":  timestamp,
-    "ACCESS-PASSPHRASE": signedPassphrase(),
+    "ACCESS-PASSPHRASE": BITGET.passphrase.trim(),
   };
   if (BITGET_DEMO) headers["x-simulated-trading"] = "1";
   const res  = await fetch(`${BITGET.baseUrl}${path}`, { method: "POST", headers, body });

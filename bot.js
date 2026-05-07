@@ -951,29 +951,66 @@ async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp) {
   // Postavi isolated margin + leverage prije svakog naloga
   await setupSymbol(symbol);
   const quantity  = (sizeUSD / price).toFixed(4);
-  const timestamp = Date.now().toString();
   const path      = "/api/v2/mix/order/place-order";
   const orderBody = {
     symbol, productType: "USDT-FUTURES",
     marginMode: "isolated", marginCoin: "USDT",
     side: side === "LONG" ? "buy" : "sell",
     tradeSide: "open", orderType: "market", size: quantity,
-    // Bez presetSL/TP — bot sam prati SL/TP svake 5 min (izbjegava okidanje od stale cijene)
   };
-  const body = JSON.stringify(orderBody);
-  const headers = {
-    "Content-Type": "application/json",
-    "ACCESS-KEY":        BITGET.apiKey.trim(),
-    "ACCESS-SIGN":       signBitGet(timestamp, "POST", path, body),
-    "ACCESS-TIMESTAMP":  timestamp,
-    "ACCESS-PASSPHRASE": BITGET.passphrase.trim(),
-  };
-  if (BITGET_DEMO) headers["x-simulated-trading"] = "1";
-  const res  = await fetch(`${BITGET.baseUrl}${path}`, { method: "POST", headers, body });
-  const data = await res.json();
-  console.log(`  📨 BitGet order response: code=${data.code} msg=${data.msg}`);
-  if (data.code !== "00000") throw new Error(`BitGet: ${data.msg}`);
-  return data.data;
+  const orderData = await bitgetPost(path, orderBody);
+  const orderId   = orderData?.orderId;
+  console.log(`  📨 Nalog otvoren: ${orderId}`);
+
+  // Dohvati stvarnu fill cijenu (čekaj malo da se ispuni)
+  let fillPrice = price;
+  if (orderId) {
+    await new Promise(r => setTimeout(r, 1500));
+    try {
+      const detailPath = `/api/v2/mix/order/detail?symbol=${symbol}&productType=USDT-FUTURES&orderId=${orderId}`;
+      const ts2 = Date.now().toString();
+      const sign2 = signBitGet(ts2, "GET", detailPath);
+      const det = await fetch(`${BITGET.baseUrl}${detailPath}`, {
+        headers: {
+          "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": sign2,
+          "ACCESS-TIMESTAMP": ts2, "ACCESS-PASSPHRASE": BITGET.passphrase,
+          "Content-Type": "application/json",
+        },
+      }).then(r => r.json());
+      if (det.code === "00000" && det.data?.priceAvg) {
+        fillPrice = parseFloat(det.data.priceAvg);
+        console.log(`  ✅ Fill cijena: ${fillPrice} (signal: ${price})`);
+      }
+    } catch (e) {
+      console.log(`  ⚠️  Ne mogu dohvatiti fill cijenu: ${e.message}`);
+    }
+  }
+
+  // Postavi SL i TP na BitGetu od stvarne fill cijene
+  const holdSide = side === "LONG" ? "long" : "short";
+  const slFromFill = side === "LONG"
+    ? fillPrice * (1 - (sl ? Math.abs(fillPrice - sl) / price : 0.015))
+    : fillPrice * (1 + (sl ? Math.abs(sl - fillPrice) / price : 0.015));
+  const tpFromFill = side === "LONG"
+    ? fillPrice * (1 + (tp ? Math.abs(tp - fillPrice) / price : 0.030))
+    : fillPrice * (1 - (tp ? Math.abs(fillPrice - tp) / price : 0.030));
+
+  for (const [planType, triggerPrice] of [["pos_loss", slFromFill], ["pos_profit", tpFromFill]]) {
+    try {
+      const tpslRes = await bitgetPost("/api/v2/mix/order/place-tpsl-order", {
+        symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
+        planType, triggerPrice: fmtPrice(triggerPrice),
+        triggerType: "mark_price", holdSide, size: quantity,
+      });
+      if (tpslRes.code === "00000") {
+        console.log(`  🎯 ${planType} @ ${fmtPrice(triggerPrice)} OK`);
+      }
+    } catch (e) {
+      console.log(`  ⚠️  ${planType} greška: ${e.message}`);
+    }
+  }
+
+  return { orderId, fillPrice };
 }
 
 // Zatvori live poziciju na BitGetu (market close order)

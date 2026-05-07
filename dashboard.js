@@ -815,7 +815,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div style="font-size:12px;color:var(--text-muted)">
           EMA · CRS · E50 · RSI · E55 · ADX · CHP · 6Sc · CVD · R⟳ · MCD · E145 · VOL · <b style="color:#e85d9a">MCC</b>
           &nbsp;|&nbsp; 🟡 Čeka pullback &nbsp; 🟢 Signal &nbsp; Cache 90s &nbsp;|&nbsp;
-          <button onclick="var el=document.getElementById('sig-legend');el.style.display=el.style.display==='none'?'block':'none';" style="background:none;border:1px solid #30363d;border-radius:4px;color:#8b949e;font-size:11px;cursor:pointer;padding:2px 8px">📖 Legenda signala</button>
+          <button onclick="toggleLegend()" style="background:none;border:1px solid #30363d;border-radius:4px;color:#8b949e;font-size:11px;cursor:pointer;padding:2px 8px">📖 Legenda signala</button>
         </div>
       </div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -935,6 +935,13 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     }
   });
 })();
+
+// ── Legend toggle ─────────────────────────────────────────────────────────────
+function toggleLegend() {
+  const el = document.getElementById('sig-legend');
+  if (!el) return;
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
 
 // Live Scanner
 function sigHtml(s) {
@@ -1060,33 +1067,34 @@ function statusBox(s) {
   const p   = s.pending;
   const sig = s.ultraSig;
 
-  // Pending pullback — čekamo ulaz
+  // Pending breakout — čekamo ulaz
   if (p) {
     const ageMs  = Date.now() - p.ts;
     const ageMin = Math.floor(ageMs / 60000);
     const ageStr = ageMin < 60 ? ageMin + 'm' : Math.floor(ageMin/60) + 'h ' + (ageMin%60) + 'm';
-    const pct = p.side === "LONG"
-      ? ((s.price - p.targetPrice) / p.targetPrice * 100).toFixed(2)
-      : ((p.targetPrice - s.price) / p.targetPrice * 100).toFixed(2);
-    const pctNum = parseFloat(pct);
-    const pctCol = pctNum < 0.3 ? '#ff4d4d' : pctNum < 0.6 ? '#f7b731' : '#8b949e';
     const sigCol = p.side === "LONG" ? '#00c48c' : '#ff4d4d';
     const sigIco = p.side === "LONG" ? '▲' : '▼';
+    // Koliko daleko je cijena od trigger razine
+    const triggerLvl = p.side === "LONG" ? p.triggerHigh : p.triggerLow;
+    const distPct = triggerLvl
+      ? ((Math.abs(s.price - triggerLvl) / triggerLvl) * 100).toFixed(2)
+      : null;
+    const distCol = distPct < 0.3 ? '#00c48c' : distPct < 1.0 ? '#f7b731' : '#8b949e';
     return '<div style="background:rgba(247,183,49,0.08);border:1px solid #f7b73166;border-radius:8px;padding:8px 10px">' +
-      '<div style="font-size:11px;color:#f7b731;font-weight:700;margin-bottom:4px">⏳ ČEKA PULLBACK</div>' +
+      '<div style="font-size:11px;color:#f7b731;font-weight:700;margin-bottom:4px">⏳ ČEKA BREAKOUT</div>' +
       '<div style="font-size:12px"><span style="color:' + sigCol + ';font-weight:700">' + sigIco + ' ' + p.side + '</span> signal @ <b>' + fmtLive(p.signalPrice) + '</b></div>' +
-      '<div style="font-size:12px;margin-top:2px">Target: <span style="color:#e85d9a;font-weight:700">' + fmtLive(p.targetPrice) + '</span> &nbsp;|&nbsp; Sad: ' + fmtLive(s.price) + '</div>' +
-      '<div style="font-size:11px;margin-top:3px;color:#8b949e">Čeka: <b style="color:#e6edf3">' + ageStr + '</b> &nbsp;|&nbsp; Još: <b style="color:' + pctCol + '">' + pct + '%</b></div>' +
+      '<div style="font-size:12px;margin-top:2px">H: <span style="color:#00c48c;font-weight:700">' + fmtLive(p.triggerHigh) + '</span> &nbsp;L: <span style="color:#ff4d4d;font-weight:700">' + fmtLive(p.triggerLow) + '</span></div>' +
+      '<div style="font-size:11px;margin-top:3px;color:#8b949e">Sad: <b style="color:#e6edf3">' + fmtLive(s.price) + '</b> &nbsp;|&nbsp; Čeka: <b style="color:#e6edf3">' + ageStr + '</b>' + (distPct !== null ? ' &nbsp;|&nbsp; Još: <b style="color:' + distCol + '">' + distPct + '%</b>' : '') + '</div>' +
       '</div>';
   }
 
-  // Aktivan signal — spreman za ulaz (bot će ga pohraniti u pending)
+  // Aktivan signal — bot će ga pohraniti u pending na sljedećem ciklusu
   if (sig === "LONG") {
     return '<div style="background:rgba(0,196,140,0.1);border:1px solid #00c48c;border-radius:8px;padding:8px 10px">' +
       '<div style="font-size:11px;color:#00c48c;font-weight:700;margin-bottom:4px">✅ SIGNAL AKTIVIRAN</div>' +
       '<div style="font-size:13px;font-weight:700;color:#00c48c">▲ LONG</div>' +
       '<div style="font-size:11px;color:#8b949e;margin-top:3px">Signal @ ' + fmtLive(s.price) + '</div>' +
-      '<div style="font-size:11px;color:#8b949e">Pullback target: ' + fmtLive(s.price * 0.99) + ' (-1%)</div>' +
+      '<div style="font-size:11px;color:#8b949e">Breakout trigger: iznad <b>' + fmtLive(s.price) + '</b> (high signal-svijeće)</div>' +
       '</div>';
   }
   if (sig === "SHORT") {
@@ -1094,7 +1102,7 @@ function statusBox(s) {
       '<div style="font-size:11px;color:#ff4d4d;font-weight:700;margin-bottom:4px">✅ SIGNAL AKTIVIRAN</div>' +
       '<div style="font-size:13px;font-weight:700;color:#ff4d4d">▼ SHORT</div>' +
       '<div style="font-size:11px;color:#8b949e;margin-top:3px">Signal @ ' + fmtLive(s.price) + '</div>' +
-      '<div style="font-size:11px;color:#8b949e">Pullback target: ' + fmtLive(s.price * 1.01) + ' (+1%)</div>' +
+      '<div style="font-size:11px;color:#8b949e">Breakout trigger: ispod <b>' + fmtLive(s.price) + '</b> (low signal-svijeće)</div>' +
       '</div>';
   }
   if (sig === "SETUP↑") return '<span style="color:#f0a500;font-size:12px">◈ SETUP ↑ &nbsp;<span style="color:#555;font-size:11px">(' + (s.ultraBull||0) + '/16)</span></span>';

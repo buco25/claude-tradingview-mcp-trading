@@ -827,27 +827,30 @@ function analyzeUltra(candles, cfg) {
     reason: `ULTRA: ↑${bullCnt} ↓${bearCnt} /16 (min ${minSig})` };
 }
 
-// ─── ULTRA Pullback Entry ─────────────────────────────────────────────────────
-// Isti sustav kao SYNAPSE-7 pullback, ali za ULTRA strategiju
+// ─── ULTRA Candle H/L Breakout Entry ──────────────────────────────────────────
+// Signal fires on candle N → spremi H/L te svijeće
+// LONG: ulaz kad price > triggerHigh (breakout iznad higa signal-svijeće)
+// SHORT: ulaz kad price < triggerLow  (breakdown ispod lowa signal-svijeće)
 
 async function analyzeUltraPullback(symbol, candles, cfg) {
-  const price = candles[candles.length - 1].close;
+  const last  = candles[candles.length - 1];
+  const price = last.close;
   const pid   = "synapse_t";
+  const TTL   = 4 * 60 * 60 * 1000;  // 4h
 
   let pending = loadPending(pid);
   const now   = Date.now();
-  // Makni stare (TTL istekao) — PULLBACK_TTL definiran ispod
-  pending = pending.filter(p => now - p.ts < 4 * 60 * 60 * 1000);
+  pending = pending.filter(p => now - p.ts < TTL);
 
   const existing = pending.find(p => p.symbol === symbol);
 
   if (existing) {
+    // Provjeri breakout
     const hit = existing.side === "LONG"
-      ? price <= existing.targetPrice
-      : price >= existing.targetPrice;
+      ? price > existing.triggerHigh    // cijena prešla iznad higa signal-svijeće
+      : price < existing.triggerLow;    // cijena pala ispod lowa signal-svijeće
 
     if (hit) {
-      // Pullback dostignut → ulaz!
       pending = pending.filter(p => p.symbol !== symbol);
       savePending(pid, pending);
       const baseResult = analyzeUltra(candles, cfg);
@@ -855,38 +858,35 @@ async function analyzeUltraPullback(symbol, candles, cfg) {
         ...baseResult,
         signal: existing.side,
         price,
-        reason: `[ULTRA PB ${existing.side}] Signal @ ${fmtPrice(existing.signalPrice)} | -1% hit @ ${fmtPrice(price)}`,
+        reason: `[ULTRA BRK ${existing.side}] Signal @ ${fmtPrice(existing.signalPrice)} | breakout @ ${fmtPrice(price)}`,
       };
     }
 
-    // Provjeri nije li signal promijenio smjer ILI pao ispod minSiga — cancel
+    // Cancel ako score pao ili signal flipnuo
     const freshResult = analyzeUltra(candles, cfg);
-    const signalFlipped = freshResult.signal !== existing.side;  // uključuje NEUTRAL!
-    if (signalFlipped) {
+    if (freshResult.signal !== existing.side) {
       pending = pending.filter(p => p.symbol !== symbol);
       savePending(pid, pending);
-      console.log(`  🔄 [ULTRA] ${symbol} — pending ${existing.side} canceliran (${freshResult.signal === "NEUTRAL" ? "score pao ispod min" : "signal flip"})`);
+      console.log(`  🔄 [ULTRA] ${symbol} — pending ${existing.side} canceliran (${freshResult.signal === "NEUTRAL" ? "score pao" : "flip"})`);
     } else {
-      const pct = existing.side === "LONG"
-        ? ((price - existing.targetPrice) / existing.targetPrice * 100).toFixed(2)
-        : ((existing.targetPrice - price) / existing.targetPrice * 100).toFixed(2);
-      console.log(`  ⏳ [ULTRA] ${symbol} ${existing.side} čeka pullback | Target: ${fmtPrice(existing.targetPrice)} | Sad: ${fmtPrice(price)} | Još: ${pct}%`);
+      console.log(`  ⏳ [ULTRA] ${symbol} ${existing.side} čeka breakout | H:${fmtPrice(existing.triggerHigh)} L:${fmtPrice(existing.triggerLow)} | Sad: ${fmtPrice(price)}`);
     }
-    return { price, signal: "NEUTRAL", reason: `Čeka ULTRA pullback na ${fmtPrice(existing?.targetPrice)}` };
+    return { price, signal: "NEUTRAL", reason: `Čeka ULTRA breakout H:${fmtPrice(existing.triggerHigh)} L:${fmtPrice(existing.triggerLow)}` };
   }
 
   // Nema pendinga — pokreni normalnu analizu
   const result = analyzeUltra(candles, cfg);
 
   if (result.signal === "LONG" || result.signal === "SHORT") {
-    const targetPrice = result.signal === "LONG"
-      ? price * (1 - 1.0 / 100)   // LONG: čeka -1%
-      : price * (1 + 1.0 / 100);  // SHORT: čeka +1%
+    // Spremi H/L signal-svijeće kao breakout trigger
+    const sigCandle = candles[candles.length - 1];
+    const triggerHigh = sigCandle.high;
+    const triggerLow  = sigCandle.low;
 
-    pending.push({ symbol, side: result.signal, signalPrice: price, targetPrice, ts: now });
+    pending.push({ symbol, side: result.signal, signalPrice: price, triggerHigh, triggerLow, ts: now });
     savePending(pid, pending);
-    console.log(`  📌 [ULTRA] ${symbol} ${result.signal} signal @ ${fmtPrice(price)} → čeka pullback na ${fmtPrice(targetPrice)}`);
-    return { price, signal: "NEUTRAL", reason: `ULTRA signal, čeka 1% pullback na ${fmtPrice(targetPrice)}` };
+    console.log(`  📌 [ULTRA] ${symbol} ${result.signal} signal @ ${fmtPrice(price)} → čeka breakout iznad ${fmtPrice(triggerHigh)} / ispod ${fmtPrice(triggerLow)}`);
+    return { price, signal: "NEUTRAL", reason: `ULTRA signal, čeka breakout H:${fmtPrice(triggerHigh)} L:${fmtPrice(triggerLow)}` };
   }
 
   return result;
@@ -926,12 +926,12 @@ async function analyzeSynapse7Pullback(symbol, candles, cfg) {
   const existing = pending.find(p => p.symbol === symbol);
 
   if (existing) {
+    // Provjeri breakout
     const hit = existing.side === "LONG"
-      ? price <= existing.targetPrice
-      : price >= existing.targetPrice;
+      ? price > existing.triggerHigh
+      : price < existing.triggerLow;
 
     if (hit) {
-      // Pullback dostignut → ulaz!
       pending = pending.filter(p => p.symbol !== symbol);
       savePending(pid, pending);
       const baseResult = analyzeSynapse7(candles, cfg);
@@ -939,38 +939,34 @@ async function analyzeSynapse7Pullback(symbol, candles, cfg) {
         ...baseResult,
         signal: existing.side,
         price,
-        reason: `[PULLBACK ${existing.side}] Signal @ ${fmtPrice(existing.signalPrice)} | -1% hit @ ${fmtPrice(price)}`,
+        reason: `[S7 BRK ${existing.side}] Signal @ ${fmtPrice(existing.signalPrice)} | breakout @ ${fmtPrice(price)}`,
       };
     }
 
-    // Provjeri nije li signal promijenio smjer ILI pao ispod minSiga — cancel
+    // Cancel ako score pao ili signal flipnuo
     const freshResult = analyzeSynapse7(candles, cfg);
-    const signalFlipped = freshResult.signal !== existing.side;  // uključuje NEUTRAL!
-    if (signalFlipped) {
+    if (freshResult.signal !== existing.side) {
       pending = pending.filter(p => p.symbol !== symbol);
       savePending(pid, pending);
-      console.log(`  🔄 [SYNAPSE-7] ${symbol} — pending ${existing.side} canceliran (${freshResult.signal === "NEUTRAL" ? "score pao ispod min" : "signal flip"})`);
+      console.log(`  🔄 [SYNAPSE-7] ${symbol} — pending ${existing.side} canceliran (${freshResult.signal === "NEUTRAL" ? "score pao" : "flip"})`);
     } else {
-      const pct = existing.side === "LONG"
-        ? ((price - existing.targetPrice) / existing.targetPrice * 100).toFixed(2)
-        : ((existing.targetPrice - price) / existing.targetPrice * 100).toFixed(2);
-      console.log(`  ⏳ [SYNAPSE-7] ${symbol} ${existing.side} čeka pullback | Target: ${fmtPrice(existing.targetPrice)} | Sad: ${fmtPrice(price)} | Još: ${pct}%`);
+      console.log(`  ⏳ [SYNAPSE-7] ${symbol} ${existing.side} čeka breakout | H:${fmtPrice(existing.triggerHigh)} L:${fmtPrice(existing.triggerLow)} | Sad: ${fmtPrice(price)}`);
     }
-    return { price, signal: "NEUTRAL", reason: `Čeka pullback na ${fmtPrice(existing?.targetPrice)}` };
+    return { price, signal: "NEUTRAL", reason: `Čeka S7 breakout H:${fmtPrice(existing.triggerHigh)} L:${fmtPrice(existing.triggerLow)}` };
   }
 
   // 2) Nema pendinga — pokreni normalnu analizu
   const result = analyzeSynapse7(candles, cfg);
 
   if (result.signal === "LONG" || result.signal === "SHORT") {
-    const targetPrice = result.signal === "LONG"
-      ? price * (1 - PULLBACK_PCT / 100)
-      : price * (1 + PULLBACK_PCT / 100);
+    const sigCandle   = candles[candles.length - 1];
+    const triggerHigh = sigCandle.high;
+    const triggerLow  = sigCandle.low;
 
-    pending.push({ symbol, side: result.signal, signalPrice: price, targetPrice, ts: now });
+    pending.push({ symbol, side: result.signal, signalPrice: price, triggerHigh, triggerLow, ts: now });
     savePending(pid, pending);
-    console.log(`  📌 [SYNAPSE-7] ${symbol} ${result.signal} signal @ ${fmtPrice(price)} → čeka pullback na ${fmtPrice(targetPrice)}`);
-    return { price, signal: "NEUTRAL", reason: `Signal zabilježen, čeka 1% pullback na ${fmtPrice(targetPrice)}` };
+    console.log(`  📌 [SYNAPSE-7] ${symbol} ${result.signal} signal @ ${fmtPrice(price)} → čeka breakout H:${fmtPrice(triggerHigh)} L:${fmtPrice(triggerLow)}`);
+    return { price, signal: "NEUTRAL", reason: `S7 signal, čeka breakout H:${fmtPrice(triggerHigh)} L:${fmtPrice(triggerLow)}` };
   }
 
   return result;

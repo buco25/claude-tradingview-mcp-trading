@@ -1283,7 +1283,8 @@ export async function run() {
     }
 
     // Circuit breaker — 5 uzastopnih gubitaka → 8h pauza
-    if (!await checkCircuitBreaker(pid, pDef.name)) continue;
+    // Circuit breaker isključen
+    // if (!await checkCircuitBreaker(pid, pDef.name)) continue;
 
     const openPositions = loadPositions(pid);
     const openSymbols   = openPositions.map(p => p.symbol);

@@ -115,7 +115,7 @@ function buildPortfolios(rules) {
       timeframe:    tfs.synapse_t    || "15m",
       slPct:        1.5, tpPct: 3.0,
       live:         true,           // ← LIVE trading
-      startCapital: 357.00,         // ← stvarni saldo na BitGet (2026-05-07)
+      startCapital: 356.80,         // ← stvarni saldo na BitGet (2026-05-07)
     },
   };
 }

@@ -767,10 +767,23 @@ async function checkPortfolioPositions(pid) {
       }
 
       if (exitPrice !== null) {
+        const qty = pos.tradeSize / pos.entryPrice;
         const pnl = pos.side === "LONG"
-          ? (exitPrice - pos.entryPrice) * pos.quantity
-          : (pos.entryPrice - exitPrice) * pos.quantity;
+          ? (exitPrice - pos.entryPrice) * qty
+          : (pos.entryPrice - exitPrice) * qty;
         console.log(`  ${pnl >= 0 ? "✅ WIN" : "❌ LOSS"} [${pid}] ${pos.symbol} ${pos.side} | P&L ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(4)}`);
+
+        // Za live pozicije — pošalji close nalog na BitGet
+        if (pos.mode === "LIVE") {
+          try {
+            await closeBitGetOrder(pos);
+            console.log(`  🔒 LIVE CLOSE poslan [${pid}] ${pos.symbol} ${pos.side}`);
+          } catch (closeErr) {
+            console.log(`  ❌ LIVE CLOSE GREŠKA [${pid}] ${pos.symbol}: ${closeErr.message}`);
+            await tg(`❌ CLOSE GREŠKA [${pid}] ${pos.symbol} ${pos.side}\n${closeErr.message}`);
+          }
+        }
+
         writeExitCsv(pid, pos, exitPrice, exitReason, pnl);
         await tg(`${pnl >= 0 ? "✅ WIN" : "❌ LOSS"} [${pid}] ${pos.symbol} ${pos.side}\nP&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)} | ${exitReason}`);
         positionsModified = true;
@@ -960,6 +973,38 @@ async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp) {
   const data = await res.json();
   console.log(`  📨 BitGet order response: code=${data.code} msg=${data.msg}`);
   if (data.code !== "00000") throw new Error(`BitGet: ${data.msg}`);
+  return data.data;
+}
+
+// Zatvori live poziciju na BitGetu (market close order)
+async function closeBitGetOrder(pos) {
+  const quantity = (pos.tradeSize / pos.entryPrice).toFixed(4);
+  const closeSide = pos.side === "LONG" ? "sell" : "buy";
+  const path = "/api/v2/mix/order/place-order";
+  const orderBody = {
+    symbol:      pos.symbol,
+    productType: "USDT-FUTURES",
+    marginMode:  "isolated",
+    marginCoin:  "USDT",
+    side:        closeSide,
+    tradeSide:   "close",
+    orderType:   "market",
+    size:        quantity,
+  };
+  const timestamp = Date.now().toString();
+  const body = JSON.stringify(orderBody);
+  const headers = {
+    "Content-Type":      "application/json",
+    "ACCESS-KEY":        BITGET.apiKey.trim(),
+    "ACCESS-SIGN":       signBitGet(timestamp, "POST", path, body),
+    "ACCESS-TIMESTAMP":  timestamp,
+    "ACCESS-PASSPHRASE": BITGET.passphrase.trim(),
+  };
+  if (BITGET_DEMO) headers["x-simulated-trading"] = "1";
+  const res  = await fetch(`${BITGET.baseUrl}${path}`, { method: "POST", headers, body });
+  const data = await res.json();
+  console.log(`  📨 BitGet CLOSE response: code=${data.code} msg=${data.msg}`);
+  if (data.code !== "00000") throw new Error(`BitGet close: ${data.msg}`);
   return data.data;
 }
 

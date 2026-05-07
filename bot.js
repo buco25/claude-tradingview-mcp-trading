@@ -639,12 +639,37 @@ function analyzeSynapseT(candles, cfg) {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────────
 
-function fmtPrice(p) {
+// Cache pricePlace po simbolu (dohvat iz BitGet contracts API)
+const _pricePlace = {};
+
+async function loadPricePrecision() {
+  try {
+    const url = `${BITGET.baseUrl}/api/v2/mix/market/contracts?productType=USDT-FUTURES`;
+    const res  = await fetch(url);
+    const json = await res.json();
+    if (json.code === "00000" && Array.isArray(json.data)) {
+      for (const c of json.data) {
+        if (c.symbol && c.pricePlace !== undefined) {
+          _pricePlace[c.symbol] = parseInt(c.pricePlace);
+        }
+      }
+      console.log(`✅ Učitano ${Object.keys(_pricePlace).length} simbola s pricePlace`);
+    }
+  } catch (e) {
+    console.log(`⚠️  loadPricePrecision greška: ${e.message}`);
+  }
+}
+
+function fmtPrice(p, symbol) {
   if (!p && p !== 0) return "";
+  if (symbol && _pricePlace[symbol] !== undefined) {
+    return p.toFixed(_pricePlace[symbol]);
+  }
+  // Fallback ako nema podataka za simbol
   if (p >= 1000)  return p.toFixed(2);
   if (p >= 1)     return p.toFixed(4);
   if (p >= 0.001) return p.toFixed(6);
-  return p.toFixed(10);
+  return p.toFixed(8);
 }
 
 // ─── Portfolio position tracking ───────────────────────────────────────────────
@@ -999,12 +1024,12 @@ async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp) {
     try {
       const tpslRes = await bitgetPost("/api/v2/mix/order/place-tpsl-order", {
         symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
-        planType, triggerPrice: fmtPrice(triggerPrice),
+        planType, triggerPrice: fmtPrice(triggerPrice, symbol),
         triggerType: "mark_price", holdSide,
         // bez size — primjenjuje se na cijelu poziciju
       });
       if (tpslRes.code === "00000") {
-        console.log(`  🎯 ${planType} @ ${fmtPrice(triggerPrice)} OK`);
+        console.log(`  🎯 ${planType} @ ${fmtPrice(triggerPrice, symbol)} OK`);
       } else {
         console.log(`  ❌ ${planType} FAIL: code=${tpslRes.code} msg=${tpslRes.msg}`);
         await tg(`⚠️ ${planType} nije postavljen [${symbol}]\n${tpslRes.msg}`);
@@ -1136,6 +1161,7 @@ export async function run() {
   for (const pid of PORTFOLIO_IDS) initCsv(pid);
 
   // Provjeri BitGet autentikaciju pri svakom startu
+  await loadPricePrecision();
   if (!PAPER_TRADING) await testBitGetAuth();
 
   const totalSymbols = Object.values(portfolios).reduce((s, p) => s + p.symbols.length, 0);

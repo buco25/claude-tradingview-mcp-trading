@@ -334,21 +334,28 @@ let _scanRunning  = false;
 async function runScan(rules) {
   if (_scanRunning) return _scanCache;
   _scanRunning = true;
-  const cfg = rules?.strategies || {};
-  const emaRsiCfg = cfg.ema_rsi?.params  || {};
-  const megaCfg   = cfg.mega?.params     || {};
-  const synapse7Cfg = cfg.synapse7?.params || {};
-  const synapseTCfg = cfg.synapse_t?.params || {};  // ultraCfg alias
-  const ultraCfg  = synapseTCfg;
+  const cfg     = rules?.strategies || {};
+  const ultraCfg = cfg.synapse_t?.params || {};
+
+  // Učitaj pending pullback podatke
+  const pendingFile = `${DATA_DIR}/pending_synapse_t.json`;
+  let pendingList = [];
+  try {
+    if (existsSync(pendingFile)) {
+      pendingList = JSON.parse(readFileSync(pendingFile, "utf8"));
+      // Makni istekle (TTL 4h)
+      const now = Date.now();
+      pendingList = pendingList.filter(p => now - p.ts < 4 * 60 * 60 * 1000);
+    }
+  } catch { /* ignoriraj */ }
 
   const results = [];
-  // Fetch all symbols in parallel (limit concurrency to avoid rate limit)
   const BATCH = 5;
   for (let i = 0; i < ALL_SYMBOLS.length; i += BATCH) {
     const batch = ALL_SYMBOLS.slice(i, i + BATCH);
     await Promise.all(batch.map(async sym => {
       try {
-        const url = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=1H&limit=250`;
+        const url = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=15m&limit=250`;
         const r   = await fetch(url);
         const d   = await r.json();
         if (d.code !== "00000" || !d.data?.length) { results.push({ symbol: sym, error: "no data" }); return; }
@@ -357,8 +364,9 @@ async function runScan(rules) {
           high: parseFloat(k[2]), low: parseFloat(k[3]), close: parseFloat(k[4]),
           volume: parseFloat(k[5] || 0),
         }));
-        const s = scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg, ultraCfg);
-        results.push({ symbol: sym, ...s });
+        const s       = scanSymbol(candles, {}, {}, {}, ultraCfg);
+        const pending = pendingList.find(p => p.symbol === sym) || null;
+        results.push({ symbol: sym, ...s, pending });
       } catch (e) {
         results.push({ symbol: sym, error: e.message });
       }
@@ -773,12 +781,26 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     </div>
   </div>
 
-  <!-- Live Scanner -->
+  <!-- Live Scanner ULTRA -->
   <div class="scan-card">
     <div class="scan-header">
       <div>
-        <div class="chart-title" style="margin-bottom:2px">🔍 Live Scanner — ${ALL_SYMBOLS.length} simbola × 4 strategije</div>
-        <div style="font-size:12px;color:var(--text-muted)">Signal = EMA9/21 cross + filteri ispunjeni | Cache 90s</div>
+        <div class="chart-title" style="margin-bottom:2px">🎯 ULTRA Scanner — ${ALL_SYMBOLS.length} simbola | 13 signala | min 8/13 | pullback 1%</div>
+        <div style="font-size:12px;color:var(--text-muted)">
+          <span style="color:#00c48c">▲</span> EMA dir &nbsp;
+          <span style="color:#e85d9a">✦</span> Cross &nbsp;
+          <span style="color:#388bfd">E50</span> &nbsp;
+          <span style="color:#f7b731">RSI</span> &nbsp;
+          <span style="color:#388bfd">E55</span> &nbsp;
+          ADX &nbsp; CHP &nbsp;
+          <span style="color:#f7b731">6Sc</span> &nbsp;
+          CVD &nbsp;
+          <span style="color:#00c48c">R⟳</span> &nbsp;
+          MACD &nbsp;
+          <span style="color:#bc8cff">E145</span> &nbsp;
+          VOL
+          &nbsp;|&nbsp; 🟡 Čeka pullback &nbsp; 🟢 Signal &nbsp; Cache 90s
+        </div>
       </div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <span id="scan-ts" style="font-size:12px;color:var(--text-muted)">—</span>
@@ -788,24 +810,21 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       </div>
     </div>
     <div class="table-wrap">
-      <table class="scan-table">
+      <table class="scan-table" id="scan-table">
         <thead>
           <tr>
-            <th>#</th>
+            <th style="width:28px">#</th>
             <th>Symbol</th>
             <th>Cijena</th>
-            <th>EMA</th>
-            <th>RSI</th>
-            <th>ADX</th>
-            <th>Trend</th>
-            <th style="color:#388bfd">📊 EMA+RSI</th>
-            <th style="color:#00c48c">🚀 MEGA</th>
-            <th style="color:#f7b731">🧠 SYNAPSE-7<br><span style="font-weight:400;font-size:10px;color:#666">6Sc RSI⟳ CVD Tr ADX</span></th>
-            <th style="color:#e85d9a">🎯 ULTRA<br><span style="font-weight:400;font-size:10px;color:#666">13 signala | min 8/13</span></th>
+            <th style="color:#8b949e">RSI</th>
+            <th style="color:#8b949e">ADX</th>
+            <th style="color:#e85d9a;text-align:center">13 Signala &nbsp;<span style="font-weight:400;font-size:10px;color:#666">EMA · CRS · E50 · RSI · E55 · ADX · CHP · 6Sc · CVD · R⟳ · MCD · E145 · VOL</span></th>
+            <th style="color:#e85d9a;text-align:center">Score</th>
+            <th style="min-width:260px">Status / Pullback</th>
           </tr>
         </thead>
         <tbody id="scan-tbody">
-          <tr><td colspan="11" style="text-align:center;padding:24px;color:var(--text-muted)">Klikni "Skeniraj" za prikaz live signala</td></tr>
+          <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted)">Klikni "Skeniraj" za prikaz ULTRA signala</td></tr>
         </tbody>
       </table>
     </div>
@@ -997,62 +1016,135 @@ async function resetOne(pid) {
   location.reload();
 }
 
+// ── Signal label boxes (13 signals) ──────────────────────────────────────────
+const SIG_NAMES = ['EMA','CRS','E50','RSI','E55','ADX','CHP','6Sc','CVD','R⟳','MCD','E145','VOL'];
+
+function sigBoxes(sig13) {
+  if (!sig13 || sig13.length === 0) return '<span style="color:#444">—</span>';
+  return sig13.map((v, i) => {
+    const bg  = v === 1 ? '#0d3d26' : v === -1 ? '#3d0d0d' : '#1c2128';
+    const col = v === 1 ? '#00c48c' : v === -1 ? '#ff4d4d' : '#444';
+    const bdr = v === 1 ? '1px solid #00c48c44' : v === -1 ? '1px solid #ff4d4d44' : '1px solid #30363d';
+    const icon = v === 1 ? '▲' : v === -1 ? '▼' : '·';
+    return '<span title="' + SIG_NAMES[i] + '" style="display:inline-block;background:' + bg + ';color:' + col + ';border:' + bdr + ';padding:2px 5px;font-size:10px;font-weight:700;border-radius:3px;margin:1px;min-width:32px;text-align:center">' + SIG_NAMES[i] + '<br><span style="font-size:9px">' + icon + '</span></span>';
+  }).join('');
+}
+
+function scoreBox(bull, bear, sig) {
+  const total = 13;
+  if (sig === "LONG")   return '<div style="background:rgba(0,196,140,0.15);border:1px solid #00c48c;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#00c48c;font-weight:800;font-size:16px">↑' + bull + '</span><span style="color:#555;font-size:11px">/' + total + '</span><br><span class="sig-long" style="font-size:11px">▲ LONG</span></div>';
+  if (sig === "SHORT")  return '<div style="background:rgba(255,77,77,0.15);border:1px solid #ff4d4d;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#ff4d4d;font-weight:800;font-size:16px">↓' + bear + '</span><span style="color:#555;font-size:11px">/' + total + '</span><br><span class="sig-short" style="font-size:11px">▼ SHORT</span></div>';
+  if (sig === "SETUP↑") return '<div style="background:rgba(240,165,0,0.1);border:1px solid #f0a50066;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#f0a500;font-weight:800;font-size:16px">↑' + bull + '</span><span style="color:#555;font-size:11px">/' + total + '</span><br><span style="color:#f0a500;font-size:11px">◈ SETUP↑</span></div>';
+  if (sig === "SETUP↓") return '<div style="background:rgba(240,165,0,0.1);border:1px solid #f0a50066;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#f0a500;font-weight:800;font-size:16px">↓' + bear + '</span><span style="color:#555;font-size:11px">/' + total + '</span><br><span style="color:#f0a500;font-size:11px">◈ SETUP↓</span></div>';
+  const top = Math.max(bull, bear);
+  const col = bull > bear ? '#00c48c55' : bear > bull ? '#ff4d4d55' : '#555';
+  return '<div style="text-align:center"><span style="color:' + col + ';font-size:14px">' + top + '</span><span style="color:#444;font-size:11px">/' + total + '</span></div>';
+}
+
+function statusBox(s) {
+  const p   = s.pending;
+  const sig = s.ultraSig;
+
+  // Pending pullback — čekamo ulaz
+  if (p) {
+    const ageMs  = Date.now() - p.ts;
+    const ageMin = Math.floor(ageMs / 60000);
+    const ageStr = ageMin < 60 ? ageMin + 'm' : Math.floor(ageMin/60) + 'h ' + (ageMin%60) + 'm';
+    const pct = p.side === "LONG"
+      ? ((s.price - p.targetPrice) / p.targetPrice * 100).toFixed(2)
+      : ((p.targetPrice - s.price) / p.targetPrice * 100).toFixed(2);
+    const pctNum = parseFloat(pct);
+    const pctCol = pctNum < 0.3 ? '#ff4d4d' : pctNum < 0.6 ? '#f7b731' : '#8b949e';
+    const sigCol = p.side === "LONG" ? '#00c48c' : '#ff4d4d';
+    const sigIco = p.side === "LONG" ? '▲' : '▼';
+    return '<div style="background:rgba(247,183,49,0.08);border:1px solid #f7b73166;border-radius:8px;padding:8px 10px">' +
+      '<div style="font-size:11px;color:#f7b731;font-weight:700;margin-bottom:4px">⏳ ČEKA PULLBACK</div>' +
+      '<div style="font-size:12px"><span style="color:' + sigCol + ';font-weight:700">' + sigIco + ' ' + p.side + '</span> signal @ <b>' + fmtLive(p.signalPrice) + '</b></div>' +
+      '<div style="font-size:12px;margin-top:2px">Target: <span style="color:#e85d9a;font-weight:700">' + fmtLive(p.targetPrice) + '</span> &nbsp;|&nbsp; Sad: ' + fmtLive(s.price) + '</div>' +
+      '<div style="font-size:11px;margin-top:3px;color:#8b949e">Čeka: <b style="color:#e6edf3">' + ageStr + '</b> &nbsp;|&nbsp; Još: <b style="color:' + pctCol + '">' + pct + '%</b></div>' +
+      '</div>';
+  }
+
+  // Aktivan signal — spreman za ulaz (bot će ga pohraniti u pending)
+  if (sig === "LONG") {
+    return '<div style="background:rgba(0,196,140,0.1);border:1px solid #00c48c;border-radius:8px;padding:8px 10px">' +
+      '<div style="font-size:11px;color:#00c48c;font-weight:700;margin-bottom:4px">✅ SIGNAL AKTIVIRAN</div>' +
+      '<div style="font-size:13px;font-weight:700;color:#00c48c">▲ LONG</div>' +
+      '<div style="font-size:11px;color:#8b949e;margin-top:3px">Signal @ ' + fmtLive(s.price) + '</div>' +
+      '<div style="font-size:11px;color:#8b949e">Pullback target: ' + fmtLive(s.price * 0.99) + ' (-1%)</div>' +
+      '</div>';
+  }
+  if (sig === "SHORT") {
+    return '<div style="background:rgba(255,77,77,0.1);border:1px solid #ff4d4d;border-radius:8px;padding:8px 10px">' +
+      '<div style="font-size:11px;color:#ff4d4d;font-weight:700;margin-bottom:4px">✅ SIGNAL AKTIVIRAN</div>' +
+      '<div style="font-size:13px;font-weight:700;color:#ff4d4d">▼ SHORT</div>' +
+      '<div style="font-size:11px;color:#8b949e;margin-top:3px">Signal @ ' + fmtLive(s.price) + '</div>' +
+      '<div style="font-size:11px;color:#8b949e">Pullback target: ' + fmtLive(s.price * 1.01) + ' (+1%)</div>' +
+      '</div>';
+  }
+  if (sig === "SETUP↑") return '<span style="color:#f0a500;font-size:12px">◈ SETUP ↑ &nbsp;<span style="color:#555;font-size:11px">(' + (s.ultraBull||0) + '/13)</span></span>';
+  if (sig === "SETUP↓") return '<span style="color:#f0a500;font-size:12px">◈ SETUP ↓ &nbsp;<span style="color:#555;font-size:11px">(' + (s.ultraBear||0) + '/13)</span></span>';
+  return '<span style="color:#444;font-size:12px">—</span>';
+}
+
 async function doScan() {
-  const btn = document.getElementById("scan-btn");
+  const btn   = document.getElementById("scan-btn");
   const tbody = document.getElementById("scan-tbody");
   btn.disabled = true;
   btn.innerHTML = '<span class="spin">⟳</span> Skenira...';
-  tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:24px;color:#8b949e"><span class="spin">⟳</span> Fetcham ${ALL_SYMBOLS.length} simbola...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:32px;color:#8b949e"><span class="spin" style="font-size:20px">⟳</span><br>Fetcham ${ALL_SYMBOLS.length} simbola na 15m TF...</td></tr>';
 
   try {
     const r = await fetch("/api/scan");
     const d = await r.json();
     if (d.error) throw new Error(d.error);
 
-    document.getElementById("scan-ts").textContent = "Ažurirano: " + (d.ts || "").slice(0,16).replace("T"," ") + " UTC";
-
+    const ts = (d.ts || "").slice(0,16).replace("T"," ");
     const results = d.results || [];
 
-    // Priority sort: LONG/SHORT first, SETUP second, neutral last
-    function priority(s) {
-      const hasSignal = s.emaRsiSig==="LONG"||s.emaRsiSig==="SHORT"||s.megaSig==="LONG"||s.megaSig==="SHORT"||s.synapse7Sig==="LONG"||s.synapse7Sig==="SHORT"||s.ultraSig==="LONG"||s.ultraSig==="SHORT";
-      const hasSetup  = (s.emaRsiSig||"").startsWith("SETUP")||(s.megaSig||"").startsWith("SETUP")||(s.synapse7Sig||"").startsWith("SETUP")||(s.ultraSig||"").startsWith("SETUP");
-      return hasSignal ? 0 : hasSetup ? 1 : 2;
-    }
-    results.sort((a, b) => priority(a) - priority(b));
+    // Sort: pending first, then signal, then setup, then score desc, then neutral
+    results.sort((a, b) => {
+      function rank(s) {
+        if (s.pending) return 0;
+        if (s.ultraSig === "LONG" || s.ultraSig === "SHORT") return 1;
+        if ((s.ultraSig||"").startsWith("SETUP")) return 2;
+        return 3 + (13 - Math.max(s.ultraBull||0, s.ultraBear||0));
+      }
+      return rank(a) - rank(b);
+    });
+
+    const longs   = results.filter(s => s.ultraSig === "LONG").length;
+    const shorts  = results.filter(s => s.ultraSig === "SHORT").length;
+    const pending = results.filter(s => s.pending).length;
+    const setups  = results.filter(s => (s.ultraSig||"").startsWith("SETUP")).length;
+    document.getElementById("scan-ts").textContent = ts + " UTC | ▲ " + longs + " LONG · ▼ " + shorts + " SHORT · ⏳ " + pending + " čeka · ◈ " + setups + " setup";
 
     tbody.innerHTML = results.map((s, i) => {
-      if (s.error) return '<tr><td colspan="11" style="color:#ff4d4d">' + s.symbol + ': ' + s.error + '</td></tr>';
-      const hasSignal = ["LONG","SHORT"].includes(s.emaRsiSig) || ["LONG","SHORT"].includes(s.megaSig) || ["LONG","SHORT"].includes(s.synapse7Sig) || ["LONG","SHORT"].includes(s.ultraSig);
-      const hasSetup  = (s.emaRsiSig||"").startsWith("SETUP") || (s.megaSig||"").startsWith("SETUP") || (s.synapse7Sig||"").startsWith("SETUP") || (s.ultraSig||"").startsWith("SETUP");
-      const rowCls = hasSignal ? "any-signal" : "";
-      const trendCol = s.trend && s.trend.includes("↑") ? "#00c48c" : s.trend && s.trend.includes("↓") ? "#ff4d4d" : "#8b949e";
+      if (s.error) return '<tr><td colspan="8" style="color:#ff4d4d;padding:6px 10px">' + s.symbol + ': ' + s.error + '</td></tr>';
+
       const rsiNum = parseFloat(s.rsi);
-      const rsiCol = isNaN(rsiNum) ? "#8b949e" : rsiNum > 70 ? "#ff4d4d" : rsiNum < 30 ? "#00c48c" : "#e6edf3";
-      const biasCol = s.emaBias === "↑" ? "#00c48c" : s.emaBias === "↓" ? "#ff4d4d" : "#8b949e";
-      return '<tr class="' + rowCls + '">' +
-        '<td style="color:#8b949e;font-size:11px">' + (i+1) + '</td>' +
-        '<td style="font-weight:700">' + s.symbol + '</td>' +
-        '<td style="font-weight:600">' + fmtLive(s.price) + '</td>' +
-        '<td style="color:' + biasCol + ';font-weight:700;font-size:15px" title="EMA9 vs EMA21">' + (s.emaBias||"—") + '</td>' +
-        '<td style="color:' + rsiCol + '">' + (s.rsi || "—") + '</td>' +
-        '<td style="color:#8b949e">' + (s.adx || "—") + '</td>' +
-        '<td style="color:' + trendCol + ';font-size:12px">' + (s.trend || "—") + '</td>' +
-        '<td>' + sigHtml(s.emaRsiSig) + '</td>' +
-        '<td>' + sigHtml(s.megaSig) + '</td>' +
-        '<td>' + synapse7Html(s) + '</td>' +
-        '<td>' + ultraHtml(s) + '</td>' +
+      const rsiCol = isNaN(rsiNum) ? "#8b949e" : rsiNum > 70 ? "#ff4d4d" : rsiNum < 30 ? "#00c48c" : rsiNum > 60 ? "#ff8c42" : rsiNum < 40 ? "#42c8ff" : "#e6edf3";
+      const adxNum = parseFloat(s.adx);
+      const adxCol = isNaN(adxNum) ? "#555" : adxNum > 25 ? "#00c48c" : adxNum > 18 ? "#f7b731" : "#555";
+
+      const hasPending = !!s.pending;
+      const hasSignal  = s.ultraSig === "LONG" || s.ultraSig === "SHORT";
+      const rowBg = hasPending ? "background:rgba(247,183,49,0.04)" : hasSignal ? "background:rgba(0,196,140,0.04)" : "";
+
+      return '<tr style="' + rowBg + '">' +
+        '<td style="color:#555;font-size:11px;text-align:center">' + (i+1) + '</td>' +
+        '<td style="font-weight:800;font-size:14px;white-space:nowrap">' + s.symbol.replace("USDT","") + '<span style="color:#555;font-size:10px;font-weight:400">USDT</span></td>' +
+        '<td style="font-weight:600;white-space:nowrap">' + fmtLive(s.price) + '</td>' +
+        '<td style="color:' + rsiCol + ';font-weight:700">' + (s.rsi || "—") + '</td>' +
+        '<td style="color:' + adxCol + '">' + (s.adx || "—") + '</td>' +
+        '<td style="padding:4px 6px">' + sigBoxes(s.ultraSigs13) + '</td>' +
+        '<td style="padding:4px 8px">' + scoreBox(s.ultraBull||0, s.ultraBear||0, s.ultraSig) + '</td>' +
+        '<td style="padding:4px 8px">' + statusBox(s) + '</td>' +
         '</tr>';
     }).join("");
 
-    // Count
-    const longs  = results.filter(s => s.emaRsiSig==="LONG"  || s.megaSig==="LONG"  || s.synapse7Sig==="LONG"  || s.ultraSig==="LONG").length;
-    const shorts = results.filter(s => s.emaRsiSig==="SHORT" || s.megaSig==="SHORT" || s.synapse7Sig==="SHORT" || s.ultraSig==="SHORT").length;
-    const setups = results.filter(s => (s.emaRsiSig||"").startsWith("SETUP") || (s.megaSig||"").startsWith("SETUP") || (s.synapse7Sig||"").startsWith("SETUP") || (s.ultraSig||"").startsWith("SETUP")).length;
-    document.getElementById("scan-ts").textContent += " | ▲ " + longs + " LONG · ▼ " + shorts + " SHORT · ◈ " + setups + " SETUP";
-
   } catch(e) {
-    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:#ff4d4d">Greška: ' + e.message + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#ff4d4d;padding:24px">Greška: ' + e.message + '</td></tr>';
   }
 
   btn.disabled = false;

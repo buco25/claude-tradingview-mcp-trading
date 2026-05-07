@@ -637,6 +637,105 @@ function analyzeSynapseT(candles, cfg) {
   return result;
 }
 
+// ─── SYNAPSE-T Kontra ─────────────────────────────────────────────────────────
+// Inverzija signala: LONG→SHORT, SHORT→LONG
+// Hipoteza: strategija prati momentum na vrhovima/dnu → kontra može biti profitabilnija
+
+function analyzeSynapseTContra(candles, cfg) {
+  const result = analyzeSynapseT(candles, cfg);
+  if (result.signal === "LONG") {
+    return { ...result, signal: "SHORT", reason: "[KONTRA] " + result.reason };
+  }
+  if (result.signal === "SHORT") {
+    return { ...result, signal: "LONG", reason: "[KONTRA] " + result.reason };
+  }
+  return result;
+}
+
+// ─── SYNAPSE-7 Pullback Entry ──────────────────────────────────────────────────
+// Umjesto immediate entry, čeka 1% pullback od signal cijene
+// LONG signal → čeka pad -1% → tek onda ulaz
+// SHORT signal → čeka rast +1% → tek onda ulaz
+
+const PULLBACK_PCT  = 1.0;   // % pullback koji čekamo
+const PULLBACK_TTL  = 4 * 60 * 60 * 1000;  // 4h — cancel ako ne dođe
+
+function pendingFile(pid) { return `${DATA_DIR}/pending_${pid}.json`; }
+
+function loadPending(pid) {
+  const f = pendingFile(pid);
+  if (!existsSync(f)) return [];
+  try { return JSON.parse(readFileSync(f, "utf8")); } catch { return []; }
+}
+
+function savePending(pid, list) {
+  writeFileSync(pendingFile(pid), JSON.stringify(list, null, 2));
+}
+
+async function analyzeSynapse7Pullback(symbol, candles, cfg) {
+  const price  = candles[candles.length - 1].close;
+  const pid    = "synapse7";
+
+  // 1) Provjeri postoji li pending za ovaj simbol
+  let pending = loadPending(pid);
+  const now   = Date.now();
+
+  // Makni stare (TTL istekao)
+  pending = pending.filter(p => now - p.ts < PULLBACK_TTL);
+
+  const existing = pending.find(p => p.symbol === symbol);
+
+  if (existing) {
+    const hit = existing.side === "LONG"
+      ? price <= existing.targetPrice
+      : price >= existing.targetPrice;
+
+    if (hit) {
+      // Pullback dostignut → ulaz!
+      pending = pending.filter(p => p.symbol !== symbol);
+      savePending(pid, pending);
+      const baseResult = analyzeSynapse7(candles, cfg);
+      return {
+        ...baseResult,
+        signal: existing.side,
+        price,
+        reason: `[PULLBACK ${existing.side}] Signal @ ${fmtPrice(existing.signalPrice)} | -1% hit @ ${fmtPrice(price)}`,
+      };
+    }
+
+    // Provjeri nije li signal promijenio smjer — cancel
+    const freshResult = analyzeSynapse7(candles, cfg);
+    const signalFlipped = freshResult.signal !== "NEUTRAL" && freshResult.signal !== existing.side;
+    if (signalFlipped) {
+      pending = pending.filter(p => p.symbol !== symbol);
+      savePending(pid, pending);
+      console.log(`  🔄 [SYNAPSE-7] ${symbol} — pending ${existing.side} canceliran (signal flip)`);
+    } else {
+      const pct = existing.side === "LONG"
+        ? ((price - existing.targetPrice) / existing.targetPrice * 100).toFixed(2)
+        : ((existing.targetPrice - price) / existing.targetPrice * 100).toFixed(2);
+      console.log(`  ⏳ [SYNAPSE-7] ${symbol} ${existing.side} čeka pullback | Target: ${fmtPrice(existing.targetPrice)} | Sad: ${fmtPrice(price)} | Još: ${pct}%`);
+    }
+    return { price, signal: "NEUTRAL", reason: `Čeka pullback na ${fmtPrice(existing?.targetPrice)}` };
+  }
+
+  // 2) Nema pendinga — pokreni normalnu analizu
+  const result = analyzeSynapse7(candles, cfg);
+
+  if (result.signal === "LONG" || result.signal === "SHORT") {
+    const targetPrice = result.signal === "LONG"
+      ? price * (1 - PULLBACK_PCT / 100)
+      : price * (1 + PULLBACK_PCT / 100);
+
+    pending.push({ symbol, side: result.signal, signalPrice: price, targetPrice, ts: now });
+    savePending(pid, pending);
+    console.log(`  📌 [SYNAPSE-7] ${symbol} ${result.signal} signal @ ${fmtPrice(price)} → čeka pullback na ${fmtPrice(targetPrice)}`);
+    return { price, signal: "NEUTRAL", reason: `Signal zabilježen, čeka 1% pullback na ${fmtPrice(targetPrice)}` };
+  }
+
+  return result;
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────────
 
 // Cache pricePlace po simbolu (dohvat iz BitGet contracts API)
@@ -1213,8 +1312,8 @@ export async function run() {
         let result;
         switch (pDef.strategy) {
           case "mega":        result = analyzeMega(candles, pDef.params);           break;
-          case "synapse7":    result = analyzeSynapse7(candles, pDef.params);       break;
-          case "synapse_t":   result = analyzeSynapseT(candles, pDef.params);       break;
+          case "synapse7":    result = await analyzeSynapse7Pullback(symbol, candles, pDef.params); break;
+          case "synapse_t":   result = analyzeSynapseTContra(candles, pDef.params); break;
           default:            result = analyzeEmaRsi(candles, pDef.params);         break;
         }
 

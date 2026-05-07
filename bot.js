@@ -738,8 +738,25 @@ function analyzeUltra(candles, cfg) {
     const s = emaSlice(closes.slice(0,i), 26);
     if (f !== null && s !== null) diffs.push(f - s);
   }
-  const macdSig  = emaSlice(diffs, 9);
-  const macdHist = macdSig ? diffs[diffs.length-1] - macdSig : null;
+  // Signal line series + current histogram
+  const histVals = [];
+  let macdHist = null;
+  if (diffs.length >= 9) {
+    const sigK9 = 2 / (9 + 1);
+    let sv9 = diffs.slice(0, 9).reduce((a,b)=>a+b,0) / 9;
+    for (let j = 9; j < diffs.length; j++) {
+      sv9 = diffs[j] * sigK9 + sv9 * (1 - sigK9);
+      histVals.push(diffs[j] - sv9);
+    }
+    if (histVals.length > 0) macdHist = histVals[histVals.length - 1];
+  }
+  // MACD cross: histogram changed sign in last 3 bars
+  let macdCrossUp = false, macdCrossDn = false;
+  for (let k = Math.max(1, histVals.length - 3); k < histVals.length; k++) {
+    if (histVals[k] > 0 && histVals[k-1] <= 0) macdCrossUp = true;
+    if (histVals[k] < 0 && histVals[k-1] >= 0) macdCrossDn = true;
+  }
+  const macdCross = macdCrossUp ? 1 : macdCrossDn ? -1 : 0;
 
   // 6-Scale multi-EMA
   const scales = [[3,11],[7,15],[13,21],[19,29],[29,47],[45,55]];
@@ -770,27 +787,25 @@ function analyzeUltra(candles, cfg) {
     }
   }
 
-  // ── 13 signala: +1 = bullish, -1 = bearish, 0 = neutral ──
+  // ── 14 signala: +1 = bullish, -1 = bearish, 0 = neutral ──
   const sigs = [
     ema9 > ema21 ? 1 : -1,                          // 1. EMA9/21 smjer
     hadCrossUp ? 1 : hadCrossDn ? -1 : 0,           // 2. Svježi cross (3 bara)
     price > ema50 ? 1 : -1,                          // 3. Cijena vs EMA50
     // 4. RSI zona: ispod 50 = prostor za rast (bullish), iznad 50 = prostor za pad (bearish)
-    //    Ali ne ulazimo ako je u extremu: overbought >70 za long, oversold <30 za short
     (rsi < 50 && rsi > 30) ? 1 : (rsi > 50 && rsi < 70) ? -1 : 0,
     price > ema55 ? 1 : -1,                          // 5. Cijena vs EMA55 (MEGA)
     adx > 18 ? 1 : 0,                                // 6. ADX > 18
     chop < 61.8 ? 1 : -1,                            // 7. Nije choppy
     (scaleUp >= 4 ? 1 : scaleDn >= 4 ? -1 : 0),     // 8. 6-Scale multi-EMA
     cvdSum > 0 ? 1 : -1,                             // 9. CVD volumen
-    // 10. RSI recovery signal (ključni signal):
-    //   BULL: RSI bio ispod 35 (oversold) u zadnjih 5 bara i sad raste iznad 35 → recovery
-    //   BEAR: RSI bio iznad 65 (overbought) i sad pada ispod 65 → recovery
+    // 10. RSI recovery: bio ispod 35 (oversold) i sad raste iznad 35 → recovery
     (rsiMin5 < 35 && rsi > 35 && rsiRising) ? 1
       : (rsiMax5 > 65 && rsi < 65 && rsiFalling) ? -1 : 0,
     macdHist !== null ? (macdHist > 0 ? 1 : -1) : 0, // 11. MACD histogram
     price > ema145 ? 1 : -1,                          // 12. EMA145 dugoročni trend
     volLast > volAvg20 ? 1 : 0,                       // 13. Volumen iznad prosjeka
+    macdCross,                                         // 14. MACD cross (histogram promijenio predznak, zadnja 3 bara)
   ];
 
   const bullCnt = sigs.filter(s => s === 1).length;
@@ -798,14 +813,14 @@ function analyzeUltra(candles, cfg) {
 
   if (bullCnt >= minSig) {
     return { price, signal: "LONG",  bullScore: bullCnt, bearScore: bearCnt,
-      reason: `ULTRA LONG ↑${bullCnt}/13 | RSI:${rsi.toFixed(0)} ADX:${adx.toFixed(0)} MACD:${macdHist?.toFixed(4)||"?"} 6Sc:${scaleUp}/6` };
+      reason: `ULTRA LONG ↑${bullCnt}/14 | RSI:${rsi.toFixed(0)} ADX:${adx.toFixed(0)} MACD:${macdHist?.toFixed(4)||"?"} MCC:${macdCross} 6Sc:${scaleUp}/6` };
   }
   if (bearCnt >= minSig) {
     return { price, signal: "SHORT", bullScore: bullCnt, bearScore: bearCnt,
-      reason: `ULTRA SHORT ↓${bearCnt}/13 | RSI:${rsi.toFixed(0)} ADX:${adx.toFixed(0)} MACD:${macdHist?.toFixed(4)||"?"} 6Sc:${scaleDn}/6` };
+      reason: `ULTRA SHORT ↓${bearCnt}/14 | RSI:${rsi.toFixed(0)} ADX:${adx.toFixed(0)} MACD:${macdHist?.toFixed(4)||"?"} MCC:${macdCross} 6Sc:${scaleDn}/6` };
   }
   return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
-    reason: `ULTRA: ↑${bullCnt} ↓${bearCnt} /13 (min ${minSig})` };
+    reason: `ULTRA: ↑${bullCnt} ↓${bearCnt} /14 (min ${minSig})` };
 }
 
 // ─── ULTRA Pullback Entry ─────────────────────────────────────────────────────

@@ -89,10 +89,10 @@
       }
     },
     "synapse_t": {
-      "name": "ULTRA — 13-Signal Combined Strategy",
-      "description": "Kombinira 13 signala iz svih strategija (EMA+RSI, MEGA, SYNAPSE-7, 3-Layer). Min 8/13 signala. Pullback entry -1%/+1%. SL 1% / TP 2% (RR 1:2). RSI recovery signal — ulaz iz oversold/overbought zone.",
+      "name": "ULTRA — 14-Signal Combined Strategy",
+      "description": "Kombinira 14 signala: EMA, Cross, E50, RSI zona, E55, ADX, Chop, 6Sc, CVD, RSI recovery, MACD hist, E145, Vol, MACD cross. Min 9/14 signala. Pullback entry -1%/+1%. SL 1% / TP 2% (RR 1:2).",
       "params": {
-        "minSig": 8,
+        "minSig": 9,
         "slPct": 1.0, "tpPct": 2.0
       }
     },
@@ -114,7 +114,7 @@
     "Samo jedna pozicija po simbolu PO PORTFOLIJU istovremeno",
     "Max 5 otvorenih pozicija po portfoliju istovremeno",
     "Dnevni limit: 100 tradova",
-    "SYNAPSE-7: kMem 100 (25h AI memory), minSig 4/5 (isto kao SYNAPSE-T)",
+    "SYNAPSE-7: kMem 100 (25h AI memory), minSig 4/5 | ULTRA: 14 signala, minSig 9/14",
     "Uklonjeni simboli (loš WR): ORDIUSDT, WLDUSDT, TRUMPUSDT, XRPUSDT, AVAXUSDT, AAVEUSDT"
   ]
 }

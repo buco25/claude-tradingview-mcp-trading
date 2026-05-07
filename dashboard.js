@@ -13,10 +13,7 @@ const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" 
 const START_CAPITAL = 1000;
 
 const PORTFOLIO_DEFS = [
-  { id: "ema_rsi",   name: "EMA+RSI",   color: "#388bfd", emoji: "📊", startCapital: 1000, live: false },
-  { id: "mega",      name: "MEGA",      color: "#00c48c", emoji: "🚀", startCapital: 1000, live: false },
-  { id: "synapse7",  name: "SYNAPSE-7", color: "#f7b731", emoji: "🧠", startCapital: 1000, live: false },
-  { id: "synapse_t", name: "ULTRA",     color: "#e85d9a", emoji: "🎯", startCapital:  356.80, live: false  },
+  { id: "synapse_t", name: "ULTRA", color: "#e85d9a", emoji: "🎯", startCapital: 356.80, live: false },
 ];
 
 // ─── All symbols ───────────────────────────────────────────────────────────────
@@ -132,6 +129,38 @@ function _macdHist(closes, fast=12, slow=26, sig=9) {
   return sigLine ? diffs[diffs.length-1] - sigLine : null;
 }
 
+// Returns last `tail` histogram values efficiently (O(n) EMA series)
+function _macdHistTail(closes, tail=3, fast=12, slow=26, sig=9) {
+  const n = closes.length;
+  if (n < slow+sig+tail) return new Array(tail).fill(null);
+  // Fast EMA series
+  const fk = 2/(fast+1);
+  let fv = closes.slice(0, fast).reduce((a,b)=>a+b,0)/fast;
+  const fArr = new Array(n).fill(null); fArr[fast-1] = fv;
+  for (let i = fast; i < n; i++) { fv = closes[i]*fk + fv*(1-fk); fArr[i] = fv; }
+  // Slow EMA series
+  const sk = 2/(slow+1);
+  let sv = closes.slice(0, slow).reduce((a,b)=>a+b,0)/slow;
+  const sArr = new Array(n).fill(null); sArr[slow-1] = sv;
+  for (let i = slow; i < n; i++) { sv = closes[i]*sk + sv*(1-sk); sArr[i] = sv; }
+  // MACD line
+  const diffs = [];
+  for (let i = slow-1; i < n; i++) {
+    if (fArr[i] !== null && sArr[i] !== null) diffs.push(fArr[i] - sArr[i]);
+  }
+  // Signal line series
+  if (diffs.length < sig) return new Array(tail).fill(null);
+  const sigK = 2/(sig+1);
+  let sgv = diffs.slice(0, sig).reduce((a,b)=>a+b,0)/sig;
+  const histArr = [];
+  for (let j = sig; j < diffs.length; j++) {
+    sgv = diffs[j]*sigK + sgv*(1-sigK);
+    histArr.push(diffs[j] - sgv);
+  }
+  // Return last `tail` values
+  return histArr.slice(-tail);
+}
+
 // ─── Scanner — run all 3 strategies on one symbol ──────────────────────────────
 
 // Compute full EMA series — koristi za detekciju crossa u zadnjih N barova
@@ -181,6 +210,17 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
   const adx    = _adx(candles, 14);
   const chop   = _chop(candles, 14);
   const macdH  = _macdHist(closes);
+  // MACD cross: histogram changed sign in last 3 bars
+  const macdTail = _macdHistTail(closes, 4);  // last 4 histogram values
+  let macdCrossUp = false, macdCrossDn = false;
+  for (let _k = 1; _k < macdTail.length; _k++) {
+    const hc = macdTail[_k], hp = macdTail[_k-1];
+    if (hc !== null && hp !== null) {
+      if (hc > 0 && hp <= 0) macdCrossUp = true;
+      if (hc < 0 && hp >= 0) macdCrossDn = true;
+    }
+  }
+  const macdCrossV = macdCrossUp ? 1 : macdCrossDn ? -1 : 0;
   const emaBias = ema9 && ema21 ? (ema9 > ema21 ? "↑" : "↓") : "—";
 
   // ── RSI series (za recovery detekciju) ──
@@ -274,18 +314,18 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
     else if (synapse7Bear === minSig - 1 && scaleDn >= 3) synapse7Sig = "SETUP↓";
   }
 
-  // ── ULTRA — 13 signala (identično bot.js analyzeUltra) ──
+  // ── ULTRA — 14 signala (identično bot.js analyzeUltra) ──
   let ultraSig = "—";
   let ultraBull = 0, ultraBear = 0;
-  let ultraSigs13 = new Array(13).fill(0);
+  let ultraSigs14 = new Array(14).fill(0);
   {
-    const { minSig = 8 } = ultraCfg;
+    const { minSig = 9 } = ultraCfg;
     if (n >= 200 && ema9 && ema21) {
       const rsiV  = rsi ?? 50;
       const adxV  = adx ?? 0;
       const chopV = chop ?? 100;
 
-      ultraSigs13 = [
+      ultraSigs14 = [
         ema9 > ema21 ? 1 : -1,                                          // 1. EMA9/21 smjer
         crossUp3 ? 1 : crossDown3 ? -1 : 0,                             // 2. Svježi cross (3 bara)
         ema50 ? (price > ema50 ? 1 : -1) : 0,                           // 3. Cijena vs EMA50
@@ -299,10 +339,11 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
         macdH !== null ? (macdH > 0 ? 1 : -1) : 0,                      // 11. MACD histogram
         ema145 ? (price > ema145 ? 1 : -1) : 0,                         // 12. EMA145 trend
         vols[n-1] > volAvg20 ? 1 : 0,                                    // 13. Volumen iznad prosjeka
+        macdCrossV,                                                       // 14. MACD cross (predznak promijenjen)
       ];
 
-      ultraBull = ultraSigs13.filter(s => s === 1).length;
-      ultraBear = ultraSigs13.filter(s => s === -1).length;
+      ultraBull = ultraSigs14.filter(s => s === 1).length;
+      ultraBear = ultraSigs14.filter(s => s === -1).length;
 
       if      (ultraBull >= minSig) ultraSig = "LONG";
       else if (ultraBear >= minSig) ultraSig = "SHORT";
@@ -319,8 +360,7 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
     trend: trendLabel,
     emaRsiSig, megaSig,
     synapse7Sig, synapse7Bull, synapse7Bear, synapse7Subs,
-    ultraSig, ultraBull, ultraBear, ultraSigs13,
-    // backward compat (doScan JS koristi synapseTSig)
+    ultraSig, ultraBull, ultraBear, ultraSigs14,
     synapseTSig: ultraSig,
   };
 }
@@ -500,57 +540,25 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     : `<span class="badge red-badge">🔴 Bot ${hb ? hbLabel + " — STAO!" : "nikad nije radio"}</span>`;
   const modeLbl  = process.env.PAPER_TRADING !== "false" ? "PAPER" : process.env.BITGET_DEMO === "true" ? "DEMO" : "LIVE";
 
-  // Collect all symbols for live price polling
-  const allSymbols = new Set();
-  allPositions.forEach(posList => posList.forEach(p => allSymbols.add(p.symbol)));
+  // ULTRA — jedini portfolio
+  const def   = PORTFOLIO_DEFS[0];
+  const s     = allStats[0];
+  const positions = allPositions[0];
+  const tf    = tfMap[def.id] || "15m";
 
-  // Chart data — P&L bars + Win/Loss bars
-  const chartLabels  = JSON.stringify(PORTFOLIO_DEFS.map(d => d.name));
-  const chartPnl     = JSON.stringify(allStats.map(s => parseFloat(s.totalPnl.toFixed(2))));
-  const chartPnlColors= JSON.stringify(allStats.map(s => s.totalPnl >= 0 ? "#00c48c" : "#ff4d4d"));
-  const chartWins    = JSON.stringify(allStats.map(s => s.wins.length));
-  const chartLosses  = JSON.stringify(allStats.map(s => s.losses.length));
-  const chartWR      = JSON.stringify(allStats.map(s => s.winRate !== null ? parseFloat(s.winRate) : 0));
-  const chartPortColors = JSON.stringify(PORTFOLIO_DEFS.map(d => d.color));
+  const pcts   = ((s.equity - def.startCapital) / def.startCapital * 100);
+  const pctStr = (pcts >= 0 ? "+" : "") + pcts.toFixed(2) + "%";
+  const eqCol  = s.equity >= def.startCapital ? "#00c48c" : "#ff4d4d";
+  const pnlCol = s.totalPnl >= 0 ? "#00c48c" : "#ff4d4d";
 
-  // Portfolio comparison cards
-  const cardsHtml = PORTFOLIO_DEFS.map((def, i) => {
-    const s      = allStats[i];
-    const pcts   = ((s.equity - def.startCapital) / def.startCapital * 100);
-    const pctStr = (pcts >= 0 ? "+" : "") + pcts.toFixed(2) + "%";
-    const eqCol  = s.equity >= def.startCapital ? "#00c48c" : "#ff4d4d";
-    const openCount = allPositions[i].length;
-    const tf = tfMap[def.id] || "1H";
-    const modeBadge = def.live
-      ? `<span class="badge" style="background:rgba(255,77,77,0.15);color:#ff4d4d;border:1px solid #ff4d4d;font-size:10px;padding:2px 7px">🔴 LIVE</span>`
-      : `<span class="badge badge-paper" style="font-size:10px;padding:2px 7px">PAPER</span>`;
-    return `
-    <div class="port-card" style="border-top:3px solid ${def.color}">
-      <div class="port-header">
-        <span style="font-size:22px">${def.emoji}</span>
-        <div style="flex:1">
-          <div style="display:flex;align-items:center;gap:8px">
-            <div class="port-name" style="color:${def.color}">${def.name}</div>
-            ${modeBadge}
-          </div>
-          <div class="port-subtitle">Portfolio ${i + 1} · ${tf} · SL ${def.id==="synapse_t"?"1":"2"}% / TP ${def.id==="synapse_t"?"2":"4"}% · 30x</div>
-        </div>
-      </div>
-      <div class="port-equity" style="color:${eqCol}">$${s.equity.toFixed(2)}</div>
-      <div class="port-return" style="color:${eqCol}">${pctStr}</div>
-      <div class="port-row"><span class="muted">Start</span><span>$${def.startCapital.toFixed(0)}</span></div>
-      <div class="port-row"><span class="muted">P&amp;L</span><span>${pnlHtml(s.totalPnl)}</span></div>
-      <div class="port-row"><span class="muted">Trades</span><span>${s.exits.length}</span></div>
-      <div class="port-row"><span class="muted">Win Rate</span><span>${s.winRate !== null ? s.winRate + "%" : "—"}</span></div>
-      <div class="port-row"><span class="muted">Otvoreno</span><span>${openCount} pozicija</span></div>
-    </div>`;
-  }).join("");
+  // Equity curve chart data
+  const curveLabels = JSON.stringify(s.pnlCurve.map(p => p.ts.slice(0,10)));
+  const curveData   = JSON.stringify(s.pnlCurve.map(p => p.equity));
 
-  // Open positions per portfolio
-  const positionsSections = PORTFOLIO_DEFS.map((def, i) => {
-    const positions = allPositions[i];
+  // Open positions (ULTRA only)
+  const positionsSections = (() => {
     if (positions.length === 0)
-      return `<div class="section-label" style="color:${def.color}">${def.name} — nema otvorenih pozicija</div>`;
+      return `<div class="section-label" style="color:${def.color}">🎯 ULTRA — nema otvorenih pozicija</div>`;
 
     const posHtml = positions.map(p => {
       const isLong = p.side === "LONG";
@@ -605,15 +613,14 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     }).join("");
 
     return `
-      <div class="section-label" style="color:${def.color}">${def.emoji} ${def.name} — Otvorene pozicije (${positions.length})</div>
+      <div class="section-label" style="color:${def.color}">🎯 ULTRA — Otvorene pozicije (${positions.length})</div>
       <div class="pos-grid-wrap">${posHtml}</div>`;
-  }).join("\n");
+  })();
 
-  // Closed trades tables per portfolio
-  const tradesSections = PORTFOLIO_DEFS.map((def, i) => {
-    const s = allStats[i];
+  // Closed trades (ULTRA only)
+  const tradesSections = (() => {
     if (s.recentExits.length === 0)
-      return `<div class="section-label" style="color:${def.color}">${def.name} — nema zatvorenih tradova</div>`;
+      return `<div class="section-label" style="color:${def.color}">🎯 ULTRA — nema zatvorenih tradova</div>`;
 
     const rows = s.recentExits.map(r => {
       const pnl = parseFloat(r["Net P&L"] || 0);
@@ -629,14 +636,14 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     }).join("");
 
     return `
-      <div class="section-label" style="color:${def.color}">${def.emoji} ${def.name} — Zadnjih ${s.recentExits.length} tradova</div>
+      <div class="section-label" style="color:${def.color}">🎯 ULTRA — Zadnjih ${s.recentExits.length} tradova</div>
       <div class="table-wrap">
         <table class="trade-table">
           <thead><tr><th>Datum</th><th>Symbol</th><th>Side</th><th>Cijena</th><th>P&amp;L</th><th>Info</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>`;
-  }).join("\n");
+  })();
 
   return `<!DOCTYPE html>
 <html lang="hr">
@@ -644,7 +651,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="refresh" content="30">
-<title>Trading Bot — 3 Portfolia</title>
+<title>🎯 ULTRA Trading Bot</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
   :root {
@@ -679,20 +686,12 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   .red   { color:var(--red); }
   .green { color:var(--green); }
 
-  /* Portfolio cards */
-  .port-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:32px; }
-  @media(max-width:1100px){ .port-grid { grid-template-columns:repeat(2,1fr); } }
-  @media(max-width:600px){  .port-grid { grid-template-columns:1fr; } }
-  .charts-row { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:32px; }
-  @media(max-width:700px){ .charts-row { grid-template-columns:1fr; } }
-  .port-card { background:var(--bg-secondary); border-radius:12px; padding:20px; border:1px solid var(--border); }
-  .port-header { display:flex; align-items:center; gap:12px; margin-bottom:16px; }
-  .port-name { font-size:16px; font-weight:700; }
-  .port-subtitle { font-size:11px; color:var(--text-muted); }
-  .port-equity { font-size:28px; font-weight:800; margin-bottom:4px; }
-  .port-return { font-size:14px; font-weight:600; margin-bottom:16px; }
-  .port-row { display:flex; justify-content:space-between; align-items:center; padding:5px 0; border-bottom:1px solid var(--border); font-size:13px; }
-  .port-row:last-child { border:none; }
+  /* Stats bar */
+  .stats-bar { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:12px; margin-bottom:24px; }
+  .stat-card { background:var(--bg-secondary); border-radius:10px; padding:14px 16px; border:1px solid var(--border); }
+  .stat-label { font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.06em; margin-bottom:4px; }
+  .stat-value { font-size:22px; font-weight:800; }
+  .stat-sub   { font-size:11px; color:var(--text-muted); margin-top:2px; }
 
   /* Chart */
   .chart-card { background:var(--bg-secondary); border-radius:12px; padding:20px; border:1px solid var(--border); margin-bottom:32px; }
@@ -752,10 +751,10 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <!-- Header -->
   <div class="header">
     <div class="header-left">
-      <div class="logo">🤖</div>
+      <div class="logo">🎯</div>
       <div>
-        <div class="title">Trading Bot — 3 Portfolia</div>
-        <div class="subtitle">EMA+RSI(${tfMap.ema_rsi||"1H"}) · MEGA(${tfMap.mega||"15m"}) · 🧠SYNAPSE-7(${tfMap.synapse7||"15m"}) · 🎯ULTRA(${tfMap.synapse_t||"15m"}) &nbsp;|&nbsp; 30x</div>
+        <div class="title">ULTRA Trading Bot</div>
+        <div class="subtitle">14 signala · min 9/14 · pullback 1% · ${tf} · SL 1% / TP 2% · 30x</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -764,42 +763,57 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     </div>
   </div>
 
-  <!-- Portfolio comparison cards -->
-  <div class="port-grid">
-    ${cardsHtml}
+  <!-- Stats bar -->
+  <div class="stats-bar">
+    <div class="stat-card" style="border-top:3px solid #e85d9a">
+      <div class="stat-label">Equity</div>
+      <div class="stat-value" style="color:${eqCol}">$${s.equity.toFixed(2)}</div>
+      <div class="stat-sub" style="color:${eqCol}">${pctStr}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Start kapital</div>
+      <div class="stat-value" style="color:#8b949e">$${def.startCapital.toFixed(2)}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Net P&amp;L</div>
+      <div class="stat-value" style="color:${pnlCol}">${s.totalPnl >= 0 ? "+" : ""}$${s.totalPnl.toFixed(2)}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Win Rate</div>
+      <div class="stat-value" style="color:${s.winRate !== null && parseFloat(s.winRate) >= 50 ? "#00c48c" : "#ff4d4d"}">${s.winRate !== null ? s.winRate + "%" : "—"}</div>
+      <div class="stat-sub">${s.wins.length}W / ${s.losses.length}L</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Zatvoreni tradovi</div>
+      <div class="stat-value">${s.exits.length}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Otvoreno</div>
+      <div class="stat-value" style="color:#f7b731">${positions.length}</div>
+      <div class="stat-sub">pozicija</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Strategija</div>
+      <div class="stat-value" style="font-size:14px;color:#e85d9a">ULTRA</div>
+      <div class="stat-sub">SL 1% / TP 2%</div>
+    </div>
   </div>
 
-  <!-- Charts row -->
-  <div class="charts-row">
-    <div class="chart-card" style="margin-bottom:0">
-      <div class="chart-title">💰 P&amp;L po portfoliju</div>
-      <div class="chart-wrap" style="height:200px"><canvas id="pnlChart"></canvas></div>
-    </div>
-    <div class="chart-card" style="margin-bottom:0">
-      <div class="chart-title">📊 Wins / Losses / WR%</div>
-      <div class="chart-wrap" style="height:200px"><canvas id="wrChart"></canvas></div>
-    </div>
+  <!-- Equity curve -->
+  <div class="chart-card">
+    <div class="chart-title">📈 Equity krivulja — ULTRA</div>
+    <div class="chart-wrap" style="height:180px"><canvas id="eqChart"></canvas></div>
   </div>
 
   <!-- Live Scanner ULTRA -->
   <div class="scan-card">
     <div class="scan-header">
       <div>
-        <div class="chart-title" style="margin-bottom:2px">🎯 ULTRA Scanner — ${ALL_SYMBOLS.length} simbola | 13 signala | min 8/13 | pullback 1%</div>
+        <div class="chart-title" style="margin-bottom:2px">🎯 ULTRA Scanner — ${ALL_SYMBOLS.length} simbola | 14 signala | min 9/14 | pullback 1%</div>
         <div style="font-size:12px;color:var(--text-muted)">
-          <span style="color:#00c48c">▲</span> EMA dir &nbsp;
-          <span style="color:#e85d9a">✦</span> Cross &nbsp;
-          <span style="color:#388bfd">E50</span> &nbsp;
-          <span style="color:#f7b731">RSI</span> &nbsp;
-          <span style="color:#388bfd">E55</span> &nbsp;
-          ADX &nbsp; CHP &nbsp;
-          <span style="color:#f7b731">6Sc</span> &nbsp;
-          CVD &nbsp;
-          <span style="color:#00c48c">R⟳</span> &nbsp;
-          MACD &nbsp;
-          <span style="color:#bc8cff">E145</span> &nbsp;
-          VOL
-          &nbsp;|&nbsp; 🟡 Čeka pullback &nbsp; 🟢 Signal &nbsp; Cache 90s
+          EMA · CRS · E50 · RSI · E55 · ADX · CHP · 6Sc · CVD · R⟳ · MCD · E145 · VOL · <b style="color:#e85d9a">MCC</b>
+          &nbsp;|&nbsp; 🟡 Čeka pullback &nbsp; 🟢 Signal &nbsp; Cache 90s &nbsp;|&nbsp;
+          <a href="#" onclick="document.getElementById('sig-legend').style.display=document.getElementById('sig-legend').style.display==='none'?'block':'none';return false;" style="color:#8b949e;font-size:11px">📖 Legenda signala</a>
         </div>
       </div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -818,7 +832,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <th>Cijena</th>
             <th style="color:#8b949e">RSI</th>
             <th style="color:#8b949e">ADX</th>
-            <th style="color:#e85d9a;text-align:center">13 Signala &nbsp;<span style="font-weight:400;font-size:10px;color:#666">EMA · CRS · E50 · RSI · E55 · ADX · CHP · 6Sc · CVD · R⟳ · MCD · E145 · VOL</span></th>
+            <th style="color:#e85d9a;text-align:center">14 Signala &nbsp;<span style="font-weight:400;font-size:10px;color:#666">EMA · CRS · E50 · RSI · E55 · ADX · CHP · 6Sc · CVD · R⟳ · MCD · E145 · VOL · MCC</span></th>
             <th style="color:#e85d9a;text-align:center">Score</th>
             <th style="min-width:260px">Status / Pullback</th>
           </tr>
@@ -827,6 +841,39 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
           <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted)">Klikni "Skeniraj" za prikaz ULTRA signala</td></tr>
         </tbody>
       </table>
+    </div>
+  </div>
+
+  <!-- Signal legend (collapsible) -->
+  <div id="sig-legend" style="display:none;margin-top:12px">
+    <div class="chart-card" style="padding:16px 20px">
+      <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — ULTRA (14 signala, min 9/14)</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px;font-size:12px">
+        ${[
+          ['EMA','EMA9 > EMA21 — kratkoročni trend gore (bull) / dole (bear)'],
+          ['CRS','Svježi EMA9/21 cross u zadnja 3 bara — momenat promjene trenda'],
+          ['E50','Cijena > EMA50 — srednji trend potvrđen'],
+          ['RSI','RSI između 30–50 (bull): ima prostora za rast, nije preotkupljeno'],
+          ['E55','Cijena > EMA55 — MEGA trend filter, šira potvrda'],
+          ['ADX','ADX > 18 — tržište je u trendu, ne u konsolidaciji'],
+          ['CHP','Choppiness < 61.8 — nije choppy/ranging tržište'],
+          ['6Sc','6-Scale EMA: min 4 od 6 EMA parova bull — multi-TF konsenzus'],
+          ['CVD','CVD (Cumulative Volume Delta) pozitivan — kupci dominiraju volumenom'],
+          ['R⟳','RSI recovery: bio < 35 (oversold), sad > 35 i raste — exit oversold'],
+          ['MCD','MACD histogram > 0 — MACD linija iznad signal linije (momentum bull)'],
+          ['E145','Cijena > EMA145 — dugoročni trend gore'],
+          ['VOL','Volumen zadnjeg bara iznad 20-barnog prosjeka — potvrda aktivnosti'],
+          ['MCC','MACD cross: histogram promijenio predznak (neg→poz) u zadnja 3 bara'],
+        ].map(([k,v]) =>
+          '<div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 10px">' +
+          '<span style="font-weight:800;color:#e85d9a;font-size:11px;display:inline-block;min-width:36px">' + k + '</span>' +
+          '<span style="color:#8b949e">' + v + '</span></div>'
+        ).join('')}
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:#555">
+        🟢 Zeleno = bullish signal aktiviran &nbsp;|&nbsp; 🔴 Crveno = bearish &nbsp;|&nbsp; ⬛ Sivo = neutral/nema signala &nbsp;|&nbsp;
+        Min <b style="color:#e85d9a">9/14</b> signala za ulaz · Pullback <b style="color:#e85d9a">-1%</b> od signal cijene · SL <b>1%</b> / TP <b>2%</b>
+      </div>
     </div>
   </div>
 
@@ -845,78 +892,41 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
 </div>
 
 <script>
-// ── P&L Bar Chart ──────────────────────────────────────────────────────────────
+// ── Equity krivulja ────────────────────────────────────────────────────────────
 (function(){
-  const labels    = ${chartLabels};
-  const pnlData   = ${chartPnl};
-  const pnlColors = ${chartPnlColors};
-  const portColors= ${chartPortColors};
-  new Chart(document.getElementById("pnlChart").getContext("2d"), {
-    type: "bar",
+  const labels = ${curveLabels};
+  const data   = ${curveData};
+  new Chart(document.getElementById("eqChart").getContext("2d"), {
+    type: "line",
     data: {
       labels,
       datasets: [{
-        label: "Net P&L ($)",
-        data: pnlData,
-        backgroundColor: pnlColors,
-        borderColor: pnlColors,
-        borderWidth: 1,
-        borderRadius: 6,
+        label: "Equity ($)",
+        data,
+        borderColor: "#e85d9a",
+        backgroundColor: "rgba(232,93,154,0.08)",
+        borderWidth: 2,
+        pointRadius: data.length > 50 ? 0 : 3,
+        pointBackgroundColor: "#e85d9a",
+        tension: 0.3,
+        fill: true,
       }]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: {
         legend: { display: false },
-        tooltip: { callbacks: { label: ctx => (ctx.raw >= 0 ? "+" : "") + "$" + ctx.raw.toFixed(2) } }
-      },
-      scales: {
-        x: { ticks: { color: "#8b949e" }, grid: { display: false } },
-        y: {
-          ticks: { color: "#8b949e", callback: v => (v >= 0 ? "+" : "") + "$" + v.toFixed(2) },
-          grid: { color: "#21262d" },
-          border: { dash: [4, 4] }
-        }
-      }
-    }
-  });
-})();
-
-// ── Win/Loss/WR Chart ──────────────────────────────────────────────────────────
-(function(){
-  const labels    = ${chartLabels};
-  const wins      = ${chartWins};
-  const losses    = ${chartLosses};
-  const wrData    = ${chartWR};
-  const portColors= ${chartPortColors};
-  new Chart(document.getElementById("wrChart").getContext("2d"), {
-    type: "bar",
-    data: {
-      labels,
-      datasets: [
-        { label: "Wins",   data: wins,   backgroundColor: "#00c48c99", borderColor: "#00c48c", borderWidth:1, borderRadius:4, stack:"trades" },
-        { label: "Losses", data: losses, backgroundColor: "#ff4d4d99", borderColor: "#ff4d4d", borderWidth:1, borderRadius:4, stack:"trades" },
-        { label: "WR %",   data: wrData, backgroundColor: portColors.map(c => c + "55"), borderColor: portColors, borderWidth:2, borderRadius:4, type:"bar", yAxisID:"y2" }
-      ]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      interaction: { mode: "index", intersect: false },
-      plugins: {
-        legend: { labels: { color: "#8b949e", boxWidth: 10, font: { size: 11 } } },
         tooltip: {
-          callbacks: {
-            label: ctx => {
-              if (ctx.dataset.label === "WR %") return "WR: " + ctx.raw.toFixed(1) + "%";
-              return ctx.dataset.label + ": " + ctx.raw;
-            }
-          }
+          callbacks: { label: ctx => "$" + ctx.raw.toFixed(2) }
         }
       },
       scales: {
-        x:  { ticks: { color: "#8b949e" }, grid: { display: false }, stacked: true },
-        y:  { ticks: { color: "#8b949e", stepSize: 1 }, grid: { color: "#21262d" }, stacked: true, title: { display: true, text: "Trades", color: "#8b949e", font: { size: 10 } } },
-        y2: { position: "right", ticks: { color: "#8b949e", callback: v => v + "%" }, grid: { display: false }, min: 0, max: 100, title: { display: true, text: "WR %", color: "#8b949e", font: { size: 10 } } }
+        x: { ticks: { color: "#8b949e", maxTicksLimit: 8 }, grid: { display: false } },
+        y: {
+          ticks: { color: "#8b949e", callback: v => "$" + v.toFixed(0) },
+          grid: { color: "#21262d" },
+          border: { dash: [4,4] }
+        }
       }
     }
   });
@@ -961,28 +971,28 @@ function synapse7Html(s) {
   return '<span title="'+tooltipText+'" style="font-size:12px">'+scoreStr+sigPart+'<br>'+dots5+'</span>';
 }
 
-// ULTRA: prikaz svih 13 signala
+// ULTRA: prikaz svih 14 signala
 function ultraHtml(s) {
-  const bull  = s.ultraBull ?? 0;
-  const bear  = s.ultraBear ?? 0;
-  const sig13 = s.ultraSigs13 || new Array(13).fill(0);
-  const sig   = s.ultraSig || "—";
+  const bull   = s.ultraBull ?? 0;
+  const bear   = s.ultraBear ?? 0;
+  const sig14  = s.ultraSigs14 || new Array(14).fill(0);
+  const sig    = s.ultraSig || "—";
 
-  if (!s.ultraSigs13) return '<span style="color:#555;font-size:11px">—</span>';
+  if (!s.ultraSigs14) return '<span style="color:#555;font-size:11px">—</span>';
 
-  const names13 = ['EMA dir','Cross','P>E50','RSI zona','P>E55','ADX>18','Chop','6Sc','CVD','RSI⟳','MACD','E145','Vol'];
-  const tooltipText = names13.map((l,i)=>l+':'+(sig13[i]===1?'↑':sig13[i]===-1?'↓':'·')).join(' | ');
+  const names14 = ['EMA dir','Cross','P>E50','RSI zona','P>E55','ADX>18','Chop','6Sc','CVD','RSI⟳','MACD hist','E145','Vol','MACD cross'];
+  const tooltipText = names14.map((l,i)=>l+':'+(sig14[i]===1?'↑':sig14[i]===-1?'↓':'·')).join(' | ');
 
-  const dots = sig13.map((v, i) => {
+  const dots = sig14.map((v, i) => {
     const col = v===1?'#00c48c':v===-1?'#ff4d4d':'#444';
-    return '<span title="'+names13[i]+'" style="color:'+col+';font-size:9px">'+(v===1?'▲':v===-1?'▼':'·')+'</span>';
+    return '<span title="'+names14[i]+'" style="color:'+col+';font-size:9px">'+(v===1?'▲':v===-1?'▼':'·')+'</span>';
   }).join('');
 
   const scoreStr = bull > bear
-    ? '<span style="color:#00c48c;font-weight:700">↑'+bull+'/13</span>'
+    ? '<span style="color:#00c48c;font-weight:700">↑'+bull+'/14</span>'
     : bear > bull
-    ? '<span style="color:#ff4d4d;font-weight:700">↓'+bear+'/13</span>'
-    : '<span style="color:#8b949e">'+Math.max(bull,bear)+'/13</span>';
+    ? '<span style="color:#ff4d4d;font-weight:700">↓'+bear+'/14</span>'
+    : '<span style="color:#8b949e">'+Math.max(bull,bear)+'/14</span>';
 
   const sigPart = sig==="LONG"   ? ' <span class="sig-long">▲ LONG</span>'
                 : sig==="SHORT"  ? ' <span class="sig-short">▼ SHORT</span>'
@@ -1016,22 +1026,23 @@ async function resetOne(pid) {
   location.reload();
 }
 
-// ── Signal label boxes (13 signals) ──────────────────────────────────────────
-const SIG_NAMES = ['EMA','CRS','E50','RSI','E55','ADX','CHP','6Sc','CVD','R⟳','MCD','E145','VOL'];
+// ── Signal label boxes (14 signals) ──────────────────────────────────────────
+const SIG_NAMES = ['EMA','CRS','E50','RSI','E55','ADX','CHP','6Sc','CVD','R⟳','MCD','E145','VOL','MCC'];
 
-function sigBoxes(sig13) {
-  if (!sig13 || sig13.length === 0) return '<span style="color:#444">—</span>';
-  return sig13.map((v, i) => {
+function sigBoxes(sigs) {
+  if (!sigs || sigs.length === 0) return '<span style="color:#444">—</span>';
+  return sigs.map((v, i) => {
     const bg  = v === 1 ? '#0d3d26' : v === -1 ? '#3d0d0d' : '#1c2128';
     const col = v === 1 ? '#00c48c' : v === -1 ? '#ff4d4d' : '#444';
     const bdr = v === 1 ? '1px solid #00c48c44' : v === -1 ? '1px solid #ff4d4d44' : '1px solid #30363d';
     const icon = v === 1 ? '▲' : v === -1 ? '▼' : '·';
-    return '<span title="' + SIG_NAMES[i] + '" style="display:inline-block;background:' + bg + ';color:' + col + ';border:' + bdr + ';padding:2px 5px;font-size:10px;font-weight:700;border-radius:3px;margin:1px;min-width:32px;text-align:center">' + SIG_NAMES[i] + '<br><span style="font-size:9px">' + icon + '</span></span>';
+    const lbl = SIG_NAMES[i] || i;
+    return '<span title="' + lbl + '" style="display:inline-block;background:' + bg + ';color:' + col + ';border:' + bdr + ';padding:2px 5px;font-size:10px;font-weight:700;border-radius:3px;margin:1px;min-width:32px;text-align:center">' + lbl + '<br><span style="font-size:9px">' + icon + '</span></span>';
   }).join('');
 }
 
 function scoreBox(bull, bear, sig) {
-  const total = 13;
+  const total = 14;
   if (sig === "LONG")   return '<div style="background:rgba(0,196,140,0.15);border:1px solid #00c48c;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#00c48c;font-weight:800;font-size:16px">↑' + bull + '</span><span style="color:#555;font-size:11px">/' + total + '</span><br><span class="sig-long" style="font-size:11px">▲ LONG</span></div>';
   if (sig === "SHORT")  return '<div style="background:rgba(255,77,77,0.15);border:1px solid #ff4d4d;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#ff4d4d;font-weight:800;font-size:16px">↓' + bear + '</span><span style="color:#555;font-size:11px">/' + total + '</span><br><span class="sig-short" style="font-size:11px">▼ SHORT</span></div>';
   if (sig === "SETUP↑") return '<div style="background:rgba(240,165,0,0.1);border:1px solid #f0a50066;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#f0a500;font-weight:800;font-size:16px">↑' + bull + '</span><span style="color:#555;font-size:11px">/' + total + '</span><br><span style="color:#f0a500;font-size:11px">◈ SETUP↑</span></div>';
@@ -1082,8 +1093,8 @@ function statusBox(s) {
       '<div style="font-size:11px;color:#8b949e">Pullback target: ' + fmtLive(s.price * 1.01) + ' (+1%)</div>' +
       '</div>';
   }
-  if (sig === "SETUP↑") return '<span style="color:#f0a500;font-size:12px">◈ SETUP ↑ &nbsp;<span style="color:#555;font-size:11px">(' + (s.ultraBull||0) + '/13)</span></span>';
-  if (sig === "SETUP↓") return '<span style="color:#f0a500;font-size:12px">◈ SETUP ↓ &nbsp;<span style="color:#555;font-size:11px">(' + (s.ultraBear||0) + '/13)</span></span>';
+  if (sig === "SETUP↑") return '<span style="color:#f0a500;font-size:12px">◈ SETUP ↑ &nbsp;<span style="color:#555;font-size:11px">(' + (s.ultraBull||0) + '/14)</span></span>';
+  if (sig === "SETUP↓") return '<span style="color:#f0a500;font-size:12px">◈ SETUP ↓ &nbsp;<span style="color:#555;font-size:11px">(' + (s.ultraBear||0) + '/14)</span></span>';
   return '<span style="color:#444;font-size:12px">—</span>';
 }
 
@@ -1108,7 +1119,7 @@ async function doScan() {
         if (s.pending) return 0;
         if (s.ultraSig === "LONG" || s.ultraSig === "SHORT") return 1;
         if ((s.ultraSig||"").startsWith("SETUP")) return 2;
-        return 3 + (13 - Math.max(s.ultraBull||0, s.ultraBear||0));
+        return 3 + (14 - Math.max(s.ultraBull||0, s.ultraBear||0));
       }
       return rank(a) - rank(b);
     });
@@ -1137,7 +1148,7 @@ async function doScan() {
         '<td style="font-weight:600;white-space:nowrap">' + fmtLive(s.price) + '</td>' +
         '<td style="color:' + rsiCol + ';font-weight:700">' + (s.rsi || "—") + '</td>' +
         '<td style="color:' + adxCol + '">' + (s.adx || "—") + '</td>' +
-        '<td style="padding:4px 6px">' + sigBoxes(s.ultraSigs13) + '</td>' +
+        '<td style="padding:4px 6px">' + sigBoxes(s.ultraSigs14) + '</td>' +
         '<td style="padding:4px 8px">' + scoreBox(s.ultraBull||0, s.ultraBear||0, s.ultraSig) + '</td>' +
         '<td style="padding:4px 8px">' + statusBox(s) + '</td>' +
         '</tr>';

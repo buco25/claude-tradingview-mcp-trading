@@ -753,6 +753,8 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <span id="scan-ts" style="font-size:12px;color:var(--text-muted)">—</span>
         <button class="scan-btn" id="scan-btn" onclick="doScan()">🔄 Skeniraj</button>
+        <button class="scan-btn" style="border-color:#f85149;color:#f85149" onclick="resetAll()">🗑️ Reset SVE</button>
+        <button class="scan-btn" style="border-color:#e85d9a;color:#e85d9a" onclick="resetOne('synapse_t')">🎯 Reset SYNAPSE-T</button>
       </div>
     </div>
     <div class="table-wrap">
@@ -886,6 +888,22 @@ function fmtLive(v) {
   if (v >= 1)    return "$" + v.toFixed(4);
   if (v >= 0.001) return "$" + v.toFixed(6);
   return "$" + v.toFixed(10);
+}
+
+async function resetAll() {
+  if (!confirm("Resetirati SVE portfolije? Briše se cijela povijest i otvorene pozicije.")) return;
+  const r = await fetch("/api/reset-full", { method: "POST", headers: {"Content-Type":"application/json"}, body: "{}" });
+  const d = await r.json();
+  alert(d.message || "Reset done");
+  location.reload();
+}
+
+async function resetOne(pid) {
+  if (!confirm("Resetirati " + pid + "? Briše se povijest i pozicije za taj portfolio.")) return;
+  const r = await fetch("/api/reset-full", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({pid}) });
+  const d = await r.json();
+  alert(d.message || "Reset done");
+  location.reload();
 }
 
 async function doScan() {

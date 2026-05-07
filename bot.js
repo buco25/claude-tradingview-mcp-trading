@@ -855,13 +855,13 @@ async function analyzeUltraPullback(symbol, candles, cfg) {
       };
     }
 
-    // Provjeri nije li signal promijenio smjer — cancel
+    // Provjeri nije li signal promijenio smjer ILI pao ispod minSiga — cancel
     const freshResult = analyzeUltra(candles, cfg);
-    const signalFlipped = freshResult.signal !== "NEUTRAL" && freshResult.signal !== existing.side;
+    const signalFlipped = freshResult.signal !== existing.side;  // uključuje NEUTRAL!
     if (signalFlipped) {
       pending = pending.filter(p => p.symbol !== symbol);
       savePending(pid, pending);
-      console.log(`  🔄 [ULTRA] ${symbol} — pending ${existing.side} canceliran (signal flip)`);
+      console.log(`  🔄 [ULTRA] ${symbol} — pending ${existing.side} canceliran (${freshResult.signal === "NEUTRAL" ? "score pao ispod min" : "signal flip"})`);
     } else {
       const pct = existing.side === "LONG"
         ? ((price - existing.targetPrice) / existing.targetPrice * 100).toFixed(2)
@@ -939,13 +939,13 @@ async function analyzeSynapse7Pullback(symbol, candles, cfg) {
       };
     }
 
-    // Provjeri nije li signal promijenio smjer — cancel
+    // Provjeri nije li signal promijenio smjer ILI pao ispod minSiga — cancel
     const freshResult = analyzeSynapse7(candles, cfg);
-    const signalFlipped = freshResult.signal !== "NEUTRAL" && freshResult.signal !== existing.side;
+    const signalFlipped = freshResult.signal !== existing.side;  // uključuje NEUTRAL!
     if (signalFlipped) {
       pending = pending.filter(p => p.symbol !== symbol);
       savePending(pid, pending);
-      console.log(`  🔄 [SYNAPSE-7] ${symbol} — pending ${existing.side} canceliran (signal flip)`);
+      console.log(`  🔄 [SYNAPSE-7] ${symbol} — pending ${existing.side} canceliran (${freshResult.signal === "NEUTRAL" ? "score pao ispod min" : "signal flip"})`);
     } else {
       const pct = existing.side === "LONG"
         ? ((price - existing.targetPrice) / existing.targetPrice * 100).toFixed(2)

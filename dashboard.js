@@ -253,10 +253,12 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, synapseTCfg =
 
   // ── SYNAPSE-T: SYNAPSE-7 + ADX obvezan + minSig 4/5 ──────────────────────
   let synapseTSig = "—";
+  let synapseTBull = 0, synapseTBear = 0, synapseTAdxOk = false;
+  let synapseTSubs = { scale: 0, rsi: 0, cvd: 0, trend: 0, ema: 0 };
   {
     const { minSig = 4, adxMin = 22 } = synapseTCfg;
-    // ADX pre-filter — ako ADX prenizak, preskačemo (konsolidacija)
-    if (adx !== null && adx >= adxMin) {
+    synapseTAdxOk = adx !== null && adx >= adxMin;
+    if (synapseTAdxOk) {
       const scales = [[3,11],[7,15],[13,21],[19,29],[29,47],[45,55]];
       let scaleUp = 0, scaleDn = 0;
       for (const [f, s] of scales) {
@@ -276,9 +278,12 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, synapseTCfg =
       }
       const cvdSig   = cvdSum > 0 ? 1 : cvdSum < 0 ? -1 : 0;
       const trendSig = (ema55 && price > ema55) ? 1 : (ema55 && price < ema55) ? -1 : 0;
-      const adxSig   = ema9 > ema21 ? 1 : -1;  // ADX already confirmed trending
+      const adxSig   = ema9 > ema21 ? 1 : -1;
       const bullCnt  = [scaleSig, rsiMomSig, cvdSig, trendSig, adxSig].filter(v => v === 1).length;
       const bearCnt  = [scaleSig, rsiMomSig, cvdSig, trendSig, adxSig].filter(v => v === -1).length;
+      synapseTBull = bullCnt;
+      synapseTBear = bearCnt;
+      synapseTSubs = { scale: scaleSig, rsi: rsiMomSig, cvd: cvdSig, trend: trendSig, ema: adxSig };
       if      (bullCnt >= minSig) synapseTSig = "LONG";
       else if (bearCnt >= minSig) synapseTSig = "SHORT";
       else if (bullCnt === minSig - 1) synapseTSig = "SETUP↑";
@@ -293,6 +298,7 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, synapseTCfg =
     chop: chop?.toFixed(1) ?? "—",
     trend: trendLabel,
     emaRsiSig, megaSig, synapse7Sig, synapseTSig,
+    synapseTBull, synapseTBear, synapseTAdxOk, synapseTSubs,
   };
 }
 
@@ -882,6 +888,39 @@ function sigHtml(s) {
   return '<span class="sig-none">—</span>';
 }
 
+function synapseTHtml(s) {
+  const adxOk   = s.synapseTAdxOk;
+  const bull     = s.synapseTBull || 0;
+  const bear     = s.synapseTBear || 0;
+  const subs     = s.synapseTSubs || {};
+  const sig      = s.synapseTSig;
+
+  // ADX nije dovoljan — siva zona
+  if (!adxOk) {
+    const adxVal = parseFloat(s.adx) || 0;
+    return '<span style="color:#555;font-size:11px" title="ADX ' + adxVal.toFixed(1) + ' < 22 — konsolidacija">ADX ' + adxVal.toFixed(1) + '</span>';
+  }
+
+  // Oznake podsustava: ✓ = bullish, ✗ = bearish, · = neutral
+  function sub(v) { return v === 1 ? '✓' : v === -1 ? '✗' : '·'; }
+  const labels = ['6Sc','RSI','CVD','Tr','EMA'];
+  const vals   = [subs.scale, subs.rsi, subs.cvd, subs.trend, subs.ema];
+  const tooltip = labels.map((l,i) => l + ':' + sub(vals[i])).join(' | ');
+  const scoreStr = bull > bear
+    ? '<span style="color:#00c48c">↑' + bull + '/5</span>'
+    : bear > bull
+    ? '<span style="color:#ff4d4d">↓' + bear + '/5</span>'
+    : '<span style="color:#8b949e">·' + Math.max(bull,bear) + '/5</span>';
+
+  const sigPart = sig === "LONG"    ? '<span class="sig-long">▲ LONG</span>'
+                : sig === "SHORT"   ? '<span class="sig-short">▼ SHORT</span>'
+                : sig === "SETUP↑"  ? '<span style="color:#f0a500;font-weight:600">◈↑</span>'
+                : sig === "SETUP↓"  ? '<span style="color:#f0a500;font-weight:600">◈↓</span>'
+                : '';
+
+  return '<span title="' + tooltip + '" style="font-size:12px">' + scoreStr + (sigPart ? ' ' + sigPart : '') + '</span>';
+}
+
 function fmtLive(v) {
   if (!v && v !== 0) return "—";
   if (v >= 1000) return "$" + v.toFixed(2);
@@ -950,7 +989,7 @@ async function doScan() {
         '<td>' + sigHtml(s.emaRsiSig) + '</td>' +
         '<td>' + sigHtml(s.megaSig) + '</td>' +
         '<td>' + sigHtml(s.synapse7Sig) + '</td>' +
-        '<td>' + sigHtml(s.synapseTSig) + '</td>' +
+        '<td>' + synapseTHtml(s) + '</td>' +
         '</tr>';
     }).join("");
 

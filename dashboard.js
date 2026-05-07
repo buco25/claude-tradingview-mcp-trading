@@ -16,7 +16,7 @@ const PORTFOLIO_DEFS = [
   { id: "ema_rsi",   name: "EMA+RSI",   color: "#388bfd", emoji: "📊", startCapital: 1000, live: false },
   { id: "mega",      name: "MEGA",      color: "#00c48c", emoji: "🚀", startCapital: 1000, live: false },
   { id: "synapse7",  name: "SYNAPSE-7", color: "#f7b731", emoji: "🧠", startCapital: 1000, live: false },
-  { id: "synapse_t", name: "SYNAPSE-T", color: "#e85d9a", emoji: "🎯", startCapital:  356.80, live: false  },
+  { id: "synapse_t", name: "ULTRA",     color: "#e85d9a", emoji: "🎯", startCapital:  356.80, live: false  },
 ];
 
 // ─── All symbols ───────────────────────────────────────────────────────────────
@@ -98,6 +98,28 @@ function _chop(candles, p = 14) {
   return (r && s) ? 100*Math.log10(s/r)/Math.log10(p) : null;
 }
 
+// RSI full series (RMA metoda — identična bot.js)
+function _rsiFullSeries(closes, p = 14) {
+  const n = closes.length;
+  const r = new Array(n).fill(null);
+  if (n < p + 1) return r;
+  const gains = [], losses = [];
+  for (let i = 1; i < n; i++) {
+    const d = closes[i] - closes[i-1];
+    gains.push(d > 0 ? d : 0);
+    losses.push(d < 0 ? -d : 0);
+  }
+  let ag = gains.slice(0,p).reduce((a,b)=>a+b,0)/p;
+  let al = losses.slice(0,p).reduce((a,b)=>a+b,0)/p;
+  r[p] = al === 0 ? 100 : 100 - 100/(1+ag/al);
+  for (let i = p; i < gains.length; i++) {
+    ag = (ag*(p-1)+gains[i])/p;
+    al = (al*(p-1)+losses[i])/p;
+    r[i+1] = al === 0 ? 100 : 100 - 100/(1+ag/al);
+  }
+  return r;
+}
+
 function _macdHist(closes, fast=12, slow=26, sig=9) {
   if (closes.length < slow+sig+2) return null;
   const diffs = [];
@@ -135,31 +157,63 @@ function hadCross(e9, e21, bars = 5) {
   return { up, dn };
 }
 
-function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, synapseTCfg = {}) {
+function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}) {
   const closes = candles.map(c => c.close);
+  const opens  = candles.map(c => c.open);
+  const vols   = candles.map(c => c.volume || 0);
   const price  = closes[closes.length - 1];
   const n      = closes.length;
 
-  // Compute full EMA series for cross detection
+  // ── EMA series ──
   const e9Arr  = _emaSeries(closes, 9);
   const e21Arr = _emaSeries(closes, 21);
-
-  // Cross in last 5 bars (scanner window — bot uses 1-2 bar window)
   const SCAN_BARS = 5;
   const { up: crossUp, dn: crossDown } = hadCross(e9Arr, e21Arr, SCAN_BARS);
+  const { up: crossUp3, dn: crossDown3 } = hadCross(e9Arr, e21Arr, 3);
 
-  // Current values
   const ema9   = e9Arr[n - 1];
   const ema21  = e21Arr[n - 1];
   const ema50  = _ema(closes, 50);
   const ema55  = _ema(closes, 55);
+  const ema145 = _ema(closes, 145);
   const ema200 = _ema(closes, 200);
   const rsi    = _rsi(closes, 14);
   const adx    = _adx(candles, 14);
   const chop   = _chop(candles, 14);
-
-  // EMA bias (neovisno o crossu — uvijek vidljivo)
+  const macdH  = _macdHist(closes);
   const emaBias = ema9 && ema21 ? (ema9 > ema21 ? "↑" : "↓") : "—";
+
+  // ── RSI series (za recovery detekciju) ──
+  const rsiSeries = _rsiFullSeries(closes, 14);
+  const rv  = rsiSeries[n-1] ?? (rsi ?? 50);
+  const rv1 = rsiSeries[n-2] ?? rv;
+  const rv2 = rsiSeries[n-3] ?? rv1;
+  const rv3 = rsiSeries[n-4] ?? rv2;
+  const rv4 = rsiSeries[n-5] ?? rv3;
+  const rsiMin5    = Math.min(rv, rv1, rv2, rv3, rv4);
+  const rsiMax5    = Math.max(rv, rv1, rv2, rv3, rv4);
+  const rsiRising  = rv > rv1 && rv1 > rv2;
+  const rsiFalling = rv < rv1 && rv1 < rv2;
+  // RSI recovery signals (identično bot.js)
+  const rsiRecovBull = rsiMin5 < 35 && rv > 35 && rsiRising;    // iz oversold
+  const rsiRecovBear = rsiMax5 > 65 && rv < 65 && rsiFalling;   // iz overbought
+
+  // ── CVD i volume (shared) ──
+  const cvdLen = Math.min(20, n);
+  let cvdSum = 0;
+  for (let i = n - cvdLen; i < n; i++) {
+    const sign = closes[i] > opens[i] ? 1 : closes[i] < opens[i] ? -1 : 0;
+    cvdSum += sign * vols[i];
+  }
+  const volAvg20 = vols.slice(-20).reduce((a,b)=>a+b,0) / 20;
+
+  // ── 6-Scale EMA (shared) ──
+  const scales = [[3,11],[7,15],[13,21],[19,29],[29,47],[45,55]];
+  let scaleUp = 0, scaleDn = 0;
+  for (const [f, s] of scales) {
+    const ef = _ema(closes, f), es = _ema(closes, s);
+    if (ef && es) { if (ef > es) scaleUp++; else scaleDn++; }
+  }
 
   // ── EMA+RSI signal ──
   let emaRsiSig = "—";
@@ -167,12 +221,9 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, synapseTCfg =
     const { rsiLongLo=35, rsiLongHi=58, rsiShortLo=42, rsiShortHi=65 } = emaRsiCfg;
     if (crossUp   && price > ema50 && rsi >= rsiLongLo  && rsi <= rsiLongHi)  emaRsiSig = "LONG";
     if (crossDown && price < ema50 && rsi >= rsiShortLo && rsi <= rsiShortHi) emaRsiSig = "SHORT";
-    // Setup (uvjeti OK, ali nema svježeg crossa) — prikaži bias
     if (emaRsiSig === "—") {
-      const setupLong  = price > ema50 && rsi >= rsiLongLo  && rsi <= rsiLongHi  && ema9 > ema21;
-      const setupShort = price < ema50 && rsi >= rsiShortLo && rsi <= rsiShortHi && ema9 < ema21;
-      if (setupLong)  emaRsiSig = "SETUP↑";
-      if (setupShort) emaRsiSig = "SETUP↓";
+      if (price > ema50 && rsi >= rsiLongLo  && rsi <= rsiLongHi  && ema9 > ema21) emaRsiSig = "SETUP↑";
+      if (price < ema50 && rsi >= rsiShortLo && rsi <= rsiShortHi && ema9 < ema21) emaRsiSig = "SETUP↓";
     }
   }
 
@@ -187,107 +238,76 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, synapseTCfg =
     if (crossUp   && tUp && rsi > rsiLongLo  && rsi < rsiLongHi  && trending && notChoppy) megaSig = "LONG";
     if (crossDown && tDn && rsi > rsiShortLo && rsi < rsiShortHi && trending && notChoppy) megaSig = "SHORT";
     if (megaSig === "—") {
-      const setupLong  = tUp && rsi > rsiLongLo  && rsi < rsiLongHi  && ema9 > ema21 && trending && notChoppy;
-      const setupShort = tDn && rsi > rsiShortLo && rsi < rsiShortHi && ema9 < ema21 && trending && notChoppy;
-      if (setupLong)  megaSig = "SETUP↑";
-      if (setupShort) megaSig = "SETUP↓";
+      if (tUp && rsi > rsiLongLo  && rsi < rsiLongHi  && ema9 > ema21 && trending && notChoppy) megaSig = "SETUP↑";
+      if (tDn && rsi > rsiShortLo && rsi < rsiShortHi && ema9 < ema21 && trending && notChoppy) megaSig = "SETUP↓";
     }
   }
 
-  // Trend label (EMA55/200)
+  // Trend label
   const trendLabel = ema55
     ? (price > ema55
         ? (ema200 ? (price > ema200 ? "↑↑ Bull" : "↑ Weak") : "↑ Bull")
         : (ema200 ? (price < ema200 ? "↓↓ Bear" : "↓ Weak") : "↓ Bear"))
     : "—";
 
-  // ── SYNAPSE-7 simplified scanner signal ────────────────────────────────────
-  // 5 sub-signals: 6-scale EMA | RSI momentum | CVD delta | EMA trend | ADX
+  // ── SYNAPSE-7 — 5 sub-signals (s novim RSI recovery signalom) ──
   let synapse7Sig = "—";
+  let synapse7Bull = 0, synapse7Bear = 0;
+  let synapse7Subs = { scale: 0, rsi: 0, cvd: 0, trend: 0, ema: 0 };
   {
-    const { minSig = 3, rsiLen = 14, rsiMaLen = 14 } = synapse7Cfg;
-    // Sub-signal 1: 6-scale EMA consensus (pairs: 3/11, 7/15, 13/21, 19/29, 29/47, 45/55)
-    const scales = [[3,11],[7,15],[13,21],[19,29],[29,47],[45,55]];
-    let scaleUp = 0, scaleDn = 0;
-    for (const [f, s] of scales) {
-      const ef = _ema(closes, f), es = _ema(closes, s);
-      if (ef && es) { if (ef > es) scaleUp++; else scaleDn++; }
-    }
+    const { minSig = 3 } = synapse7Cfg;
     const scaleSig = scaleUp >= 4 ? 1 : scaleDn >= 4 ? -1 : 0;
+    // RSI recovery signal (isto kao bot.js)
+    const rsiRecSig = rsiRecovBull ? 1 : rsiRecovBear ? -1 : 0;
+    const cvdSig    = cvdSum > 0 ? 1 : cvdSum < 0 ? -1 : 0;
+    const trendSig  = (ema55 && price > ema55) ? 1 : (ema55 && price < ema55) ? -1 : 0;
+    const adxSig    = (adx && adx > 20) ? (ema9 > ema21 ? 1 : -1) : 0;
 
-    // Sub-signal 2: RSI vs RSI-EMA (Pumori pattern)
-    const rsiVal = _rsi(closes, 14);
-    let rsiMomSig = 0;
-    if (rsiVal !== null) {
-      // build RSI series for EMA (simplified: use last value vs mid)
-      rsiMomSig = rsiVal > 55 ? 1 : rsiVal < 45 ? -1 : 0;
-    }
+    const subs = [scaleSig, rsiRecSig, cvdSig, trendSig, adxSig];
+    synapse7Bull = subs.filter(v => v === 1).length;
+    synapse7Bear = subs.filter(v => v === -1).length;
+    synapse7Subs = { scale: scaleSig, rsi: rsiRecSig, cvd: cvdSig, trend: trendSig, ema: adxSig };
 
-    // Sub-signal 3: CVD delta (signed volume: sum of last 20 bars sign(close-open)*volume)
-    const highs  = candles.map(c => c.high);
-    const lows   = candles.map(c => c.low);
-    const vols   = candles.map(c => c.volume || 0);
-    const opens  = candles.map(c => c.open);
-    const cvdLen = Math.min(20, candles.length);
-    let cvdSum = 0;
-    for (let i = candles.length - cvdLen; i < candles.length; i++) {
-      const sign = closes[i] > opens[i] ? 1 : closes[i] < opens[i] ? -1 : 0;
-      cvdSum += sign * vols[i];
-    }
-    const cvdSig = cvdSum > 0 ? 1 : cvdSum < 0 ? -1 : 0;
-
-    // Sub-signal 4: EMA trend (EMA55 + EMA200)
-    const trendSig = (ema55 && price > ema55) ? 1 : (ema55 && price < ema55) ? -1 : 0;
-
-    // Sub-signal 5: ADX momentum (trending = bull/bear conf by EMA9/21)
-    const adxSig = (adx && adx > 20) ? (ema9 > ema21 ? 1 : -1) : 0;
-
-    const bullCnt = [scaleSig, rsiMomSig, cvdSig, trendSig, adxSig].filter(v => v === 1).length;
-    const bearCnt = [scaleSig, rsiMomSig, cvdSig, trendSig, adxSig].filter(v => v === -1).length;
-
-    if      (bullCnt >= minSig) synapse7Sig = "LONG";
-    else if (bearCnt >= minSig) synapse7Sig = "SHORT";
-    else if (bullCnt === minSig - 1 && scaleUp >= 3) synapse7Sig = "SETUP↑";
-    else if (bearCnt === minSig - 1 && scaleDn >= 3) synapse7Sig = "SETUP↓";
+    if      (synapse7Bull >= minSig) synapse7Sig = "LONG";
+    else if (synapse7Bear >= minSig) synapse7Sig = "SHORT";
+    else if (synapse7Bull === minSig - 1 && scaleUp >= 3) synapse7Sig = "SETUP↑";
+    else if (synapse7Bear === minSig - 1 && scaleDn >= 3) synapse7Sig = "SETUP↓";
   }
 
-  // ── SYNAPSE-T: SYNAPSE-7 + ADX obvezan + minSig 4/5 ──────────────────────
-  let synapseTSig = "—";
-  let synapseTBull = 0, synapseTBear = 0, synapseTAdxOk = false;
-  let synapseTSubs = { scale: 0, rsi: 0, cvd: 0, trend: 0, ema: 0 };
+  // ── ULTRA — 13 signala (identično bot.js analyzeUltra) ──
+  let ultraSig = "—";
+  let ultraBull = 0, ultraBear = 0;
+  let ultraSigs13 = new Array(13).fill(0);
   {
-    const { minSig = 4, adxMin = 22 } = synapseTCfg;
-    synapseTAdxOk = adx !== null && adx >= adxMin;
-    if (synapseTAdxOk) {
-      const scales = [[3,11],[7,15],[13,21],[19,29],[29,47],[45,55]];
-      let scaleUp = 0, scaleDn = 0;
-      for (const [f, s] of scales) {
-        const ef = _ema(closes, f), es = _ema(closes, s);
-        if (ef && es) { if (ef > es) scaleUp++; else scaleDn++; }
-      }
-      const scaleSig = scaleUp >= 4 ? 1 : scaleDn >= 4 ? -1 : 0;
-      const rsiVal   = _rsi(closes, 14);
-      const rsiMomSig = rsiVal !== null ? (rsiVal > 55 ? 1 : rsiVal < 45 ? -1 : 0) : 0;
-      const opens = candles.map(c => c.open);
-      const vols  = candles.map(c => c.volume || 0);
-      const cvdLen = Math.min(20, candles.length);
-      let cvdSum = 0;
-      for (let i = candles.length - cvdLen; i < candles.length; i++) {
-        const sign = closes[i] > opens[i] ? 1 : closes[i] < opens[i] ? -1 : 0;
-        cvdSum += sign * vols[i];
-      }
-      const cvdSig   = cvdSum > 0 ? 1 : cvdSum < 0 ? -1 : 0;
-      const trendSig = (ema55 && price > ema55) ? 1 : (ema55 && price < ema55) ? -1 : 0;
-      const adxSig   = ema9 > ema21 ? 1 : -1;
-      const bullCnt  = [scaleSig, rsiMomSig, cvdSig, trendSig, adxSig].filter(v => v === 1).length;
-      const bearCnt  = [scaleSig, rsiMomSig, cvdSig, trendSig, adxSig].filter(v => v === -1).length;
-      synapseTBull = bullCnt;
-      synapseTBear = bearCnt;
-      synapseTSubs = { scale: scaleSig, rsi: rsiMomSig, cvd: cvdSig, trend: trendSig, ema: adxSig };
-      if      (bullCnt >= minSig) synapseTSig = "LONG";
-      else if (bearCnt >= minSig) synapseTSig = "SHORT";
-      else if (bullCnt === minSig - 1) synapseTSig = "SETUP↑";
-      else if (bearCnt === minSig - 1) synapseTSig = "SETUP↓";
+    const { minSig = 8 } = ultraCfg;
+    if (n >= 200 && ema9 && ema21) {
+      const rsiV  = rsi ?? 50;
+      const adxV  = adx ?? 0;
+      const chopV = chop ?? 100;
+
+      ultraSigs13 = [
+        ema9 > ema21 ? 1 : -1,                                          // 1. EMA9/21 smjer
+        crossUp3 ? 1 : crossDown3 ? -1 : 0,                             // 2. Svježi cross (3 bara)
+        ema50 ? (price > ema50 ? 1 : -1) : 0,                           // 3. Cijena vs EMA50
+        (rsiV < 50 && rsiV > 30) ? 1 : (rsiV > 50 && rsiV < 70) ? -1 : 0, // 4. RSI zona
+        ema55 ? (price > ema55 ? 1 : -1) : 0,                           // 5. Cijena vs EMA55
+        adxV > 18 ? 1 : 0,                                               // 6. ADX > 18
+        chopV < 61.8 ? 1 : -1,                                           // 7. Nije choppy
+        (scaleUp >= 4 ? 1 : scaleDn >= 4 ? -1 : 0),                     // 8. 6-Scale EMA
+        cvdSum > 0 ? 1 : -1,                                             // 9. CVD volumen
+        rsiRecovBull ? 1 : rsiRecovBear ? -1 : 0,                        // 10. RSI recovery
+        macdH !== null ? (macdH > 0 ? 1 : -1) : 0,                      // 11. MACD histogram
+        ema145 ? (price > ema145 ? 1 : -1) : 0,                         // 12. EMA145 trend
+        vols[n-1] > volAvg20 ? 1 : 0,                                    // 13. Volumen iznad prosjeka
+      ];
+
+      ultraBull = ultraSigs13.filter(s => s === 1).length;
+      ultraBear = ultraSigs13.filter(s => s === -1).length;
+
+      if      (ultraBull >= minSig) ultraSig = "LONG";
+      else if (ultraBear >= minSig) ultraSig = "SHORT";
+      else if (ultraBull === minSig - 1) ultraSig = "SETUP↑";
+      else if (ultraBear === minSig - 1) ultraSig = "SETUP↓";
     }
   }
 
@@ -297,8 +317,11 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, synapseTCfg =
     adx: adx?.toFixed(1) ?? "—",
     chop: chop?.toFixed(1) ?? "—",
     trend: trendLabel,
-    emaRsiSig, megaSig, synapse7Sig, synapseTSig,
-    synapseTBull, synapseTBear, synapseTAdxOk, synapseTSubs,
+    emaRsiSig, megaSig,
+    synapse7Sig, synapse7Bull, synapse7Bear, synapse7Subs,
+    ultraSig, ultraBull, ultraBear, ultraSigs13,
+    // backward compat (doScan JS koristi synapseTSig)
+    synapseTSig: ultraSig,
   };
 }
 
@@ -312,10 +335,11 @@ async function runScan(rules) {
   if (_scanRunning) return _scanCache;
   _scanRunning = true;
   const cfg = rules?.strategies || {};
-  const emaRsiCfg   = cfg.ema_rsi?.params    || {};
-  const megaCfg     = cfg.mega?.params        || {};
-  const synapse7Cfg = cfg.synapse7?.params    || {};
-  const synapseTCfg = cfg.synapse_t?.params   || {};
+  const emaRsiCfg = cfg.ema_rsi?.params  || {};
+  const megaCfg   = cfg.mega?.params     || {};
+  const synapse7Cfg = cfg.synapse7?.params || {};
+  const synapseTCfg = cfg.synapse_t?.params || {};  // ultraCfg alias
+  const ultraCfg  = synapseTCfg;
 
   const results = [];
   // Fetch all symbols in parallel (limit concurrency to avoid rate limit)
@@ -333,7 +357,7 @@ async function runScan(rules) {
           high: parseFloat(k[2]), low: parseFloat(k[3]), close: parseFloat(k[4]),
           volume: parseFloat(k[5] || 0),
         }));
-        const s = scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg, synapseTCfg);
+        const s = scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg, ultraCfg);
         results.push({ symbol: sym, ...s });
       } catch (e) {
         results.push({ symbol: sym, error: e.message });
@@ -501,7 +525,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <div class="port-name" style="color:${def.color}">${def.name}</div>
             ${modeBadge}
           </div>
-          <div class="port-subtitle">Portfolio ${i + 1} · ${tf} · SL ${def.id==="synapse_t"?"1.5":"2"}% / TP ${def.id==="synapse_t"?"3":"4"}% · 30x</div>
+          <div class="port-subtitle">Portfolio ${i + 1} · ${tf} · SL ${def.id==="synapse_t"?"1":"2"}% / TP ${def.id==="synapse_t"?"2":"4"}% · 30x</div>
         </div>
       </div>
       <div class="port-equity" style="color:${eqCol}">$${s.equity.toFixed(2)}</div>
@@ -723,7 +747,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="logo">🤖</div>
       <div>
         <div class="title">Trading Bot — 3 Portfolia</div>
-        <div class="subtitle">EMA+RSI(${tfMap.ema_rsi||"1H"}) · MEGA(${tfMap.mega||"15m"}) · 🧠SYNAPSE-7(${tfMap.synapse7||"15m"}) · 🎯SYNAPSE-T(${tfMap.synapse_t||"15m"}) &nbsp;|&nbsp; 30x</div>
+        <div class="subtitle">EMA+RSI(${tfMap.ema_rsi||"1H"}) · MEGA(${tfMap.mega||"15m"}) · 🧠SYNAPSE-7(${tfMap.synapse7||"15m"}) · 🎯ULTRA(${tfMap.synapse_t||"15m"}) &nbsp;|&nbsp; 30x</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -760,7 +784,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <span id="scan-ts" style="font-size:12px;color:var(--text-muted)">—</span>
         <button class="scan-btn" id="scan-btn" onclick="doScan()">🔄 Skeniraj</button>
         <button class="scan-btn" style="border-color:#f85149;color:#f85149" onclick="resetAll()">🗑️ Reset SVE</button>
-        <button class="scan-btn" style="border-color:#e85d9a;color:#e85d9a" onclick="resetOne('synapse_t')">🎯 Reset SYNAPSE-T</button>
+        <button class="scan-btn" style="border-color:#e85d9a;color:#e85d9a" onclick="resetOne('synapse_t')">🎯 Reset ULTRA</button>
       </div>
     </div>
     <div class="table-wrap">
@@ -776,8 +800,8 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <th>Trend</th>
             <th style="color:#388bfd">📊 EMA+RSI</th>
             <th style="color:#00c48c">🚀 MEGA</th>
-            <th style="color:#f7b731">🧠 SYNAPSE-7</th>
-            <th style="color:#e85d9a">🎯 SYNAPSE-T</th>
+            <th style="color:#f7b731">🧠 SYNAPSE-7<br><span style="font-weight:400;font-size:10px;color:#666">6Sc RSI⟳ CVD Tr ADX</span></th>
+            <th style="color:#e85d9a">🎯 ULTRA<br><span style="font-weight:400;font-size:10px;color:#666">13 signala | min 8/13</span></th>
           </tr>
         </thead>
         <tbody id="scan-tbody">
@@ -888,37 +912,65 @@ function sigHtml(s) {
   return '<span class="sig-none">—</span>';
 }
 
-function synapseTHtml(s) {
-  const adxOk   = s.synapseTAdxOk;
-  const bull     = s.synapseTBull || 0;
-  const bear     = s.synapseTBear || 0;
-  const subs     = s.synapseTSubs || {};
-  const sig      = s.synapseTSig;
+// SYNAPSE-7: prikaz 5 sub-signala sa score-om
+function synapse7Html(s) {
+  const bull = s.synapse7Bull || 0;
+  const bear = s.synapse7Bear || 0;
+  const subs = s.synapse7Subs || {};
+  const sig  = s.synapse7Sig || "—";
 
-  // ADX nije dovoljan — siva zona
-  if (!adxOk) {
-    const adxVal = parseFloat(s.adx) || 0;
-    return '<span style="color:#555;font-size:11px" title="ADX ' + adxVal.toFixed(1) + ' < 22 — konsolidacija">ADX ' + adxVal.toFixed(1) + '</span>';
-  }
+  const names5 = ['6Sc','RSI⟳','CVD','Tr','ADX'];
+  const vals5  = [subs.scale, subs.rsi, subs.cvd, subs.trend, subs.ema];
+  const tooltipText = names5.map((l,i) => l+':'+(vals5[i]===1?'↑':vals5[i]===-1?'↓':'·')).join(' | ');
 
-  // Oznake podsustava: ✓ = bullish, ✗ = bearish, · = neutral
-  function sub(v) { return v === 1 ? '✓' : v === -1 ? '✗' : '·'; }
-  const labels = ['6Sc','RSI','CVD','Tr','EMA'];
-  const vals   = [subs.scale, subs.rsi, subs.cvd, subs.trend, subs.ema];
-  const tooltip = labels.map((l,i) => l + ':' + sub(vals[i])).join(' | ');
+  const dots5 = vals5.map((v,i) => {
+    const col = v===1?'#00c48c':v===-1?'#ff4d4d':'#444';
+    return '<span title="'+names5[i]+'" style="color:'+col+';font-size:10px">'+(v===1?'▲':v===-1?'▼':'·')+'</span>';
+  }).join('');
+
   const scoreStr = bull > bear
-    ? '<span style="color:#00c48c">↑' + bull + '/5</span>'
+    ? '<span style="color:#00c48c;font-weight:700">↑'+bull+'/5</span>'
     : bear > bull
-    ? '<span style="color:#ff4d4d">↓' + bear + '/5</span>'
-    : '<span style="color:#8b949e">·' + Math.max(bull,bear) + '/5</span>';
+    ? '<span style="color:#ff4d4d;font-weight:700">↓'+bear+'/5</span>'
+    : '<span style="color:#8b949e">'+Math.max(bull,bear)+'/5</span>';
 
-  const sigPart = sig === "LONG"    ? '<span class="sig-long">▲ LONG</span>'
-                : sig === "SHORT"   ? '<span class="sig-short">▼ SHORT</span>'
-                : sig === "SETUP↑"  ? '<span style="color:#f0a500;font-weight:600">◈↑</span>'
-                : sig === "SETUP↓"  ? '<span style="color:#f0a500;font-weight:600">◈↓</span>'
-                : '';
+  const sigPart = sig==="LONG"   ? ' <span class="sig-long">▲</span>'
+                : sig==="SHORT"  ? ' <span class="sig-short">▼</span>'
+                : sig==="SETUP↑" ? ' <span style="color:#f0a500">◈↑</span>'
+                : sig==="SETUP↓" ? ' <span style="color:#f0a500">◈↓</span>' : '';
 
-  return '<span title="' + tooltip + '" style="font-size:12px">' + scoreStr + (sigPart ? ' ' + sigPart : '') + '</span>';
+  return '<span title="'+tooltipText+'" style="font-size:12px">'+scoreStr+sigPart+'<br>'+dots5+'</span>';
+}
+
+// ULTRA: prikaz svih 13 signala
+function ultraHtml(s) {
+  const bull  = s.ultraBull ?? 0;
+  const bear  = s.ultraBear ?? 0;
+  const sig13 = s.ultraSigs13 || new Array(13).fill(0);
+  const sig   = s.ultraSig || "—";
+
+  if (!s.ultraSigs13) return '<span style="color:#555;font-size:11px">—</span>';
+
+  const names13 = ['EMA dir','Cross','P>E50','RSI zona','P>E55','ADX>18','Chop','6Sc','CVD','RSI⟳','MACD','E145','Vol'];
+  const tooltipText = names13.map((l,i)=>l+':'+(sig13[i]===1?'↑':sig13[i]===-1?'↓':'·')).join(' | ');
+
+  const dots = sig13.map((v, i) => {
+    const col = v===1?'#00c48c':v===-1?'#ff4d4d':'#444';
+    return '<span title="'+names13[i]+'" style="color:'+col+';font-size:9px">'+(v===1?'▲':v===-1?'▼':'·')+'</span>';
+  }).join('');
+
+  const scoreStr = bull > bear
+    ? '<span style="color:#00c48c;font-weight:700">↑'+bull+'/13</span>'
+    : bear > bull
+    ? '<span style="color:#ff4d4d;font-weight:700">↓'+bear+'/13</span>'
+    : '<span style="color:#8b949e">'+Math.max(bull,bear)+'/13</span>';
+
+  const sigPart = sig==="LONG"   ? ' <span class="sig-long">▲ LONG</span>'
+                : sig==="SHORT"  ? ' <span class="sig-short">▼ SHORT</span>'
+                : sig==="SETUP↑" ? ' <span style="color:#f0a500;font-weight:600">◈↑</span>'
+                : sig==="SETUP↓" ? ' <span style="color:#f0a500;font-weight:600">◈↓</span>' : '';
+
+  return '<span title="'+tooltipText+'" style="font-size:12px">'+scoreStr+sigPart+'<br><span style="letter-spacing:1px">'+dots+'</span></span>';
 }
 
 function fmtLive(v) {
@@ -963,16 +1015,16 @@ async function doScan() {
 
     // Priority sort: LONG/SHORT first, SETUP second, neutral last
     function priority(s) {
-      const hasSignal = s.emaRsiSig==="LONG"||s.emaRsiSig==="SHORT"||s.megaSig==="LONG"||s.megaSig==="SHORT"||s.synapse7Sig==="LONG"||s.synapse7Sig==="SHORT"||s.synapseTSig==="LONG"||s.synapseTSig==="SHORT";
-      const hasSetup  = s.emaRsiSig?.startsWith("SETUP")||s.megaSig?.startsWith("SETUP")||s.synapse7Sig?.startsWith("SETUP")||s.synapseTSig?.startsWith("SETUP");
+      const hasSignal = s.emaRsiSig==="LONG"||s.emaRsiSig==="SHORT"||s.megaSig==="LONG"||s.megaSig==="SHORT"||s.synapse7Sig==="LONG"||s.synapse7Sig==="SHORT"||s.ultraSig==="LONG"||s.ultraSig==="SHORT";
+      const hasSetup  = (s.emaRsiSig||"").startsWith("SETUP")||(s.megaSig||"").startsWith("SETUP")||(s.synapse7Sig||"").startsWith("SETUP")||(s.ultraSig||"").startsWith("SETUP");
       return hasSignal ? 0 : hasSetup ? 1 : 2;
     }
     results.sort((a, b) => priority(a) - priority(b));
 
     tbody.innerHTML = results.map((s, i) => {
       if (s.error) return '<tr><td colspan="11" style="color:#ff4d4d">' + s.symbol + ': ' + s.error + '</td></tr>';
-      const hasSignal = ["LONG","SHORT"].includes(s.emaRsiSig) || ["LONG","SHORT"].includes(s.megaSig) || ["LONG","SHORT"].includes(s.synapse7Sig) || ["LONG","SHORT"].includes(s.synapseTSig);
-      const hasSetup  = (s.emaRsiSig||"").startsWith("SETUP") || (s.megaSig||"").startsWith("SETUP") || (s.synapse7Sig||"").startsWith("SETUP") || (s.synapseTSig||"").startsWith("SETUP");
+      const hasSignal = ["LONG","SHORT"].includes(s.emaRsiSig) || ["LONG","SHORT"].includes(s.megaSig) || ["LONG","SHORT"].includes(s.synapse7Sig) || ["LONG","SHORT"].includes(s.ultraSig);
+      const hasSetup  = (s.emaRsiSig||"").startsWith("SETUP") || (s.megaSig||"").startsWith("SETUP") || (s.synapse7Sig||"").startsWith("SETUP") || (s.ultraSig||"").startsWith("SETUP");
       const rowCls = hasSignal ? "any-signal" : "";
       const trendCol = s.trend && s.trend.includes("↑") ? "#00c48c" : s.trend && s.trend.includes("↓") ? "#ff4d4d" : "#8b949e";
       const rsiNum = parseFloat(s.rsi);
@@ -988,15 +1040,15 @@ async function doScan() {
         '<td style="color:' + trendCol + ';font-size:12px">' + (s.trend || "—") + '</td>' +
         '<td>' + sigHtml(s.emaRsiSig) + '</td>' +
         '<td>' + sigHtml(s.megaSig) + '</td>' +
-        '<td>' + sigHtml(s.synapse7Sig) + '</td>' +
-        '<td>' + synapseTHtml(s) + '</td>' +
+        '<td>' + synapse7Html(s) + '</td>' +
+        '<td>' + ultraHtml(s) + '</td>' +
         '</tr>';
     }).join("");
 
     // Count
-    const longs  = results.filter(s => s.emaRsiSig==="LONG"  || s.megaSig==="LONG"  || s.synapse7Sig==="LONG"  || s.synapseTSig==="LONG").length;
-    const shorts = results.filter(s => s.emaRsiSig==="SHORT" || s.megaSig==="SHORT" || s.synapse7Sig==="SHORT" || s.synapseTSig==="SHORT").length;
-    const setups = results.filter(s => (s.emaRsiSig||"").startsWith("SETUP") || (s.megaSig||"").startsWith("SETUP") || (s.synapse7Sig||"").startsWith("SETUP") || (s.synapseTSig||"").startsWith("SETUP")).length;
+    const longs  = results.filter(s => s.emaRsiSig==="LONG"  || s.megaSig==="LONG"  || s.synapse7Sig==="LONG"  || s.ultraSig==="LONG").length;
+    const shorts = results.filter(s => s.emaRsiSig==="SHORT" || s.megaSig==="SHORT" || s.synapse7Sig==="SHORT" || s.ultraSig==="SHORT").length;
+    const setups = results.filter(s => (s.emaRsiSig||"").startsWith("SETUP") || (s.megaSig||"").startsWith("SETUP") || (s.synapse7Sig||"").startsWith("SETUP") || (s.ultraSig||"").startsWith("SETUP")).length;
     document.getElementById("scan-ts").textContent += " | ▲ " + longs + " LONG · ▼ " + shorts + " SHORT · ◈ " + setups + " SETUP";
 
   } catch(e) {

@@ -1,0 +1,339 @@
+// ╔══════════════════════════════════════════════════════════════════════════════╗
+// ║  🎯 ULTRA — 16 Signala | min 11/16 | Candle H/L Breakout Entry            ║
+// ║  Identično bot.js analyzeUltra() logici                                    ║
+// ║  TF: 15m preporučeno (isti kao bot)                                        ║
+// ╚══════════════════════════════════════════════════════════════════════════════╝
+//@version=5
+strategy("🎯 ULTRA — 16 Signala | min 11/16 | H/L Breakout",
+     shorttitle          = "ULTRA-16",
+     overlay             = true,
+     initial_capital     = 1000,
+     default_qty_type    = strategy.percent_of_equity,
+     default_qty_value   = 100,
+     commission_type     = strategy.commission.percent,
+     commission_value    = 0.05,
+     slippage            = 1,
+     max_labels_count    = 500)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// INPUTS
+// ══════════════════════════════════════════════════════════════════════════════
+var GRP1 = "⚙️ Strategija"
+var GRP2 = "💰 Upravljanje rizikom"
+var GRP3 = "🎨 Vizualizacija"
+
+i_minSig = input.int  (11,   "Min signala za ulaz (od 16)", minval=1, maxval=16, group=GRP1)
+i_slPct  = input.float( 1.0, "Stop Loss %",   minval=0.1, step=0.1, group=GRP2)
+i_tpPct  = input.float( 2.0, "Take Profit %", minval=0.1, step=0.1, group=GRP2)
+i_table  = input.bool (true, "Prikaži signal tablicu (top-right)", group=GRP3)
+i_labels = input.bool (true, "Prikaži oznake na grafu",            group=GRP3)
+i_emas   = input.bool (true, "Prikaži EMA linije",                 group=GRP3)
+i_bg     = input.bool (true, "Pozadinska boja na signalu",         group=GRP3)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// INDIKATORI
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── EMA ────────────────────────────────────────────────────────────────────────
+ema9   = ta.ema(close, 9)
+ema21  = ta.ema(close, 21)
+ema50  = ta.ema(close, 50)
+ema55  = ta.ema(close, 55)
+ema145 = ta.ema(close, 145)
+
+plot(i_emas ? ema9   : na, "EMA 9",   color=color.new(color.teal,   40), linewidth=1)
+plot(i_emas ? ema21  : na, "EMA 21",  color=color.new(color.orange, 40), linewidth=1)
+plot(i_emas ? ema55  : na, "EMA 55",  color=color.new(color.blue,   35), linewidth=2)
+plot(i_emas ? ema145 : na, "EMA 145", color=color.new(color.purple, 35), linewidth=2)
+
+// ── RSI ────────────────────────────────────────────────────────────────────────
+rsiVal     = ta.rsi(close, 14)
+rsiRising  = rsiVal > rsiVal[1] and rsiVal[1] > rsiVal[2]
+rsiFalling = rsiVal < rsiVal[1] and rsiVal[1] < rsiVal[2]
+rsiMin5    = ta.lowest (rsiVal, 5)   // minimum RSI u zadnjih 5 bara
+rsiMax5    = ta.highest(rsiVal, 5)   // maximum RSI u zadnjih 5 bara
+
+// ── ADX ────────────────────────────────────────────────────────────────────────
+[_diP, _diM, adxVal] = ta.dmi(14, 14)
+
+// ── MACD ───────────────────────────────────────────────────────────────────────
+[_macdL, _sigL, histVal] = ta.macd(close, 12, 26, 9)
+
+// MACD cross (histogram promijenio predznak u zadnja 3 bara)
+macdCross3Up = (histVal > 0 and histVal[1] <= 0) or
+               (histVal[1] > 0 and histVal[2] <= 0) or
+               (histVal[2] > 0 and histVal[3] <= 0)
+macdCross3Dn = (histVal < 0 and histVal[1] >= 0) or
+               (histVal[1] < 0 and histVal[2] >= 0) or
+               (histVal[2] < 0 and histVal[3] >= 0)
+
+// ── Choppiness Index ───────────────────────────────────────────────────────────
+atrSum = math.sum(ta.tr(true), 14)
+hh14   = ta.highest(high, 14)
+ll14   = ta.lowest (low,  14)
+chop   = (hh14 - ll14) > 0 ? 100.0 * math.log10(atrSum / (hh14 - ll14)) / math.log10(14) : 100.0
+
+// ── CVD — kumulativni volumen delta (20 bara) ──────────────────────────────────
+signedVol = close > open ? volume : close < open ? -volume : 0.0
+cvd20     = math.sum(signedVol, 20)
+
+// ── 6-Scale EMA (6 EMA parova: 4+/6 = bull, 4+/6 = bear) ─────────────────────
+e3   = ta.ema(close,  3)
+e11  = ta.ema(close, 11)
+e7   = ta.ema(close,  7)
+e15  = ta.ema(close, 15)
+e13  = ta.ema(close, 13)
+e21b = ta.ema(close, 21)
+e19  = ta.ema(close, 19)
+e29  = ta.ema(close, 29)
+e29b = ta.ema(close, 29)
+e47  = ta.ema(close, 47)
+e45  = ta.ema(close, 45)
+e55b = ta.ema(close, 55)
+
+scaleUp = (e3 > e11 ? 1:0) + (e7 > e15 ? 1:0) + (e13 > e21b ? 1:0) +
+          (e19 > e29 ? 1:0) + (e29b > e47 ? 1:0) + (e45 > e55b ? 1:0)
+scaleDn = (e3 < e11 ? 1:0) + (e7 < e15 ? 1:0) + (e13 < e21b ? 1:0) +
+          (e19 < e29 ? 1:0) + (e29b < e47 ? 1:0) + (e45 < e55b ? 1:0)
+
+// ── EMA9/21 cross u zadnja 3 bara ─────────────────────────────────────────────
+crossUp3 = (ema9 > ema21 and ema9[1] <= ema21[1]) or
+           (ema9[1] > ema21[1] and ema9[2] <= ema21[2]) or
+           (ema9[2] > ema21[2] and ema9[3] <= ema21[3])
+crossDn3 = (ema9 < ema21 and ema9[1] >= ema21[1]) or
+           (ema9[1] < ema21[1] and ema9[2] >= ema21[2]) or
+           (ema9[2] < ema21[2] and ema9[3] >= ema21[3])
+
+// ── Volume ─────────────────────────────────────────────────────────────────────
+volAvg = ta.sma(volume, 20)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 16 SIGNALI  (+1 = bull  ·  -1 = bear  ·  0 = neutral)
+// Identično bot.js analyzeUltra()
+// ══════════════════════════════════════════════════════════════════════════════
+sig1  = ema9 > ema21 ? 1 : -1
+// Signal 2: Svježi EMA9/21 cross u zadnja 3 bara
+sig2  = crossUp3 ? 1 : crossDn3 ? -1 : 0
+// Signal 3: Cijena vs EMA50
+sig3  = close > ema50 ? 1 : -1
+// Signal 4: RSI zona — 30-50 = prostor za rast (bull), 50-70 = prostor za pad (bear)
+sig4  = rsiVal < 50 and rsiVal > 30 ? 1 : rsiVal > 50 and rsiVal < 70 ? -1 : 0
+// Signal 5: Cijena vs EMA55
+sig5  = close > ema55 ? 1 : -1
+// Signal 6: ADX > 18 + EMA smjer (trend postoji i u kom pravcu)
+sig6  = adxVal > 18 ? (ema9 > ema21 ? 1 : -1) : 0
+// Signal 7: Choppiness < 61.8 (nije ranging)
+sig7  = chop < 61.8 ? 1 : -1
+// Signal 8: 6-Scale EMA konsenzus (4+ od 6 parova)
+sig8  = scaleUp >= 4 ? 1 : scaleDn >= 4 ? -1 : 0
+// Signal 9: CVD (kupci vs prodavači volumenom)
+sig9  = cvd20 > 0 ? 1 : -1
+// Signal 10: RSI recovery — bio ispod 35 (oversold), sad iznad 35 i raste
+sig10 = rsiMin5 < 35 and rsiVal > 35 and rsiRising  ? 1 :
+        rsiMax5 > 65 and rsiVal < 65 and rsiFalling ? -1 : 0
+// Signal 11: MACD histogram > 0
+sig11 = histVal > 0 ? 1 : -1
+// Signal 12: Cijena vs EMA145 (dugoročni trend)
+sig12 = close > ema145 ? 1 : -1
+// Signal 13: Volumen iznad 20-barnog prosjeka
+sig13 = volume > volAvg ? 1 : 0
+// Signal 14: MACD cross (histogram promijenio predznak u zadnja 3 bara)
+sig14 = macdCross3Up ? 1 : macdCross3Dn ? -1 : 0
+// Signal 15: RSI smjer (raste 2 bara = bull, pada = bear)
+sig15 = rsiRising ? 1 : rsiFalling ? -1 : 0
+// Signal 16: ADX jak > 25 + EMA smjer (jak trend potvrđen)
+sig16 = adxVal > 25 ? (ema9 > ema21 ? 1 : -1) : 0
+
+// ── Score ──────────────────────────────────────────────────────────────────────
+sigs = array.from(sig1, sig2, sig3, sig4, sig5, sig6, sig7, sig8,
+                  sig9, sig10, sig11, sig12, sig13, sig14, sig15, sig16)
+
+var int bullCnt = 0
+var int bearCnt = 0
+bullCnt := 0
+bearCnt := 0
+for i = 0 to 15
+    v = array.get(sigs, i)
+    bullCnt += v ==  1 ? 1 : 0
+    bearCnt += v == -1 ? 1 : 0
+
+longSig  = bullCnt >= i_minSig
+shortSig = bearCnt >= i_minSig
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CANDLE H/L BREAKOUT ENTRY
+// Signal fires on bar N → spremi High/Low te svijeće
+// LONG:  ulaz kad close > triggerHigh  (breakout iznad higa signal-svijeće)
+// SHORT: ulaz kad close < triggerLow   (breakdown ispod lowa signal-svijeće)
+// Cancel: ako score padne ispod minSig ili signal flipne
+// ══════════════════════════════════════════════════════════════════════════════
+var float trigH   = na
+var float trigL   = na
+var bool  pLong   = false
+var bool  pShort  = false
+var int   sigBar  = -1
+
+// Novi signal → spremi H/L signal-svijeće
+if longSig and not pLong and not pShort and strategy.position_size == 0
+    trigH  := high
+    trigL  := low
+    pLong  := true
+    pShort := false
+    sigBar := bar_index
+
+if shortSig and not pShort and not pLong and strategy.position_size == 0
+    trigH  := high
+    trigL  := low
+    pShort := true
+    pLong  := false
+    sigBar := bar_index
+
+// Cancel ako signal nestao (score < minSig ili flipnuo)
+if pLong and not longSig
+    pLong := false
+    trigH := na
+    trigL := na
+
+if pShort and not shortSig
+    pShort := false
+    trigH  := na
+    trigL  := na
+
+// Breakout / breakdown trigger (sljedeći bar nakon signala)
+// Koristimo HIGH/LOW (ne close) — wick koji prođe trigger odmah aktivira ulaz
+enterLong  = pLong  and bar_index > sigBar and high > trigH
+enterShort = pShort and bar_index > sigBar and low  < trigL
+
+if enterLong
+    pLong := false
+if enterShort
+    pShort := false
+
+// ══════════════════════════════════════════════════════════════════════════════
+// STRATEGY ORDERS
+// ══════════════════════════════════════════════════════════════════════════════
+if enterLong and strategy.position_size == 0
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Long Exit", "Long",
+         stop    = strategy.position_avg_price * (1.0 - i_slPct / 100.0),
+         limit   = strategy.position_avg_price * (1.0 + i_tpPct / 100.0),
+         comment_loss   = "❌ SL",
+         comment_profit = "✅ TP")
+
+if enterShort and strategy.position_size == 0
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Short Exit", "Short",
+         stop    = strategy.position_avg_price * (1.0 + i_slPct / 100.0),
+         limit   = strategy.position_avg_price * (1.0 - i_tpPct / 100.0),
+         comment_loss   = "❌ SL",
+         comment_profit = "✅ TP")
+
+// ══════════════════════════════════════════════════════════════════════════════
+// VIZUALIZACIJA
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Pozadinska boja kad je signal aktivan
+bgcolor(i_bg and longSig  ? color.new(color.green, 92) : na, title="Bull pozadina")
+bgcolor(i_bg and shortSig ? color.new(color.red,   92) : na, title="Bear pozadina")
+
+// Signal oznake (prvi bar signala)
+plotshape(i_labels and longSig  and not longSig[1],
+     title    = "LONG Signal",
+     style    = shape.triangleup,
+     location = location.belowbar,
+     color    = color.new(color.lime, 0),
+     size     = size.small)
+
+plotshape(i_labels and shortSig and not shortSig[1],
+     title    = "SHORT Signal",
+     style    = shape.triangledown,
+     location = location.abovebar,
+     color    = color.new(color.red, 0),
+     size     = size.small)
+
+// Entry oznake
+plotshape(i_labels and enterLong,
+     title     = "LONG Entry",
+     style     = shape.labelup,
+     location  = location.belowbar,
+     color     = color.new(color.green, 0),
+     textcolor = color.white,
+     text      = "▲ LONG\nENTRY",
+     size      = size.normal)
+
+plotshape(i_labels and enterShort,
+     title     = "SHORT Entry",
+     style     = shape.labeldown,
+     location  = location.abovebar,
+     color     = color.new(color.red, 0),
+     textcolor = color.white,
+     text      = "▼ SHORT\nENTRY",
+     size      = size.normal)
+
+// Breakout trigger razine (horizontalne linije dok čekamo)
+plot(pLong  and not na(trigH) ? trigH : na,
+     "Breakout H (Long)",  color=color.new(color.green, 45), linewidth=1, style=plot.style_linebr)
+plot(pShort and not na(trigL) ? trigL : na,
+     "Breakdown L (Short)", color=color.new(color.red,  45), linewidth=1, style=plot.style_linebr)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SIGNAL TABLICA (top-right)
+// ══════════════════════════════════════════════════════════════════════════════
+var table tbl = table.new(position.top_right, 9, 3,
+     bgcolor      = color.new(color.black, 15),
+     border_width = 1, border_color = color.new(color.gray, 65),
+     frame_width  = 2, frame_color  = color.new(color.gray, 45))
+
+if i_table and barstate.islast
+    names = array.from("EMA","CRS","E50","RSI","E55","ADX","CHP","6Sc",
+                       "CVD","R⟳","MCD","E145","VOL","MCC","R↗","ADX+")
+
+    // Score cell
+    isLong  = bullCnt >= i_minSig
+    isShort = bearCnt >= i_minSig
+    sBg   = isLong  ? color.new(color.green, 25) :
+            isShort ? color.new(color.red,   25) : color.new(color.gray, 70)
+    sTxt  = isLong  ? "▲ LONG\n" + str.tostring(bullCnt) + "/16" :
+            isShort ? "▼ SHORT\n" + str.tostring(bearCnt) + "/16" :
+                      "↑" + str.tostring(bullCnt) + " ↓" + str.tostring(bearCnt) + "\n/16"
+
+    // Kolona 0: score (spanning rows 1-2)
+    table.cell(tbl, 0, 0, "ULTRA\n" + str.tostring(i_minSig) + "/16",
+         bgcolor=color.new(color.navy, 50), text_color=color.new(color.white, 30), text_size=size.tiny)
+    table.cell(tbl, 0, 1, sTxt,
+         bgcolor=sBg, text_color=color.white, text_size=size.small)
+    table.cell(tbl, 0, 2, pLong ? "⏳ BRK↑" : pShort ? "⏳ BRK↓" : "—",
+         bgcolor=color.new(color.black, 60),
+         text_color=pLong ? color.lime : pShort ? color.red : color.new(color.gray, 50),
+         text_size=size.tiny)
+
+    // Signal ćelije — 8 po redu
+    for i = 0 to 15
+        col = (i % 8) + 1
+        row = i < 8 ? 1 : 2
+        v   = array.get(sigs,  i)
+        nm  = array.get(names, i)
+        bg  = v ==  1 ? color.new(color.green, 30) :
+              v == -1 ? color.new(color.red,   30) : color.new(color.gray, 80)
+        ico = v ==  1 ? "▲" : v == -1 ? "▼" : "·"
+        table.cell(tbl, col, row, nm + "\n" + ico,
+             text_color=color.white, bgcolor=bg, text_size=size.tiny)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ALERT CONDITIONS
+// ══════════════════════════════════════════════════════════════════════════════
+alertcondition(longSig  and not longSig[1],
+     "ULTRA LONG Signal",
+     "🎯 ULTRA LONG ↑ signal — čeka breakout iznad H signal-svijeće")
+
+alertcondition(shortSig and not shortSig[1],
+     "ULTRA SHORT Signal",
+     "🎯 ULTRA SHORT ↓ signal — čeka breakdown ispod L signal-svijeće")
+
+alertcondition(enterLong,
+     "ULTRA LONG Entry",
+     "🟢 ULTRA LONG ulaz — breakout potvrđen")
+
+alertcondition(enterShort,
+     "ULTRA SHORT Entry",
+     "🔴 ULTRA SHORT ulaz — breakdown potvrđen")

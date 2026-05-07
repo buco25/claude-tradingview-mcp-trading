@@ -674,7 +674,7 @@ function addPosition(pid, entry) {
     sl:         entry.sl,
     tp:         entry.tp,
     orderId:    entry.orderId,
-    mode:       PAPER_TRADING ? "PAPER" : BITGET_DEMO ? "DEMO" : "LIVE",
+    mode:       entry.mode || (PAPER_TRADING ? "PAPER" : BITGET_DEMO ? "DEMO" : "LIVE"),
     openedAt:   entry.timestamp,
     portfolio:  pid,
     strategy:   entry.strategy,
@@ -767,7 +767,7 @@ async function checkPortfolioPositions(pid) {
       }
 
       if (exitPrice !== null) {
-        const qty = pos.tradeSize / pos.entryPrice;
+        const qty = pos.quantity ?? (pos.totalUSD / pos.entryPrice);
         const pnl = pos.side === "LONG"
           ? (exitPrice - pos.entryPrice) * qty
           : (pos.entryPrice - exitPrice) * qty;
@@ -1019,7 +1019,7 @@ async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp) {
 
 // Zatvori live poziciju na BitGetu (market close order)
 async function closeBitGetOrder(pos) {
-  const quantity = (pos.tradeSize / pos.entryPrice).toFixed(4);
+  const quantity = (pos.quantity ?? (pos.totalUSD / pos.entryPrice)).toFixed(4);
   const closeSide = pos.side === "LONG" ? "sell" : "buy";
   const path = "/api/v2/mix/order/place-order";
   const orderBody = {

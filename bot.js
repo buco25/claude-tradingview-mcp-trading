@@ -845,10 +845,12 @@ async function analyzeUltraPullback(symbol, candles, cfg) {
   const existing = pending.find(p => p.symbol === symbol);
 
   if (existing) {
-    // Provjeri breakout
+    // Provjeri breakout — koristimo HIGH/LOW trenutne svijeće (ne close)
+    // SHORT: aktivira čim wick/close padne ispod lowa signal-svijeće
+    // LONG:  aktivira čim wick/close poraste iznad higa signal-svijeće
     const hit = existing.side === "LONG"
-      ? price > existing.triggerHigh    // cijena prešla iznad higa signal-svijeće
-      : price < existing.triggerLow;    // cijena pala ispod lowa signal-svijeće
+      ? last.high > existing.triggerHigh    // hig trenutne svijeće prešao iznad trigera
+      : last.low  < existing.triggerLow;    // low trenutne svijeće pao ispod trigera
 
     if (hit) {
       pending = pending.filter(p => p.symbol !== symbol);
@@ -869,7 +871,7 @@ async function analyzeUltraPullback(symbol, candles, cfg) {
       savePending(pid, pending);
       console.log(`  🔄 [ULTRA] ${symbol} — pending ${existing.side} canceliran (${freshResult.signal === "NEUTRAL" ? "score pao" : "flip"})`);
     } else {
-      console.log(`  ⏳ [ULTRA] ${symbol} ${existing.side} čeka breakout | H:${fmtPrice(existing.triggerHigh)} L:${fmtPrice(existing.triggerLow)} | Sad: ${fmtPrice(price)}`);
+      console.log(`  ⏳ [ULTRA] ${symbol} ${existing.side} čeka breakout | TrigH:${fmtPrice(existing.triggerHigh)} TrigL:${fmtPrice(existing.triggerLow)} | CandH:${fmtPrice(last.high)} CandL:${fmtPrice(last.low)} | Close:${fmtPrice(price)}`);
     }
     return { price, signal: "NEUTRAL", reason: `Čeka ULTRA breakout H:${fmtPrice(existing.triggerHigh)} L:${fmtPrice(existing.triggerLow)}` };
   }
@@ -913,7 +915,8 @@ function savePending(pid, list) {
 }
 
 async function analyzeSynapse7Pullback(symbol, candles, cfg) {
-  const price  = candles[candles.length - 1].close;
+  const last   = candles[candles.length - 1];
+  const price  = last.close;
   const pid    = "synapse7";
 
   // 1) Provjeri postoji li pending za ovaj simbol
@@ -926,10 +929,10 @@ async function analyzeSynapse7Pullback(symbol, candles, cfg) {
   const existing = pending.find(p => p.symbol === symbol);
 
   if (existing) {
-    // Provjeri breakout
+    // Provjeri breakout — koristimo HIGH/LOW trenutne svijeće (ne close)
     const hit = existing.side === "LONG"
-      ? price > existing.triggerHigh
-      : price < existing.triggerLow;
+      ? last.high > existing.triggerHigh
+      : last.low  < existing.triggerLow;
 
     if (hit) {
       pending = pending.filter(p => p.symbol !== symbol);
@@ -950,7 +953,7 @@ async function analyzeSynapse7Pullback(symbol, candles, cfg) {
       savePending(pid, pending);
       console.log(`  🔄 [SYNAPSE-7] ${symbol} — pending ${existing.side} canceliran (${freshResult.signal === "NEUTRAL" ? "score pao" : "flip"})`);
     } else {
-      console.log(`  ⏳ [SYNAPSE-7] ${symbol} ${existing.side} čeka breakout | H:${fmtPrice(existing.triggerHigh)} L:${fmtPrice(existing.triggerLow)} | Sad: ${fmtPrice(price)}`);
+      console.log(`  ⏳ [SYNAPSE-7] ${symbol} ${existing.side} čeka breakout | TrigH:${fmtPrice(existing.triggerHigh)} TrigL:${fmtPrice(existing.triggerLow)} | CandH:${fmtPrice(last.high)} CandL:${fmtPrice(last.low)} | Close:${fmtPrice(price)}`);
     }
     return { price, signal: "NEUTRAL", reason: `Čeka S7 breakout H:${fmtPrice(existing.triggerHigh)} L:${fmtPrice(existing.triggerLow)}` };
   }

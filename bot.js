@@ -546,11 +546,20 @@ function analyzeSynapse7(candles, cfg) {
   }
   const scSig = upCnt >= 3 ? 1 : dnCnt >= 3 ? -1 : 0;
 
-  // ── 4. RSI Pumori ──
-  const rsiEma = _emaSeries(rsiArr.map(v => v ?? 0), 14);
-  const rv = rsiEma[n-1], rv1 = rsiEma[n-2];
-  const rsSig = (rv !== null && rv1 !== null)
-    ? (rv > 50 && rv > rv1 ? 1 : rv < 50 && rv < rv1 ? -1 : 0) : 0;
+  // ── 4. RSI Recovery (iz oversold/overbought zone) ──
+  // BULL: RSI bio ispod 35 u zadnjih 5 bara i sad raste iznad 35 → recovery iz oversold
+  // BEAR: RSI bio iznad 65 u zadnjih 5 bara i sad pada ispod 65 → recovery iz overbought
+  const rv  = rsiArr[n-1] ?? 50;
+  const rv1 = rsiArr[n-2] ?? rv;
+  const rv2 = rsiArr[n-3] ?? rv1;
+  const rv3 = rsiArr[n-4] ?? rv2;
+  const rv4 = rsiArr[n-5] ?? rv3;
+  const rsiMin5s = Math.min(rv, rv1, rv2, rv3, rv4);
+  const rsiMax5s = Math.max(rv, rv1, rv2, rv3, rv4);
+  const rsiRisingS  = rv > rv1 && rv1 > rv2;
+  const rsiFallingS = rv < rv1 && rv1 < rv2;
+  const rsSig = (rsiMin5s < 35 && rv > 35 && rsiRisingS)  ?  1
+              : (rsiMax5s > 65 && rv < 65 && rsiFallingS) ? -1 : 0;
 
   // ── 5. CVD Delta ──
   const barDelta = candles.map(c => c.volume * Math.sign(c.close - c.open));
@@ -571,10 +580,10 @@ function analyzeSynapse7(candles, cfg) {
 
   if (bullScore >= minSig) {
     signal = "LONG";
-    reason = `SYNAPSE-7 LONG | Score ${bullScore}/5 | kNN↑${aiSignal>0?'✓':''} AT↑${atSig>0?'✓':''} SC ${upCnt}/6 RSI${rv?.toFixed(0)} CVD↑${cvdSig>0?'✓':''}`;
+    reason = `SYNAPSE-7 LONG | Score ${bullScore}/5 | kNN↑${aiSignal>0?'✓':''} AT↑${atSig>0?'✓':''} SC ${upCnt}/6 RSI${rv.toFixed(0)}↑ CVD↑${cvdSig>0?'✓':''}`;
   } else if (bearScore >= minSig) {
     signal = "SHORT";
-    reason = `SYNAPSE-7 SHORT | Score ${bearScore}/5 | kNN↓${aiSignal<0?'✓':''} AT↓${atSig<0?'✓':''} SC ${dnCnt}/6 RSI${rv?.toFixed(0)} CVD↓${cvdSig<0?'✓':''}`;
+    reason = `SYNAPSE-7 SHORT | Score ${bearScore}/5 | kNN↓${aiSignal<0?'✓':''} AT↓${atSig<0?'✓':''} SC ${dnCnt}/6 RSI${rv.toFixed(0)}↓ CVD↓${cvdSig<0?'✓':''}`;
   } else {
     reason = `Score ↑${bullScore}/5 ↓${bearScore}/5 — min ${minSig} potrebno`;
   }

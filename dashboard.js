@@ -331,7 +331,7 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
         ema50 ? (price > ema50 ? 1 : -1) : 0,                           // 3. Cijena vs EMA50
         (rsiV < 50 && rsiV > 30) ? 1 : (rsiV > 50 && rsiV < 70) ? -1 : 0, // 4. RSI zona
         ema55 ? (price > ema55 ? 1 : -1) : 0,                           // 5. Cijena vs EMA55
-        adxV > 18 ? 1 : 0,                                               // 6. ADX > 18 (trend postoji)
+        adxV > 18 ? (ema9 > ema21 ? 1 : -1) : 0,                        // 6. ADX > 18 + EMA smjer
         chopV < 61.8 ? 1 : -1,                                           // 7. Nije choppy
         (scaleUp >= 4 ? 1 : scaleDn >= 4 ? -1 : 0),                     // 8. 6-Scale EMA
         cvdSum > 0 ? 1 : -1,                                             // 9. CVD volumen
@@ -857,7 +857,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
           ['E50','Cijena > EMA50 — srednji trend potvrđen'],
           ['RSI','RSI između 30–50 (bull): ima prostora za rast, nije preotkupljeno'],
           ['E55','Cijena > EMA55 — MEGA trend filter, šira potvrda'],
-          ['ADX','ADX > 18 — tržište je u trendu, ne u konsolidaciji'],
+          ['ADX','ADX > 18 + EMA smjer: trend postoji I potvrđen EMA9/21 smjerom'],
           ['CHP','Choppiness < 61.8 — nije choppy/ranging tržište'],
           ['6Sc','6-Scale EMA: min 4 od 6 EMA parova bull — multi-TF konsenzus'],
           ['CVD','CVD (Cumulative Volume Delta) pozitivan — kupci dominiraju volumenom'],

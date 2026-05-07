@@ -795,7 +795,7 @@ function analyzeUltra(candles, cfg) {
     // 4. RSI zona: ispod 50 = prostor za rast, iznad 50 = prostor za pad
     (rsi < 50 && rsi > 30) ? 1 : (rsi > 50 && rsi < 70) ? -1 : 0,
     price > ema55 ? 1 : -1,                          // 5. Cijena vs EMA55 (MEGA)
-    adx > 18 ? 1 : 0,                                // 6. ADX > 18 (trend postoji)
+    adx > 18 ? (ema9 > ema21 ? 1 : -1) : 0,          // 6. ADX > 18 + EMA smjer (trend + pravac)
     chop < 61.8 ? 1 : -1,                            // 7. Nije choppy
     (scaleUp >= 4 ? 1 : scaleDn >= 4 ? -1 : 0),     // 8. 6-Scale multi-EMA
     cvdSum > 0 ? 1 : -1,                             // 9. CVD volumen

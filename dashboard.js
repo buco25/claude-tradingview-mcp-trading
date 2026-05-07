@@ -16,7 +16,7 @@ const PORTFOLIO_DEFS = [
   { id: "ema_rsi",   name: "EMA+RSI",   color: "#388bfd", emoji: "📊", startCapital: 1000, live: false },
   { id: "mega",      name: "MEGA",      color: "#00c48c", emoji: "🚀", startCapital: 1000, live: false },
   { id: "synapse7",  name: "SYNAPSE-7", color: "#f7b731", emoji: "🧠", startCapital: 1000, live: false },
-  { id: "synapse_t", name: "SYNAPSE-T", color: "#e85d9a", emoji: "🎯", startCapital:  356.80, live: true  },
+  { id: "synapse_t", name: "SYNAPSE-T", color: "#e85d9a", emoji: "🎯", startCapital:  356.80, live: false  },
 ];
 
 // ─── All symbols ───────────────────────────────────────────────────────────────

@@ -89,10 +89,10 @@
       }
     },
     "synapse_t": {
-      "name": "ULTRA — 14-Signal Combined Strategy",
-      "description": "Kombinira 14 signala: EMA, Cross, E50, RSI zona, E55, ADX, Chop, 6Sc, CVD, RSI recovery, MACD hist, E145, Vol, MACD cross. Min 9/14 signala. Pullback entry -1%/+1%. SL 1% / TP 2% (RR 1:2).",
+      "name": "ULTRA — 16-Signal Combined Strategy",
+      "description": "Kombinira 16 signala: EMA, Cross, E50, RSI zona, E55, ADX>18, Chop, 6Sc, CVD, RSI recovery, MACD hist, E145, Vol, MACD cross, RSI smjer, ADX>25. Min 11/16 signala. Pullback entry -1%/+1%. SL 1% / TP 2% (RR 1:2).",
       "params": {
-        "minSig": 9,
+        "minSig": 11,
         "slPct": 1.0, "tpPct": 2.0
       }
     },

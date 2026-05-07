@@ -129,8 +129,7 @@ sig8  = scaleUp >= 4 ? 1 : scaleDn >= 4 ? -1 : 0
 // Signal 9: CVD (kupci vs prodavači volumenom)
 sig9  = cvd20 > 0 ? 1 : -1
 // Signal 10: RSI recovery — bio ispod 35 (oversold), sad iznad 35 i raste
-sig10 = rsiMin5 < 35 and rsiVal > 35 and rsiRising  ? 1 :
-        rsiMax5 > 65 and rsiVal < 65 and rsiFalling ? -1 : 0
+sig10 = rsiMin5 < 35 and rsiVal > 35 and rsiRising ? 1 : rsiMax5 > 65 and rsiVal < 65 and rsiFalling ? -1 : 0
 // Signal 11: MACD histogram > 0
 sig11 = histVal > 0 ? 1 : -1
 // Signal 12: Cijena vs EMA145 (dugoročni trend)
@@ -291,11 +290,8 @@ if i_table and barstate.islast
     // Score cell
     isLong  = bullCnt >= i_minSig
     isShort = bearCnt >= i_minSig
-    sBg   = isLong  ? color.new(color.green, 25) :
-            isShort ? color.new(color.red,   25) : color.new(color.gray, 70)
-    sTxt  = isLong  ? "▲ LONG\n" + str.tostring(bullCnt) + "/16" :
-            isShort ? "▼ SHORT\n" + str.tostring(bearCnt) + "/16" :
-                      "↑" + str.tostring(bullCnt) + " ↓" + str.tostring(bearCnt) + "\n/16"
+    sBg  = isLong ? color.new(color.green, 25) : isShort ? color.new(color.red, 25) : color.new(color.gray, 70)
+    sTxt = isLong ? "▲ LONG\n" + str.tostring(bullCnt) + "/16" : isShort ? "▼ SHORT\n" + str.tostring(bearCnt) + "/16" : "↑" + str.tostring(bullCnt) + " ↓" + str.tostring(bearCnt) + "\n/16"
 
     // Kolona 0: score (spanning rows 1-2)
     table.cell(tbl, 0, 0, "ULTRA\n" + str.tostring(i_minSig) + "/16",
@@ -313,8 +309,7 @@ if i_table and barstate.islast
         row = i < 8 ? 1 : 2
         v   = array.get(sigs,  i)
         nm  = array.get(names, i)
-        bg  = v ==  1 ? color.new(color.green, 30) :
-              v == -1 ? color.new(color.red,   30) : color.new(color.gray, 80)
+        bg  = v == 1 ? color.new(color.green, 30) : v == -1 ? color.new(color.red, 30) : color.new(color.gray, 80)
         ico = v ==  1 ? "▲" : v == -1 ? "▼" : "·"
         table.cell(tbl, col, row, nm + "\n" + ico,
              text_color=color.white, bgcolor=bg, text_size=size.tiny)

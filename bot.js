@@ -4,7 +4,7 @@
  * Portfolio 1 — EMA+RSI    → 1H  | SL 2%  / TP 4%
  * Portfolio 2 — MEGA       → 15m | SL 2%  / TP 4%
  * Portfolio 3 — SYNAPSE-7  → 15m | SL 2%  / TP 4%
- * Portfolio 4 — SYNAPSE-T  → 15m | SL 1.5%/ TP 3%  (ADX filter + minSig 4/5)
+ * Portfolio 4 — ULTRA      → 15m | SL 1%  / TP 2%  (13 signala, min 8/13, pullback entry)
  *
  * Risk-based sizing: notional = (equity × 2%) / slPct%
  *   → SL hit = točno 2% equity gubitak, bez obzira na SL%
@@ -108,14 +108,14 @@ function buildPortfolios(rules) {
     },
     synapse_t: {
       id:           "synapse_t",
-      name:         "SYNAPSE-T",
+      name:         "ULTRA",
       symbols:      rules.watchlist_synapse_t  || [],
       strategy:     "synapse_t",
       params:       rules.strategies.synapse_t?.params || {},
       timeframe:    tfs.synapse_t    || "15m",
-      slPct:        1.5, tpPct: 3.0,
-      live:         false,          // ← PAPER (live pauziran)
-      startCapital: 356.80,         // ← stvarni saldo na BitGet (2026-05-07)
+      slPct:        1.0, tpPct: 2.0,   // ULTRA: SL 1% / TP 2%
+      live:         false,              // ← PAPER (live pauziran)
+      startCapital: 356.80,            // ← stvarni saldo na BitGet (2026-05-07)
     },
   };
 }
@@ -637,18 +637,230 @@ function analyzeSynapseT(candles, cfg) {
   return result;
 }
 
-// ─── SYNAPSE-T Kontra ─────────────────────────────────────────────────────────
-// Inverzija signala: LONG→SHORT, SHORT→LONG
-// Hipoteza: strategija prati momentum na vrhovima/dnu → kontra može biti profitabilnija
+// ─── ULTRA — 13-Signal Combined Strategy ──────────────────────────────────────
+// Kombinira signale iz: EMA+RSI, MEGA, SYNAPSE-7, 3-Layer, Fib/PA
+// Min 8/13 signala za ulaz + pullback entry -1%/+1%
+// SL 1% / TP 2%
 
-function analyzeSynapseTContra(candles, cfg) {
-  const result = analyzeSynapseT(candles, cfg);
-  if (result.signal === "LONG") {
-    return { ...result, signal: "SHORT", reason: "[KONTRA] " + result.reason };
+function analyzeUltra(candles, cfg) {
+  const { minSig = 8 } = cfg;
+  const closes = candles.map(c => c.close);
+  const vols   = candles.map(c => c.volume || 0);
+  const n      = closes.length;
+  const price  = closes[n - 1];
+
+  if (n < 200) return { price, signal: "NEUTRAL", reason: "Nedovoljno podataka (treba 200 bar)" };
+
+  // ── Indikatori ──
+  function ema(p) {
+    const k = 2 / (p + 1);
+    let v = closes.slice(0, p).reduce((a, b) => a + b, 0) / p;
+    for (let i = p; i < n; i++) v = closes[i] * k + v * (1 - k);
+    return v;
   }
-  if (result.signal === "SHORT") {
-    return { ...result, signal: "LONG", reason: "[KONTRA] " + result.reason };
+  function emaSeries(p) {
+    const k = 2 / (p + 1); const r = new Array(n).fill(null);
+    let v = closes.slice(0, p).reduce((a, b) => a + b, 0) / p; r[p-1] = v;
+    for (let i = p; i < n; i++) { v = closes[i] * k + v * (1 - k); r[i] = v; }
+    return r;
   }
+
+  const e9s  = emaSeries(9); const e21s = emaSeries(21);
+  const ema9 = e9s[n-1]; const ema21 = e21s[n-1];
+  const ema50  = ema(50);  const ema55  = ema(55);
+  const ema145 = ema(145); const ema200 = ema(200);
+
+  // RSI series (last 6 bars za detekciju recovery)
+  const rsiArr2 = _rsiSeries(closes, 14);
+  const rsi  = rsiArr2[n-1] ?? 50;
+  const rsi1 = rsiArr2[n-2] ?? rsi;  // prethodna svjeća
+  const rsi2 = rsiArr2[n-3] ?? rsi1; // dvije svjeće unazad
+  const rsi3 = rsiArr2[n-4] ?? rsi2;
+  const rsi4 = rsiArr2[n-5] ?? rsi3;
+  const rsiMin5 = Math.min(rsi1, rsi2, rsi3, rsi4, rsi);  // minimum zadnjih 5 bara
+  const rsiMax5 = Math.max(rsi1, rsi2, rsi3, rsi4, rsi);  // maximum zadnjih 5 bara
+  const rsiRising  = rsi > rsi1 && rsi1 > rsi2;  // RSI raste zadnje 2 svjeće
+  const rsiFalling = rsi < rsi1 && rsi1 < rsi2;  // RSI pada zadnje 2 svjeće
+
+  // ADX
+  const trs = [], pDMs = [], mDMs = [];
+  for (let i = 1; i < n; i++) {
+    const h = candles[i].high, l = candles[i].low, pc = candles[i-1].close;
+    const ph = candles[i-1].high, pl = candles[i-1].low;
+    trs.push(Math.max(h-l, Math.abs(h-pc), Math.abs(l-pc)));
+    const up = h-ph, dn = pl-l;
+    pDMs.push(up > dn && up > 0 ? up : 0);
+    mDMs.push(dn > up && dn > 0 ? dn : 0);
+  }
+  const p14 = 14;
+  let smTR = trs.slice(0,p14).reduce((a,b)=>a+b,0);
+  let smP  = pDMs.slice(0,p14).reduce((a,b)=>a+b,0);
+  let smM  = mDMs.slice(0,p14).reduce((a,b)=>a+b,0);
+  const dx = [];
+  for (let i = p14; i < trs.length; i++) {
+    smTR = smTR - smTR/p14 + trs[i]; smP = smP - smP/p14 + pDMs[i]; smM = smM - smM/p14 + mDMs[i];
+    const pdi = smTR > 0 ? 100*smP/smTR : 0, mdi = smTR > 0 ? 100*smM/smTR : 0;
+    const s = pdi+mdi; dx.push(s > 0 ? 100*Math.abs(pdi-mdi)/s : 0);
+  }
+  let adx = dx.slice(0,p14).reduce((a,b)=>a+b,0)/p14;
+  for (let i = p14; i < dx.length; i++) adx = (adx*(p14-1)+dx[i])/p14;
+
+  // Choppiness
+  const sl14 = candles.slice(-15);
+  let trSum = 0;
+  for (let i = 1; i < sl14.length; i++) {
+    const h=sl14[i].high,l=sl14[i].low,pc=sl14[i-1].close;
+    trSum += Math.max(h-l, Math.abs(h-pc), Math.abs(l-pc));
+  }
+  const hh14 = Math.max(...sl14.slice(1).map(c=>c.high));
+  const ll14 = Math.min(...sl14.slice(1).map(c=>c.low));
+  const chop = (hh14-ll14) > 0 ? 100*Math.log10(trSum/(hh14-ll14))/Math.log10(14) : 100;
+
+  // MACD histogram
+  function emaSlice(arr, p) {
+    if (arr.length < p) return null;
+    const k = 2/(p+1); let v = arr.slice(0,p).reduce((a,b)=>a+b,0)/p;
+    for (let i = p; i < arr.length; i++) v = arr[i]*k + v*(1-k);
+    return v;
+  }
+  const diffs = [];
+  for (let i = 26; i <= n; i++) {
+    const f = emaSlice(closes.slice(0,i), 12);
+    const s = emaSlice(closes.slice(0,i), 26);
+    if (f !== null && s !== null) diffs.push(f - s);
+  }
+  const macdSig  = emaSlice(diffs, 9);
+  const macdHist = macdSig ? diffs[diffs.length-1] - macdSig : null;
+
+  // 6-Scale multi-EMA
+  const scales = [[3,11],[7,15],[13,21],[19,29],[29,47],[45,55]];
+  let scaleUp = 0, scaleDn = 0;
+  for (const [f, s] of scales) {
+    const ef = emaSlice(closes, f), es = emaSlice(closes, s);
+    if (ef && es) { if (ef > es) scaleUp++; else scaleDn++; }
+  }
+
+  // CVD
+  const opens = candles.map(c => c.open);
+  let cvdSum = 0;
+  for (let i = n - 20; i < n; i++) {
+    const sign = closes[i] > opens[i] ? 1 : closes[i] < opens[i] ? -1 : 0;
+    cvdSum += sign * vols[i];
+  }
+
+  // Volume vs average
+  const volAvg20 = vols.slice(-20).reduce((a,b)=>a+b,0) / 20;
+  const volLast  = vols[n-1];
+
+  // Recent EMA cross (last 3 bars)
+  let hadCrossUp = false, hadCrossDn = false;
+  for (let i = Math.max(1, n-3); i < n; i++) {
+    if (e9s[i-1] !== null && e21s[i-1] !== null) {
+      if (e9s[i-1] <= e21s[i-1] && e9s[i] > e21s[i]) hadCrossUp = true;
+      if (e9s[i-1] >= e21s[i-1] && e9s[i] < e21s[i]) hadCrossDn = true;
+    }
+  }
+
+  // ── 13 signala: +1 = bullish, -1 = bearish, 0 = neutral ──
+  const sigs = [
+    ema9 > ema21 ? 1 : -1,                          // 1. EMA9/21 smjer
+    hadCrossUp ? 1 : hadCrossDn ? -1 : 0,           // 2. Svježi cross (3 bara)
+    price > ema50 ? 1 : -1,                          // 3. Cijena vs EMA50
+    // 4. RSI zona: ispod 50 = prostor za rast (bullish), iznad 50 = prostor za pad (bearish)
+    //    Ali ne ulazimo ako je u extremu: overbought >70 za long, oversold <30 za short
+    (rsi < 50 && rsi > 30) ? 1 : (rsi > 50 && rsi < 70) ? -1 : 0,
+    price > ema55 ? 1 : -1,                          // 5. Cijena vs EMA55 (MEGA)
+    adx > 18 ? 1 : 0,                                // 6. ADX > 18
+    chop < 61.8 ? 1 : -1,                            // 7. Nije choppy
+    (scaleUp >= 4 ? 1 : scaleDn >= 4 ? -1 : 0),     // 8. 6-Scale multi-EMA
+    cvdSum > 0 ? 1 : -1,                             // 9. CVD volumen
+    // 10. RSI recovery signal (ključni signal):
+    //   BULL: RSI bio ispod 35 (oversold) u zadnjih 5 bara i sad raste iznad 35 → recovery
+    //   BEAR: RSI bio iznad 65 (overbought) i sad pada ispod 65 → recovery
+    (rsiMin5 < 35 && rsi > 35 && rsiRising) ? 1
+      : (rsiMax5 > 65 && rsi < 65 && rsiFalling) ? -1 : 0,
+    macdHist !== null ? (macdHist > 0 ? 1 : -1) : 0, // 11. MACD histogram
+    price > ema145 ? 1 : -1,                          // 12. EMA145 dugoročni trend
+    volLast > volAvg20 ? 1 : 0,                       // 13. Volumen iznad prosjeka
+  ];
+
+  const bullCnt = sigs.filter(s => s === 1).length;
+  const bearCnt = sigs.filter(s => s === -1).length;
+
+  if (bullCnt >= minSig) {
+    return { price, signal: "LONG",  bullScore: bullCnt, bearScore: bearCnt,
+      reason: `ULTRA LONG ↑${bullCnt}/13 | RSI:${rsi.toFixed(0)} ADX:${adx.toFixed(0)} MACD:${macdHist?.toFixed(4)||"?"} 6Sc:${scaleUp}/6` };
+  }
+  if (bearCnt >= minSig) {
+    return { price, signal: "SHORT", bullScore: bullCnt, bearScore: bearCnt,
+      reason: `ULTRA SHORT ↓${bearCnt}/13 | RSI:${rsi.toFixed(0)} ADX:${adx.toFixed(0)} MACD:${macdHist?.toFixed(4)||"?"} 6Sc:${scaleDn}/6` };
+  }
+  return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
+    reason: `ULTRA: ↑${bullCnt} ↓${bearCnt} /13 (min ${minSig})` };
+}
+
+// ─── ULTRA Pullback Entry ─────────────────────────────────────────────────────
+// Isti sustav kao SYNAPSE-7 pullback, ali za ULTRA strategiju
+
+async function analyzeUltraPullback(symbol, candles, cfg) {
+  const price = candles[candles.length - 1].close;
+  const pid   = "synapse_t";
+
+  let pending = loadPending(pid);
+  const now   = Date.now();
+  // Makni stare (TTL istekao) — PULLBACK_TTL definiran ispod
+  pending = pending.filter(p => now - p.ts < 4 * 60 * 60 * 1000);
+
+  const existing = pending.find(p => p.symbol === symbol);
+
+  if (existing) {
+    const hit = existing.side === "LONG"
+      ? price <= existing.targetPrice
+      : price >= existing.targetPrice;
+
+    if (hit) {
+      // Pullback dostignut → ulaz!
+      pending = pending.filter(p => p.symbol !== symbol);
+      savePending(pid, pending);
+      const baseResult = analyzeUltra(candles, cfg);
+      return {
+        ...baseResult,
+        signal: existing.side,
+        price,
+        reason: `[ULTRA PB ${existing.side}] Signal @ ${fmtPrice(existing.signalPrice)} | -1% hit @ ${fmtPrice(price)}`,
+      };
+    }
+
+    // Provjeri nije li signal promijenio smjer — cancel
+    const freshResult = analyzeUltra(candles, cfg);
+    const signalFlipped = freshResult.signal !== "NEUTRAL" && freshResult.signal !== existing.side;
+    if (signalFlipped) {
+      pending = pending.filter(p => p.symbol !== symbol);
+      savePending(pid, pending);
+      console.log(`  🔄 [ULTRA] ${symbol} — pending ${existing.side} canceliran (signal flip)`);
+    } else {
+      const pct = existing.side === "LONG"
+        ? ((price - existing.targetPrice) / existing.targetPrice * 100).toFixed(2)
+        : ((existing.targetPrice - price) / existing.targetPrice * 100).toFixed(2);
+      console.log(`  ⏳ [ULTRA] ${symbol} ${existing.side} čeka pullback | Target: ${fmtPrice(existing.targetPrice)} | Sad: ${fmtPrice(price)} | Još: ${pct}%`);
+    }
+    return { price, signal: "NEUTRAL", reason: `Čeka ULTRA pullback na ${fmtPrice(existing?.targetPrice)}` };
+  }
+
+  // Nema pendinga — pokreni normalnu analizu
+  const result = analyzeUltra(candles, cfg);
+
+  if (result.signal === "LONG" || result.signal === "SHORT") {
+    const targetPrice = result.signal === "LONG"
+      ? price * (1 - 1.0 / 100)   // LONG: čeka -1%
+      : price * (1 + 1.0 / 100);  // SHORT: čeka +1%
+
+    pending.push({ symbol, side: result.signal, signalPrice: price, targetPrice, ts: now });
+    savePending(pid, pending);
+    console.log(`  📌 [ULTRA] ${symbol} ${result.signal} signal @ ${fmtPrice(price)} → čeka pullback na ${fmtPrice(targetPrice)}`);
+    return { price, signal: "NEUTRAL", reason: `ULTRA signal, čeka 1% pullback na ${fmtPrice(targetPrice)}` };
+  }
+
   return result;
 }
 
@@ -1312,10 +1524,10 @@ export async function run() {
 
         let result;
         switch (pDef.strategy) {
-          case "mega":        result = analyzeMega(candles, pDef.params);           break;
-          case "synapse7":    result = await analyzeSynapse7Pullback(symbol, candles, pDef.params); break;
-          case "synapse_t":   result = analyzeSynapseTContra(candles, pDef.params); break;
-          default:            result = analyzeEmaRsi(candles, pDef.params);         break;
+          case "mega":        result = analyzeMega(candles, pDef.params);                              break;
+          case "synapse7":    result = await analyzeSynapse7Pullback(symbol, candles, pDef.params);   break;
+          case "synapse_t":   result = await analyzeUltraPullback(symbol, candles, pDef.params);      break;
+          default:            result = analyzeEmaRsi(candles, pDef.params);                           break;
         }
 
         const { signal, reason } = result;

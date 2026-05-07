@@ -89,16 +89,11 @@
       }
     },
     "synapse_t": {
-      "name": "SYNAPSE-T — SYNAPSE-7 + ADX trend filter + minSig 4/5",
-      "description": "SYNAPSE-7 baza + obvezan ADX>22 (eliminira konsolidaciju) + min 4/5 + kMem 100. SL 1.5% / TP 3% (RR 1:2).",
+      "name": "ULTRA — 13-Signal Combined Strategy",
+      "description": "Kombinira 13 signala iz svih strategija (EMA+RSI, MEGA, SYNAPSE-7, 3-Layer). Min 8/13 signala. Pullback entry -1%/+1%. SL 1% / TP 2% (RR 1:2). RSI recovery signal — ulaz iz oversold/overbought zone.",
       "params": {
-        "kLen": 10, "kMem": 100, "kK": 5, "kSmth": 5, "kSigLn": 5,
-        "atWin": 20, "yzMin": 3,
-        "rsiLen": 14, "rsiMaLen": 14,
-        "cvdLen": 20,
-        "minSig": 4,
-        "adxMin": 22,
-        "slPct": 1.5, "tpPct": 3.0
+        "minSig": 8,
+        "slPct": 1.0, "tpPct": 2.0
       }
     },
     "mega": {
@@ -115,7 +110,7 @@
   "risk_rules": [
     "4 neovisna portfolia × $1000 startni kapital — jedan simbol može biti otvoren u sva 4 istovremeno",
     "Risk-based sizing: notional = (equity × 2%) / slPct% → SL hit = točno 2% equity",
-    "EMA+RSI: SL 2% / TP 4% | MEGA: SL 2% / TP 4% | SYNAPSE-7: SL 2% / TP 4% | SYNAPSE-T: SL 1.5% / TP 3%",
+    "EMA+RSI: SL 2% / TP 4% | MEGA: SL 2% / TP 4% | SYNAPSE-7: SL 2% / TP 4% | ULTRA: SL 1% / TP 2%",
     "Samo jedna pozicija po simbolu PO PORTFOLIJU istovremeno",
     "Max 5 otvorenih pozicija po portfoliju istovremeno",
     "Dnevni limit: 100 tradova",

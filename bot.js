@@ -1000,10 +1000,14 @@ async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp) {
       const tpslRes = await bitgetPost("/api/v2/mix/order/place-tpsl-order", {
         symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
         planType, triggerPrice: fmtPrice(triggerPrice),
-        triggerType: "mark_price", holdSide, size: quantity,
+        triggerType: "mark_price", holdSide,
+        // bez size — primjenjuje se na cijelu poziciju
       });
       if (tpslRes.code === "00000") {
         console.log(`  🎯 ${planType} @ ${fmtPrice(triggerPrice)} OK`);
+      } else {
+        console.log(`  ❌ ${planType} FAIL: code=${tpslRes.code} msg=${tpslRes.msg}`);
+        await tg(`⚠️ ${planType} nije postavljen [${symbol}]\n${tpslRes.msg}`);
       }
     } catch (e) {
       console.log(`  ⚠️  ${planType} greška: ${e.message}`);

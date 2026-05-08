@@ -4,11 +4,11 @@
  * Portfolio 1 — EMA+RSI    → 1H  | SL 2%  / TP 4%
  * Portfolio 2 — MEGA       → 15m | SL 2%  / TP 4%
  * Portfolio 3 — SYNAPSE-7  → 15m | SL 2%  / TP 4%
- * Portfolio 4 — ULTRA      → 15m | SL 1%  / TP 2%  (13 signala, min 8/13, pullback entry)
+ * Portfolio 4 — ULTRA      → 15m | SL 1% / TP 2% | 100x | rizik 1.5% banke po tradeu
  *
- * Risk-based sizing: notional = (equity × 2%) / slPct%
- *   → SL hit = točno 2% equity gubitak, bez obzira na SL%
- *   → 25x leverage | START_CAPITAL $1000 po portfoliju
+ * Risk-based sizing: margin = equity × 1.5% | notional = margin × 100x
+ *   → SL 1% × 100x = 100% margine = likvidacija (gubiš samo ulog)
+ *   → TP 2% × 100x = 200% margine = +3% banke po dobitnom tradeu
  */
 
 import "dotenv/config";
@@ -19,11 +19,11 @@ import { fileURLToPath } from "url";
 // ─── Config ────────────────────────────────────────────────────────────────────
 
 const TIMEFRAME     = "1H";
-const LEVERAGE      = 40;     // 40x → SL 2.5% = 100% margine = likvidacija (gubiš samo ulog)
+const LEVERAGE      = 100;    // 100x → SL 1% = 100% margine = likvidacija (gubiš samo ulog)
 const START_CAPITAL = 1000;   // po portfoliju
-const RISK_PCT      = 1.5;    // % banke koji rizikaš po tradeu (= veličina uloga)
-const SL_PCT        = 2.0;    // fiksni SL %
-const TP_PCT        = 4.0;    // fiksni TP %
+const RISK_PCT      = 1.5;    // % banke koji rizikaš po tradeu (= veličina uloga/margine)
+const SL_PCT        = 1.0;    // fiksni SL % | SL 1% × 100x = 100% margine = likvidacija
+const TP_PCT        = 2.0;    // fiksni TP % | RR 1:2
 const MAX_TRADES_PER_DAY = 100;
 const MAX_OPEN_PER_PORTFOLIO = 5;  // max otvorenih pozicija po portfoliju
 
@@ -113,7 +113,7 @@ function buildPortfolios(rules) {
       strategy:     "synapse_t",
       params:       rules.strategies.synapse_t?.params || {},
       timeframe:    tfs.synapse_t    || "15m",
-      slPct:        2.5, tpPct: 5.0,   // ULTRA: SL 2.5% / TP 5%
+      slPct:        1.0, tpPct: 2.0,   // ULTRA: SL 1% / TP 2% | 100x → SL = likvidacija
       live:         true,               // ← LIVE trading
       startCapital: 300.00,            // ← početna banka za ULTRA LIVE
     },

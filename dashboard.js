@@ -790,7 +790,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="logo">🎯</div>
       <div>
         <div class="title">ULTRA Trading Bot</div>
-        <div class="subtitle">18 signala · min 10/18 · H/L breakout · ${tf} · SL 2.5% / TP 5% · 40x · rizik 1.5%</div>
+        <div class="subtitle">18 signala · min 10/18 · H/L breakout · ${tf} · SL 1% / TP 2% · 100x · rizik 1.5%</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -830,8 +830,8 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     </div>
     <div class="stat-card">
       <div class="stat-label">Strategija</div>
-      <div class="stat-value" style="font-size:14px;color:#e85d9a">ULTRA · 40x</div>
-      <div class="stat-sub">SL 2.5% / TP 5% · rizik 1.5%</div>
+      <div class="stat-value" style="font-size:14px;color:#e85d9a">ULTRA · 100x</div>
+      <div class="stat-sub">SL 1% / TP 2% · rizik 1.5%</div>
     </div>
   </div>
 
@@ -912,7 +912,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       </div>
       <div style="margin-top:10px;font-size:11px;color:#555">
         🟢 Zeleno = bullish signal aktiviran &nbsp;|&nbsp; 🔴 Crveno = bearish &nbsp;|&nbsp; ⬛ Sivo = neutral/nema signala &nbsp;|&nbsp;
-        Min <b style="color:#e85d9a">10/18</b> signala za ulaz · H/L breakout entry · SL <b>2.5%</b> / TP <b>5%</b> · <b>40x</b> leverage · rizik <b>1.5%</b> banke po tradeu
+        Min <b style="color:#e85d9a">10/18</b> signala za ulaz · H/L breakout entry · SL <b>1%</b> / TP <b>2%</b> · <b>100x</b> leverage · rizik <b>1.5%</b> banke po tradeu
       </div>
     </div>
   </div>

@@ -6,7 +6,7 @@
 // ║  TF: 15m preporučeno (isti kao bot)                                        ║
 // ╚══════════════════════════════════════════════════════════════════════════════╝
 //@version=5
-strategy("🎯 ULTRA — 18 Signala | min 10/18 | H/L Breakout",
+strategy("🎯 ULTRA — 18 Signala | min 10/18 | SL 1% / TP 2% | 100x",
      shorttitle          = "ULTRA-18",
      overlay             = true,
      initial_capital     = 1000,
@@ -25,8 +25,8 @@ var GRP2 = "💰 Upravljanje rizikom"
 var GRP3 = "🎨 Vizualizacija"
 
 i_minSig = input.int  (10,   "Min signala za ulaz (od 18)", minval=1, maxval=18, group=GRP1)
-i_slPct  = input.float( 2.5, "Stop Loss %",   minval=0.1, step=0.1, group=GRP2)
-i_tpPct  = input.float( 5.0, "Take Profit %", minval=0.1, step=0.1, group=GRP2)
+i_slPct  = input.float( 1.0, "Stop Loss %",   minval=0.1, step=0.1, group=GRP2)
+i_tpPct  = input.float( 2.0, "Take Profit %", minval=0.1, step=0.1, group=GRP2)
 i_pivN   = input.int  ( 4,   "S/R pivot lookback (svaka strana)", minval=2, maxval=10, group=GRP1)
 i_srZone = input.float(1.2,  "S/R zona % (proximity bounce)", minval=0.1, step=0.1, group=GRP1)
 i_table    = input.bool (true,  "Prikaži signal tablicu (top-right)",        group=GRP3)

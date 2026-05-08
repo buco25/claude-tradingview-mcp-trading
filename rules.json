@@ -8,22 +8,10 @@
     "SOLUSDT","XAGUSDT","HYPEUSDT","LINKUSDT","PEPEUSDT","ZECUSDT","BTCUSDT"
   ],
 
-  "watchlist_ema_rsi": [
-    "XAUUSDT","DOGEUSDT","NEARUSDT","RIVERUSDT","ADAUSDT",
-    "ETHUSDT","SUIUSDT","TAOUSDT",
-    "SOLUSDT","XAGUSDT","HYPEUSDT","LINKUSDT","PEPEUSDT","ZECUSDT","BTCUSDT"
-  ],
+  "watchlist_ema_rsi": [],
   "watchlist_3layer": [],
-  "watchlist_mega": [
-    "XAUUSDT","DOGEUSDT","NEARUSDT","RIVERUSDT","ADAUSDT",
-    "ETHUSDT","SUIUSDT","TAOUSDT",
-    "SOLUSDT","XAGUSDT","HYPEUSDT","LINKUSDT","PEPEUSDT","ZECUSDT","BTCUSDT"
-  ],
-  "watchlist_synapse7": [
-    "XAUUSDT","DOGEUSDT","NEARUSDT","RIVERUSDT","ADAUSDT",
-    "ETHUSDT","SUIUSDT","TAOUSDT",
-    "SOLUSDT","XAGUSDT","HYPEUSDT","LINKUSDT","PEPEUSDT","ZECUSDT","BTCUSDT"
-  ],
+  "watchlist_mega": [],
+  "watchlist_synapse7": [],
   "watchlist_synapse_t": [
     "XAUUSDT","DOGEUSDT","NEARUSDT","RIVERUSDT","ADAUSDT",
     "ETHUSDT","SUIUSDT","TAOUSDT",

@@ -1326,30 +1326,35 @@ async function setupSymbol(symbol) {
   });
   if (mm.code !== "00000") console.log(`  ⚠️  marginMode ${symbol}: ${mm.msg}`);
 
-  // 2) Leverage za long i short (hedge mode) — fallback na 20x/10x ako simbol ne podržava LEVERAGE
+  // 2) Leverage za long i short — fallback na manji leverage ako simbol ne podržava 100x
+  // Vraća stvarni leverage koji je uspješno postavljen
+  let actualLeverage = LEVERAGE;
   for (const holdSide of ["long", "short"]) {
     let set = false;
-    for (const lev of [LEVERAGE, 20, 10]) {
+    for (const lev of [LEVERAGE, 75, 50, 20, 10]) {
       const lv = await bitgetPost("/api/v2/mix/account/set-leverage", {
         symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
         leverage: String(lev), holdSide,
       });
       if (lv.code === "00000") {
-        if (lev !== LEVERAGE) console.log(`  ℹ️  ${symbol} ${holdSide}: max leverage je ${lev}x (ne ${LEVERAGE}x)`);
+        if (lev !== LEVERAGE) {
+          console.log(`  ℹ️  ${symbol} ${holdSide}: max leverage je ${lev}x (ne ${LEVERAGE}x) — sizing prilagođen`);
+          if (holdSide === "long") actualLeverage = lev;  // koristi long leverage kao referentni
+        }
         set = true;
         break;
       }
-      console.log(`  ⚠️  leverage ${symbol} ${holdSide} ${lev}x: ${lv.msg}`);
     }
     if (!set) console.log(`  ❌  Nije uspjelo postaviti leverage za ${symbol} ${holdSide}`);
   }
 
-  console.log(`  ⚙️  ${symbol}: isolated + leverage set (long+short)`);
+  console.log(`  ⚙️  ${symbol}: isolated + ${actualLeverage}x leverage set`);
+  return actualLeverage;
 }
 
 async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp) {
-  // Postavi isolated margin + leverage prije svakog naloga
-  await setupSymbol(symbol);
+  // Postavi isolated margin + leverage prije svakog naloga; vrati stvarni leverage
+  const actualLeverage = await setupSymbol(symbol);
   const quantity  = (sizeUSD / price).toFixed(4);
   const path      = "/api/v2/mix/order/place-order";
   const orderBody = {
@@ -1414,7 +1419,7 @@ async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp) {
     }
   }
 
-  return { orderId, fillPrice };
+  return { orderId, fillPrice, actualLeverage };
 }
 
 // Zatvori live poziciju na BitGetu (market close order)
@@ -1662,11 +1667,12 @@ export async function run() {
 
         // Risk-based position sizing: SL gubitak = točno RISK_PCT% trenutne equity
         // notional = riskAmount / slPct  →  SL hit = -riskAmount, TP hit = +riskAmount*(tpPct/slPct)
+        // margin = notional / actualLeverage — prilagođava se ako simbol ne podržava 100x
         const startCap   = pDef.startCapital ?? START_CAPITAL;
         const equity     = getPortfolioEquity(pid, startCap);
         const riskAmount = equity * (RISK_PCT / 100);
         const tradeSize  = riskAmount / (slPct / 100);
-        const margin     = tradeSize / LEVERAGE;
+        const margin     = tradeSize / LEVERAGE;  // preliminarno — ažurira se nakon setupSymbol
 
         if (!checkDailyLimit(pid)) {
           console.log(`  ❌ [${pDef.name}] Dnevni limit dostignut`);
@@ -1688,11 +1694,14 @@ export async function run() {
         } else {
           try {
             const order = await placeBitGetOrder(symbol, signal, tradeSize, price, sl, tp);
+            const usedLev    = order?.actualLeverage || LEVERAGE;
+            const usedMargin = tradeSize / usedLev;
             entry.orderId = order?.orderId || orderId;
+            entry.margin  = usedMargin;
             addPosition(pid, entry);
             writeEntryCsv(pid, entry);
             console.log(`  ✅ LIVE NALOG [${pDef.name}] — ${entry.orderId}`);
-            await tg(`🔴 LIVE [${pDef.name}/${pDef.timeframe}] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b>\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}\nEquity: $${equity.toFixed(2)} | Risk: $${riskAmount.toFixed(2)} | Notional: $${tradeSize.toFixed(0)} | Margin: $${margin.toFixed(2)} | ${LEVERAGE}x`);
+            await tg(`🔴 LIVE [${pDef.name}/${pDef.timeframe}] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b>\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}\nEquity: $${equity.toFixed(2)} | Risk: $${riskAmount.toFixed(2)} | Notional: $${tradeSize.toFixed(0)} | Margin: $${usedMargin.toFixed(2)} | ${usedLev}x${usedLev < LEVERAGE ? " ⚠️ max lev" : ""}`);
           } catch (err) {
             console.log(`  ❌ LIVE NALOG PAO — ${err.message}`);
             await tg(`❌ LIVE GREŠKA [${pDef.name}] ${symbol}\n${err.message}`);

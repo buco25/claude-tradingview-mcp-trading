@@ -1717,6 +1717,102 @@ export async function run() {
   writeHeartbeat("ok", { portfolios: nPort, symbols: totalSymbols, leverage: LEVERAGE });
 }
 
+// ─── Fast breakout checker (svake minute) ──────────────────────────────────────
+// Provjerava pending breakout trigere bez punog signal scana.
+// Čim live cijena probije triggerHigh (LONG) ili triggerLow (SHORT) → odmah otvara trade.
+
+export async function checkBreakouts() {
+  const pid     = "synapse_t";
+  const TTL     = 15 * 60 * 1000;
+  const now     = Date.now();
+  let   pending = loadPending(pid);
+
+  // Makni istekle
+  pending = pending.filter(p => now - p.ts < TTL);
+  if (pending.length === 0) return;
+
+  const rules     = JSON.parse(readFileSync("rules.json", "utf8"));
+  const portfolios = buildPortfolios(rules);
+  const pDef      = portfolios[pid];
+  if (!pDef) return;
+
+  const openPositions = loadPositions(pid);
+  const openSymbols   = openPositions.map(p => p.symbol);
+
+  for (const p of pending) {
+    const { symbol, side, triggerHigh, triggerLow, signalPrice, ts } = p;
+
+    // Ako već otvorena pozicija za ovaj simbol — preskoči
+    if (openSymbols.includes(symbol)) continue;
+
+    // Dohvati live ticker s Bitgeta
+    let livePrice;
+    try {
+      const tickerUrl = `${BITGET.baseUrl}/api/v2/mix/market/ticker?symbol=${symbol}&productType=USDT-FUTURES`;
+      const tj = await fetch(tickerUrl).then(r => r.json());
+      livePrice = parseFloat(tj?.data?.[0]?.lastPr || tj?.data?.[0]?.close || 0);
+    } catch (_) { continue; }
+
+    if (!livePrice) continue;
+
+    const hit = side === "LONG"  ? livePrice >= triggerHigh
+              : side === "SHORT" ? livePrice <= triggerLow
+              : false;
+
+    if (!hit) {
+      console.log(`  ⏳ [ULTRA BRK fast] ${symbol} ${side} | Live: ${fmtPrice(livePrice)} | TrigH: ${fmtPrice(triggerHigh)} TrigL: ${fmtPrice(triggerLow)}`);
+      continue;
+    }
+
+    // BREAKOUT! — makni iz pendinga i otvori trade
+    const newPending = pending.filter(x => !(x.symbol === symbol && x.side === side));
+    savePending(pid, newPending);
+
+    const slPct  = pDef.slPct ?? SL_PCT;
+    const tpPct  = pDef.tpPct ?? TP_PCT;
+    const slDist = livePrice * (slPct / 100);
+    const tpDist = livePrice * (tpPct / 100);
+    const sl = side === "LONG" ? livePrice - slDist : livePrice + slDist;
+    const tp = side === "LONG" ? livePrice + tpDist : livePrice - tpDist;
+
+    const startCap   = pDef.startCapital ?? START_CAPITAL;
+    const equity     = getPortfolioEquity(pid, startCap);
+    const riskAmount = equity * (RISK_PCT / 100);
+    const tradeSize  = riskAmount / (slPct / 100);
+    const margin     = tradeSize / LEVERAGE;
+
+    if (!checkDailyLimit(pid)) continue;
+
+    console.log(`🚀 [ULTRA BRK fast] ${side} ${symbol} @ ${fmtPrice(livePrice)} | SL ${fmtPrice(sl)} | TP ${fmtPrice(tp)}`);
+
+    const isLive    = pDef.live === true && !PAPER_TRADING;
+    const timestamp = new Date().toISOString();
+    const orderId   = `${isLive ? "LIVE" : "PAPER"}-BRK-${Date.now()}`;
+    const mode      = isLive ? (BITGET_DEMO ? "DEMO" : "LIVE") : "PAPER";
+    const entry     = { symbol, signal: side, price: livePrice, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode };
+
+    if (!isLive) {
+      addPosition(pid, entry);
+      writeEntryCsv(pid, entry);
+      await tg(`📋 PAPER [ULTRA/fast] ${side === "LONG" ? "📈" : "📉"} <b>${side} ${symbol}</b>\nUlaz: ${fmtPrice(livePrice)} | SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}\nBreakout detektiran u realnom vremenu`);
+    } else {
+      try {
+        const order = await placeBitGetOrder(symbol, side, tradeSize, livePrice, sl, tp);
+        const usedLev    = order?.actualLeverage || LEVERAGE;
+        const usedMargin = tradeSize / usedLev;
+        entry.orderId = order?.orderId || orderId;
+        entry.margin  = usedMargin;
+        addPosition(pid, entry);
+        writeEntryCsv(pid, entry);
+        await tg(`🔴 LIVE [ULTRA/fast] ${side === "LONG" ? "📈" : "📉"} <b>${side} ${symbol}</b>\nUlaz: ${fmtPrice(livePrice)} | SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}\nBreakout detektiran u realnom vremenu | ${usedLev}x`);
+      } catch (err) {
+        console.log(`  ❌ LIVE BRK NALOG PAO — ${err.message}`);
+        await tg(`❌ LIVE BRK GREŠKA [ULTRA] ${symbol}\n${err.message}`);
+      }
+    }
+  }
+}
+
 // ─── Entry point ───────────────────────────────────────────────────────────────
 
 const _botFile = fileURLToPath(import.meta.url);

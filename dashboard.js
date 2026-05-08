@@ -6,7 +6,7 @@
 import "dotenv/config";
 import http from "http";
 import { readFileSync, writeFileSync, existsSync } from "fs";
-import { run as botRun } from "./bot.js";
+import { run as botRun, checkBreakouts } from "./bot.js";
 import { startWhaleTracker } from "./whale_tracker.js";
 
 const PORT     = process.env.PORT || 3000;
@@ -1471,6 +1471,13 @@ server.listen(PORT, () => {
   console.log(`⚙️  Bot scheduler aktivan (svake 5 min)`);
   scheduledRun();
   setInterval(scheduledRun, 5 * 60 * 1000);
+
+  // Fast breakout checker — svake minute provjerava live cijenu vs. trigger
+  setInterval(async () => {
+    try { await checkBreakouts(); }
+    catch (e) { console.error("Breakout checker greška:", e.message); }
+  }, 60 * 1000);
+
   // Whale copy tracker (demo)
   startWhaleTracker().catch(e => console.error("Whale tracker greška:", e.message));
 });

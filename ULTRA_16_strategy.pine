@@ -1,11 +1,13 @@
 // ╔══════════════════════════════════════════════════════════════════════════════╗
-// ║  🎯 ULTRA — 16 Signala | min 11/16 | Candle H/L Breakout Entry            ║
+// ║  🎯 ULTRA — 18 Signala | min 10/18 | Candle H/L Breakout Entry            ║
 // ║  Identično bot.js analyzeUltra() logici                                    ║
+// ║  Sig 17: S/R Bounce (pivot zona 1.2% + RSI smjer)                         ║
+// ║  Sig 18: S/R Breakout (pivot probijen u zadnja 3 bara)                     ║
 // ║  TF: 15m preporučeno (isti kao bot)                                        ║
 // ╚══════════════════════════════════════════════════════════════════════════════╝
 //@version=5
-strategy("🎯 ULTRA — 16 Signala | min 11/16 | H/L Breakout",
-     shorttitle          = "ULTRA-16",
+strategy("🎯 ULTRA — 18 Signala | min 10/18 | H/L Breakout",
+     shorttitle          = "ULTRA-18",
      overlay             = true,
      initial_capital     = 1000,
      default_qty_type    = strategy.percent_of_equity,
@@ -22,9 +24,11 @@ var GRP1 = "⚙️ Strategija"
 var GRP2 = "💰 Upravljanje rizikom"
 var GRP3 = "🎨 Vizualizacija"
 
-i_minSig = input.int  (11,   "Min signala za ulaz (od 16)", minval=1, maxval=16, group=GRP1)
-i_slPct  = input.float( 1.0, "Stop Loss %",   minval=0.1, step=0.1, group=GRP2)
-i_tpPct  = input.float( 2.0, "Take Profit %", minval=0.1, step=0.1, group=GRP2)
+i_minSig = input.int  (10,   "Min signala za ulaz (od 18)", minval=1, maxval=18, group=GRP1)
+i_slPct  = input.float( 2.5, "Stop Loss %",   minval=0.1, step=0.1, group=GRP2)
+i_tpPct  = input.float( 5.0, "Take Profit %", minval=0.1, step=0.1, group=GRP2)
+i_pivN   = input.int  ( 4,   "S/R pivot lookback (svaka strana)", minval=2, maxval=10, group=GRP1)
+i_srZone = input.float(1.2,  "S/R zona % (proximity bounce)", minval=0.1, step=0.1, group=GRP1)
 i_table  = input.bool (true, "Prikaži signal tablicu (top-right)", group=GRP3)
 i_labels = input.bool (true, "Prikaži oznake na grafu",            group=GRP3)
 i_emas   = input.bool (true, "Prikaži EMA linije",                 group=GRP3)
@@ -107,8 +111,43 @@ crossDn3 = (ema9 < ema21 and ema9[1] >= ema21[1]) or
 // ── Volume ─────────────────────────────────────────────────────────────────────
 volAvg = ta.sma(volume, 20)
 
+// ── Pivot Support / Resistance (za signale 17 i 18) ───────────────────────────
+// ta.pivothigh/low vraća vrijednost pivota kad je bar[pivN] lokalni max/min, inače na
+ph = ta.pivothigh(high, i_pivN, i_pivN)
+pl = ta.pivotlow (low,  i_pivN, i_pivN)
+
+// Akumuliramo zadnjih 20 potvrđenih pivota u array-e
+var float[] resList = array.new_float(0)
+var float[] supList = array.new_float(0)
+
+if not na(ph)
+    array.push(resList, ph)
+    if array.size(resList) > 20
+        array.shift(resList)
+
+if not na(pl)
+    array.push(supList, pl)
+    if array.size(supList) > 20
+        array.shift(supList)
+
+// Najbliža resistance iznad cijene i najbliži support ispod cijene
+var float nearRes = na
+var float nearSup = na
+nearRes := float(na)
+nearSup := float(na)
+
+for i = 0 to array.size(resList) - 1
+    r = array.get(resList, i)
+    if r > close * 1.001
+        nearRes := na(nearRes) or r < nearRes ? r : nearRes
+
+for i = 0 to array.size(supList) - 1
+    s = array.get(supList, i)
+    if s < close * 0.999
+        nearSup := na(nearSup) or s > nearSup ? s : nearSup
+
 // ══════════════════════════════════════════════════════════════════════════════
-// 16 SIGNALI  (+1 = bull  ·  -1 = bear  ·  0 = neutral)
+// 18 SIGNALI  (+1 = bull  ·  -1 = bear  ·  0 = neutral)
 // Identično bot.js analyzeUltra()
 // ══════════════════════════════════════════════════════════════════════════════
 sig1  = ema9 > ema21 ? 1 : -1
@@ -143,15 +182,35 @@ sig15 = rsiRising ? 1 : rsiFalling ? -1 : 0
 // Signal 16: ADX jak > 25 + EMA smjer (jak trend potvrđen)
 sig16 = adxVal > 25 ? (ema9 > ema21 ? 1 : -1) : 0
 
+// Signal 17: S/R Bounce — cijena unutar zone od pivot supporta (bull) ili resistancea (bear)
+srZoneFrac = i_srZone / 100.0
+sig17 = not na(nearSup) and (close - nearSup) / close < srZoneFrac and rsiRising ? 1 : not na(nearRes) and (nearRes - close) / close < srZoneFrac and rsiFalling ? -1 : 0
+
+// Signal 18: S/R Breakout — cijena probila pivot resistance (bull) ili support (bear) u zadnja 3 bara
+var bool srbUp = false
+var bool srbDn = false
+srbUp := false
+srbDn := false
+for i = 0 to array.size(resList) - 1
+    r = array.get(resList, i)
+    if (close[2] < r and close[1] > r) or (close[1] < r and close > r)
+        srbUp := true
+for i = 0 to array.size(supList) - 1
+    s = array.get(supList, i)
+    if (close[2] > s and close[1] < s) or (close[1] > s and close < s)
+        srbDn := true
+sig18 = srbUp ? 1 : srbDn ? -1 : 0
+
 // ── Score ──────────────────────────────────────────────────────────────────────
 sigs = array.from(sig1, sig2, sig3, sig4, sig5, sig6, sig7, sig8,
-                  sig9, sig10, sig11, sig12, sig13, sig14, sig15, sig16)
+                  sig9, sig10, sig11, sig12, sig13, sig14, sig15, sig16,
+                  sig17, sig18)
 
 var int bullCnt = 0
 var int bearCnt = 0
 bullCnt := 0
 bearCnt := 0
-for i = 0 to 15
+for i = 0 to 17
     v = array.get(sigs, i)
     bullCnt += v ==  1 ? 1 : 0
     bearCnt += v == -1 ? 1 : 0
@@ -278,23 +337,23 @@ plot(pShort and not na(trigL) ? trigL : na,
 // ══════════════════════════════════════════════════════════════════════════════
 // SIGNAL TABLICA (top-right)
 // ══════════════════════════════════════════════════════════════════════════════
-var table tbl = table.new(position.top_right, 9, 3,
+var table tbl = table.new(position.top_right, 10, 3,
      bgcolor      = color.new(color.black, 15),
      border_width = 1, border_color = color.new(color.gray, 65),
      frame_width  = 2, frame_color  = color.new(color.gray, 45))
 
 if i_table and barstate.islast
-    names = array.from("EMA","CRS","E50","RSI","E55","ADX","CHP","6Sc",
-                       "CVD","R⟳","MCD","E145","VOL","MCC","R↗","ADX+")
+    names = array.from("EMA","CRS","E50","RSI","E55","ADX","CHP","6Sc","CVD",
+                       "R⟳","MCD","E145","VOL","MCC","R↗","ADX+","SRS","SRB")
 
     // Score cell
     isLong  = bullCnt >= i_minSig
     isShort = bearCnt >= i_minSig
     sBg  = isLong ? color.new(color.green, 25) : isShort ? color.new(color.red, 25) : color.new(color.gray, 70)
-    sTxt = isLong ? "▲ LONG\n" + str.tostring(bullCnt) + "/16" : isShort ? "▼ SHORT\n" + str.tostring(bearCnt) + "/16" : "↑" + str.tostring(bullCnt) + " ↓" + str.tostring(bearCnt) + "\n/16"
+    sTxt = isLong ? "▲ LONG\n" + str.tostring(bullCnt) + "/18" : isShort ? "▼ SHORT\n" + str.tostring(bearCnt) + "/18" : "↑" + str.tostring(bullCnt) + " ↓" + str.tostring(bearCnt) + "\n/18"
 
     // Kolona 0: score (spanning rows 1-2)
-    table.cell(tbl, 0, 0, "ULTRA\n" + str.tostring(i_minSig) + "/16",
+    table.cell(tbl, 0, 0, "ULTRA\n" + str.tostring(i_minSig) + "/18",
          bgcolor=color.new(color.navy, 50), text_color=color.new(color.white, 30), text_size=size.tiny)
     table.cell(tbl, 0, 1, sTxt,
          bgcolor=sBg, text_color=color.white, text_size=size.small)
@@ -303,10 +362,10 @@ if i_table and barstate.islast
          text_color=pLong ? color.lime : pShort ? color.red : color.new(color.gray, 50),
          text_size=size.tiny)
 
-    // Signal ćelije — 8 po redu
-    for i = 0 to 15
-        col = (i % 8) + 1
-        row = i < 8 ? 1 : 2
+    // Signal ćelije — 9 po redu (18 signala u 2 reda × 9)
+    for i = 0 to 17
+        col = (i % 9) + 1
+        row = i < 9 ? 1 : 2
         v   = array.get(sigs,  i)
         nm  = array.get(names, i)
         bg  = v == 1 ? color.new(color.green, 30) : v == -1 ? color.new(color.red, 30) : color.new(color.gray, 80)
@@ -318,17 +377,17 @@ if i_table and barstate.islast
 // ALERT CONDITIONS
 // ══════════════════════════════════════════════════════════════════════════════
 alertcondition(longSig  and not longSig[1],
-     "ULTRA LONG Signal",
-     "🎯 ULTRA LONG ↑ signal — čeka breakout iznad H signal-svijeće")
+     "ULTRA-18 LONG Signal",
+     "🎯 ULTRA-18 LONG ↑ signal — čeka breakout iznad H signal-svijeće")
 
 alertcondition(shortSig and not shortSig[1],
-     "ULTRA SHORT Signal",
-     "🎯 ULTRA SHORT ↓ signal — čeka breakdown ispod L signal-svijeće")
+     "ULTRA-18 SHORT Signal",
+     "🎯 ULTRA-18 SHORT ↓ signal — čeka breakdown ispod L signal-svijeće")
 
 alertcondition(enterLong,
-     "ULTRA LONG Entry",
-     "🟢 ULTRA LONG ulaz — breakout potvrđen")
+     "ULTRA-18 LONG Entry",
+     "🟢 ULTRA-18 LONG ulaz — breakout potvrđen (SL 2.5% / TP 5%)")
 
 alertcondition(enterShort,
-     "ULTRA SHORT Entry",
-     "🔴 ULTRA SHORT ulaz — breakdown potvrđen")
+     "ULTRA-18 SHORT Entry",
+     "🔴 ULTRA-18 SHORT ulaz — breakdown potvrđen (SL 2.5% / TP 5%)")

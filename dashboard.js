@@ -577,7 +577,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <div><label>SL</label><span class="red">${fmtP(p.sl)}</span></div>
             <div><label>TP</label><span class="green">${fmtP(p.tp)}</span></div>
             <div><label>Notional</label><span>$${p.totalUSD.toFixed(2)}</span></div>
-            <div><label>Margin (tvoj $)</label><span style="color:#f7b731;font-weight:700">$${(p.margin ?? p.totalUSD / 25).toFixed(2)}</span></div>
+            <div><label>Ulog (margin)</label><span style="color:#f7b731;font-weight:700">$${(p.margin ?? p.totalUSD / 40).toFixed(2)}</span></div>
             <div><label>Qty</label><span>${p.quantity.toFixed(4)}</span></div>
             <div><label>Otvoreno</label><span>${(p.openedAt || "").slice(0,16).replace("T"," ")}</span></div>
           </div>
@@ -796,8 +796,8 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     </div>
     <div class="stat-card">
       <div class="stat-label">Strategija</div>
-      <div class="stat-value" style="font-size:14px;color:#e85d9a">ULTRA</div>
-      <div class="stat-sub">SL 2.5% / TP 5%</div>
+      <div class="stat-value" style="font-size:14px;color:#e85d9a">ULTRA · 40x</div>
+      <div class="stat-sub">SL 2.5% / TP 5% · rizik 1.5%</div>
     </div>
   </div>
 
@@ -811,10 +811,10 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <div class="scan-card">
     <div class="scan-header">
       <div>
-        <div class="chart-title" style="margin-bottom:2px">🎯 ULTRA Scanner — ${ALL_SYMBOLS.length} simbola | 14 signala | min 9/14 | pullback 1%</div>
+        <div class="chart-title" style="margin-bottom:2px">🎯 ULTRA Scanner — ${ALL_SYMBOLS.length} simbola | 16 signala | min 10/16 | H/L breakout</div>
         <div style="font-size:12px;color:var(--text-muted)">
-          EMA · CRS · E50 · RSI · E55 · ADX · CHP · 6Sc · CVD · R⟳ · MCD · E145 · VOL · <b style="color:#e85d9a">MCC</b>
-          &nbsp;|&nbsp; 🟡 Čeka pullback &nbsp; 🟢 Signal &nbsp; Cache 90s &nbsp;|&nbsp;
+          EMA · CRS · E50 · RSI · E55 · ADX · CHP · 6Sc · CVD · R⟳ · MCD · E145 · VOL · MCC · R↗ · ADX+
+          &nbsp;|&nbsp; 🟡 Čeka breakout &nbsp; 🟢 Signal &nbsp; Cache 90s &nbsp;|&nbsp;
           <button onclick="toggleLegend()" style="background:none;border:1px solid #30363d;border-radius:4px;color:#8b949e;font-size:11px;cursor:pointer;padding:2px 8px">📖 Legenda signala</button>
         </div>
       </div>
@@ -836,7 +836,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <th style="color:#8b949e">ADX</th>
             <th style="color:#e85d9a;text-align:center">16 Signala &nbsp;<span style="font-weight:400;font-size:10px;color:#666">EMA · CRS · E50 · RSI · E55 · ADX · CHP · 6Sc · CVD · R⟳ · MCD · E145 · VOL · MCC · R↗ · ADX+</span></th>
             <th style="color:#e85d9a;text-align:center">Score</th>
-            <th style="min-width:260px">Status / Pullback</th>
+            <th style="min-width:260px">Status / Breakout</th>
           </tr>
         </thead>
         <tbody id="scan-tbody">
@@ -876,7 +876,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       </div>
       <div style="margin-top:10px;font-size:11px;color:#555">
         🟢 Zeleno = bullish signal aktiviran &nbsp;|&nbsp; 🔴 Crveno = bearish &nbsp;|&nbsp; ⬛ Sivo = neutral/nema signala &nbsp;|&nbsp;
-        Min <b style="color:#e85d9a">10/16</b> signala za ulaz · H/L breakout entry · SL <b>2.5%</b> / TP <b>5%</b>
+        Min <b style="color:#e85d9a">10/16</b> signala za ulaz · H/L breakout entry · SL <b>2.5%</b> / TP <b>5%</b> · <b>40x</b> leverage · rizik <b>1.5%</b> banke po tradeu
       </div>
     </div>
   </div>
@@ -1037,7 +1037,7 @@ async function resetOne(pid) {
   location.reload();
 }
 
-// ── Signal label boxes (14 signals) ──────────────────────────────────────────
+// ── Signal label boxes (16 signals) ──────────────────────────────────────────
 const SIG_NAMES = ['EMA','CRS','E50','RSI','E55','ADX','CHP','6Sc','CVD','R⟳','MCD','E145','VOL','MCC','R↗','ADX+'];
 
 function sigBoxes(sigs) {

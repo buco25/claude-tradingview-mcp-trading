@@ -29,10 +29,12 @@ i_slPct  = input.float( 2.5, "Stop Loss %",   minval=0.1, step=0.1, group=GRP2)
 i_tpPct  = input.float( 5.0, "Take Profit %", minval=0.1, step=0.1, group=GRP2)
 i_pivN   = input.int  ( 4,   "S/R pivot lookback (svaka strana)", minval=2, maxval=10, group=GRP1)
 i_srZone = input.float(1.2,  "S/R zona % (proximity bounce)", minval=0.1, step=0.1, group=GRP1)
-i_table  = input.bool (true, "Prikaži signal tablicu (top-right)", group=GRP3)
-i_labels = input.bool (true, "Prikaži oznake na grafu",            group=GRP3)
-i_emas   = input.bool (true, "Prikaži EMA linije",                 group=GRP3)
-i_bg     = input.bool (true, "Pozadinska boja na signalu",         group=GRP3)
+i_table    = input.bool (true,  "Prikaži signal tablicu (top-right)",        group=GRP3)
+i_entries  = input.bool (true,  "Prikaži ENTRY oznake (stvarni ulazi ▲▼)",  group=GRP3)
+i_signals  = input.bool (false, "Prikaži SIGNAL trokute (čeka breakout)",   group=GRP3)
+i_brk_line = input.bool (true,  "Prikaži breakout trigger liniju",           group=GRP3)
+i_emas     = input.bool (true,  "Prikaži EMA linije",                        group=GRP3)
+i_bg       = input.bool (false, "Pozadinska boja (signal zona)",             group=GRP3)
 
 // ══════════════════════════════════════════════════════════════════════════════
 // INDIKATORI
@@ -294,49 +296,49 @@ if enterShort and strategy.position_size == 0
 // VIZUALIZACIJA
 // ══════════════════════════════════════════════════════════════════════════════
 
-// Pozadinska boja kad je signal aktivan
+// Pozadinska boja kad je signal aktivan (isključeno po defaultu — smeta čitljivosti)
 bgcolor(i_bg and longSig  ? color.new(color.green, 92) : na, title="Bull pozadina")
 bgcolor(i_bg and shortSig ? color.new(color.red,   92) : na, title="Bear pozadina")
 
-// Signal oznake (prvi bar signala)
-plotshape(i_labels and longSig  and not longSig[1],
-     title    = "LONG Signal",
+// ── SIGNAL trokuti — pokazuju PRVI bar kad score ≥ minSig (čeka breakout, nije ulaz!)
+plotshape(i_signals and longSig  and not longSig[1],
+     title    = "LONG Signal (čeka breakout)",
      style    = shape.triangleup,
      location = location.belowbar,
-     color    = color.new(color.lime, 0),
-     size     = size.small)
+     color    = color.new(color.lime, 40),
+     size     = size.tiny)
 
-plotshape(i_labels and shortSig and not shortSig[1],
-     title    = "SHORT Signal",
+plotshape(i_signals and shortSig and not shortSig[1],
+     title    = "SHORT Signal (čeka breakout)",
      style    = shape.triangledown,
      location = location.abovebar,
-     color    = color.new(color.red, 0),
-     size     = size.small)
+     color    = color.new(color.red, 40),
+     size     = size.tiny)
 
-// Entry oznake
-plotshape(i_labels and enterLong,
-     title     = "LONG Entry",
+// ── ENTRY labeli — stvarni ulaz, breakout potvrđen (uvijek vidljivi po defaultu)
+plotshape(i_entries and enterLong,
+     title     = "LONG Entry ✅",
      style     = shape.labelup,
      location  = location.belowbar,
      color     = color.new(color.green, 0),
      textcolor = color.white,
-     text      = "▲ LONG\nENTRY",
+     text      = "▲ LONG",
      size      = size.normal)
 
-plotshape(i_labels and enterShort,
-     title     = "SHORT Entry",
+plotshape(i_entries and enterShort,
+     title     = "SHORT Entry ✅",
      style     = shape.labeldown,
      location  = location.abovebar,
      color     = color.new(color.red, 0),
      textcolor = color.white,
-     text      = "▼ SHORT\nENTRY",
+     text      = "▼ SHORT",
      size      = size.normal)
 
-// Breakout trigger razine (horizontalne linije dok čekamo)
-plot(pLong  and not na(trigH) ? trigH : na,
-     "Breakout H (Long)",  color=color.new(color.green, 45), linewidth=1, style=plot.style_linebr)
-plot(pShort and not na(trigL) ? trigL : na,
-     "Breakdown L (Short)", color=color.new(color.red,  45), linewidth=1, style=plot.style_linebr)
+// ── Breakout trigger razina — horizontalna linija dok čekamo potvrdu
+plot(i_brk_line and pLong  and not na(trigH) ? trigH : na,
+     "Breakout H (Long)",   color=color.new(color.green, 30), linewidth=2, style=plot.style_linebr)
+plot(i_brk_line and pShort and not na(trigL) ? trigL : na,
+     "Breakdown L (Short)", color=color.new(color.red,   30), linewidth=2, style=plot.style_linebr)
 
 // ══════════════════════════════════════════════════════════════════════════════
 // SIGNAL TABLICA (top-right)

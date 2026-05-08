@@ -90,10 +90,10 @@
     },
     "synapse_t": {
       "name": "ULTRA — 16-Signal Combined Strategy",
-      "description": "Kombinira 16 signala: EMA, Cross, E50, RSI zona, E55, ADX>18, Chop, 6Sc, CVD, RSI recovery, MACD hist, E145, Vol, MACD cross, RSI smjer, ADX>25. Min 11/16 signala. Pullback entry -1%/+1%. SL 1% / TP 2% (RR 1:2).",
+      "description": "Kombinira 16 signala: EMA, Cross, E50, RSI zona, E55, ADX>18, Chop, 6Sc, CVD, RSI recovery, MACD hist, E145, Vol, MACD cross, RSI smjer, ADX>25. Min 10/16 signala. H/L breakout entry. SL 2.5% / TP 5% (RR 1:2).",
       "params": {
-        "minSig": 11,
-        "slPct": 1.0, "tpPct": 2.0
+        "minSig": 10,
+        "slPct": 2.5, "tpPct": 5.0
       }
     },
     "mega": {
@@ -110,11 +110,11 @@
   "risk_rules": [
     "4 neovisna portfolia × $1000 startni kapital — jedan simbol može biti otvoren u sva 4 istovremeno",
     "Risk-based sizing: notional = (equity × 2%) / slPct% → SL hit = točno 2% equity",
-    "EMA+RSI: SL 2% / TP 4% | MEGA: SL 2% / TP 4% | SYNAPSE-7: SL 2% / TP 4% | ULTRA: SL 1% / TP 2%",
+    "EMA+RSI: SL 2% / TP 4% | MEGA: SL 2% / TP 4% | SYNAPSE-7: SL 2% / TP 4% | ULTRA: SL 2.5% / TP 5%",
     "Samo jedna pozicija po simbolu PO PORTFOLIJU istovremeno",
     "Max 5 otvorenih pozicija po portfoliju istovremeno",
     "Dnevni limit: 100 tradova",
-    "SYNAPSE-7: kMem 100 (25h AI memory), minSig 4/5 | ULTRA: 14 signala, minSig 9/14",
+    "SYNAPSE-7: kMem 100 (25h AI memory), minSig 4/5 | ULTRA: 16 signala, minSig 10/16, SL 2.5% / TP 5%",
     "Uklonjeni simboli (loš WR): ORDIUSDT, WLDUSDT, TRUMPUSDT, XRPUSDT, AVAXUSDT, AAVEUSDT"
   ]
 }

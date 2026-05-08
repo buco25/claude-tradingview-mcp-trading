@@ -756,7 +756,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="logo">🎯</div>
       <div>
         <div class="title">ULTRA Trading Bot</div>
-        <div class="subtitle">16 signala · min 11/16 · pullback 1% · ${tf} · SL 1% / TP 2% · 30x</div>
+        <div class="subtitle">16 signala · min 10/16 · H/L breakout · ${tf} · SL 2.5% / TP 5% · 30x</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -797,7 +797,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     <div class="stat-card">
       <div class="stat-label">Strategija</div>
       <div class="stat-value" style="font-size:14px;color:#e85d9a">ULTRA</div>
-      <div class="stat-sub">SL 1% / TP 2%</div>
+      <div class="stat-sub">SL 2.5% / TP 5%</div>
     </div>
   </div>
 
@@ -849,7 +849,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <!-- Signal legend (collapsible) -->
   <div id="sig-legend" style="display:none;margin-top:12px">
     <div class="chart-card" style="padding:16px 20px">
-      <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — ULTRA (16 signala, min 11/16)</div>
+      <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — ULTRA (16 signala, min 10/16)</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px;font-size:12px">
         ${[
           ['EMA','EMA9 > EMA21 — kratkoročni trend gore (bull) / dole (bear)'],
@@ -876,7 +876,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       </div>
       <div style="margin-top:10px;font-size:11px;color:#555">
         🟢 Zeleno = bullish signal aktiviran &nbsp;|&nbsp; 🔴 Crveno = bearish &nbsp;|&nbsp; ⬛ Sivo = neutral/nema signala &nbsp;|&nbsp;
-        Min <b style="color:#e85d9a">11/16</b> signala za ulaz · Pullback <b style="color:#e85d9a">-1%</b> od signal cijene · SL <b>1%</b> / TP <b>2%</b>
+        Min <b style="color:#e85d9a">10/16</b> signala za ulaz · H/L breakout entry · SL <b>2.5%</b> / TP <b>5%</b>
       </div>
     </div>
   </div>

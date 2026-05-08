@@ -113,7 +113,7 @@ function buildPortfolios(rules) {
       strategy:     "synapse_t",
       params:       rules.strategies.synapse_t?.params || {},
       timeframe:    tfs.synapse_t    || "15m",
-      slPct:        1.0, tpPct: 2.0,   // ULTRA: SL 1% / TP 2%
+      slPct:        2.5, tpPct: 5.0,   // ULTRA: SL 2.5% / TP 5%
       live:         false,              // ← PAPER (live pauziran)
       startCapital: 356.80,            // ← stvarni saldo na BitGet (2026-05-07)
     },

@@ -13,7 +13,7 @@ const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" 
 const START_CAPITAL = 1000;
 
 const PORTFOLIO_DEFS = [
-  { id: "synapse_t", name: "ULTRA", color: "#e85d9a", emoji: "🎯", startCapital: 356.80, live: false },
+  { id: "synapse_t", name: "ULTRA", color: "#e85d9a", emoji: "🎯", startCapital: 300.00, live: true },
 ];
 
 // ─── All symbols ───────────────────────────────────────────────────────────────

@@ -4,7 +4,7 @@
  * Portfolio 1 — EMA+RSI    → 1H  | SL 2%  / TP 4%
  * Portfolio 2 — MEGA       → 15m | SL 2%  / TP 4%
  * Portfolio 3 — SYNAPSE-7  → 15m | SL 2%  / TP 4%
- * Portfolio 4 — ULTRA      → 15m | SL 1% / TP 2% | 100x | rizik 1.5% banke po tradeu
+ * Portfolio 4 — ULTRA      → 15m | SL 1% / TP 2% | 100x | rizik 1% banke po tradeu
  *
  * Risk-based sizing: margin = equity × 1% | notional = margin × 100x
  *   → SL 1% × 100x = 100% margine = likvidacija (gubiš samo ulog)
@@ -74,7 +74,7 @@ const HEARTBEAT_FILE = `${DATA_DIR}/heartbeat.json`;
 
 // ─── Portfolio definicije ──────────────────────────────────────────────────────
 
-const PORTFOLIO_IDS = ["ema_rsi", "mega", "synapse7", "synapse_t"];
+const PORTFOLIO_IDS = ["synapse_t"];  // Aktivni portfolio — samo ULTRA
 
 function buildPortfolios(rules) {
   const tfs = rules.portfolio_timeframes || {};

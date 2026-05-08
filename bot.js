@@ -114,8 +114,8 @@ function buildPortfolios(rules) {
       params:       rules.strategies.synapse_t?.params || {},
       timeframe:    tfs.synapse_t    || "15m",
       slPct:        2.5, tpPct: 5.0,   // ULTRA: SL 2.5% / TP 5%
-      live:         false,              // ← PAPER (live pauziran)
-      startCapital: 356.80,            // ← stvarni saldo na BitGet (2026-05-07)
+      live:         true,               // ← LIVE trading
+      startCapital: 300.00,            // ← početna banka za ULTRA LIVE
     },
   };
 }
@@ -1149,6 +1149,8 @@ async function checkPortfolioPositions(pid) {
 
         writeExitCsv(pid, pos, exitPrice, exitReason, pnl);
         await tg(`${pnl >= 0 ? "✅ WIN" : "❌ LOSS"} [${pid}] ${pos.symbol} ${pos.side}\nP&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)} | ${exitReason}`);
+        // Auto-remove simbol ako ima SYM_CONSEC_LOSSES uzastopnih gubitaka
+        if (pnl < 0) await checkAndRemoveSymbol(pid, pos.symbol);
         positionsModified = true;
       } else {
         const unrealized = pos.side === "LONG"
@@ -1428,8 +1430,10 @@ function checkDailyLimit(pid) {
 // Ako portfolio ima 5 uzastopnih gubitaka → pauza 8 sati.
 // Stanje se čuva na disku (preživi restart).
 
-const CB_LOSSES    = 5;           // broj uzastopnih gubitaka
+const CB_LOSSES    = 7;           // broj uzastopnih gubitaka → blokada
 const CB_COOLDOWN  = 8 * 60 * 60 * 1000;  // 8 sati u ms
+const CB_DRAWDOWN_MIN = 250;      // minimalni equity ($) — ispod = stop trading
+const SYM_CONSEC_LOSSES = 4;      // uzastopni gubici po simbolu → makni sa liste
 const CB_FILE      = `${DATA_DIR}/circuit_breaker.json`;
 
 function loadCircuitBreaker() {
@@ -1464,7 +1468,7 @@ async function checkCircuitBreaker(pid, pName) {
       .filter(l => l.includes("CLOSE_LONG") || l.includes("CLOSE_SHORT"))
       .slice(-CB_LOSSES);  // zadnjih 5 zatvorenih
 
-    if (exits.length < CB_LOSSES) return true;  // nema dovoljno podataka
+    if (exits.length < CB_LOSSES) return true;  // nema dovoljno podataka (treba min 7)
 
     const allLosses = exits.every(l => {
       const cols = l.split(",");
@@ -1483,6 +1487,41 @@ async function checkCircuitBreaker(pid, pName) {
   } catch { /* nastavi */ }
 
   return true;
+}
+
+// ─── Auto-remove simbol pri uzastopnim gubicima ────────────────────────────────
+// Čita CSV, gleda zadnjih SYM_CONSEC_LOSSES exitova za taj simbol.
+// Ako su svi gubici → makni simbol iz rules.json watchliste.
+
+async function checkAndRemoveSymbol(pid, symbol) {
+  const f = csvFilePath(pid);
+  if (!existsSync(f)) return;
+  try {
+    const lines = readFileSync(f, "utf8").trim().split("\n");
+    // Filtriraj samo exitove tog simbola
+    const symExits = lines.slice(1)
+      .filter(l => l.includes("CLOSE_LONG") || l.includes("CLOSE_SHORT"))
+      .filter(l => l.split(",")[2] === symbol);  // col 2 = symbol
+
+    if (symExits.length < SYM_CONSEC_LOSSES) return;
+
+    const lastN = symExits.slice(-SYM_CONSEC_LOSSES);
+    const allLoss = lastN.every(l => parseFloat(l.split(",")[9] || 0) < 0);
+    if (!allLoss) return;
+
+    // Makni iz rules.json
+    const rules = JSON.parse(readFileSync("rules.json", "utf8"));
+    const wl    = rules.watchlist_synapse_t || [];
+    if (!wl.includes(symbol)) return;
+
+    rules.watchlist_synapse_t = wl.filter(s => s !== symbol);
+    writeFileSync("rules.json", JSON.stringify(rules, null, 2));
+
+    console.log(`  ⚠️  [AUTO-REMOVE] ${symbol} — ${SYM_CONSEC_LOSSES} uzastopna gubitka → maknuto sa liste!`);
+    await tg(`⚠️ <b>AUTO-REMOVE: ${symbol}</b>\n${SYM_CONSEC_LOSSES} uzastopna gubitka na redu.\nSimbol maknuto s ULTRA watchliste.`);
+  } catch (e) {
+    console.log(`  ⚠️  checkAndRemoveSymbol error: ${e.message}`);
+  }
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────────
@@ -1521,9 +1560,16 @@ export async function run() {
       continue;
     }
 
-    // Circuit breaker — 5 uzastopnih gubitaka → 8h pauza
-    // Circuit breaker isključen
-    // if (!await checkCircuitBreaker(pid, pDef.name)) continue;
+    // ── Drawdown zaštita: equity < $250 → stop sve ────────────────────────────
+    const equityNow = getPortfolioEquity(pid, pDef.startCapital || START_CAPITAL);
+    if (equityNow < CB_DRAWDOWN_MIN) {
+      console.log(`  🛑 [${pDef.name}] DRAWDOWN ZAŠTITA — equity $${equityNow.toFixed(2)} < $${CB_DRAWDOWN_MIN} — trading zablokiran!`);
+      await tg(`🛑 <b>DRAWDOWN ZAŠTITA [${pDef.name}]</b>\nEquity: $${equityNow.toFixed(2)} — ispod minimuma $${CB_DRAWDOWN_MIN}\nTrading zablokiran do ručnog reseta.`);
+      continue;
+    }
+
+    // ── Circuit breaker: 7 uzastopnih gubitaka → 8h pauza ────────────────────
+    if (!await checkCircuitBreaker(pid, pDef.name)) continue;
 
     const openPositions = loadPositions(pid);
     const openSymbols   = openPositions.map(p => p.symbol);

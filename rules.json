@@ -97,12 +97,12 @@
 
   "risk_rules": [
     "4 neovisna portfolia × $1000 startni kapital — jedan simbol može biti otvoren u sva 4 istovremeno",
-    "Risk-based sizing: margin = equity × 1.5% | notional = margin × 100x | SL 1% × 100x = 100% margine = gubiš samo ulog",
-    "ULTRA: SL 1% / TP 2% / 100x leverage / rizik 1.5% banke po tradeu | TP hit = +3% banke",
+    "Risk-based sizing: margin = equity × 1% | notional = margin × 100x | SL 1% × 100x = 100% margine = gubiš samo ulog",
+    "ULTRA: SL 1% / TP 2% / 100x leverage / rizik 1% banke po tradeu | TP hit = +2% banke",
     "Samo jedna pozicija po simbolu PO PORTFOLIJU istovremeno",
     "Max 5 otvorenih pozicija po portfoliju istovremeno",
     "Dnevni limit: 100 tradova",
-    "SYNAPSE-7: kMem 100 (25h AI memory), minSig 4/5 | ULTRA: 18 signala (16 + SRS + SRB), minSig 10/18, SL 1% / TP 2%, 100x leverage",
+    "SYNAPSE-7: kMem 100 (25h AI memory), minSig 4/5 | ULTRA: 18 signala (16 + SRS + SRB), minSig 10/18, SL 1% / TP 2%, 100x leverage, rizik 1% banke",
     "Uklonjeni simboli (loš WR): ORDIUSDT, WLDUSDT, TRUMPUSDT, XRPUSDT, AVAXUSDT, AAVEUSDT"
   ]
 }

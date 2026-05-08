@@ -1527,10 +1527,16 @@ export async function run() {
 
     const openPositions = loadPositions(pid);
     const openSymbols   = openPositions.map(p => p.symbol);
+    const BTC_EXCEPTION = "BTCUSDT";  // BTC uvijek može otvoriti kao 6. trade
 
     if (openPositions.length >= MAX_OPEN_PER_PORTFOLIO) {
-      console.log(`  🔒 [${pDef.name}] Max ${MAX_OPEN_PER_PORTFOLIO} otvorenih pozicija dostignut (${openPositions.length}) — preskačem skeniranje`);
-      continue;
+      // Ako su svi slotovi puni, skeniramo samo BTC (specijalni slot)
+      const btcAlreadyOpen = openSymbols.includes(BTC_EXCEPTION);
+      if (btcAlreadyOpen || !pDef.symbols.includes(BTC_EXCEPTION)) {
+        console.log(`  🔒 [${pDef.name}] Max ${MAX_OPEN_PER_PORTFOLIO} otvorenih pozicija dostignut (${openPositions.length}) — preskačem skeniranje`);
+        continue;
+      }
+      console.log(`  🔒 [${pDef.name}] Max ${MAX_OPEN_PER_PORTFOLIO} dostignut — skeniranje samo BTC (specijalni slot)`);
     }
 
     for (const symbol of pDef.symbols) {
@@ -1539,10 +1545,11 @@ export async function run() {
         continue;
       }
 
-      // Provjeri limit ponovo unutar petlje jer se može popuniti
-      if (loadPositions(pid).length >= MAX_OPEN_PER_PORTFOLIO) {
-        console.log(`  🔒 [${pDef.name}] Max ${MAX_OPEN_PER_PORTFOLIO} dostignut — zaustavljam skeniranje`);
-        break;
+      // Provjeri limit ponovo unutar petlje — BTC uvijek prolazi bez obzira na broj
+      const currentOpen = loadPositions(pid).length;
+      if (currentOpen >= MAX_OPEN_PER_PORTFOLIO && symbol !== BTC_EXCEPTION) {
+        console.log(`  🔒 [${pDef.name}] Max ${MAX_OPEN_PER_PORTFOLIO} dostignut — preskačem ${symbol} (nije BTC)`);
+        continue;  // continue umjesto break — da BTC na kraju liste ipak prođe
       }
 
       try {

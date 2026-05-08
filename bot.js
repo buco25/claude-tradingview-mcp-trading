@@ -115,7 +115,7 @@ function buildPortfolios(rules) {
       timeframe:    tfs.synapse_t    || "15m",
       slPct:        1.0, tpPct: 2.0,   // ULTRA: SL 1% / TP 2% | 100x → SL = likvidacija
       live:         true,               // ← LIVE trading
-      startCapital: 300.00,            // ← početna banka za ULTRA LIVE
+      startCapital: 308.16,            // ← početna banka za ULTRA LIVE (resetirano 2026-05-08)
     },
   };
 }

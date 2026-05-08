@@ -5,7 +5,7 @@
   "all_symbols": [
     "XAUUSDT","DOGEUSDT","NEARUSDT","RIVERUSDT","ADAUSDT",
     "ETHUSDT","SUIUSDT","TAOUSDT",
-    "SOLUSDT","XAGUSDT","HYPEUSDT","LINKUSDT","PEPEUSDT","ZECUSDT","BTCUSDT"
+    "SOLUSDT","XAGUSDT","HYPEUSDT","LINKUSDT","PEPEUSDT","ZECUSDT","BTCUSDT","XRPUSDT"
   ],
 
   "watchlist_ema_rsi": [],
@@ -15,7 +15,7 @@
   "watchlist_synapse_t": [
     "XAUUSDT","DOGEUSDT","NEARUSDT","RIVERUSDT","ADAUSDT",
     "ETHUSDT","SUIUSDT","TAOUSDT",
-    "SOLUSDT","XAGUSDT","HYPEUSDT","LINKUSDT","PEPEUSDT","ZECUSDT","BTCUSDT"
+    "SOLUSDT","XAGUSDT","HYPEUSDT","LINKUSDT","PEPEUSDT","ZECUSDT","BTCUSDT","XRPUSDT"
   ],
 
   "portfolio_timeframes": {
@@ -103,6 +103,6 @@
     "Max 5 otvorenih pozicija po portfoliju istovremeno",
     "Dnevni limit: 100 tradova",
     "SYNAPSE-7: kMem 100 (25h AI memory), minSig 4/5 | ULTRA: 18 signala (16 + SRS + SRB), minSig 10/18, SL 1% / TP 2%, 100x leverage, rizik 1% banke",
-    "Uklonjeni simboli (loš WR): ORDIUSDT, WLDUSDT, TRUMPUSDT, XRPUSDT, AVAXUSDT, AAVEUSDT"
+    "Uklonjeni simboli (loš WR): ORDIUSDT, WLDUSDT, TRUMPUSDT, AVAXUSDT, AAVEUSDT"
   ]
 }

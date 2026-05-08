@@ -871,7 +871,7 @@ async function analyzeUltraPullback(symbol, candles, cfg) {
   const last  = candles[candles.length - 1];
   const price = last.close;
   const pid   = "synapse_t";
-  const TTL   = 4 * 60 * 60 * 1000;  // 4h
+  const TTL   = 15 * 60 * 1000;  // 1 svjećica (15m) — signal vrijedi samo do sljedeće svjećice
 
   let pending = loadPending(pid);
   const now   = Date.now();

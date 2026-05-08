@@ -421,7 +421,7 @@ async function runScan(rules) {
       pendingList = JSON.parse(readFileSync(pendingFile, "utf8"));
       // Makni istekle (TTL 4h)
       const now = Date.now();
-      pendingList = pendingList.filter(p => now - p.ts < 4 * 60 * 60 * 1000);
+      pendingList = pendingList.filter(p => now - p.ts < 15 * 60 * 1000);  // 1 svjećica (15m)
     }
   } catch { /* ignoriraj */ }
 

@@ -19,9 +19,9 @@ import { fileURLToPath } from "url";
 // ─── Config ────────────────────────────────────────────────────────────────────
 
 const TIMEFRAME     = "1H";
-const LEVERAGE      = 30;
+const LEVERAGE      = 40;     // 40x → SL 2.5% = 100% margine = likvidacija (gubiš samo ulog)
 const START_CAPITAL = 1000;   // po portfoliju
-const RISK_PCT      = 2.0;    // % margine po tradeu
+const RISK_PCT      = 1.5;    // % banke koji rizikaš po tradeu (= veličina uloga)
 const SL_PCT        = 2.0;    // fiksni SL %
 const TP_PCT        = 4.0;    // fiksni TP %
 const MAX_TRADES_PER_DAY = 100;

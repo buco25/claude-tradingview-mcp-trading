@@ -97,8 +97,8 @@
 
   "risk_rules": [
     "4 neovisna portfolia × $1000 startni kapital — jedan simbol može biti otvoren u sva 4 istovremeno",
-    "Risk-based sizing: notional = (equity × 2%) / slPct% → SL hit = točno 2% equity",
-    "EMA+RSI: SL 2% / TP 4% | MEGA: SL 2% / TP 4% | SYNAPSE-7: SL 2% / TP 4% | ULTRA: SL 2.5% / TP 5%",
+    "Risk-based sizing: margin = equity × 1.5% | notional = margin × 40x | SL 2.5% × 40x = 100% margine = gubiš samo ulog",
+    "ULTRA: SL 2.5% / TP 5% / 40x leverage / rizik 1.5% banke po tradeu",
     "Samo jedna pozicija po simbolu PO PORTFOLIJU istovremeno",
     "Max 5 otvorenih pozicija po portfoliju istovremeno",
     "Dnevni limit: 100 tradova",

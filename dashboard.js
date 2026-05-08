@@ -756,7 +756,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="logo">🎯</div>
       <div>
         <div class="title">ULTRA Trading Bot</div>
-        <div class="subtitle">16 signala · min 10/16 · H/L breakout · ${tf} · SL 2.5% / TP 5% · 30x</div>
+        <div class="subtitle">16 signala · min 10/16 · H/L breakout · ${tf} · SL 2.5% / TP 5% · 40x · rizik 1.5%</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">

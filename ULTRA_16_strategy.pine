@@ -136,15 +136,17 @@ var float nearSup = na
 nearRes := float(na)
 nearSup := float(na)
 
-for i = 0 to array.size(resList) - 1
-    r = array.get(resList, i)
-    if r > close * 1.001
-        nearRes := na(nearRes) or r < nearRes ? r : nearRes
+if array.size(resList) > 0
+    for i = 0 to array.size(resList) - 1
+        r = array.get(resList, i)
+        if r > close * 1.001
+            nearRes := na(nearRes) or r < nearRes ? r : nearRes
 
-for i = 0 to array.size(supList) - 1
-    s = array.get(supList, i)
-    if s < close * 0.999
-        nearSup := na(nearSup) or s > nearSup ? s : nearSup
+if array.size(supList) > 0
+    for i = 0 to array.size(supList) - 1
+        s = array.get(supList, i)
+        if s < close * 0.999
+            nearSup := na(nearSup) or s > nearSup ? s : nearSup
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 18 SIGNALI  (+1 = bull  ·  -1 = bear  ·  0 = neutral)
@@ -191,14 +193,16 @@ var bool srbUp = false
 var bool srbDn = false
 srbUp := false
 srbDn := false
-for i = 0 to array.size(resList) - 1
-    r = array.get(resList, i)
-    if (close[2] < r and close[1] > r) or (close[1] < r and close > r)
-        srbUp := true
-for i = 0 to array.size(supList) - 1
-    s = array.get(supList, i)
-    if (close[2] > s and close[1] < s) or (close[1] > s and close < s)
-        srbDn := true
+if array.size(resList) > 0
+    for i = 0 to array.size(resList) - 1
+        r = array.get(resList, i)
+        if (close[2] < r and close[1] > r) or (close[1] < r and close > r)
+            srbUp := true
+if array.size(supList) > 0
+    for i = 0 to array.size(supList) - 1
+        s = array.get(supList, i)
+        if (close[2] > s and close[1] < s) or (close[1] > s and close < s)
+            srbDn := true
 sig18 = srbUp ? 1 : srbDn ? -1 : 0
 
 // ── Score ──────────────────────────────────────────────────────────────────────

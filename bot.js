@@ -774,6 +774,43 @@ function analyzeUltra(candles, cfg) {
     cvdSum += sign * vols[i];
   }
 
+  // ── Support / Resistance (pivot-based, zadnjih 80 bara, pivot N=4) ───────────
+  // Pivot high = local max s 4 bara na svakoj strani (potvrđen, ne zadnjih 4)
+  // Pivot low  = local min s 4 bara na svakoj strani
+  const pivN = 4, srLookback = 80;
+  const srStart = Math.max(pivN, n - srLookback);
+  const srEnd   = n - pivN - 1;          // potvrđeni pivoti (prošlost, ne zadnji)
+  const resistances = [], supports = [];
+  for (let i = srStart; i <= srEnd; i++) {
+    let ph = true, pl = true;
+    for (let j = i - pivN; j <= i + pivN; j++) {
+      if (j === i || j < 0 || j >= n) continue;
+      if (candles[j].high >= candles[i].high) ph = false;
+      if (candles[j].low  <= candles[i].low)  pl = false;
+    }
+    if (ph) resistances.push(candles[i].high);
+    if (pl) supports.push(candles[i].low);
+  }
+  // Najbliži resistance iznad i support ispod trenutne cijene
+  const resAbove = resistances.filter(r => r > price * 1.001).sort((a,b) => a - b);
+  const supBelow = supports.filter(s => s < price * 0.999).sort((a,b) => b - a);
+  const nearRes  = resAbove[0] ?? null;
+  const nearSup  = supBelow[0] ?? null;
+  const srZone   = 0.012;   // 1.2% = unutar zone
+
+  // sig17: Bounce/Rejection od S/R razine (cijena reagira na zonu)
+  let sig17sr = 0;
+  if (nearSup !== null && (price - nearSup) / price < srZone && rsiRising)   sig17sr =  1;
+  if (nearRes !== null && (nearRes - price) / price < srZone && rsiFalling)   sig17sr = -1;
+
+  // sig18: Breakout/Breakdown kroz S/R razinu (u zadnja 3 bara)
+  let sig18bk = 0;
+  for (let k = Math.max(1, n - 3); k < n && sig18bk === 0; k++) {
+    const pc = closes[k - 1], cc = closes[k];
+    for (const r of resistances) if (pc < r && cc > r) { sig18bk =  1; break; }
+    for (const s of supports)    if (pc > s && cc < s) { sig18bk = -1; break; }
+  }
+
   // Volume vs average
   const volAvg20 = vols.slice(-20).reduce((a,b)=>a+b,0) / 20;
   const volLast  = vols[n-1];
@@ -787,29 +824,27 @@ function analyzeUltra(candles, cfg) {
     }
   }
 
-  // ── 16 signala: +1 = bullish, -1 = bearish, 0 = neutral ──
+  // ── 18 signala: +1 = bullish, -1 = bearish, 0 = neutral ──
   const sigs = [
-    ema9 > ema21 ? 1 : -1,                          // 1. EMA9/21 smjer
-    hadCrossUp ? 1 : hadCrossDn ? -1 : 0,           // 2. Svježi cross (3 bara)
-    price > ema50 ? 1 : -1,                          // 3. Cijena vs EMA50
-    // 4. RSI zona: ispod 50 = prostor za rast, iznad 50 = prostor za pad
-    (rsi < 50 && rsi > 30) ? 1 : (rsi > 50 && rsi < 70) ? -1 : 0,
-    price > ema55 ? 1 : -1,                          // 5. Cijena vs EMA55 (MEGA)
-    adx > 18 ? (ema9 > ema21 ? 1 : -1) : 0,          // 6. ADX > 18 + EMA smjer (trend + pravac)
-    chop < 61.8 ? 1 : -1,                            // 7. Nije choppy
-    (scaleUp >= 4 ? 1 : scaleDn >= 4 ? -1 : 0),     // 8. 6-Scale multi-EMA
-    cvdSum > 0 ? 1 : -1,                             // 9. CVD volumen
-    // 10. RSI recovery: bio ispod 35 (oversold) i sad raste iznad 35
+    ema9 > ema21 ? 1 : -1,                          //  1. EMA9/21 smjer
+    hadCrossUp ? 1 : hadCrossDn ? -1 : 0,           //  2. Svježi cross (3 bara)
+    price > ema50 ? 1 : -1,                          //  3. Cijena vs EMA50
+    (rsi < 50 && rsi > 30) ? 1 : (rsi > 50 && rsi < 70) ? -1 : 0, // 4. RSI zona
+    price > ema55 ? 1 : -1,                          //  5. Cijena vs EMA55
+    adx > 18 ? (ema9 > ema21 ? 1 : -1) : 0,          //  6. ADX > 18 + smjer
+    chop < 61.8 ? 1 : -1,                            //  7. Nije choppy
+    (scaleUp >= 4 ? 1 : scaleDn >= 4 ? -1 : 0),     //  8. 6-Scale multi-EMA
+    cvdSum > 0 ? 1 : -1,                             //  9. CVD volumen
     (rsiMin5 < 35 && rsi > 35 && rsiRising) ? 1
-      : (rsiMax5 > 65 && rsi < 65 && rsiFalling) ? -1 : 0,
+      : (rsiMax5 > 65 && rsi < 65 && rsiFalling) ? -1 : 0, // 10. RSI recovery
     macdHist !== null ? (macdHist > 0 ? 1 : -1) : 0, // 11. MACD histogram
     price > ema145 ? 1 : -1,                          // 12. EMA145 dugoročni trend
     volLast > volAvg20 ? 1 : 0,                       // 13. Volumen iznad prosjeka
     macdCross,                                         // 14. MACD cross (zadnja 3 bara)
-    // 15. RSI smjer: RSI raste = bull, RSI pada = bear
-    rsiRising ? 1 : rsiFalling ? -1 : 0,
-    // 16. ADX jak (>25) + smjer: snažan trend u pravcu EMA biasa
-    adx > 25 ? (ema9 > ema21 ? 1 : -1) : 0,
+    rsiRising ? 1 : rsiFalling ? -1 : 0,              // 15. RSI smjer
+    adx > 25 ? (ema9 > ema21 ? 1 : -1) : 0,          // 16. ADX jak >25 + smjer
+    sig17sr,                                           // 17. S/R bounce (bounce od supporta/resistancea)
+    sig18bk,                                           // 18. S/R breakout (proboj razine u zadnja 3 bara)
   ];
 
   const bullCnt = sigs.filter(s => s === 1).length;
@@ -817,14 +852,14 @@ function analyzeUltra(candles, cfg) {
 
   if (bullCnt >= minSig) {
     return { price, signal: "LONG",  bullScore: bullCnt, bearScore: bearCnt,
-      reason: `ULTRA LONG ↑${bullCnt}/16 | RSI:${rsi.toFixed(0)} ADX:${adx.toFixed(0)} MACD:${macdHist?.toFixed(4)||"?"} MCC:${macdCross} 6Sc:${scaleUp}/6` };
+      reason: `ULTRA LONG ↑${bullCnt}/18 | RSI:${rsi.toFixed(0)} ADX:${adx.toFixed(0)} SR:${sig17sr}/${sig18bk} 6Sc:${scaleUp}/6` };
   }
   if (bearCnt >= minSig) {
     return { price, signal: "SHORT", bullScore: bullCnt, bearScore: bearCnt,
-      reason: `ULTRA SHORT ↓${bearCnt}/16 | RSI:${rsi.toFixed(0)} ADX:${adx.toFixed(0)} MACD:${macdHist?.toFixed(4)||"?"} MCC:${macdCross} 6Sc:${scaleDn}/6` };
+      reason: `ULTRA SHORT ↓${bearCnt}/18 | RSI:${rsi.toFixed(0)} ADX:${adx.toFixed(0)} SR:${sig17sr}/${sig18bk} 6Sc:${scaleDn}/6` };
   }
   return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
-    reason: `ULTRA: ↑${bullCnt} ↓${bearCnt} /16 (min ${minSig})` };
+    reason: `ULTRA: ↑${bullCnt} ↓${bearCnt} /18 (min ${minSig})` };
 }
 
 // ─── ULTRA Candle H/L Breakout Entry ──────────────────────────────────────────

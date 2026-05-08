@@ -223,6 +223,38 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
   const macdCrossV = macdCrossUp ? 1 : macdCrossDn ? -1 : 0;
   const emaBias = ema9 && ema21 ? (ema9 > ema21 ? "↑" : "↓") : "—";
 
+  // ── Support / Resistance (pivot-based, 80 bara, pivotN=4) ──────────────────
+  const _pivN = 4, _srLB = 80;
+  const _srS  = Math.max(_pivN, n - _srLB);
+  const _srE  = n - _pivN - 1;
+  const _ress = [], _sups = [];
+  for (let i = _srS; i <= _srE; i++) {
+    let ph = true, pl = true;
+    for (let j = i - _pivN; j <= i + _pivN; j++) {
+      if (j === i || j < 0 || j >= n) continue;
+      if (candles[j].high >= candles[i].high) ph = false;
+      if (candles[j].low  <= candles[i].low)  pl = false;
+    }
+    if (ph) _ress.push(candles[i].high);
+    if (pl) _sups.push(candles[i].low);
+  }
+  const _price   = closes[n - 1];
+  const _nearRes = _ress.filter(r => r > _price * 1.001).sort((a,b) => a-b)[0] ?? null;
+  const _nearSup = _sups.filter(s => s < _price * 0.999).sort((a,b) => b-a)[0] ?? null;
+  const _srZone  = 0.012;
+  // rsiRising/rsiFalling potrebni za sig17
+  const _rsiArr  = [_rsi(closes, 14), _rsi(closes.slice(0,-1), 14), _rsi(closes.slice(0,-2), 14)];
+  const _rsiR    = _rsiArr[0] !== null && _rsiArr[1] !== null && _rsiArr[0] > _rsiArr[1] && _rsiArr[1] > _rsiArr[2];
+  const _rsiF    = _rsiArr[0] !== null && _rsiArr[1] !== null && _rsiArr[0] < _rsiArr[1] && _rsiArr[1] < _rsiArr[2];
+  let srsBounce  = 0;
+  if (_nearSup !== null && (_price - _nearSup) / _price < _srZone && _rsiR) srsBounce =  1;
+  if (_nearRes !== null && (_nearRes - _price) / _price < _srZone && _rsiF) srsBounce = -1;
+  let srbBreak   = 0;
+  for (let k = Math.max(1, n - 3); k < n && srbBreak === 0; k++) {
+    for (const r of _ress) if (closes[k-1] < r && closes[k] > r) { srbBreak =  1; break; }
+    for (const s of _sups) if (closes[k-1] > s && closes[k] < s) { srbBreak = -1; break; }
+  }
+
   // ── RSI series (za recovery detekciju) ──
   const rsiSeries = _rsiFullSeries(closes, 14);
   const rv  = rsiSeries[n-1] ?? (rsi ?? 50);
@@ -317,31 +349,33 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
   // ── ULTRA — 16 signala (identično bot.js analyzeUltra) ──
   let ultraSig = "—";
   let ultraBull = 0, ultraBear = 0;
-  let ultraSigs16 = new Array(16).fill(0);
+  let ultraSigs16 = new Array(18).fill(0);
   {
-    const { minSig = 11 } = ultraCfg;
+    const { minSig = 10 } = ultraCfg;
     if (n >= 200 && ema9 && ema21) {
       const rsiV  = rsi ?? 50;
       const adxV  = adx ?? 0;
       const chopV = chop ?? 100;
 
       ultraSigs16 = [
-        ema9 > ema21 ? 1 : -1,                                          // 1. EMA9/21 smjer
-        crossUp3 ? 1 : crossDown3 ? -1 : 0,                             // 2. Svježi cross (3 bara)
-        ema50 ? (price > ema50 ? 1 : -1) : 0,                           // 3. Cijena vs EMA50
-        (rsiV < 50 && rsiV > 30) ? 1 : (rsiV > 50 && rsiV < 70) ? -1 : 0, // 4. RSI zona
-        ema55 ? (price > ema55 ? 1 : -1) : 0,                           // 5. Cijena vs EMA55
-        adxV > 18 ? (ema9 > ema21 ? 1 : -1) : 0,                        // 6. ADX > 18 + EMA smjer
-        chopV < 61.8 ? 1 : -1,                                           // 7. Nije choppy
-        (scaleUp >= 4 ? 1 : scaleDn >= 4 ? -1 : 0),                     // 8. 6-Scale EMA
-        cvdSum > 0 ? 1 : -1,                                             // 9. CVD volumen
+        ema9 > ema21 ? 1 : -1,                                          //  1. EMA9/21 smjer
+        crossUp3 ? 1 : crossDown3 ? -1 : 0,                             //  2. Svježi cross (3 bara)
+        ema50 ? (price > ema50 ? 1 : -1) : 0,                           //  3. Cijena vs EMA50
+        (rsiV < 50 && rsiV > 30) ? 1 : (rsiV > 50 && rsiV < 70) ? -1 : 0, //  4. RSI zona
+        ema55 ? (price > ema55 ? 1 : -1) : 0,                           //  5. Cijena vs EMA55
+        adxV > 18 ? (ema9 > ema21 ? 1 : -1) : 0,                        //  6. ADX > 18 + EMA smjer
+        chopV < 61.8 ? 1 : -1,                                           //  7. Nije choppy
+        (scaleUp >= 4 ? 1 : scaleDn >= 4 ? -1 : 0),                     //  8. 6-Scale EMA
+        cvdSum > 0 ? 1 : -1,                                             //  9. CVD volumen
         rsiRecovBull ? 1 : rsiRecovBear ? -1 : 0,                        // 10. RSI recovery
         macdH !== null ? (macdH > 0 ? 1 : -1) : 0,                      // 11. MACD histogram
         ema145 ? (price > ema145 ? 1 : -1) : 0,                         // 12. EMA145 trend
         vols[n-1] > volAvg20 ? 1 : 0,                                    // 13. Volumen iznad prosjeka
-        macdCrossV,                                                       // 14. MACD cross (predznak promijenjen)
-        rsiRising ? 1 : rsiFalling ? -1 : 0,                             // 15. RSI smjer (raste/pada)
-        adxV > 25 ? (ema9 > ema21 ? 1 : -1) : 0,                       // 16. ADX jak >25 + EMA smjer
+        macdCrossV,                                                       // 14. MACD cross
+        rsiRising ? 1 : rsiFalling ? -1 : 0,                             // 15. RSI smjer
+        adxV > 25 ? (ema9 > ema21 ? 1 : -1) : 0,                        // 16. ADX jak >25
+        srsBounce,                                                        // 17. S/R bounce
+        srbBreak,                                                         // 18. S/R breakout
       ];
 
       ultraBull = ultraSigs16.filter(s => s === 1).length;
@@ -756,7 +790,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="logo">🎯</div>
       <div>
         <div class="title">ULTRA Trading Bot</div>
-        <div class="subtitle">16 signala · min 10/16 · H/L breakout · ${tf} · SL 2.5% / TP 5% · 40x · rizik 1.5%</div>
+        <div class="subtitle">18 signala · min 10/18 · H/L breakout · ${tf} · SL 2.5% / TP 5% · 40x · rizik 1.5%</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -811,7 +845,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <div class="scan-card">
     <div class="scan-header">
       <div>
-        <div class="chart-title" style="margin-bottom:2px">🎯 ULTRA Scanner — ${ALL_SYMBOLS.length} simbola | 16 signala | min 10/16 | H/L breakout</div>
+        <div class="chart-title" style="margin-bottom:2px">🎯 ULTRA Scanner — ${ALL_SYMBOLS.length} simbola | 18 signala | min 10/18 | H/L breakout</div>
         <div style="font-size:12px;color:var(--text-muted)">
           EMA · CRS · E50 · RSI · E55 · ADX · CHP · 6Sc · CVD · R⟳ · MCD · E145 · VOL · MCC · R↗ · ADX+
           &nbsp;|&nbsp; 🟡 Čeka breakout &nbsp; 🟢 Signal &nbsp; Cache 90s &nbsp;|&nbsp;
@@ -849,7 +883,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <!-- Signal legend (collapsible) -->
   <div id="sig-legend" style="display:none;margin-top:12px">
     <div class="chart-card" style="padding:16px 20px">
-      <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — ULTRA (16 signala, min 10/16)</div>
+      <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — ULTRA (18 signala, min 10/18)</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px;font-size:12px">
         ${[
           ['EMA','EMA9 > EMA21 — kratkoročni trend gore (bull) / dole (bear)'],
@@ -868,6 +902,8 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
           ['MCC','MACD cross: histogram promijenio predznak (neg→poz) u zadnja 3 bara'],
           ['R↗','RSI smjer: RSI raste (2 uzastopna bara) = bull, RSI pada = bear'],
           ['ADX+','ADX jak >25 + EMA smjer: snažan trend, potvrda s EMA9/21 biasom'],
+          ['SRS','S/R Bounce: cijena unutar 1.2% od pivot supporta + RSI raste (bull) ili od resistancea + RSI pada (bear)'],
+          ['SRB','S/R Breakout: cijena probila pivot resistance gore (bull) ili pivot support dolje (bear) u zadnja 3 bara'],
         ].map(([k,v]) =>
           '<div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 10px">' +
           '<span style="font-weight:800;color:#e85d9a;font-size:11px;display:inline-block;min-width:36px">' + k + '</span>' +
@@ -876,7 +912,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       </div>
       <div style="margin-top:10px;font-size:11px;color:#555">
         🟢 Zeleno = bullish signal aktiviran &nbsp;|&nbsp; 🔴 Crveno = bearish &nbsp;|&nbsp; ⬛ Sivo = neutral/nema signala &nbsp;|&nbsp;
-        Min <b style="color:#e85d9a">10/16</b> signala za ulaz · H/L breakout entry · SL <b>2.5%</b> / TP <b>5%</b> · <b>40x</b> leverage · rizik <b>1.5%</b> banke po tradeu
+        Min <b style="color:#e85d9a">10/18</b> signala za ulaz · H/L breakout entry · SL <b>2.5%</b> / TP <b>5%</b> · <b>40x</b> leverage · rizik <b>1.5%</b> banke po tradeu
       </div>
     </div>
   </div>
@@ -1000,10 +1036,10 @@ function ultraHtml(s) {
   }).join('');
 
   const scoreStr = bull > bear
-    ? '<span style="color:#00c48c;font-weight:700">↑'+bull+'/16</span>'
+    ? '<span style="color:#00c48c;font-weight:700">↑'+bull+'/18</span>'
     : bear > bull
-    ? '<span style="color:#ff4d4d;font-weight:700">↓'+bear+'/16</span>'
-    : '<span style="color:#8b949e">'+Math.max(bull,bear)+'/16</span>';
+    ? '<span style="color:#ff4d4d;font-weight:700">↓'+bear+'/18</span>'
+    : '<span style="color:#8b949e">'+Math.max(bull,bear)+'/18</span>';
 
   const sigPart = sig==="LONG"   ? ' <span class="sig-long">▲ LONG</span>'
                 : sig==="SHORT"  ? ' <span class="sig-short">▼ SHORT</span>'
@@ -1037,8 +1073,8 @@ async function resetOne(pid) {
   location.reload();
 }
 
-// ── Signal label boxes (16 signals) ──────────────────────────────────────────
-const SIG_NAMES = ['EMA','CRS','E50','RSI','E55','ADX','CHP','6Sc','CVD','R⟳','MCD','E145','VOL','MCC','R↗','ADX+'];
+// ── Signal label boxes (18 signals) ──────────────────────────────────────────
+const SIG_NAMES = ['EMA','CRS','E50','RSI','E55','ADX','CHP','6Sc','CVD','R⟳','MCD','E145','VOL','MCC','R↗','ADX+','SRS','SRB'];
 
 function sigBoxes(sigs) {
   if (!sigs || sigs.length === 0) return '<span style="color:#444">—</span>';
@@ -1053,7 +1089,7 @@ function sigBoxes(sigs) {
 }
 
 function scoreBox(bull, bear, sig) {
-  const total = 16;
+  const total = 18;
   if (sig === "LONG")   return '<div style="background:rgba(0,196,140,0.15);border:1px solid #00c48c;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#00c48c;font-weight:800;font-size:16px">↑' + bull + '</span><span style="color:#555;font-size:11px">/' + total + '</span><br><span class="sig-long" style="font-size:11px">▲ LONG</span></div>';
   if (sig === "SHORT")  return '<div style="background:rgba(255,77,77,0.15);border:1px solid #ff4d4d;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#ff4d4d;font-weight:800;font-size:16px">↓' + bear + '</span><span style="color:#555;font-size:11px">/' + total + '</span><br><span class="sig-short" style="font-size:11px">▼ SHORT</span></div>';
   if (sig === "SETUP↑") return '<div style="background:rgba(240,165,0,0.1);border:1px solid #f0a50066;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#f0a500;font-weight:800;font-size:16px">↑' + bull + '</span><span style="color:#555;font-size:11px">/' + total + '</span><br><span style="color:#f0a500;font-size:11px">◈ SETUP↑</span></div>';
@@ -1105,8 +1141,8 @@ function statusBox(s) {
       '<div style="font-size:11px;color:#8b949e">Breakout trigger: ispod <b>' + fmtLive(s.price) + '</b> (low signal-svijeće)</div>' +
       '</div>';
   }
-  if (sig === "SETUP↑") return '<span style="color:#f0a500;font-size:12px">◈ SETUP ↑ &nbsp;<span style="color:#555;font-size:11px">(' + (s.ultraBull||0) + '/16)</span></span>';
-  if (sig === "SETUP↓") return '<span style="color:#f0a500;font-size:12px">◈ SETUP ↓ &nbsp;<span style="color:#555;font-size:11px">(' + (s.ultraBear||0) + '/16)</span></span>';
+  if (sig === "SETUP↑") return '<span style="color:#f0a500;font-size:12px">◈ SETUP ↑ &nbsp;<span style="color:#555;font-size:11px">(' + (s.ultraBull||0) + '/18)</span></span>';
+  if (sig === "SETUP↓") return '<span style="color:#f0a500;font-size:12px">◈ SETUP ↓ &nbsp;<span style="color:#555;font-size:11px">(' + (s.ultraBear||0) + '/18)</span></span>';
   return '<span style="color:#444;font-size:12px">—</span>';
 }
 

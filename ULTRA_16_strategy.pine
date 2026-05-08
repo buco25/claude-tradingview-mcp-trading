@@ -275,20 +275,28 @@ if enterShort
 
 // ══════════════════════════════════════════════════════════════════════════════
 // STRATEGY ORDERS
+// FIX: strategy.exit se postavlja BAR NAKON entry filla jer u istom baru
+//      strategy.position_avg_price je još 0 → SL/TP bi bili postavljeni na 0
 // ══════════════════════════════════════════════════════════════════════════════
 if enterLong and strategy.position_size == 0
     strategy.entry("Long", strategy.long)
-    strategy.exit("Long Exit", "Long",
-         stop    = strategy.position_avg_price * (1.0 - i_slPct / 100.0),
-         limit   = strategy.position_avg_price * (1.0 + i_tpPct / 100.0),
-         comment_loss   = "❌ SL",
-         comment_profit = "✅ TP")
 
 if enterShort and strategy.position_size == 0
     strategy.entry("Short", strategy.short)
+
+// Exit se postavlja kad position_size upravo postane != 0 (bar nakon entry filla)
+// strategy.position_avg_price je ovdje stvarna cijena ulaza
+if strategy.position_size > 0 and strategy.position_size[1] == 0
+    strategy.exit("Long Exit", "Long",
+         stop           = strategy.position_avg_price * (1.0 - i_slPct / 100.0),
+         limit          = strategy.position_avg_price * (1.0 + i_tpPct / 100.0),
+         comment_loss   = "❌ SL",
+         comment_profit = "✅ TP")
+
+if strategy.position_size < 0 and strategy.position_size[1] == 0
     strategy.exit("Short Exit", "Short",
-         stop    = strategy.position_avg_price * (1.0 + i_slPct / 100.0),
-         limit   = strategy.position_avg_price * (1.0 - i_tpPct / 100.0),
+         stop           = strategy.position_avg_price * (1.0 + i_slPct / 100.0),
+         limit          = strategy.position_avg_price * (1.0 - i_tpPct / 100.0),
          comment_loss   = "❌ SL",
          comment_profit = "✅ TP")
 

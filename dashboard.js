@@ -533,7 +533,22 @@ function buildPortfolioStats(pid) {
   // Recent 20 closed trades
   const recentExits = [...exits].reverse().slice(0, 20);
 
-  return { pid, startCap, rows, exits, entries, wins, losses, totalPnl, winRate, equity, pnlCurve, recentExits };
+  // Per-symbol statistika
+  const symbolStats = {};
+  for (const r of exits) {
+    const sym = r["Symbol"] || "?";
+    if (!symbolStats[sym]) symbolStats[sym] = { wins: 0, losses: 0, pnl: 0 };
+    const pnl = parseFloat(r["Net P&L"] || 0);
+    if (pnl >= 0) symbolStats[sym].wins++;
+    else          symbolStats[sym].losses++;
+    symbolStats[sym].pnl += pnl;
+  }
+  // Sortiraj po ukupnom broju tradova
+  const symbolStatsArr = Object.entries(symbolStats)
+    .map(([sym, s]) => ({ sym, ...s, total: s.wins + s.losses }))
+    .sort((a, b) => b.total - a.total);
+
+  return { pid, startCap, rows, exits, entries, wins, losses, totalPnl, winRate, equity, pnlCurve, recentExits, symbolStatsArr };
 }
 
 async function fetchLivePrices(symbols) {
@@ -672,12 +687,35 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       </tr>`;
     }).join("");
 
+    // Per-symbol statistika
+    const symRows = s.symbolStatsArr.map(sym => {
+      const wr = sym.total > 0 ? (sym.wins / sym.total * 100).toFixed(0) : 0;
+      const wrCol = wr >= 50 ? "#00c48c" : "#ff4d4d";
+      const pnlCol = sym.pnl >= 0 ? "#00c48c" : "#ff4d4d";
+      const bar = `<div style="display:inline-block;width:${Math.round(wr)}%;max-width:100%;height:4px;background:${wrCol};border-radius:2px;vertical-align:middle"></div>`;
+      return `<tr>
+        <td style="font-weight:700;color:#e6edf3">${sym.sym.replace("USDT","")}</td>
+        <td style="color:#00c48c;font-weight:700">${sym.wins}W</td>
+        <td style="color:#ff4d4d;font-weight:700">${sym.losses}L</td>
+        <td style="color:${wrCol};font-weight:700">${wr}%</td>
+        <td style="width:80px">${bar}</td>
+        <td style="color:${pnlCol};font-weight:600">${sym.pnl >= 0 ? "+" : ""}$${sym.pnl.toFixed(2)}</td>
+      </tr>`;
+    }).join("");
+
     return `
       <div class="section-label" style="color:${def.color}">🎯 ULTRA — Zadnjih ${s.recentExits.length} tradova</div>
       <div class="table-wrap">
         <table class="trade-table">
           <thead><tr><th>Datum</th><th>Symbol</th><th>Side</th><th>Cijena</th><th>P&amp;L</th><th>Info</th></tr></thead>
           <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div class="section-label" style="color:${def.color};margin-top:18px">📊 Win/Loss po coinu</div>
+      <div class="table-wrap">
+        <table class="trade-table">
+          <thead><tr><th>Coin</th><th>Dobitni</th><th>Gubitni</th><th>WR</th><th></th><th>P&amp;L</th></tr></thead>
+          <tbody>${symRows}</tbody>
         </table>
       </div>`;
   })();

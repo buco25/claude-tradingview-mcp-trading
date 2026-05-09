@@ -115,7 +115,7 @@ function buildPortfolios(rules) {
       timeframe:    tfs.synapse_t    || "15m",
       slPct:        1.0, tpPct: 2.0,   // ULTRA: SL 1% / TP 2% | 100x → SL = likvidacija
       live:         true,               // ← LIVE trading
-      startCapital: 299.13,            // ← Bitget equity 2026-05-09 09:xx UTC (sync)
+      startCapital: 296.99,            // ← Bitget balans 2026-05-09 (stvarni)
     },
   };
 }

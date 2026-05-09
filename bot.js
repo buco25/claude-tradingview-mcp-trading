@@ -115,7 +115,7 @@ function buildPortfolios(rules) {
       timeframe:    tfs.synapse_t    || "15m",
       slPct:        1.0, tpPct: 2.0,   // ULTRA: SL 1% / TP 2% | 100x → SL = likvidacija
       live:         true,               // ← LIVE trading
-      startCapital: 296.96,            // ← stvarni Bitget balans 2026-05-09 (sync s exchange)
+      startCapital: 299.13,            // ← Bitget equity 2026-05-09 09:xx UTC (sync)
     },
   };
 }
@@ -1661,6 +1661,68 @@ async function checkAndRemoveSymbol(pid, symbol) {
   } catch (e) {
     console.log(`  ⚠️  checkAndRemoveSymbol error: ${e.message}`);
   }
+}
+
+// ─── Sync otvorenih pozicija s Bitgeta ─────────────────────────────────────────
+// Detektira pozicije koje su stvarno otvorene na Bitgetu ali nisu u lokalnom stanju.
+// Koristi se pri resetu/resync da dashboard prikaže točno stanje.
+
+export async function syncPositionsFromBitget(pid = "synapse_t") {
+  if (PAPER_TRADING) return { synced: 0, message: "PAPER mode — nema sinca" };
+
+  const posPath  = `/api/v2/mix/position/all-position?productType=USDT-FUTURES&marginCoin=USDT`;
+  const ts       = Date.now().toString();
+  const sign     = signBitGet(ts, "GET", posPath);
+  const r        = await fetch(`${BITGET.baseUrl}${posPath}`, {
+    headers: {
+      "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": sign,
+      "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET.passphrase,
+      "Content-Type": "application/json",
+    },
+  });
+  const d = await r.json();
+  if (d.code !== "00000") throw new Error(`Bitget error: ${d.msg}`);
+
+  const bitgetPos = (d.data || []).filter(p => parseFloat(p.total) > 0);
+  const existing  = loadPositions(pid);
+  const existingKeys = new Set(existing.map(p => `${p.symbol}:${(p.side||p.signal||"").toUpperCase()}`));
+
+  let synced = 0;
+  const rules = JSON.parse(readFileSync("rules.json", "utf8"));
+  const pDef  = buildPortfolios(rules)[pid];
+  const slPct = pDef?.slPct ?? SL_PCT;
+  const tpPct = pDef?.tpPct ?? TP_PCT;
+
+  for (const bp of bitgetPos) {
+    const side   = bp.holdSide === "long" ? "LONG" : "SHORT";
+    const key    = `${bp.symbol}:${side}`;
+    if (existingKeys.has(key)) continue;  // već praćena
+
+    const entryPrice = parseFloat(bp.openPriceAvg);
+    const size       = parseFloat(bp.total);
+    const tradeSize  = entryPrice * size;
+    const sl = side === "LONG" ? entryPrice * (1 - slPct / 100) : entryPrice * (1 + slPct / 100);
+    const tp = side === "LONG" ? entryPrice * (1 + tpPct / 100) : entryPrice * (1 - tpPct / 100);
+
+    const entry = {
+      symbol: bp.symbol, signal: side, side,
+      price: entryPrice, entryPrice,
+      sl, tp, slPct, tpPct,
+      tradeSize, quantity: size,
+      margin: tradeSize / LEVERAGE,
+      orderId: `SYNC-${bp.symbol}-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      strategy: "synapse_t", timeframe: pDef?.timeframe || "15m",
+      mode: "LIVE",
+    };
+
+    addPosition(pid, entry);
+    initCsv(pid);
+    writeEntryCsv(pid, entry);
+    synced++;
+    console.log(`  🔄 SYNC [${pid}] ${bp.symbol} ${side} @ ${entryPrice} (${size} coins)`);
+  }
+  return { synced, total: bitgetPos.length, message: `Sinhronizirano ${synced} novih pozicija` };
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────────

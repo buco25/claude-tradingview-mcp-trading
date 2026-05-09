@@ -6,7 +6,7 @@
 import "dotenv/config";
 import http from "http";
 import { readFileSync, writeFileSync, existsSync } from "fs";
-import { run as botRun, checkBreakouts } from "./bot.js";
+import { run as botRun, checkBreakouts, syncPositionsFromBitget } from "./bot.js";
 import { startWhaleTracker } from "./whale_tracker.js";
 
 const PORT     = process.env.PORT || 3000;
@@ -14,7 +14,7 @@ const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" 
 const START_CAPITAL = 1000;
 
 const PORTFOLIO_DEFS = [
-  { id: "synapse_t", name: "ULTRA", color: "#e85d9a", emoji: "🎯", startCapital: 296.96, live: true },
+  { id: "synapse_t", name: "ULTRA", color: "#e85d9a", emoji: "🎯", startCapital: 299.13, live: true },
 ];
 
 // ─── All symbols ───────────────────────────────────────────────────────────────
@@ -1445,6 +1445,19 @@ const server = http.createServer(async (req, res) => {
       PORTFOLIO_DEFS.forEach(d => { all[d.id] = loadPositions(d.id); });
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(all));
+    }
+    return;
+  }
+
+  // Sync pozicija s Bitgeta
+  if (url.pathname === "/api/sync-positions" && req.method === "POST") {
+    try {
+      const result = await syncPositionsFromBitget("synapse_t");
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ success: true, ...result }));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ success: false, error: e.message }));
     }
     return;
   }

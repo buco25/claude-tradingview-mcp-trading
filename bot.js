@@ -1133,34 +1133,134 @@ function applyTrail(pos, currentPrice) {
   return true;  // pozicija ažurirana
 }
 
+// Dohvati sve stvarno otvorene pozicije na Bitgetu (za sve simbole)
+async function fetchBitgetOpenPositions() {
+  try {
+    const path = "/api/v2/mix/position/all-position?productType=USDT-FUTURES&marginCoin=USDT";
+    const ts   = Date.now().toString();
+    const sign = signBitGet(ts, "GET", path);
+    const r    = await fetch(`${BITGET.baseUrl}${path}`, {
+      headers: {
+        "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": sign,
+        "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET.passphrase,
+        "Content-Type": "application/json",
+      },
+    });
+    const d = await r.json();
+    if (d.code !== "00000") return null;
+    // Vrati set "SYMBOL:holdSide" koji su stvarno otvoreni
+    const open = new Set();
+    for (const p of (d.data || [])) {
+      if (parseFloat(p.total) > 0) {
+        open.add(`${p.symbol}:${p.holdSide}`);  // npr. "BTCUSDT:long"
+      }
+    }
+    return open;
+  } catch (e) {
+    console.log(`  ⚠️  fetchBitgetOpenPositions greška: ${e.message}`);
+    return null;
+  }
+}
+
+// Dohvati stvarni P&L zatvorene pozicije iz Bitget historije
+async function fetchBitgetClosedPnl(symbol) {
+  try {
+    const path = `/api/v2/mix/order/fill-history?symbol=${symbol}&productType=USDT-FUTURES&limit=5`;
+    const ts   = Date.now().toString();
+    const sign = signBitGet(ts, "GET", path);
+    const r    = await fetch(`${BITGET.baseUrl}${path}`, {
+      headers: {
+        "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": sign,
+        "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET.passphrase,
+        "Content-Type": "application/json",
+      },
+    });
+    const d = await r.json();
+    if (d.code !== "00000" || !d.data?.fillList?.length) return null;
+    // Zadnji fill za ovaj simbol
+    const fill = d.data.fillList[0];
+    return {
+      exitPrice: parseFloat(fill.price),
+      realizedPnl: parseFloat(fill.profit || fill.realizedPnl || 0),
+      fee: parseFloat(fill.fee || 0),
+      side: fill.side,  // "close_long" / "close_short"
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
 async function checkPortfolioPositions(pid) {
   const positions = loadPositions(pid);
   if (positions.length === 0) return;
   console.log(`  🔍 [${pid}] Provjera ${positions.length} pozicija`);
 
+  // Za LIVE portfolije: dohvati stvarno otvorene pozicije s Bitgeta
+  const pDef = buildPortfolios(JSON.parse(readFileSync("rules.json", "utf8")))[pid];
+  const isLivePortfolio = pDef?.live === true && !PAPER_TRADING;
+  const bitgetOpen = isLivePortfolio ? await fetchBitgetOpenPositions() : null;
+
   const stillOpen = [];
-  let positionsModified = false;
 
   for (const pos of positions) {
     try {
-      const candles = await fetchCandles(pos.symbol, pos.timeframe || "1H", 5);
-      const bar     = candles[candles.length - 1];
+      const holdSide = pos.side === "LONG" ? "long" : "short";
+      const bitgetKey = `${pos.symbol}:${holdSide}`;
 
-      // 1) Trail SL/TP ažuriranje (prije provjere SL/TP hita)
-      const trailed = applyTrail(pos, bar.close);
-      if (trailed) {
-        positionsModified = true;
-        console.log(`  📈 TRAIL [${pid}] ${pos.symbol} ${pos.side} | SL→${fmtPrice(pos.sl)} | TP→${fmtPrice(pos.tp)} | Gain: ${((pos.side==="LONG"?(bar.close-pos.entryPrice):(pos.entryPrice-bar.close))/pos.entryPrice*100).toFixed(2)}%`);
-        await tg(`📈 TRAIL [${pid}] ${pos.symbol} ${pos.side}\nNovi SL: ${fmtPrice(pos.sl)} | Novi TP: ${fmtPrice(pos.tp)}`);
+      // ── LIVE: provjeri je li Bitget zatvorio poziciju ─────────────────────
+      if (isLivePortfolio && bitgetOpen !== null) {
+        if (!bitgetOpen.has(bitgetKey)) {
+          // Pozicija zatvorena na Bitgetu (SL/TP/likvidacija) — dohvati stvarni P&L
+          const closed = await fetchBitgetClosedPnl(pos.symbol);
+          const exitPrice  = closed?.exitPrice  ?? pos.sl;  // fallback na sl
+          const realPnl    = closed?.realizedPnl ?? null;
+          const fee        = closed?.fee         ?? 0;
+
+          // Odredi razlog zatvaranja
+          let exitReason = "Zatvoreno na Bitgetu";
+          if (closed?.side?.includes("close")) {
+            const priceDiff = pos.side === "LONG"
+              ? exitPrice - pos.entryPrice
+              : pos.entryPrice - exitPrice;
+            exitReason = priceDiff > 0 ? "TP dostignut" : "SL/Likvidacija";
+          }
+
+          // P&L: koristi stvarni Bitget P&L ako dostupan, inače kalkuliraj
+          const qty = pos.quantity ?? (pos.totalUSD / pos.entryPrice);
+          const pnl = realPnl !== null ? realPnl : (
+            pos.side === "LONG"
+              ? (exitPrice - pos.entryPrice) * qty
+              : (pos.entryPrice - exitPrice) * qty
+          );
+
+          console.log(`  ${pnl >= 0 ? "✅ WIN" : "❌ LOSS"} [${pid}] ${pos.symbol} ${pos.side} | P&L ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(4)} | ${exitReason} | exit@${fmtPrice(exitPrice)}`);
+          writeExitCsv(pid, pos, exitPrice, exitReason, pnl);
+          await tg(`${pnl >= 0 ? "✅ WIN" : "❌ LOSS"} [ULTRA] ${pos.symbol} ${pos.side}\nP&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)} | ${exitReason}\nUlaz: ${fmtPrice(pos.entryPrice)} → Izlaz: ${fmtPrice(exitPrice)}`);
+          if (pnl < 0) await checkAndRemoveSymbol(pid, pos.symbol);
+          continue;  // Ne dodaj u stillOpen
+        }
+        // Još uvijek otvorena na Bitgetu — prikaz unrealized
+        const prices = await fetchLivePrices([pos.symbol]);
+        const liveP  = prices[pos.symbol] || pos.entryPrice;
+        const qty    = pos.quantity ?? (pos.totalUSD / pos.entryPrice);
+        const unrealized = pos.side === "LONG"
+          ? (liveP - pos.entryPrice) * qty
+          : (pos.entryPrice - liveP) * qty;
+        console.log(`  ⏳ [${pid}] ${pos.symbol} ${pos.side} | Ulaz ${fmtPrice(pos.entryPrice)} | Sad ${fmtPrice(liveP)} | P&L ${unrealized >= 0 ? "+" : ""}$${unrealized.toFixed(4)}`);
+        stillOpen.push(pos);
+        continue;
       }
 
-      // 2) Provjera SL/TP hita
+      // ── PAPER: provjera candle-om (stara logika) ──────────────────────────
+      const candles = await fetchCandles(pos.symbol, pos.timeframe || "15m", 5);
+      const bar     = candles[candles.length - 1];
+
       let exitPrice = null, exitReason = null;
       if (pos.side === "LONG") {
-        if (bar.high >= pos.tp)    { exitPrice = pos.tp; exitReason = "TP dostignut"; }
-        else if (bar.low <= pos.sl){ exitPrice = pos.sl; exitReason = "SL dostignut"; }
+        if (bar.high >= pos.tp)     { exitPrice = pos.tp; exitReason = "TP dostignut"; }
+        else if (bar.low <= pos.sl) { exitPrice = pos.sl; exitReason = "SL dostignut"; }
       } else {
-        if (bar.low  <= pos.tp)    { exitPrice = pos.tp; exitReason = "TP dostignut"; }
+        if (bar.low  <= pos.tp)     { exitPrice = pos.tp; exitReason = "TP dostignut"; }
         else if (bar.high >= pos.sl){ exitPrice = pos.sl; exitReason = "SL dostignut"; }
       }
 
@@ -1170,27 +1270,13 @@ async function checkPortfolioPositions(pid) {
           ? (exitPrice - pos.entryPrice) * qty
           : (pos.entryPrice - exitPrice) * qty;
         console.log(`  ${pnl >= 0 ? "✅ WIN" : "❌ LOSS"} [${pid}] ${pos.symbol} ${pos.side} | P&L ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(4)}`);
-
-        // Za live pozicije — pošalji close nalog na BitGet
-        if (pos.mode === "LIVE") {
-          try {
-            await closeBitGetOrder(pos);
-            console.log(`  🔒 LIVE CLOSE poslan [${pid}] ${pos.symbol} ${pos.side}`);
-          } catch (closeErr) {
-            console.log(`  ❌ LIVE CLOSE GREŠKA [${pid}] ${pos.symbol}: ${closeErr.message}`);
-            await tg(`❌ CLOSE GREŠKA [${pid}] ${pos.symbol} ${pos.side}\n${closeErr.message}`);
-          }
-        }
-
         writeExitCsv(pid, pos, exitPrice, exitReason, pnl);
-        await tg(`${pnl >= 0 ? "✅ WIN" : "❌ LOSS"} [${pid}] ${pos.symbol} ${pos.side}\nP&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)} | ${exitReason}`);
-        // Auto-remove simbol ako ima SYM_CONSEC_LOSSES uzastopnih gubitaka
+        await tg(`${pnl >= 0 ? "✅ WIN" : "❌ LOSS"} [ULTRA] ${pos.symbol} ${pos.side}\nP&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)} | ${exitReason}`);
         if (pnl < 0) await checkAndRemoveSymbol(pid, pos.symbol);
-        positionsModified = true;
       } else {
         const unrealized = pos.side === "LONG"
-          ? (bar.close - pos.entryPrice) * pos.quantity
-          : (pos.entryPrice - bar.close) * pos.quantity;
+          ? (bar.close - pos.entryPrice) * (pos.quantity ?? 0)
+          : (pos.entryPrice - bar.close) * (pos.quantity ?? 0);
         console.log(`  ⏳ [${pid}] ${pos.symbol} ${pos.side} | Ulaz ${fmtPrice(pos.entryPrice)} | Sad ${fmtPrice(bar.close)} | P&L ${unrealized >= 0 ? "+" : ""}$${unrealized.toFixed(4)}`);
         stillOpen.push(pos);
       }

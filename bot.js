@@ -1352,28 +1352,40 @@ async function setupSymbol(symbol) {
   return actualLeverage;
 }
 
-async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp) {
+async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp, slPct, tpPct) {
   // Postavi isolated margin + leverage prije svakog naloga; vrati stvarni leverage
   const actualLeverage = await setupSymbol(symbol);
   const quantity  = (sizeUSD / price).toFixed(4);
+  const holdSide  = side === "LONG" ? "long" : "short";
+
+  // Preset SL/TP direktno u nalog (atomski — ne može failati odvojeno)
+  // Temeljeno na signal cijeni; nakon filla korigiramo via tpsl-order
+  const presetSL = fmtPrice(sl, symbol);
+  const presetTP = fmtPrice(tp, symbol);
+
   const path      = "/api/v2/mix/order/place-order";
   const orderBody = {
     symbol, productType: "USDT-FUTURES",
     marginMode: "isolated", marginCoin: "USDT",
     side: side === "LONG" ? "buy" : "sell",
     tradeSide: "open", orderType: "market", size: quantity,
+    presetStopLossPrice:    presetSL,   // ← SL direktno u orderu
+    presetStopSurplusPrice: presetTP,   // ← TP direktno u orderu
   };
   const orderData = await bitgetPost(path, orderBody);
-  const orderId   = orderData?.orderId;
-  console.log(`  📨 Nalog otvoren: ${orderId}`);
+  if (!orderData || orderData.code !== "00000") {
+    throw new Error(`place-order fail: ${orderData?.code} ${orderData?.msg}`);
+  }
+  const orderId = orderData.data?.orderId || orderData.orderId;
+  console.log(`  📨 Nalog otvoren: ${orderId} | preset SL:${presetSL} TP:${presetTP}`);
 
   // Dohvati stvarnu fill cijenu (čekaj malo da se ispuni)
   let fillPrice = price;
   if (orderId) {
-    await new Promise(r => setTimeout(r, 1500));
+    await new Promise(r => setTimeout(r, 2000));
     try {
       const detailPath = `/api/v2/mix/order/detail?symbol=${symbol}&productType=USDT-FUTURES&orderId=${orderId}`;
-      const ts2 = Date.now().toString();
+      const ts2   = Date.now().toString();
       const sign2 = signBitGet(ts2, "GET", detailPath);
       const det = await fetch(`${BITGET.baseUrl}${detailPath}`, {
         headers: {
@@ -1391,31 +1403,32 @@ async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp) {
     }
   }
 
-  // Postavi SL i TP na BitGetu od stvarne fill cijene
-  const holdSide = side === "LONG" ? "long" : "short";
+  // Korigiraj SL/TP na temelju stvarne fill cijene (slPct/tpPct od fill, ne od signal cijene)
+  const _slPct = slPct ?? SL_PCT;
+  const _tpPct = tpPct ?? TP_PCT;
   const slFromFill = side === "LONG"
-    ? fillPrice * (1 - (sl ? Math.abs(fillPrice - sl) / price : 0.015))
-    : fillPrice * (1 + (sl ? Math.abs(sl - fillPrice) / price : 0.015));
+    ? fillPrice * (1 - _slPct / 100)
+    : fillPrice * (1 + _slPct / 100);
   const tpFromFill = side === "LONG"
-    ? fillPrice * (1 + (tp ? Math.abs(tp - fillPrice) / price : 0.030))
-    : fillPrice * (1 - (tp ? Math.abs(fillPrice - tp) / price : 0.030));
+    ? fillPrice * (1 + _tpPct / 100)
+    : fillPrice * (1 - _tpPct / 100);
 
+  // Zamijeni preset SL/TP s preciznim korekcijom od fill cijene
   for (const [planType, triggerPrice] of [["pos_loss", slFromFill], ["pos_profit", tpFromFill]]) {
     try {
       const tpslRes = await bitgetPost("/api/v2/mix/order/place-tpsl-order", {
         symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
         planType, triggerPrice: fmtPrice(triggerPrice, symbol),
         triggerType: "mark_price", holdSide,
-        // bez size — primjenjuje se na cijelu poziciju
       });
       if (tpslRes.code === "00000") {
-        console.log(`  🎯 ${planType} @ ${fmtPrice(triggerPrice, symbol)} OK`);
+        console.log(`  🎯 ${planType} @ ${fmtPrice(triggerPrice, symbol)} OK (fill-adjusted)`);
       } else {
-        console.log(`  ❌ ${planType} FAIL: code=${tpslRes.code} msg=${tpslRes.msg}`);
-        await tg(`⚠️ ${planType} nije postavljen [${symbol}]\n${tpslRes.msg}`);
+        // Preset u orderu već postoji — ovo je samo korekcija, nije kritično
+        console.log(`  ⚠️  ${planType} korekcija fail (preset aktivan): code=${tpslRes.code} ${tpslRes.msg}`);
       }
     } catch (e) {
-      console.log(`  ⚠️  ${planType} greška: ${e.message}`);
+      console.log(`  ⚠️  ${planType} korekcija greška: ${e.message}`);
     }
   }
 
@@ -1693,7 +1706,7 @@ export async function run() {
           await tg(`📋 PAPER [${pDef.name}/${pDef.timeframe}] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b>\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}\nEquity: $${equity.toFixed(2)} | Risk: $${riskAmount.toFixed(2)} | Notional: $${tradeSize.toFixed(0)} | Margin: $${margin.toFixed(2)} | ${LEVERAGE}x`);
         } else {
           try {
-            const order = await placeBitGetOrder(symbol, signal, tradeSize, price, sl, tp);
+            const order = await placeBitGetOrder(symbol, signal, tradeSize, price, sl, tp, slPct, tpPct);
             const usedLev    = order?.actualLeverage || LEVERAGE;
             const usedMargin = tradeSize / usedLev;
             entry.orderId = order?.orderId || orderId;
@@ -1797,7 +1810,7 @@ export async function checkBreakouts() {
       await tg(`📋 PAPER [ULTRA/fast] ${side === "LONG" ? "📈" : "📉"} <b>${side} ${symbol}</b>\nUlaz: ${fmtPrice(livePrice)} | SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}\nBreakout detektiran u realnom vremenu`);
     } else {
       try {
-        const order = await placeBitGetOrder(symbol, side, tradeSize, livePrice, sl, tp);
+        const order = await placeBitGetOrder(symbol, side, tradeSize, livePrice, sl, tp, slPct, tpPct);
         const usedLev    = order?.actualLeverage || LEVERAGE;
         const usedMargin = tradeSize / usedLev;
         entry.orderId = order?.orderId || orderId;

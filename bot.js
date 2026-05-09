@@ -1818,6 +1818,14 @@ export async function run() {
           continue;
         }
 
+        // 🔄 INVERTED MODE — trgujemo suprotno od signala (long→short, short→long)
+        const INVERT_SIGNALS = true;
+        if (INVERT_SIGNALS && signal !== "NEUTRAL") {
+          const orig = signal;
+          signal = signal === "LONG" ? "SHORT" : "LONG";
+          console.log(`  🔄 INVERT: ${orig} → ${signal} ${symbol}`);
+        }
+
         // SL/TP — per-portfolio (fallback na globalne konstante)
         const slPct  = pDef.slPct ?? SL_PCT;
         const tpPct  = pDef.tpPct ?? TP_PCT;
@@ -1929,12 +1937,17 @@ export async function checkBreakouts() {
     const newPending = pending.filter(x => !(x.symbol === symbol && x.side === side));
     savePending(pid, newPending);
 
+    // 🔄 INVERT: isti flag kao u glavnom scanneru
+    const INVERT_SIGNALS = true;
+    const actualSide = INVERT_SIGNALS ? (side === "LONG" ? "SHORT" : "LONG") : side;
+    if (INVERT_SIGNALS) console.log(`  🔄 BRK INVERT: ${side} → ${actualSide} ${symbol}`);
+
     const slPct  = pDef.slPct ?? SL_PCT;
     const tpPct  = pDef.tpPct ?? TP_PCT;
     const slDist = livePrice * (slPct / 100);
     const tpDist = livePrice * (tpPct / 100);
-    const sl = side === "LONG" ? livePrice - slDist : livePrice + slDist;
-    const tp = side === "LONG" ? livePrice + tpDist : livePrice - tpDist;
+    const sl = actualSide === "LONG" ? livePrice - slDist : livePrice + slDist;
+    const tp = actualSide === "LONG" ? livePrice + tpDist : livePrice - tpDist;
 
     const startCap   = pDef.startCapital ?? START_CAPITAL;
     const equity     = getPortfolioEquity(pid, startCap);
@@ -1950,7 +1963,7 @@ export async function checkBreakouts() {
     const timestamp = new Date().toISOString();
     const orderId   = `${isLive ? "LIVE" : "PAPER"}-BRK-${Date.now()}`;
     const mode      = isLive ? (BITGET_DEMO ? "DEMO" : "LIVE") : "PAPER";
-    const entry     = { symbol, signal: side, price: livePrice, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode };
+    const entry     = { symbol, signal: actualSide, price: livePrice, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode };
 
     if (!isLive) {
       addPosition(pid, entry);

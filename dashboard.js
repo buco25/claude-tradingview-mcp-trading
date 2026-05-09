@@ -714,10 +714,22 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="section-label" style="color:${def.color};margin-top:18px">📊 Win/Loss po coinu</div>
       <div class="table-wrap">
         <table class="trade-table">
-          <thead><tr><th>Coin</th><th>Dobitni</th><th>Gubitni</th><th>WR</th><th></th><th>P&amp;L</th></tr></thead>
+          <thead><tr><th>Coin</th><th>Dobitni</th><th>Gubitni</th><th>WR</th><th></th><th>P&amp;L</th><th>Status</th></tr></thead>
           <tbody>${symRows}</tbody>
         </table>
-      </div>`;
+      </div>
+      ${(() => {
+        const rules = dashRules;
+        const allSyms = rules.all_symbols || [];
+        const watchlist = rules.watchlist_synapse_t || [];
+        const suspended = allSyms.filter(s => !watchlist.includes(s) &&
+          !["ORDIUSDT","WLDUSDT","TRUMPUSDT","AVAXUSDT","AAVEUSDT"].includes(s));
+        if (!suspended.length) return "";
+        return `<div class="section-label" style="color:#ff4d4d;margin-top:14px">🚫 Suspendirani coinovi (5+ uzastopnih gubitaka)</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">
+            ${suspended.map(s => `<span style="background:#2d1b1b;border:1px solid #ff4d4d33;color:#ff4d4d;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600">${s.replace("USDT","")}</span>`).join("")}
+          </div>`;
+      })()}`;
   })();
 
   return `<!DOCTYPE html>

@@ -1572,7 +1572,7 @@ function checkDailyLimit(pid) {
 const CB_LOSSES    = 7;           // broj uzastopnih gubitaka → blokada
 const CB_COOLDOWN  = 8 * 60 * 60 * 1000;  // 8 sati u ms
 const CB_DRAWDOWN_MIN = 250;      // minimalni equity ($) — ispod = stop trading
-const SYM_CONSEC_LOSSES = 4;      // uzastopni gubici po simbolu → makni sa liste
+const SYM_CONSEC_LOSSES = 5;      // uzastopni gubici po simbolu → suspendiraj sa liste
 const CB_FILE      = `${DATA_DIR}/circuit_breaker.json`;
 
 function loadCircuitBreaker() {
@@ -1656,8 +1656,8 @@ async function checkAndRemoveSymbol(pid, symbol) {
     rules.watchlist_synapse_t = wl.filter(s => s !== symbol);
     writeFileSync("rules.json", JSON.stringify(rules, null, 2));
 
-    console.log(`  ⚠️  [AUTO-REMOVE] ${symbol} — ${SYM_CONSEC_LOSSES} uzastopna gubitka → maknuto sa liste!`);
-    await tg(`⚠️ <b>AUTO-REMOVE: ${symbol}</b>\n${SYM_CONSEC_LOSSES} uzastopna gubitka na redu.\nSimbol maknuto s ULTRA watchliste.`);
+    console.log(`  🚫 [SUSPEND] ${symbol} — ${SYM_CONSEC_LOSSES} uzastopnih gubitaka → suspendiran!`);
+    await tg(`🚫 <b>SUSPENDIRAN: ${symbol}</b>\n${SYM_CONSEC_LOSSES} uzastopnih gubitaka zaredom.\nSimbol uklonjen s ULTRA watchliste do ručnog dodavanja.`);
   } catch (e) {
     console.log(`  ⚠️  checkAndRemoveSymbol error: ${e.message}`);
   }

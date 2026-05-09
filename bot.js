@@ -1605,8 +1605,8 @@ export async function run() {
     await checkPortfolioPositions(pid);
   }
 
-  // Skeniraj svaki portfolio
-  for (const [pid, pDef] of Object.entries(portfolios)) {
+  // Skeniraj samo aktivne portfolije (PORTFOLIO_IDS)
+  for (const [pid, pDef] of Object.entries(portfolios).filter(([id]) => PORTFOLIO_IDS.includes(id))) {
     // Pokreni entry logiku samo kad se zatvori svjeća ovog TF-a
     if (!shouldRunNow(pDef.timeframe, utcHour, utcMin)) {
       console.log(`  ⏭️  [${pDef.name}] Preskačem skeniranje — TF ${pDef.timeframe} još nije zatvoren`);

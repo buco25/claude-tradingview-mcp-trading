@@ -14,7 +14,7 @@ const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" 
 const START_CAPITAL = 1000;
 
 const PORTFOLIO_DEFS = [
-  { id: "synapse_t", name: "ULTRA", color: "#e85d9a", emoji: "🎯", startCapital: 308.16, live: true },
+  { id: "synapse_t", name: "ULTRA", color: "#e85d9a", emoji: "🎯", startCapital: 296.96, live: true },
 ];
 
 // ─── All symbols ───────────────────────────────────────────────────────────────
@@ -803,9 +803,14 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <!-- Stats bar -->
   <div class="stats-bar">
     <div class="stat-card" style="border-top:3px solid #e85d9a">
-      <div class="stat-label">Equity</div>
+      <div class="stat-label">Equity <span style="font-size:10px;color:#8b949e">(CSV)</span></div>
       <div class="stat-value" style="color:${eqCol}">$${s.equity.toFixed(2)}</div>
       <div class="stat-sub" style="color:${eqCol}">${pctStr}</div>
+    </div>
+    <div class="stat-card" style="border-top:3px solid #f7b731">
+      <div class="stat-label">Bitget balans <span style="font-size:10px;color:#8b949e">(live)</span></div>
+      <div class="stat-value" id="bitget-bal" style="color:#f7b731">…</div>
+      <div class="stat-sub" id="bitget-unr" style="color:#8b949e"></div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Start kapital</div>
@@ -1211,6 +1216,31 @@ async function doScan() {
   btn.innerHTML = "🔄 Skeniraj";
 }
 
+// Bitget live balance
+async function loadBitgetBalance() {
+  try {
+    const r = await fetch('/api/bitget-balance');
+    const d = await r.json();
+    const el  = document.getElementById('bitget-bal');
+    const unr = document.getElementById('bitget-unr');
+    if (!el) return;
+    if (d.ok && d.balance) {
+      const eq = parseFloat(d.balance.equity);
+      el.textContent = '$' + eq.toFixed(2);
+      const unrPnl = parseFloat(d.balance.unrealizedPnl);
+      unr.textContent = 'Unrealized: ' + (unrPnl >= 0 ? '+' : '') + '$' + unrPnl.toFixed(2);
+      unr.style.color = unrPnl >= 0 ? '#00c48c' : '#ff4d4d';
+    } else {
+      el.textContent = 'N/A';
+    }
+  } catch(e) {
+    const el = document.getElementById('bitget-bal');
+    if (el) el.textContent = 'err';
+  }
+}
+loadBitgetBalance();
+setInterval(loadBitgetBalance, 30000);
+
 // Auto-scan on load after 2s delay
 setTimeout(doScan, 2000);
 // Re-scan every 5 minutes
@@ -1328,6 +1358,41 @@ const server = http.createServer(async (req, res) => {
     const ok     = ageSec !== null && ageSec < 600;
     res.writeHead(ok ? 200 : 503, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: ok ? "ok" : "stale", bot: hb, ageSec, dashboard: "ok" }));
+    return;
+  }
+
+  // Bitget live balance — bez auth
+  if (url.pathname === "/api/bitget-balance") {
+    try {
+      const BITGET_KEY    = (process.env.BITGET_API_KEY    || "").trim();
+      const BITGET_SECRET = (process.env.BITGET_SECRET_KEY || "").trim();
+      const BITGET_PASS   = (process.env.BITGET_PASSPHRASE || "").trim();
+      const BITGET_BASE   = (process.env.BITGET_BASE_URL   || "https://api.bitget.com").trim();
+      const path = "/api/v2/mix/account/accounts?productType=USDT-FUTURES";
+      const ts   = Date.now().toString();
+      const { createHmac } = await import("crypto");
+      const sign = createHmac("sha256", BITGET_SECRET).update(`${ts}GET${path}`).digest("base64");
+      const r = await fetch(`${BITGET_BASE}${path}`, {
+        headers: {
+          "ACCESS-KEY": BITGET_KEY, "ACCESS-SIGN": sign,
+          "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET_PASS,
+          "Content-Type": "application/json",
+        },
+      });
+      const d = await r.json();
+      const acc = d?.data?.[0];
+      const balance = acc ? {
+        available: parseFloat(acc.available || 0).toFixed(2),
+        equity:    parseFloat(acc.usdtEquity || acc.equity || acc.available || 0).toFixed(2),
+        unrealizedPnl: parseFloat(acc.unrealizedPL || 0).toFixed(2),
+        marginUsed: parseFloat(acc.locked || acc.frozen || 0).toFixed(2),
+      } : null;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: d.code === "00000", balance, raw: acc }));
+    } catch (e) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
     return;
   }
 

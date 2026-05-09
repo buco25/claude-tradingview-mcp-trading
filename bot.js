@@ -115,7 +115,7 @@ function buildPortfolios(rules) {
       timeframe:    tfs.synapse_t    || "15m",
       slPct:        1.0, tpPct: 2.0,   // ULTRA: SL 1% / TP 2% | 100x → SL = likvidacija
       live:         true,               // ← LIVE trading
-      startCapital: 308.16,            // ← početna banka za ULTRA LIVE (resetirano 2026-05-08)
+      startCapital: 296.96,            // ← stvarni Bitget balans 2026-05-09 (sync s exchange)
     },
   };
 }

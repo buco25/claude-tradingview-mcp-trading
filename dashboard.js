@@ -719,7 +719,6 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         </table>
       </div>
       ${(() => {
-        const rules = dashRules;
         const allSyms = rules.all_symbols || [];
         const watchlist = rules.watchlist_synapse_t || [];
         const suspended = allSyms.filter(s => !watchlist.includes(s) &&

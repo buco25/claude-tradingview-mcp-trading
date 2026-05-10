@@ -81,7 +81,7 @@
       "description": "Kombinira 18 signala: EMA, Cross, E50, RSI zona, E55, ADX>18, Chop, 6Sc, CVD, RSI recovery, MACD hist, E145, Vol, MACD cross, RSI smjer, ADX>25, SRS (S/R bounce), SRB (S/R breakout). Min 10/18 signala. H/L breakout entry. SL 1% / TP 2% (RR 1:2). 100x leverage → SL = likvidacija.",
       "params": {
         "minSig": 10,
-        "slPct": 1.0, "tpPct": 2.0
+        "slPct": 1.5, "tpPct": 2.5
       }
     },
     "mega": {
@@ -98,7 +98,7 @@
   "risk_rules": [
     "4 neovisna portfolia × $1000 startni kapital — jedan simbol može biti otvoren u sva 4 istovremeno",
     "Risk-based sizing: margin = equity × 1% | notional = margin × 100x | SL 1% × 100x = 100% margine = gubiš samo ulog",
-    "ULTRA: SL 1% / TP 2% / 100x leverage / rizik 1% banke po tradeu | TP hit = +2% banke",
+    "ULTRA: SL 1.5% / TP 2.5% / 50x leverage / rizik 1% banke po tradeu | TP hit = +1.25% banke",
     "Samo jedna pozicija po simbolu PO PORTFOLIJU istovremeno",
     "Max 5 otvorenih pozicija po portfoliju istovremeno",
     "Dnevni limit: 100 tradova",

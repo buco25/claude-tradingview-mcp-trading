@@ -19,11 +19,11 @@ import { fileURLToPath } from "url";
 // ─── Config ────────────────────────────────────────────────────────────────────
 
 const TIMEFRAME     = "1H";
-const LEVERAGE      = 100;    // 100x → SL 1% = 100% margine = likvidacija (gubiš samo ulog)
+const LEVERAGE      = 50;     // 50x → SL 1.5% = 75% margine (više prostora za šum)
 const START_CAPITAL = 1000;   // po portfoliju
 const RISK_PCT      = 1.0;    // % banke koji rizikaš po tradeu (= veličina uloga/margine)
-const SL_PCT        = 1.0;    // fiksni SL % | SL 1% × 100x = 100% margine = likvidacija
-const TP_PCT        = 2.0;    // fiksni TP % | RR 1:2
+const SL_PCT        = 1.5;    // fiksni SL % | SL 1.5% × 50x = 75% margine
+const TP_PCT        = 2.5;    // fiksni TP % | RR 1:1.67
 const MAX_TRADES_PER_DAY = 100;
 const MAX_OPEN_PER_PORTFOLIO = 7;  // max otvorenih pozicija po portfoliju (+ BTC uvijek)
 
@@ -1819,7 +1819,7 @@ export async function run() {
         }
 
         // 🔄 INVERTED MODE — trgujemo suprotno od signala (long→short, short→long)
-        const INVERT_SIGNALS = true;
+        const INVERT_SIGNALS = false;
         if (INVERT_SIGNALS && signal !== "NEUTRAL") {
           const orig = signal;
           signal = signal === "LONG" ? "SHORT" : "LONG";
@@ -1938,7 +1938,7 @@ export async function checkBreakouts() {
     savePending(pid, newPending);
 
     // 🔄 INVERT: isti flag kao u glavnom scanneru
-    const INVERT_SIGNALS = true;
+    const INVERT_SIGNALS = false;
     const actualSide = INVERT_SIGNALS ? (side === "LONG" ? "SHORT" : "LONG") : side;
     if (INVERT_SIGNALS) console.log(`  🔄 BRK INVERT: ${side} → ${actualSide} ${symbol}`);
 

@@ -1609,23 +1609,24 @@ export async function closeBitGetExcess(pid, target = MAX_OPEN_PER_PORTFOLIO) {
 
   const closed = [];
   for (const pos of toClose) {
+    const exitPrice = prices[pos.symbol] || pos.entryPrice;
+    const qty = pos.quantity ?? (pos.totalUSD / pos.entryPrice);
+    const pnl = pos.side === "LONG"
+      ? (exitPrice - pos.entryPrice) * qty
+      : (pos.entryPrice - exitPrice) * qty;
+
     try {
       await closeBitGetOrder(pos);
-      // Ukloni iz tracked pozicija
-      const remaining = loadPositions(pid).filter(p => p.symbol !== pos.symbol || p.side !== pos.side);
-      savePositions(pid, remaining);
-      // Zabilježi u CSV
-      const exitPrice = prices[pos.symbol] || pos.entryPrice;
-      const qty = pos.quantity ?? (pos.totalUSD / pos.entryPrice);
-      const pnl = pos.side === "LONG"
-        ? (exitPrice - pos.entryPrice) * qty
-        : (pos.entryPrice - exitPrice) * qty;
-      writeExitCsv(pid, pos, exitPrice, "Ručno zatvoreno (višak pozicija)", pnl);
-      closed.push({ symbol: pos.symbol, side: pos.side, pnl: pnl.toFixed(4) });
       console.log(`  🔴 MANUAL CLOSE [${pos.symbol}] ${pos.side} P&L: ${pnl.toFixed(4)}`);
     } catch (e) {
-      console.log(`  ❌ MANUAL CLOSE FAIL [${pos.symbol}]: ${e.message}`);
+      // Pozicija možda već zatvorena na Bitgetu — svejedno ukloni iz trackinga
+      console.log(`  ⚠️  MANUAL CLOSE FAIL [${pos.symbol}]: ${e.message} — uklanjam iz trackinga`);
     }
+    // Uvijek ukloni iz tracked pozicija i zabilježi u CSV
+    const remaining = loadPositions(pid).filter(p => !(p.symbol === pos.symbol && p.side === pos.side));
+    savePositions(pid, remaining);
+    writeExitCsv(pid, pos, exitPrice, "Ručno zatvoreno (višak pozicija)", pnl);
+    closed.push({ symbol: pos.symbol, side: pos.side, pnl: pnl.toFixed(4) });
   }
 
   return { ok: true, closed, remaining: loadPositions(pid).length, target };

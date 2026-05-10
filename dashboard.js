@@ -532,6 +532,31 @@ function buildPortfolioStats(pid) {
   // Recent 20 closed trades
   const recentExits = [...exits].reverse().slice(0, 20);
 
+  // Period P&L (dnevni, tjedni, mjesečni, godišnji)
+  const now   = new Date();
+  const todayStr  = now.toISOString().slice(0, 10);  // "2026-05-10"
+  const weekAgo   = new Date(now - 7  * 86400000);
+  const monthAgo  = new Date(now - 30 * 86400000);
+  const yearAgo   = new Date(now - 365* 86400000);
+
+  function periodPnl(from) {
+    return exits
+      .filter(r => new Date(`${r["Date"]}T${r["Time (UTC)"] || "00:00:00"}Z`) >= from)
+      .reduce((s, r) => s + parseFloat(r["Net P&L"] || 0), 0);
+  }
+  function periodTrades(from) {
+    return exits.filter(r => new Date(`${r["Date"]}T${r["Time (UTC)"] || "00:00:00"}Z`) >= from).length;
+  }
+
+  const pnlDay   = periodPnl(new Date(todayStr + "T00:00:00Z"));
+  const pnlWeek  = periodPnl(weekAgo);
+  const pnlMonth = periodPnl(monthAgo);
+  const pnlYear  = periodPnl(yearAgo);
+  const tradesDay   = periodTrades(new Date(todayStr + "T00:00:00Z"));
+  const tradesWeek  = periodTrades(weekAgo);
+  const tradesMonth = periodTrades(monthAgo);
+  const tradesYear  = periodTrades(yearAgo);
+
   // Per-symbol statistika
   const symbolStats = {};
   for (const r of exits) {
@@ -547,7 +572,8 @@ function buildPortfolioStats(pid) {
     .map(([sym, s]) => ({ sym, ...s, total: s.wins + s.losses }))
     .sort((a, b) => b.total - a.total);
 
-  return { pid, startCap, rows, exits, entries, wins, losses, totalPnl, winRate, equity, pnlCurve, recentExits, symbolStatsArr };
+  return { pid, startCap, rows, exits, entries, wins, losses, totalPnl, winRate, equity, pnlCurve, recentExits, symbolStatsArr,
+    pnlDay, pnlWeek, pnlMonth, pnlYear, tradesDay, tradesWeek, tradesMonth, tradesYear };
 }
 
 async function fetchLivePrices(symbols) {
@@ -884,10 +910,34 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     </div>
     <div class="stat-card">
       <div class="stat-label">Strategija</div>
-      <div class="stat-value" style="font-size:14px;color:#e85d9a">ULTRA · 100x</div>
-      <div class="stat-sub">SL 1% / TP 2% · rizik 1%</div>
+      <div class="stat-value" style="font-size:14px;color:#e85d9a">ULTRA · 50/75x</div>
+      <div class="stat-sub">SL 1.5% / TP 2.5% · rizik 1%</div>
     </div>
   </div>
+
+  <!-- Period P&L -->
+  ${(() => {
+    const periods = [
+      { label: "Danas",    pnl: s.pnlDay,   trades: s.tradesDay },
+      { label: "7 dana",   pnl: s.pnlWeek,  trades: s.tradesWeek },
+      { label: "30 dana",  pnl: s.pnlMonth, trades: s.tradesMonth },
+      { label: "Godina",   pnl: s.pnlYear,  trades: s.tradesYear },
+    ];
+    return `
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
+    ${periods.map(p => {
+      const col = p.pnl > 0 ? "#00c48c" : p.pnl < 0 ? "#ff4d4d" : "#8b949e";
+      const icon = p.pnl > 0 ? "▲" : p.pnl < 0 ? "▼" : "—";
+      const pct = def.startCapital > 0 ? (p.pnl / def.startCapital * 100).toFixed(2) : "0.00";
+      return `<div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:14px 18px">
+        <div style="font-size:11px;color:#8b949e;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">${p.label}</div>
+        <div style="font-size:22px;font-weight:800;color:${col}">${p.pnl >= 0 ? "+" : ""}$${p.pnl.toFixed(2)}</div>
+        <div style="font-size:12px;color:${col};margin-top:2px">${icon} ${p.pnl >= 0 ? "+" : ""}${pct}%</div>
+        <div style="font-size:11px;color:#8b949e;margin-top:4px">${p.trades} zatvorenih</div>
+      </div>`;
+    }).join("")}
+  </div>`;
+  })()}
 
   <!-- Equity curve -->
   <div class="chart-card">

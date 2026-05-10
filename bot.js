@@ -1576,6 +1576,55 @@ async function closeBitGetOrder(pos) {
   return data.data;
 }
 
+// Zatvori višak pozicija — ostavlja prvih `target` pozicija, zatvara ostale market orderom
+export async function closeBitGetExcess(pid, target = MAX_OPEN_PER_PORTFOLIO) {
+  const positions = loadPositions(pid);
+  if (positions.length <= target) {
+    return { ok: true, msg: `Već ${positions.length} pozicija — nije potrebno zatvarati`, closed: [] };
+  }
+
+  // Dohvati live cijene za sortiranje po unrealized P&L
+  const symbols = positions.map(p => p.symbol);
+  const prices  = await fetchLivePrices(symbols).catch(() => ({}));
+
+  // Izračunaj unrealized P&L za svaku poziciju
+  const withPnl = positions.map(pos => {
+    const liveP = prices[pos.symbol] || pos.entryPrice;
+    const qty   = pos.quantity ?? (pos.totalUSD / pos.entryPrice);
+    const pnl   = pos.side === "LONG"
+      ? (liveP - pos.entryPrice) * qty
+      : (pos.entryPrice - liveP) * qty;
+    return { ...pos, _pnl: pnl };
+  });
+
+  // Sortiraj: najlošije P&L zatvaraj prve
+  withPnl.sort((a, b) => a._pnl - b._pnl);
+  const toClose = withPnl.slice(0, positions.length - target);
+
+  const closed = [];
+  for (const pos of toClose) {
+    try {
+      await closeBitGetOrder(pos);
+      // Ukloni iz tracked pozicija
+      const remaining = loadPositions(pid).filter(p => p.symbol !== pos.symbol || p.side !== pos.side);
+      savePositions(pid, remaining);
+      // Zabilježi u CSV
+      const exitPrice = prices[pos.symbol] || pos.entryPrice;
+      const qty = pos.quantity ?? (pos.totalUSD / pos.entryPrice);
+      const pnl = pos.side === "LONG"
+        ? (exitPrice - pos.entryPrice) * qty
+        : (pos.entryPrice - exitPrice) * qty;
+      writeExitCsv(pid, pos, exitPrice, "Ručno zatvoreno (višak pozicija)", pnl);
+      closed.push({ symbol: pos.symbol, side: pos.side, pnl: pnl.toFixed(4) });
+      console.log(`  🔴 MANUAL CLOSE [${pos.symbol}] ${pos.side} P&L: ${pnl.toFixed(4)}`);
+    } catch (e) {
+      console.log(`  ❌ MANUAL CLOSE FAIL [${pos.symbol}]: ${e.message}`);
+    }
+  }
+
+  return { ok: true, closed, remaining: loadPositions(pid).length, target };
+}
+
 // ─── Daily trade counter ────────────────────────────────────────────────────────
 
 const _todayTrades = {};

@@ -1493,6 +1493,21 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Zatvori višak pozicija — POST /api/close-excess?target=15
+  if (url.pathname === "/api/close-excess" && req.method === "POST") {
+    const target = parseInt(url.searchParams?.get?.("target") || new URL(req.url, "http://x").searchParams.get("target") || "15");
+    try {
+      const { closeBitGetExcess } = await import("./bot.js");
+      const result = await closeBitGetExcess("synapse_t", target);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(result));
+    } catch(e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+
   // Circuit breaker — GET = status, POST = reset
   if (url.pathname === "/api/circuit-breaker") {
     const cbFile = `${DATA_DIR}/circuit_breaker.json`;

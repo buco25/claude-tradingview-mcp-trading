@@ -1447,26 +1447,20 @@ async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp, slPct, tpP
   const quantity  = (sizeUSD / price).toFixed(4);
   const holdSide  = side === "LONG" ? "long" : "short";
 
-  // Preset SL/TP direktno u nalog (atomski — ne može failati odvojeno)
-  // Temeljeno na signal cijeni; nakon filla korigiramo via tpsl-order
-  const presetSL = fmtPrice(sl, symbol);
-  const presetTP = fmtPrice(tp, symbol);
-
+  // Bez preset SL/TP u main orderu — koristimo fill-adjusted tpsl-order (ne duplikat)
   const path      = "/api/v2/mix/order/place-order";
   const orderBody = {
     symbol, productType: "USDT-FUTURES",
     marginMode: "isolated", marginCoin: "USDT",
     side: side === "LONG" ? "buy" : "sell",
     tradeSide: "open", orderType: "market", size: quantity,
-    presetStopLossPrice:    presetSL,   // ← SL direktno u orderu
-    presetStopSurplusPrice: presetTP,   // ← TP direktno u orderu
   };
   const orderData = await bitgetPost(path, orderBody);
   if (!orderData || orderData.code !== "00000") {
     throw new Error(`place-order fail: ${orderData?.code} ${orderData?.msg}`);
   }
   const orderId = orderData.data?.orderId || orderData.orderId;
-  console.log(`  📨 Nalog otvoren: ${orderId} | preset SL:${presetSL} TP:${presetTP}`);
+  console.log(`  📨 Nalog otvoren: ${orderId} | čekam fill za SL/TP postavljanje...`);
 
   // Dohvati stvarnu fill cijenu (čekaj malo da se ispuni)
   let fillPrice = price;
@@ -1502,7 +1496,7 @@ async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp, slPct, tpP
     ? fillPrice * (1 + _tpPct / 100)
     : fillPrice * (1 - _tpPct / 100);
 
-  // Zamijeni preset SL/TP s preciznim korekcijom od fill cijene
+  // Postavi SL/TP od fill cijene (samo jednom — bez duplikata)
   for (const [planType, triggerPrice] of [["pos_loss", slFromFill], ["pos_profit", tpFromFill]]) {
     try {
       const tpslRes = await bitgetPost("/api/v2/mix/order/place-tpsl-order", {

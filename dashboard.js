@@ -356,7 +356,7 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
         ema9 > ema21 ? 1 : -1,                                          //  1. EMA9/21 smjer
         crossUp3 ? 1 : crossDown3 ? -1 : 0,                             //  2. Svježi cross (3 bara)
         ema50 ? (price > ema50 ? 1 : -1) : 0,                           //  3. Cijena vs EMA50
-        (rsiV < 50 && rsiV > 30) ? 1 : (rsiV > 50 && rsiV < 70) ? -1 : 0, //  4. RSI zona
+        rsiV < 45 ? 1 : rsiV > 55 ? -1 : 0,                                //  4. RSI zona (<45=oversold→+1, >55=overbought→-1)
         ema55 ? (price > ema55 ? 1 : -1) : 0,                           //  5. Cijena vs EMA55
         adxV > 18 ? (ema9 > ema21 ? 1 : -1) : 0,                        //  6. ADX > 18 + EMA smjer
         chopV < 61.8 ? 1 : -1,                                           //  7. Nije choppy

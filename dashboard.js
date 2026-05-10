@@ -7,7 +7,6 @@ import "dotenv/config";
 import http from "http";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { run as botRun, checkBreakouts, syncPositionsFromBitget } from "./bot.js";
-import { startWhaleTracker } from "./whale_tracker.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -1296,99 +1295,6 @@ setTimeout(doScan, 2000);
 setInterval(doScan, 5 * 60 * 1000);
 </script>
 
-<!-- ─── WHALE COPY TRACKER ──────────────────────────────────────────────────── -->
-<div style="max-width:1100px;margin:32px auto 0;padding:0 16px">
-  <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;padding:20px 24px">
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
-      <span style="font-size:24px">🐋</span>
-      <div>
-        <div style="font-size:16px;font-weight:700;color:#e6edf3">WHALE COPY TRACKER <span style="font-size:11px;color:#f7b731;font-weight:600;background:#2d2a1e;padding:2px 8px;border-radius:4px;margin-left:6px">DEMO</span></div>
-        <div style="font-size:11px;color:#8b949e;margin-top:2px">0xecb63c...2b82b00 · HyperLiquid · $1000 start · 1% rizik/trade</div>
-      </div>
-      <div style="margin-left:auto;text-align:right">
-        <div id="whale-bank" style="font-size:22px;font-weight:800;color:#e6edf3">$1000.00</div>
-        <div id="whale-pnl" style="font-size:13px;font-weight:600;color:#8b949e">P&L: $0.00 (0.00%)</div>
-      </div>
-    </div>
-    <div style="display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap">
-      <div style="background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:10px 16px;min-width:100px">
-        <div style="font-size:11px;color:#8b949e;margin-bottom:4px">Ukupno tradova</div>
-        <div id="whale-trades" style="font-size:20px;font-weight:700;color:#e6edf3">0</div>
-      </div>
-      <div style="background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:10px 16px;min-width:100px">
-        <div style="font-size:11px;color:#8b949e;margin-bottom:4px">Otvorene pozicije</div>
-        <div id="whale-open" style="font-size:20px;font-weight:700;color:#e6edf3">0</div>
-      </div>
-      <div style="background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:10px 16px;min-width:120px">
-        <div style="font-size:11px;color:#8b949e;margin-bottom:4px">Unrealized P&L</div>
-        <div id="whale-unrealized" style="font-size:20px;font-weight:700;color:#8b949e">$0.00</div>
-      </div>
-      <div style="background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:10px 16px;min-width:120px">
-        <div style="font-size:11px;color:#8b949e;margin-bottom:4px">Realized P&L</div>
-        <div id="whale-realized" style="font-size:20px;font-weight:700;color:#8b949e">$0.00</div>
-      </div>
-    </div>
-    <div id="whale-positions" style="font-size:12px;color:#8b949e">Učitavam pozicije...</div>
-  </div>
-</div>
-
-<script>
-async function loadWhale() {
-  try {
-    const r = await fetch('/api/whale');
-    const d = await r.json();
-    document.getElementById('whale-bank').textContent = '$' + parseFloat(d.bank).toFixed(2);
-    const pnl = parseFloat(d.pnl || 0);
-    const pnlPct = parseFloat(d.pnlPct || 0);
-    const pnlEl = document.getElementById('whale-pnl');
-    pnlEl.textContent = 'P&L: ' + (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2) + ' (' + (pnl >= 0 ? '+' : '') + pnlPct + '%)';
-    pnlEl.style.color = pnl >= 0 ? '#00c48c' : '#ff4d4d';
-    document.getElementById('whale-trades').textContent = d.trades || 0;
-    document.getElementById('whale-open').textContent = (d.openPositions || []).length;
-    const unr = parseFloat(d.unrealizedPnl || 0);
-    const rlz = parseFloat(d.realizedPnl || 0);
-    const unrEl = document.getElementById('whale-unrealized');
-    const rlzEl = document.getElementById('whale-realized');
-    unrEl.textContent = (unr >= 0 ? '+' : '') + '$' + unr.toFixed(2);
-    unrEl.style.color = unr >= 0 ? '#00c48c' : '#ff4d4d';
-    rlzEl.textContent = (rlz >= 0 ? '+' : '') + '$' + rlz.toFixed(2);
-    rlzEl.style.color = rlz >= 0 ? '#00c48c' : '#ff4d4d';
-    // Pozicije tablica
-    const pos = d.openPositions || [];
-    if (pos.length === 0) {
-      document.getElementById('whale-positions').innerHTML = '<span style="color:#8b949e">Nema otvorenih demo pozicija</span>';
-    } else {
-      let rows = pos.map(p => {
-        const unrp = parseFloat(p.unrealizedPnl || 0);
-        const col = unrp >= 0 ? '#00c48c' : '#ff4d4d';
-        const ageMins = Math.floor((Date.now() - p.openTs) / 60000);
-        return \`<tr style="border-bottom:1px solid #21262d">
-          <td style="padding:6px 10px;font-weight:700;color:#e6edf3">\${p.coin}</td>
-          <td style="padding:6px 10px;color:\${p.side==='LONG'?'#00c48c':'#ff4d4d'};font-weight:700">\${p.side==='LONG'?'▲':'▼'} \${p.side}</td>
-          <td style="padding:6px 10px;color:#8b949e">@\${parseFloat(p.entryPrice).toPrecision(5)}</td>
-          <td style="padding:6px 10px;color:#8b949e">\${p.leverage}x</td>
-          <td style="padding:6px 10px;color:\${col};font-weight:600">\${unrp>=0?'+':''}\$\${unrp.toFixed(2)}</td>
-          <td style="padding:6px 10px;color:#8b949e">\${ageMins}min</td>
-        </tr>\`;
-      }).join('');
-      document.getElementById('whale-positions').innerHTML = \`
-        <table style="width:100%;border-collapse:collapse">
-          <thead><tr style="color:#8b949e;font-size:11px">
-            <th style="padding:4px 10px;text-align:left">Token</th>
-            <th style="padding:4px 10px;text-align:left">Smjer</th>
-            <th style="padding:4px 10px;text-align:left">Ulaz</th>
-            <th style="padding:4px 10px;text-align:left">Lev</th>
-            <th style="padding:4px 10px;text-align:left">Unrealized P&L</th>
-            <th style="padding:4px 10px;text-align:left">Trajanje</th>
-          </tr></thead>
-          <tbody>\${rows}</tbody>
-        </table>\`;
-    }
-  } catch(e) { document.getElementById('whale-positions').textContent = 'Greška: ' + e.message; }
-}
-loadWhale();
-setInterval(loadWhale, 60000);
-</script>
 
 </body>
 </html>`;
@@ -1511,19 +1417,6 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Whale tracker API
-  if (url.pathname === "/api/whale") {
-    const f = `${DATA_DIR}/whale_status.json`;
-    if (existsSync(f)) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(readFileSync(f, "utf8"));
-    } else {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ bank: 1000, startCapital: 1000, pnl: 0, pnlPct: "0.00", trades: 0, openPositions: [] }));
-    }
-    return;
-  }
-
   // Scanner API
   if (url.pathname === "/api/scan") {
     // Return cached if < 90s old
@@ -1627,6 +1520,4 @@ server.listen(PORT, () => {
     catch (e) { console.error("Breakout checker greška:", e.message); }
   }, 60 * 1000);
 
-  // Whale copy tracker (demo)
-  startWhaleTracker().catch(e => console.error("Whale tracker greška:", e.message));
 });

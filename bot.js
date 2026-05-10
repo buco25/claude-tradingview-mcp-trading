@@ -1305,7 +1305,7 @@ function writeEntryCsv(pid, entry) {
   const date = now.toISOString().slice(0, 10);
   const time = now.toISOString().slice(11, 19);
   const qty  = (entry.tradeSize / entry.price).toFixed(6);
-  const fee  = (entry.tradeSize * 0.0005).toFixed(4);
+  const fee  = (entry.tradeSize * 0.0006).toFixed(4);  // Bitget taker 0.06%
   const mode = PAPER_TRADING ? "PAPER" : BITGET_DEMO ? "DEMO" : "LIVE";
 
   const row = [
@@ -1360,8 +1360,10 @@ function writeExitCsv(pid, pos, exitPrice, reason, pnl) {
   const date    = now.toISOString().slice(0, 10);
   const time    = now.toISOString().slice(11, 19);
   const exitSide = pos.side === "LONG" ? "CLOSE_LONG" : "CLOSE_SHORT";
-  const fee     = (pos.totalUSD * 0.0005).toFixed(4);
-  const netPnl  = (pnl - parseFloat(fee)).toFixed(4);
+  const feeExit  = pos.totalUSD * 0.0006;              // Bitget taker 0.06% — izlaz
+  const feeEntry = pos.totalUSD * 0.0006;              // Bitget taker 0.06% — ulaz
+  const feeTotal = (feeExit + feeEntry).toFixed(4);    // roundtrip provizija
+  const netPnl   = (pnl - feeExit - feeEntry).toFixed(4);
   const icon    = pnl >= 0 ? "WIN" : "LOSS";
 
   const row = [
@@ -1370,7 +1372,7 @@ function writeExitCsv(pid, pos, exitPrice, reason, pnl) {
     pos.quantity.toFixed(6),
     fmtPrice(exitPrice),
     pos.totalUSD.toFixed(2),
-    fee, netPnl,
+    feeTotal, netPnl,
     fmtPrice(pos.sl), fmtPrice(pos.tp),
     pos.orderId || "", pos.mode, pid,
     `"${icon}: ${reason} | Ulaz ${fmtPrice(pos.entryPrice)} → Izlaz ${fmtPrice(exitPrice)}"`,

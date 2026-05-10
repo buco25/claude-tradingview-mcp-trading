@@ -1585,7 +1585,13 @@ export async function closeBitGetExcess(pid, target = MAX_OPEN_PER_PORTFOLIO) {
 
   // Dohvati live cijene za sortiranje po unrealized P&L
   const symbols = positions.map(p => p.symbol);
-  const prices  = await fetchLivePrices(symbols).catch(() => ({}));
+  const prices  = {};
+  await Promise.all(symbols.map(async sym => {
+    try {
+      const tj = await fetch(`${BITGET.baseUrl}/api/v2/mix/market/ticker?symbol=${sym}&productType=USDT-FUTURES`).then(r => r.json());
+      prices[sym] = parseFloat(tj?.data?.[0]?.lastPr || tj?.data?.[0]?.close || 0);
+    } catch { /* koristi entryPrice kao fallback */ }
+  }));
 
   // Izračunaj unrealized P&L za svaku poziciju
   const withPnl = positions.map(pos => {

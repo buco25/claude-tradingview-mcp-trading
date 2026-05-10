@@ -20,7 +20,7 @@ import { fileURLToPath } from "url";
 
 const TIMEFRAME     = "1H";
 const LEVERAGE      = 50;     // 50x default → SL 1.5% = 75% margine (više prostora za šum)
-const BTC_LEVERAGE  = 100;   // BTC posebno — 100x (SL 1.5% = likvidacija)
+const BTC_LEVERAGE  = 75;    // BTC posebno — 75x
 const START_CAPITAL = 1000;   // po portfoliju
 const RISK_PCT      = 1.0;    // % banke koji rizikaš po tradeu (= veličina uloga/margine)
 const SL_PCT        = 1.5;    // fiksni SL % | SL 1.5% × 50x = 75% margine

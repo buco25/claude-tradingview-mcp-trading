@@ -830,7 +830,7 @@ function analyzeUltra(candles, cfg) {
     ema9 > ema21 ? 1 : -1,                          //  1. EMA9/21 smjer
     hadCrossUp ? 1 : hadCrossDn ? -1 : 0,           //  2. Svježi cross (3 bara)
     price > ema50 ? 1 : -1,                          //  3. Cijena vs EMA50
-    (rsi < 50 && rsi > 30) ? 1 : (rsi > 50 && rsi < 70) ? -1 : 0, // 4. RSI zona
+    rsi < 45 ? 1 : rsi > 55 ? -1 : 0,                  //  4. RSI zona (>55=overbought→-1, <45=oversold→+1)
     price > ema55 ? 1 : -1,                          //  5. Cijena vs EMA55
     adx > 18 ? (ema9 > ema21 ? 1 : -1) : 0,          //  6. ADX > 18 + smjer
     chop < 61.8 ? 1 : -1,                            //  7. Nije choppy

@@ -1308,6 +1308,30 @@ function statusBox(s) {
   }
   if (sig === "SETUP↑") return '<span style="color:#f0a500;font-size:12px">◈ SETUP ↑ &nbsp;<span style="color:#555;font-size:11px">(' + (s.ultraBull||0) + '/18)</span></span>';
   if (sig === "SETUP↓") return '<span style="color:#f0a500;font-size:12px">◈ SETUP ↓ &nbsp;<span style="color:#555;font-size:11px">(' + (s.ultraBear||0) + '/18)</span></span>';
+
+  // ── RSI Watch alert — ekstreman RSI bez aktivnog signala ───────────────────
+  const rsiNum = parseFloat(s.rsi);
+  if (!isNaN(rsiNum)) {
+    // WATCH SHORT — RSI > 70, tržište overbought, pripremi se na preokret
+    if (rsiNum > 70) {
+      const adxNum = parseFloat(s.adx) || 0;
+      const adxWarn = adxNum > 50 ? ' <span style="color:#ff4d4d;font-size:10px">ADX ' + s.adx + ' — ekstremni momentum, moguć vrh</span>' : '';
+      return '<div style="background:rgba(255,77,77,0.06);border:1px solid #ff4d4d55;border-radius:8px;padding:6px 10px">' +
+        '<div style="font-size:11px;color:#ff4d4d;font-weight:700">⚠️ WATCH SHORT</div>' +
+        '<div style="font-size:11px;color:#8b949e;margin-top:2px">RSI <b style="color:#ff4d4d">' + s.rsi + '</b> — overbought, čekaj slabljenje bull signala' + adxWarn + '</div>' +
+        '<div style="font-size:10px;color:#555;margin-top:2px">Bull: ' + (s.ultraBull||0) + ' · Bear: ' + (s.ultraBear||0) + ' · Treba 12+ za SHORT signal</div>' +
+        '</div>';
+    }
+    // WATCH LONG — RSI < 30, tržište oversold, pripremi se na bounce
+    if (rsiNum < 30) {
+      return '<div style="background:rgba(0,196,140,0.06);border:1px solid #00c48c55;border-radius:8px;padding:6px 10px">' +
+        '<div style="font-size:11px;color:#00c48c;font-weight:700">⚠️ WATCH LONG</div>' +
+        '<div style="font-size:11px;color:#8b949e;margin-top:2px">RSI <b style="color:#00c48c">' + s.rsi + '</b> — oversold, čekaj pojačanje bull signala</div>' +
+        '<div style="font-size:10px;color:#555;margin-top:2px">Bull: ' + (s.ultraBull||0) + ' · Bear: ' + (s.ultraBear||0) + ' · Treba 12+ za LONG signal</div>' +
+        '</div>';
+    }
+  }
+
   return '<span style="color:#444;font-size:12px">—</span>';
 }
 

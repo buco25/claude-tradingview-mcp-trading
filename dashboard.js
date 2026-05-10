@@ -1312,7 +1312,7 @@ function statusBox(s) {
   // ── RSI + ADX Watch alert — oba moraju biti overextended ──────────────────
   const rsiNum = parseFloat(s.rsi);
   const adxNum = parseFloat(s.adx) || 0;
-  if (!isNaN(rsiNum) && adxNum > 50) {
+  if (!isNaN(rsiNum) && adxNum > 60) {
     // WATCH SHORT — RSI > 70 + ADX > 50: overbought + ekstremni trend
     if (rsiNum > 70) {
       return '<div style="background:rgba(255,77,77,0.06);border:1px solid #ff4d4d55;border-radius:8px;padding:6px 10px">' +

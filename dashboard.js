@@ -1552,6 +1552,22 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Circuit breaker — GET = status, POST = reset
+  if (url.pathname === "/api/circuit-breaker") {
+    const cbFile = `${DATA_DIR}/circuit_breaker.json`;
+    if (req.method === "POST") {
+      const fresh = { consecLosses: {}, pauseUntil: {} };
+      writeFileSync(cbFile, JSON.stringify(fresh, null, 2));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, msg: "Circuit breaker resetiran" }));
+    } else {
+      const cb = existsSync(cbFile) ? JSON.parse(readFileSync(cbFile, "utf8")) : {};
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ cb, now: new Date().toISOString() }));
+    }
+    return;
+  }
+
   // Debug
   if (url.pathname === "/api/debug") {
     const info = PORTFOLIO_DEFS.map(d => {

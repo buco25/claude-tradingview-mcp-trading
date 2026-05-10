@@ -970,7 +970,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <th>Cijena</th>
             <th style="color:#8b949e">RSI</th>
             <th style="color:#8b949e">ADX</th>
-            <th style="color:#e85d9a;text-align:center">16 Signala &nbsp;<span style="font-weight:400;font-size:10px;color:#666">EMA · CRS · E50 · RSI · E55 · ADX · CHP · 6Sc · CVD · R⟳ · MCD · E145 · VOL · MCC · R↗ · ADX+</span></th>
+            <th style="color:#e85d9a;text-align:center">18 Signala &nbsp;<span style="font-weight:400;font-size:10px;color:#666">EMA · CRS · E50 · RSI · E55 · ADX · CHP · 6Sc · CVD · R⟳ · MCD · E145 · VOL · MCC · R↗ · ADX+ · SRS · SRB</span></th>
             <th style="color:#e85d9a;text-align:center">Score</th>
             <th style="min-width:260px">Status / Breakout</th>
           </tr>
@@ -985,27 +985,27 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <!-- Signal legend (collapsible) -->
   <div id="sig-legend" style="display:none;margin-top:12px">
     <div class="chart-card" style="padding:16px 20px">
-      <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — ULTRA (18 signala, min 10/18)</div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px;font-size:12px">
+      <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — ULTRA (18 signala, min 12/18 za ulaz)</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:8px;font-size:12px">
         ${[
-          ['EMA','EMA9 > EMA21 — kratkoročni trend gore (bull) / dole (bear)'],
-          ['CRS','Svježi EMA9/21 cross u zadnja 3 bara — momenat promjene trenda'],
-          ['E50','Cijena > EMA50 — srednji trend potvrđen'],
-          ['RSI','RSI između 30–50 (bull): ima prostora za rast, nije preotkupljeno'],
-          ['E55','Cijena > EMA55 — MEGA trend filter, šira potvrda'],
-          ['ADX','ADX > 18 + EMA smjer: trend postoji I potvrđen EMA9/21 smjerom'],
-          ['CHP','Choppiness < 61.8 — nije choppy/ranging tržište'],
-          ['6Sc','6-Scale EMA: min 4 od 6 EMA parova bull — multi-TF konsenzus'],
-          ['CVD','CVD (Cumulative Volume Delta) pozitivan — kupci dominiraju volumenom'],
-          ['R⟳','RSI recovery: bio < 35 (oversold), sad > 35 i raste — exit oversold'],
-          ['MCD','MACD histogram > 0 — MACD linija iznad signal linije (momentum bull)'],
-          ['E145','Cijena > EMA145 — dugoročni trend gore'],
-          ['VOL','Volumen zadnjeg bara iznad 20-barnog prosjeka — potvrda aktivnosti'],
-          ['MCC','MACD cross: histogram promijenio predznak (neg→poz) u zadnja 3 bara'],
-          ['R↗','RSI smjer: RSI raste (2 uzastopna bara) = bull, RSI pada = bear'],
-          ['ADX+','ADX jak >25 + EMA smjer: snažan trend, potvrda s EMA9/21 biasom'],
-          ['SRS','S/R Bounce: cijena unutar 1.2% od pivot supporta + RSI raste (bull) ili od resistancea + RSI pada (bear)'],
-          ['SRB','S/R Breakout: cijena probila pivot resistance gore (bull) ili pivot support dolje (bear) u zadnja 3 bara'],
+          ['EMA', '▲ EMA9 > EMA21 → kratkoročni bull trend  |  ▼ EMA9 < EMA21 → bear'],
+          ['CRS', '▲ EMA9/21 cross gore zadnja 3 bara  |  ▼ cross dolje  |  · nema crossa'],
+          ['E50', '▲ Cijena > EMA50 → srednji trend gore  |  ▼ ispod EMA50'],
+          ['RSI', '▲ RSI < 45 → oversold, potencijalni bounce  |  ▼ RSI > 55 → overbought, opasnost  |  · RSI 45–55 neutralan'],
+          ['E55', '▲ Cijena > EMA55 → širi trend gore  |  ▼ ispod EMA55'],
+          ['ADX', '▲ ADX > 18 + EMA9 > EMA21 → trend potvrđen (bull)  |  ▼ trend potvrđen (bear)  |  · ADX ≤ 18 → nema trenda'],
+          ['CHP', '▲ Chop < 61.8 → tržište trenira  |  ▼ Chop > 61.8 → bočno kretanje'],
+          ['6Sc', '▲ 4+ od 6 EMA-para bull (3,11 / 7,15 / 13,21 / 19,29 / 29,47 / 45,55)  |  ▼ 4+ bear  |  · mješovito'],
+          ['CVD', '▲ CVD > 0 → kupci dominiraju volumenom (zadnjih 20 bara)  |  ▼ CVD < 0 → prodavači'],
+          ['R⟳', '▲ RSI bio < 35, sad > 35 i raste → izlaz iz oversold (bounce signal)  |  ▼ RSI bio > 65, sad < 65 i pada → exit overbought  |  · bez recovery'],
+          ['MCD', '▲ MACD histogram > 0 → momentum gore  |  ▼ histogram < 0 → momentum dolje'],
+          ['E145','▲ Cijena > EMA145 → dugoročni bull trend  |  ▼ ispod EMA145 → bear'],
+          ['VOL', '▲ Volumen > 20-bar prosjek → aktivnost potvrđena  |  · nizak volumen (ne daje -1, samo 0)'],
+          ['MCC', '▲ MACD histogram prošao 0 liniju (neg→poz) zadnja 3 bara  |  ▼ (poz→neg)  |  · bez crossa'],
+          ['R↗',  '▲ RSI raste 2+ uzastopna bara → momentum gore  |  ▼ RSI pada → momentum dolje  |  · neutralan'],
+          ['ADX+','▲ ADX > 25 + EMA9 > EMA21 → jak trend gore  |  ▼ jak trend dolje  |  · ADX ≤ 25'],
+          ['SRS', '▲ Bounce od S/R supporta (unutar 1.2%) + RSI raste  |  ▼ bounce od resistancea + RSI pada  |  · daleko od S/R'],
+          ['SRB', '▲ Proboj S/R resistancea gore (zadnja 3 bara)  |  ▼ proboj supporta dolje  |  · bez proboja'],
         ].map(([k,v]) =>
           '<div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 10px">' +
           '<span style="font-weight:800;color:#e85d9a;font-size:11px;display:inline-block;min-width:36px">' + k + '</span>' +
@@ -1178,15 +1178,78 @@ async function resetOne(pid) {
 // ── Signal label boxes (18 signals) ──────────────────────────────────────────
 const SIG_NAMES = ['EMA','CRS','E50','RSI','E55','ADX','CHP','6Sc','CVD','R⟳','MCD','E145','VOL','MCC','R↗','ADX+','SRS','SRB'];
 
+// Uvjeti za tooltip — objasni zašto je signal zelen/crven
+const SIG_COND_BULL = [
+  'EMA9 > EMA21 — kratkoročni trend gore',
+  'EMA9/21 cross gore zadnja 3 bara',
+  'Cijena > EMA50 — srednji trend gore',
+  'RSI < 45 — oversold zona, potencijalni bounce',
+  'Cijena > EMA55 — srednji/dugi trend gore',
+  'ADX > 18 + EMA9 > EMA21 — trend potvrđen',
+  'Chop < 61.8 — tržište trenira, nije bočno',
+  '4+ od 6 EMA-para bullish (multi-timeframe)',
+  'CVD > 0 — kupci dominiraju volumenom',
+  'RSI izašao iz oversold (<35) i raste — recovery',
+  'MACD histogram > 0 — bullish momentum',
+  'Cijena > EMA145 — dugoročni trend gore',
+  'Volumen > 20-bar prosjek — povećana aktivnost',
+  'MACD histogram prešao iz neg→poz (zadnja 3 bara)',
+  'RSI raste 2+ uzastopna bara — momentum gore',
+  'ADX > 25 + EMA9 > EMA21 — jak trend gore',
+  'Bounce od S/R supporta + RSI raste — reakcija na podršku',
+  'Proboj S/R resistance gore zadnja 3 bara',
+];
+const SIG_COND_BEAR = [
+  'EMA9 < EMA21 — kratkoročni trend dolje',
+  'EMA9/21 cross dolje zadnja 3 bara',
+  'Cijena < EMA50 — srednji trend dolje',
+  'RSI > 55 — overbought zona, potencijalni pad',
+  'Cijena < EMA55 — srednji/dugi trend dolje',
+  'ADX > 18 + EMA9 < EMA21 — bearish trend potvrđen',
+  'Chop > 61.8 — bočno tržište, nema trenda',
+  '4+ od 6 EMA-para bearish (multi-timeframe)',
+  'CVD < 0 — prodavači dominiraju volumenom',
+  'RSI izašao iz overbought (>65) i pada — pad potvrđen',
+  'MACD histogram < 0 — bearish momentum',
+  'Cijena < EMA145 — dugoročni trend dolje',
+  '— (niski volumen = neutralan)',
+  'MACD histogram prešao iz poz→neg (zadnja 3 bara)',
+  'RSI pada 2+ uzastopna bara — momentum dolje',
+  'ADX > 25 + EMA9 < EMA21 — jak bearish trend',
+  'Bounce od S/R resistancea + RSI pada — reakcija na otpor',
+  'Proboj S/R supporta dolje zadnja 3 bara',
+];
+const SIG_COND_NEUT = [
+  'EMA9 ≈ EMA21 — bez jasnog smjera',
+  'Nema svježeg crossa (neutralno)',
+  'EMA50 nedostupan',
+  'RSI 45–55 — neutralna zona',
+  'EMA55 nedostupan',
+  'ADX ≤ 18 — tržište ne trenira dovoljno',
+  '—',
+  'Manje od 4 EMA-para poravnano',
+  'CVD = 0',
+  'RSI nije u recovery zoni',
+  'MACD nedostupan',
+  'EMA145 nedostupan',
+  'Volumen ≤ prosjeku — neutralan',
+  'Nema MACD crossa u zadnja 3 bara',
+  'RSI ne raste ni pada konzistentno',
+  'ADX ≤ 25 — trend nije dovoljno jak',
+  'Cijena nije blizu S/R razine',
+  'Nema S/R proboja u zadnja 3 bara',
+];
+
 function sigBoxes(sigs) {
   if (!sigs || sigs.length === 0) return '<span style="color:#444">—</span>';
   return sigs.map((v, i) => {
-    const bg  = v === 1 ? '#0d3d26' : v === -1 ? '#3d0d0d' : '#1c2128';
-    const col = v === 1 ? '#00c48c' : v === -1 ? '#ff4d4d' : '#444';
-    const bdr = v === 1 ? '1px solid #00c48c44' : v === -1 ? '1px solid #ff4d4d44' : '1px solid #30363d';
+    const bg   = v === 1 ? '#0d3d26' : v === -1 ? '#3d0d0d' : '#1c2128';
+    const col  = v === 1 ? '#00c48c' : v === -1 ? '#ff4d4d' : '#444';
+    const bdr  = v === 1 ? '1px solid #00c48c44' : v === -1 ? '1px solid #ff4d4d44' : '1px solid #30363d';
     const icon = v === 1 ? '▲' : v === -1 ? '▼' : '·';
-    const lbl = SIG_NAMES[i] || i;
-    return '<span title="' + lbl + '" style="display:inline-block;background:' + bg + ';color:' + col + ';border:' + bdr + ';padding:2px 5px;font-size:10px;font-weight:700;border-radius:3px;margin:1px;min-width:32px;text-align:center">' + lbl + '<br><span style="font-size:9px">' + icon + '</span></span>';
+    const lbl  = SIG_NAMES[i] || i;
+    const tip  = (i + 1) + '. ' + lbl + ': ' + (v === 1 ? SIG_COND_BULL[i] : v === -1 ? SIG_COND_BEAR[i] : SIG_COND_NEUT[i]);
+    return '<span title="' + tip + '" style="display:inline-block;background:' + bg + ';color:' + col + ';border:' + bdr + ';padding:2px 5px;font-size:10px;font-weight:700;border-radius:3px;margin:1px;min-width:32px;text-align:center">' + lbl + '<br><span style="font-size:9px">' + icon + '</span></span>';
   }).join('');
 }
 

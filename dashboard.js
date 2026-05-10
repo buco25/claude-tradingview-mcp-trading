@@ -1530,6 +1530,67 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Fix CSV — DELETE loš red (POST /api/fix-csv)
+  // Body: { pid, symbol, date, action: "delete"|"fix", pnl?, exitPrice? }
+  if (url.pathname === "/api/fix-csv" && req.method === "POST") {
+    let body = "";
+    req.on("data", d => { body += d; });
+    req.on("end", () => {
+      try {
+        const { pid = "synapse_t", symbol, date, action = "delete", pnl, exitPrice } = JSON.parse(body || "{}");
+        const f = `${DATA_DIR}/trades_${pid}.csv`;
+        if (!existsSync(f)) { res.writeHead(404); res.end(JSON.stringify({ error: "CSV not found" })); return; }
+        const lines = readFileSync(f, "utf8").split("\n");
+        const header = lines[0];
+        let affected = 0;
+        const newLines = [header];
+        for (let i = 1; i < lines.length; i++) {
+          const l = lines[i];
+          if (!l.trim()) { newLines.push(l); continue; }
+          const cols = l.split(",");
+          const rowDate   = cols[0] || "";
+          const rowSymbol = cols[3] || "";
+          const rowSide   = cols[4] || "";
+          const isClosed  = rowSide === "CLOSE_LONG" || rowSide === "CLOSE_SHORT";
+          // Provjeri je li ovo krivi red
+          const match = isClosed
+            && (!symbol || rowSymbol === symbol)
+            && (!date   || rowDate === date);
+          if (!match) { newLines.push(l); continue; }
+          affected++;
+          if (action === "delete") {
+            console.log(`🗑️  fix-csv: obrisano — ${rowDate} ${rowSymbol} ${rowSide}`);
+            // ne dodajem u newLines = brisanje
+          } else if (action === "fix") {
+            // Ispravi Net P&L (col 9) i Price (col 6)
+            if (pnl    !== undefined) cols[9] = String(pnl);
+            if (exitPrice !== undefined) cols[6] = String(exitPrice);
+            newLines.push(cols.join(","));
+            console.log(`✏️  fix-csv: ispravljeno — ${rowDate} ${rowSymbol} P&L=${cols[9]} Price=${cols[6]}`);
+          } else {
+            newLines.push(l);
+          }
+        }
+        writeFileSync(f, newLines.join("\n"));
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true, affected, action, symbol, date }));
+      } catch (e) {
+        res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
+  // CSV download — GET /api/csv?pid=synapse_t
+  if (url.pathname === "/api/csv") {
+    const pid = url.searchParams.get("pid") || "synapse_t";
+    const f = `${DATA_DIR}/trades_${pid}.csv`;
+    if (!existsSync(f)) { res.writeHead(404); res.end("Not found"); return; }
+    res.writeHead(200, { "Content-Type": "text/csv", "Content-Disposition": `attachment; filename="trades_${pid}.csv"` });
+    res.end(readFileSync(f, "utf8"));
+    return;
+  }
+
   // Debug
   if (url.pathname === "/api/debug") {
     const info = PORTFOLIO_DEFS.map(d => {

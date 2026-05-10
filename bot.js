@@ -1164,9 +1164,9 @@ async function fetchBitgetOpenPositions() {
 }
 
 // Dohvati stvarni P&L zatvorene pozicije iz Bitget historije
-async function fetchBitgetClosedPnl(symbol) {
+async function fetchBitgetClosedPnl(symbol, pos) {
   try {
-    const path = `/api/v2/mix/order/fill-history?symbol=${symbol}&productType=USDT-FUTURES&limit=5`;
+    const path = `/api/v2/mix/order/fill-history?symbol=${symbol}&productType=USDT-FUTURES&limit=20`;
     const ts   = Date.now().toString();
     const sign = signBitGet(ts, "GET", path);
     const r    = await fetch(`${BITGET.baseUrl}${path}`, {
@@ -1178,15 +1178,34 @@ async function fetchBitgetClosedPnl(symbol) {
     });
     const d = await r.json();
     if (d.code !== "00000" || !d.data?.fillList?.length) return null;
-    // Zadnji fill za ovaj simbol
-    const fill = d.data.fillList[0];
+
+    // Filtriraj samo CLOSE fillove (ne entry fillove)
+    const expectedCloseSide = pos?.side === "LONG" ? "close_long" : "close_short";
+    const closeFills = d.data.fillList.filter(f =>
+      f.side === expectedCloseSide || f.tradeSide === "close"
+    );
+    if (!closeFills.length) return null;
+
+    // Sumej sve close fillove (može biti parcijalno zatvaranje)
+    const totalQty = closeFills.reduce((s, f) => s + parseFloat(f.size || 0), 0);
+    const avgExitPrice = closeFills.reduce((s, f) => s + parseFloat(f.price || 0) * parseFloat(f.size || 0), 0) / (totalQty || 1);
+    const totalFee = closeFills.reduce((s, f) => s + Math.abs(parseFloat(f.fee || 0)), 0);
+
+    // P&L = razlika cijene × količina (bez leverage jer je već u cijenama)
+    const qty = pos?.quantity ?? (pos?.totalUSD / pos?.entryPrice) ?? totalQty;
+    const entryPx = pos?.entryPrice ?? parseFloat(closeFills[0].price);
+    const rawPnl = pos?.side === "LONG"
+      ? (avgExitPrice - entryPx) * qty
+      : (entryPx - avgExitPrice) * qty;
+
     return {
-      exitPrice: parseFloat(fill.price),
-      realizedPnl: parseFloat(fill.profit || fill.realizedPnl || 0),
-      fee: parseFloat(fill.fee || 0),
-      side: fill.side,  // "close_long" / "close_short"
+      exitPrice: avgExitPrice,
+      realizedPnl: rawPnl,
+      fee: totalFee,
+      side: expectedCloseSide,
     };
   } catch (e) {
+    console.log(`  ⚠️  fetchBitgetClosedPnl greška: ${e.message}`);
     return null;
   }
 }
@@ -1212,7 +1231,7 @@ async function checkPortfolioPositions(pid) {
       if (isLivePortfolio && bitgetOpen !== null) {
         if (!bitgetOpen.has(bitgetKey)) {
           // Pozicija zatvorena na Bitgetu (SL/TP/likvidacija) — dohvati stvarni P&L
-          const closed = await fetchBitgetClosedPnl(pos.symbol);
+          const closed = await fetchBitgetClosedPnl(pos.symbol, pos);
           const exitPrice  = closed?.exitPrice  ?? pos.sl;  // fallback na sl
           const realPnl    = closed?.realizedPnl ?? null;
           const fee        = closed?.fee         ?? 0;
@@ -1496,7 +1515,8 @@ async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp, slPct, tpP
     ? fillPrice * (1 + _tpPct / 100)
     : fillPrice * (1 - _tpPct / 100);
 
-  // 1) Hard SL — fiksni stop loss od fill cijene
+  // 1) Hard SL — fiksni stop loss od fill cijene — KRITIČNO: ako fail → zatvori poziciju!
+  let slOk = false;
   try {
     const slRes = await bitgetPost("/api/v2/mix/order/place-tpsl-order", {
       symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
@@ -1505,12 +1525,29 @@ async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp, slPct, tpP
       triggerType: "mark_price", holdSide,
     });
     if (slRes.code === "00000") {
+      slOk = true;
       console.log(`  🛡️  Hard SL @ ${fmtPrice(slFromFill, symbol)} OK`);
     } else {
-      console.log(`  ⚠️  Hard SL fail: code=${slRes.code} ${slRes.msg}`);
+      console.log(`  🚨 Hard SL FAIL: code=${slRes.code} ${slRes.msg} — zatvaramo poziciju radi sigurnosti!`);
     }
   } catch (e) {
-    console.log(`  ⚠️  Hard SL greška: ${e.message}`);
+    console.log(`  🚨 Hard SL greška: ${e.message} — zatvaramo poziciju radi sigurnosti!`);
+  }
+
+  // Ako SL nije postavljen → zatvori poziciju odmah (ne možemo riskirati bez zaštite)
+  if (!slOk) {
+    try {
+      await bitgetPost("/api/v2/mix/order/place-order", {
+        symbol, productType: "USDT-FUTURES", marginMode: "isolated", marginCoin: "USDT",
+        side: holdSide === "long" ? "sell" : "buy", tradeSide: "close",
+        orderType: "market", size: quantity,
+      });
+      console.log(`  🔴 Pozicija ${symbol} zatvorena jer SL nije mogao biti postavljen`);
+      await tg(`🚨 <b>SL FAIL — ZATVORENO</b> ${symbol}\nNismo mogli postaviti SL → pozicija zatvorena radi sigurnosti!`);
+    } catch (e2) {
+      console.log(`  ❌ Emergency close fail: ${e2.message}`);
+    }
+    return { orderId, fillPrice, actualLeverage, slFailed: true };
   }
 
   // 2) Trailing stop — aktivira se na TP razini, zatim prati cijenu odozgo za SL%

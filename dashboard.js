@@ -16,14 +16,9 @@ const PORTFOLIO_DEFS = [
   { id: "synapse_t", name: "ULTRA", color: "#e85d9a", emoji: "🎯", startCapital: 296.99, live: true },
 ];
 
-// ─── All symbols ───────────────────────────────────────────────────────────────
-
-const ALL_SYMBOLS = [
-  "XAUUSDT","DOGEUSDT","NEARUSDT","RIVERUSDT","ADAUSDT",
-  "ETHUSDT","SUIUSDT","TAOUSDT",
-  "SOLUSDT","XAGUSDT","HYPEUSDT","LINKUSDT","PEPEUSDT","ZECUSDT","BTCUSDT",
-  // Uklonjeni (loš WR): ORDIUSDT, WLDUSDT, TRUMPUSDT, XRPUSDT, AVAXUSDT, AAVEUSDT
-];
+// ─── All symbols — čita iz rules.json (lazily, nakon što loadRules bude definiran) ─
+// Placeholder — pravi ALL_SYMBOLS se postavlja na dnu, nakon definicije loadRules
+let ALL_SYMBOLS = [];
 
 // ─── Scanner indicator helpers ─────────────────────────────────────────────────
 
@@ -478,6 +473,9 @@ function loadRules() {
   try { return JSON.parse(readFileSync("rules.json", "utf8")); }
   catch { return {}; }
 }
+
+// Popuni ALL_SYMBOLS iz rules.json
+ALL_SYMBOLS.push(...(loadRules().watchlist_synapse_t || []));
 
 function loadPositions(pid) {
   const f = `${DATA_DIR}/open_positions_${pid}.json`;

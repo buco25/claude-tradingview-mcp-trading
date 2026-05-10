@@ -1556,10 +1556,16 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === "/api/circuit-breaker") {
     const cbFile = `${DATA_DIR}/circuit_breaker.json`;
     if (req.method === "POST") {
-      const fresh = { consecLosses: {}, pauseUntil: {} };
+      // Učitaj postojeći CB, postavi manualResetAt za svaki portfolio i obriši until
+      const existing = existsSync(cbFile) ? JSON.parse(readFileSync(cbFile, "utf8")) : {};
+      const now = Date.now();
+      const fresh = {};
+      for (const pid of ["synapse_t", "ema_rsi", "mega", "synapse7"]) {
+        fresh[pid] = { manualResetAt: now };  // ignoriraj CSV trade-ove prije ovog trenutka
+      }
       writeFileSync(cbFile, JSON.stringify(fresh, null, 2));
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, msg: "Circuit breaker resetiran" }));
+      res.end(JSON.stringify({ ok: true, msg: "Circuit breaker resetiran", manualResetAt: new Date(now).toISOString() }));
     } else {
       const cb = existsSync(cbFile) ? JSON.parse(readFileSync(cbFile, "utf8")) : {};
       res.writeHead(200, { "Content-Type": "application/json" });

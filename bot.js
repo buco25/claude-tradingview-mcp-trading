@@ -1598,16 +1598,24 @@ async function checkCircuitBreaker(pid, pName) {
     }
   }
 
-  // 2) Provjeri zadnjih N zatvorenih tradova iz CSV-a
+  // 2) Provjeri zadnjih N zatvorenih tradova iz CSV-a (samo nakon manualResetAt)
   const f = csvFilePath(pid);
   if (!existsSync(f)) return true;
   try {
+    const manualResetAt = cb[pid]?.manualResetAt || 0;
     const lines = readFileSync(f, "utf8").trim().split("\n");
     const exits = lines.slice(1)
       .filter(l => l.includes("CLOSE_LONG") || l.includes("CLOSE_SHORT"))
-      .slice(-CB_LOSSES);  // zadnjih 5 zatvorenih
+      .filter(l => {
+        // Ignoriraj trade-ove prije ručnog reseta
+        if (!manualResetAt) return true;
+        const cols = l.split(",");
+        const ts = new Date(`${cols[0]}T${cols[1]}Z`).getTime();
+        return ts > manualResetAt;
+      })
+      .slice(-CB_LOSSES);
 
-    if (exits.length < CB_LOSSES) return true;  // nema dovoljno podataka (treba min 7)
+    if (exits.length < CB_LOSSES) return true;  // nema dovoljno podataka
 
     const allLosses = exits.every(l => {
       const cols = l.split(",");

@@ -1496,23 +1496,49 @@ async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp, slPct, tpP
     ? fillPrice * (1 + _tpPct / 100)
     : fillPrice * (1 - _tpPct / 100);
 
-  // Postavi SL/TP od fill cijene (samo jednom — bez duplikata)
-  for (const [planType, triggerPrice] of [["pos_loss", slFromFill], ["pos_profit", tpFromFill]]) {
-    try {
-      const tpslRes = await bitgetPost("/api/v2/mix/order/place-tpsl-order", {
+  // 1) Hard SL — fiksni stop loss od fill cijene
+  try {
+    const slRes = await bitgetPost("/api/v2/mix/order/place-tpsl-order", {
+      symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
+      planType: "pos_loss",
+      triggerPrice: fmtPrice(slFromFill, symbol),
+      triggerType: "mark_price", holdSide,
+    });
+    if (slRes.code === "00000") {
+      console.log(`  🛡️  Hard SL @ ${fmtPrice(slFromFill, symbol)} OK`);
+    } else {
+      console.log(`  ⚠️  Hard SL fail: code=${slRes.code} ${slRes.msg}`);
+    }
+  } catch (e) {
+    console.log(`  ⚠️  Hard SL greška: ${e.message}`);
+  }
+
+  // 2) Trailing stop — aktivira se na TP razini, zatim prati cijenu odozgo za SL%
+  //    Kada cijena dostigne tpFromFill, trailing stop se aktivira i prati peak - slPct%
+  //    Npr: entry $100, TP=$102.5, SL trail=1.5% → ako cijena ide na $105 → stop na $103.46
+  try {
+    const trailCallbackRatio = String((_slPct / 100).toFixed(4)); // npr "0.0150"
+    const trailRes = await bitgetPost("/api/v2/mix/order/place-tpsl-order", {
+      symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
+      planType: "track_stop",
+      triggerPrice: fmtPrice(tpFromFill, symbol),  // aktivira se kad dosegne TP
+      callbackRatio: trailCallbackRatio,             // trail za SL% od vrha
+      holdSide,
+    });
+    if (trailRes.code === "00000") {
+      console.log(`  🎯 Trailing stop: aktivacija @ ${fmtPrice(tpFromFill, symbol)}, trail ${_slPct}% OK`);
+    } else {
+      // Fallback: postavi fiksni TP ako trailing nije podržan
+      console.log(`  ⚠️  Trailing stop fail (${trailRes.code} ${trailRes.msg}) — fallback na fiksni TP`);
+      await bitgetPost("/api/v2/mix/order/place-tpsl-order", {
         symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
-        planType, triggerPrice: fmtPrice(triggerPrice, symbol),
+        planType: "pos_profit",
+        triggerPrice: fmtPrice(tpFromFill, symbol),
         triggerType: "mark_price", holdSide,
       });
-      if (tpslRes.code === "00000") {
-        console.log(`  🎯 ${planType} @ ${fmtPrice(triggerPrice, symbol)} OK (fill-adjusted)`);
-      } else {
-        // Preset u orderu već postoji — ovo je samo korekcija, nije kritično
-        console.log(`  ⚠️  ${planType} korekcija fail (preset aktivan): code=${tpslRes.code} ${tpslRes.msg}`);
-      }
-    } catch (e) {
-      console.log(`  ⚠️  ${planType} korekcija greška: ${e.message}`);
     }
+  } catch (e) {
+    console.log(`  ⚠️  Trailing stop greška: ${e.message}`);
   }
 
   return { orderId, fillPrice, actualLeverage };

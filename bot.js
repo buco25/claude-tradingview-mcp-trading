@@ -1942,8 +1942,15 @@ export async function checkBreakouts() {
   for (const p of pending) {
     const { symbol, side, triggerHigh, triggerLow, signalPrice, ts } = p;
 
+    // Provjeri limit svaki put (čitaj svježe da uvaži pozicije otvorene unutar iste petlje)
+    const currentOpen = loadPositions(pid);
+    if (currentOpen.length >= MAX_OPEN_PER_PORTFOLIO) {
+      console.log(`  🔒 [checkBreakouts] Max ${MAX_OPEN_PER_PORTFOLIO} otvorenih — preskačem ${symbol}`);
+      break;
+    }
+
     // Ako već otvorena pozicija za ovaj simbol — preskoči
-    if (openSymbols.includes(symbol)) continue;
+    if (currentOpen.map(x => x.symbol).includes(symbol)) continue;
 
     // Dohvati live ticker s Bitgeta
     let livePrice;

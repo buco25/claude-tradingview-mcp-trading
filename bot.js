@@ -19,7 +19,8 @@ import { fileURLToPath } from "url";
 // ─── Config ────────────────────────────────────────────────────────────────────
 
 const TIMEFRAME     = "1H";
-const LEVERAGE      = 50;     // 50x → SL 1.5% = 75% margine (više prostora za šum)
+const LEVERAGE      = 50;     // 50x default → SL 1.5% = 75% margine (više prostora za šum)
+const BTC_LEVERAGE  = 100;   // BTC posebno — 100x (SL 1.5% = likvidacija)
 const START_CAPITAL = 1000;   // po portfoliju
 const RISK_PCT      = 1.0;    // % banke koji rizikaš po tradeu (= veličina uloga/margine)
 const SL_PCT        = 1.5;    // fiksni SL % | SL 1.5% × 50x = 75% margine
@@ -1414,19 +1415,19 @@ async function setupSymbol(symbol) {
   });
   if (mm.code !== "00000") console.log(`  ⚠️  marginMode ${symbol}: ${mm.msg}`);
 
-  // 2) Leverage za long i short — fallback na manji leverage ako simbol ne podržava 100x
-  // Vraća stvarni leverage koji je uspješno postavljen
-  let actualLeverage = LEVERAGE;
+  // 2) Leverage — BTC dobiva BTC_LEVERAGE (100x), ostali LEVERAGE (50x)
+  const targetLev = symbol === "BTCUSDT" ? BTC_LEVERAGE : LEVERAGE;
+  let actualLeverage = targetLev;
   for (const holdSide of ["long", "short"]) {
     let set = false;
-    for (const lev of [LEVERAGE, 75, 50, 20, 10]) {
+    for (const lev of [targetLev, 75, 50, 20, 10]) {
       const lv = await bitgetPost("/api/v2/mix/account/set-leverage", {
         symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
         leverage: String(lev), holdSide,
       });
       if (lv.code === "00000") {
-        if (lev !== LEVERAGE) {
-          console.log(`  ℹ️  ${symbol} ${holdSide}: max leverage je ${lev}x (ne ${LEVERAGE}x) — sizing prilagođen`);
+        if (lev !== targetLev) {
+          console.log(`  ℹ️  ${symbol} ${holdSide}: max leverage je ${lev}x (ne ${targetLev}x) — sizing prilagođen`);
           if (holdSide === "long") actualLeverage = lev;  // koristi long leverage kao referentni
         }
         set = true;

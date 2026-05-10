@@ -1166,7 +1166,7 @@ async function fetchBitgetOpenPositions() {
 // Dohvati stvarni P&L zatvorene pozicije iz Bitget historije
 async function fetchBitgetClosedPnl(symbol, pos) {
   try {
-    const path = `/api/v2/mix/order/fill-history?symbol=${symbol}&productType=USDT-FUTURES&limit=20`;
+    const path = `/api/v2/mix/order/fill-history?symbol=${symbol}&productType=USDT-FUTURES&limit=50`;
     const ts   = Date.now().toString();
     const sign = signBitGet(ts, "GET", path);
     const r    = await fetch(`${BITGET.baseUrl}${path}`, {
@@ -1179,30 +1179,60 @@ async function fetchBitgetClosedPnl(symbol, pos) {
     const d = await r.json();
     if (d.code !== "00000" || !d.data?.fillList?.length) return null;
 
-    // Filtriraj samo CLOSE fillove (ne entry fillove)
+    // Filtriraj samo CLOSE fillove NAKON otvaranja pozicije
+    // openedAt je ISO string ("2026-05-10T12:34:56.789Z"), openTs je ms timestamp
+    const openTs = pos?.openTs
+      || (pos?.openedAt ? new Date(pos.openedAt).getTime() : 0)
+      || (pos?.ts       ? new Date(pos.ts).getTime()       : 0);
     const expectedCloseSide = pos?.side === "LONG" ? "close_long" : "close_short";
-    const closeFills = d.data.fillList.filter(f =>
-      f.side === expectedCloseSide || f.tradeSide === "close"
-    );
-    if (!closeFills.length) return null;
+
+    const closeFills = d.data.fillList.filter(f => {
+      const fillTs = parseInt(f.cTime || f.uTime || f.time || 0);
+      const isAfterOpen = !openTs || fillTs >= openTs - 60_000;  // dopusti 1min toleranciju
+      const isClose = f.side === expectedCloseSide
+        || f.tradeSide === "close"
+        || f.tradeSide === "burst_close"   // likvidacija
+        || f.tradeSide === "forced_close"; // prisilno zatvaranje
+      return isClose && isAfterOpen;
+    });
+
+    if (!closeFills.length) {
+      console.log(`  ⚠️  [fetchBitgetClosedPnl] ${symbol} — nema close fillova nakon openTs=${openTs}`);
+      return null;
+    }
 
     // Sumej sve close fillove (može biti parcijalno zatvaranje)
-    const totalQty = closeFills.reduce((s, f) => s + parseFloat(f.size || 0), 0);
+    const totalQty     = closeFills.reduce((s, f) => s + parseFloat(f.size  || 0), 0);
     const avgExitPrice = closeFills.reduce((s, f) => s + parseFloat(f.price || 0) * parseFloat(f.size || 0), 0) / (totalQty || 1);
-    const totalFee = closeFills.reduce((s, f) => s + Math.abs(parseFloat(f.fee || 0)), 0);
+    const totalFee     = closeFills.reduce((s, f) => s + Math.abs(parseFloat(f.fee || 0)), 0);
 
-    // P&L = razlika cijene × količina (bez leverage jer je već u cijenama)
-    const qty = pos?.quantity ?? (pos?.totalUSD / pos?.entryPrice) ?? totalQty;
+    // Sanity check: avgExitPrice mora biti >0
+    if (!avgExitPrice || avgExitPrice <= 0) {
+      console.log(`  ⚠️  [fetchBitgetClosedPnl] ${symbol} — avgExitPrice=${avgExitPrice} je nevažeći`);
+      return null;
+    }
+
+    // P&L = razlika cijene × količina
+    const qty     = pos?.quantity ?? (pos?.totalUSD / pos?.entryPrice) ?? totalQty;
     const entryPx = pos?.entryPrice ?? parseFloat(closeFills[0].price);
-    const rawPnl = pos?.side === "LONG"
+    const rawPnl  = pos?.side === "LONG"
       ? (avgExitPrice - entryPx) * qty
       : (entryPx - avgExitPrice) * qty;
 
+    // Sanity cap: P&L ne može biti gori od gubitka cijele margine
+    const maxLoss = pos?.margin ? pos.margin * 1.1 : (pos?.totalUSD ?? 999);  // +10% za fees
+    const pnlCapped = Math.max(rawPnl, -maxLoss);
+    if (pnlCapped !== rawPnl) {
+      console.log(`  ⚠️  [fetchBitgetClosedPnl] ${symbol} — P&L capped ${rawPnl.toFixed(2)} → ${pnlCapped.toFixed(2)} (maxLoss=${maxLoss.toFixed(2)})`);
+    }
+
+    console.log(`  📊 [fetchBitgetClosedPnl] ${symbol} ${pos?.side} | exit=${avgExitPrice.toFixed(6)} entry=${entryPx.toFixed(6)} qty=${qty.toFixed(4)} fills=${closeFills.length} pnl=${pnlCapped.toFixed(4)}`);
+
     return {
-      exitPrice: avgExitPrice,
-      realizedPnl: rawPnl,
-      fee: totalFee,
-      side: expectedCloseSide,
+      exitPrice:    avgExitPrice,
+      realizedPnl:  pnlCapped,
+      fee:          totalFee,
+      side:         expectedCloseSide,
     };
   } catch (e) {
     console.log(`  ⚠️  fetchBitgetClosedPnl greška: ${e.message}`);
@@ -1232,7 +1262,13 @@ async function checkPortfolioPositions(pid) {
         if (!bitgetOpen.has(bitgetKey)) {
           // Pozicija zatvorena na Bitgetu (SL/TP/likvidacija) — dohvati stvarni P&L
           const closed = await fetchBitgetClosedPnl(pos.symbol, pos);
-          const exitPrice  = closed?.exitPrice  ?? pos.sl;  // fallback na sl
+          // exitPrice fallback: nikad 0 — koristi sl, pa procijenjeni SL od entry cijene
+          const estimatedSl = pos.side === "LONG"
+            ? pos.entryPrice * (1 - SL_PCT / 100)
+            : pos.entryPrice * (1 + SL_PCT / 100);
+          const exitPrice  = (closed?.exitPrice  > 0) ? closed.exitPrice
+                           : (pos.sl             > 0) ? pos.sl
+                           : estimatedSl;
           const realPnl    = closed?.realizedPnl ?? null;
           const fee        = closed?.fee         ?? 0;
 
@@ -1247,11 +1283,17 @@ async function checkPortfolioPositions(pid) {
 
           // P&L: koristi stvarni Bitget P&L ako dostupan, inače kalkuliraj
           const qty = pos.quantity ?? (pos.totalUSD / pos.entryPrice);
-          const pnl = realPnl !== null ? realPnl : (
-            pos.side === "LONG"
-              ? (exitPrice - pos.entryPrice) * qty
-              : (pos.entryPrice - exitPrice) * qty
-          );
+          const rawCalcPnl = pos.side === "LONG"
+            ? (exitPrice - pos.entryPrice) * qty
+            : (pos.entryPrice - exitPrice) * qty;
+          const calcPnl = realPnl !== null ? realPnl : rawCalcPnl;
+
+          // Sanity cap: maksimalni gubitak = margina × 1.1 (uključuje fees/funding)
+          const maxLoss = pos.margin ? pos.margin * 1.1 : pos.totalUSD * 0.02;
+          const pnl = Math.max(calcPnl, -maxLoss);
+          if (pnl !== calcPnl) {
+            console.log(`  ⚠️  P&L capped: ${calcPnl.toFixed(4)} → ${pnl.toFixed(4)} (maxLoss=${maxLoss.toFixed(2)}) — mogući problem s fill fetchom`);
+          }
 
           console.log(`  ${pnl >= 0 ? "✅ WIN" : "❌ LOSS"} [${pid}] ${pos.symbol} ${pos.side} | P&L ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(4)} | ${exitReason} | exit@${fmtPrice(exitPrice)}`);
           writeExitCsv(pid, pos, exitPrice, exitReason, pnl);

@@ -26,7 +26,7 @@ const RISK_PCT      = 1.0;    // % banke koji rizikaš po tradeu (= veličina ul
 const SL_PCT        = 1.5;    // fiksni SL % | SL 1.5% × 50x = 75% margine
 const TP_PCT        = 2.5;    // fiksni TP % | RR 1:1.67
 const MAX_TRADES_PER_DAY = 100;
-const MAX_OPEN_PER_PORTFOLIO = 15; // max otvorenih pozicija po portfoliju
+const MAX_OPEN_PER_PORTFOLIO = 10; // max otvorenih pozicija po portfoliju
 
 const PAPER_TRADING = process.env.PAPER_TRADING !== "false";
 const BITGET_DEMO   = process.env.BITGET_DEMO === "true";

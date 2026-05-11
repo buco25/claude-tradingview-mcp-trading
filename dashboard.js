@@ -980,13 +980,14 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <th>Cijena</th>
             <th style="color:#8b949e">RSI</th>
             <th style="color:#8b949e">ADX</th>
+            <th style="color:#f7b731;text-align:center;white-space:nowrap">Obavezni <span style="font-weight:400;font-size:10px;color:#666">ADX · EMA · RSI · 5mSR</span></th>
             <th style="color:#e85d9a;text-align:center">18 Signala &nbsp;<span style="font-weight:400;font-size:10px;color:#666">EMA · CRS · E50 · RSI · E55 · ADX · CHP · 6Sc · CVD · R⟳ · MCD · E145 · VOL · MCC · R↗ · ADX+ · SRS · SRB</span></th>
             <th style="color:#e85d9a;text-align:center">Score</th>
             <th style="min-width:260px">Status / Breakout</th>
           </tr>
         </thead>
         <tbody id="scan-tbody">
-          <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted)">Klikni "Skeniraj" za prikaz ULTRA signala</td></tr>
+          <tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-muted)">Klikni "Skeniraj" za prikaz ULTRA signala</td></tr>
         </tbody>
       </table>
     </div>
@@ -1250,6 +1251,51 @@ const SIG_COND_NEUT = [
   'Nema S/R proboja u zadnja 3 bara',
 ];
 
+function mandatoryBoxes(s) {
+  const rsiNum = parseFloat(s.rsi) || 50;
+  const adxNum = parseFloat(s.adx) || 0;
+  const sig    = s.ultraSig;
+
+  // 1. ADX > 25
+  const adxOk  = adxNum >= 25;
+  const adxCol = adxOk ? '#00c48c' : '#ff4d4d';
+  const adxBg  = adxOk ? '#0d3d26' : '#3d0d0d';
+  const adxTip = 'ADX ' + adxNum.toFixed(1) + (adxOk ? ' ≥ 25 ✓' : ' < 25 ✗ — ranging tržište');
+
+  // 2. EMA9/21 smjer (signal #1 iz ultraSigs16)
+  const emaSig = s.ultraSigs16?.[0] ?? 0;
+  const emaLongOk  = emaSig === 1;
+  const emaShortOk = emaSig === -1;
+  const emaOk  = sig === "SHORT" ? emaShortOk : emaLongOk;
+  const emaCol = emaSig === 1 ? '#00c48c' : emaSig === -1 ? '#ff4d4d' : '#555';
+  const emaBg  = emaSig === 1 ? '#0d3d26' : emaSig === -1 ? '#3d0d0d' : '#1c2128';
+  const emaTip = 'EMA9/21: ' + (emaSig === 1 ? 'EMA9 > EMA21 — bullish ✓' : emaSig === -1 ? 'EMA9 < EMA21 — bearish ✓' : 'neutralno');
+
+  // 3. RSI asimetričan — LONG: RSI<72, SHORT: RSI>30
+  const rsiLongOk  = rsiNum < 72;
+  const rsiShortOk = rsiNum > 30;
+  const rsiOk  = sig === "SHORT" ? rsiShortOk : rsiLongOk;
+  const rsiCol = rsiOk ? '#00c48c' : '#ff4d4d';
+  const rsiBg  = rsiOk ? '#0d3d26' : '#3d0d0d';
+  const rsiTip = 'RSI ' + rsiNum.toFixed(1) + (sig === "SHORT"
+    ? (rsiShortOk ? ' > 30 ✓ (nije oversold)' : ' ≤ 30 ✗ — oversold, blokiran SHORT')
+    : (rsiLongOk  ? ' < 72 ✓ (nije overbought)' : ' ≥ 72 ✗ — overbought, blokiran LONG'));
+
+  // 4. 5m S/R test — samo bot zna, prikaži kao "BOT"
+  const srTip = '5m S/R test: provjerava bot pri otvaranju trejda';
+
+  function badge(label, col, bg, tip) {
+    return '<span title="' + tip + '" style="display:inline-flex;flex-direction:column;align-items:center;background:' + bg +
+      ';color:' + col + ';border:1px solid ' + col + '44;padding:2px 5px;font-size:10px;font-weight:700;border-radius:3px;margin:1px;min-width:36px;text-align:center">' +
+      label + '</span>';
+  }
+
+  return badge('ADX', adxCol, adxBg, adxTip) +
+         badge('EMA', emaCol, emaBg, emaTip) +
+         badge('RSI', rsiCol, rsiBg, rsiTip) +
+         badge('5mSR', '#8b949e', '#1c2128', srTip);
+}
+
 function sigBoxes(sigs) {
   if (!sigs || sigs.length === 0) return '<span style="color:#444">—</span>';
   return sigs.map((v, i) => {
@@ -1325,7 +1371,7 @@ async function doScan() {
   const tbody = document.getElementById("scan-tbody");
   btn.disabled = true;
   btn.innerHTML = '<span class="spin">⟳</span> Skenira...';
-  tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:32px;color:#8b949e"><span class="spin" style="font-size:20px">⟳</span><br>Fetcham ${ALL_SYMBOLS.length} simbola na 15m TF...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:32px;color:#8b949e"><span class="spin" style="font-size:20px">⟳</span><br>Fetcham ${ALL_SYMBOLS.length} simbola na 15m TF...</td></tr>';
 
   try {
     const r = await fetch("/api/scan");
@@ -1353,7 +1399,7 @@ async function doScan() {
     document.getElementById("scan-ts").textContent = ts + " UTC | ▲ " + longs + " LONG · ▼ " + shorts + " SHORT · ⏳ " + pending + " čeka · ◈ " + setups + " setup";
 
     tbody.innerHTML = results.map((s, i) => {
-      if (s.error) return '<tr><td colspan="8" style="color:#ff4d4d;padding:6px 10px">' + s.symbol + ': ' + s.error + '</td></tr>';
+      if (s.error) return '<tr><td colspan="9" style="color:#ff4d4d;padding:6px 10px">' + s.symbol + ': ' + s.error + '</td></tr>';
 
       const rsiNum = parseFloat(s.rsi);
       const rsiCol = isNaN(rsiNum) ? "#8b949e" : rsiNum > 70 ? "#ff4d4d" : rsiNum < 30 ? "#00c48c" : rsiNum > 60 ? "#ff8c42" : rsiNum < 40 ? "#42c8ff" : "#e6edf3";
@@ -1375,6 +1421,7 @@ async function doScan() {
         '<td style="font-weight:600;white-space:nowrap">' + fmtLive(s.price) + '</td>' +
         '<td style="color:' + rsiCol + ';font-weight:700">' + (s.rsi || "—") + '</td>' +
         '<td style="color:' + adxCol + '">' + (s.adx || "—") + '</td>' +
+        '<td style="padding:4px 6px;border-right:1px solid #f7b73133">' + mandatoryBoxes(s) + '</td>' +
         '<td style="padding:4px 6px">' + sigBoxes(s.ultraSigs16) + '</td>' +
         '<td style="padding:4px 8px">' + scoreBox(s.ultraBull||0, s.ultraBear||0, s.ultraSig) + '</td>' +
         '<td style="padding:4px 8px">' + statusBox(s) + '</td>' +
@@ -1382,7 +1429,7 @@ async function doScan() {
     }).join("");
 
   } catch(e) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#ff4d4d;padding:24px">Greška: ' + e.message + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#ff4d4d;padding:24px">Greška: ' + e.message + '</td></tr>';
   }
 
   btn.disabled = false;

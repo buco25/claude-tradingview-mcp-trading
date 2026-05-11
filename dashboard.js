@@ -1563,6 +1563,27 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Ručno ukloni jednu poziciju iz trackinga — POST /api/remove-position
+  // Body: { pid, symbol }  — samo briše iz JSON, ne šalje nalog na Bitget
+  if (url.pathname === "/api/remove-position" && req.method === "POST") {
+    try {
+      const body = await new Promise(r => { let d=""; req.on("data",c=>d+=c); req.on("end",()=>r(d)); });
+      const { pid, symbol } = JSON.parse(body);
+      if (!pid || !symbol) throw new Error("pid i symbol su obavezni");
+      const f = `${DATA_DIR}/open_positions_${pid}.json`;
+      const positions = existsSync(f) ? JSON.parse(readFileSync(f, "utf8")) : [];
+      const before = positions.length;
+      const filtered = positions.filter(p => p.symbol !== symbol);
+      writeFileSync(f, JSON.stringify(filtered, null, 2));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, removed: before - filtered.length, remaining: filtered.length }));
+    } catch(e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+
   // Zatvori višak pozicija — POST /api/close-excess?target=15
   if (url.pathname === "/api/close-excess" && req.method === "POST") {
     const target = parseInt(url.searchParams?.get?.("target") || new URL(req.url, "http://x").searchParams.get("target") || "15");

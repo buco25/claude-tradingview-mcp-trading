@@ -15,7 +15,11 @@
   "watchlist_mega": [],
   "watchlist_synapse7": [],
   "watchlist_synapse_t": [
-    "BTCUSDT"
+    "XAUUSDT","DOGEUSDT","NEARUSDT","ADAUSDT","ETHUSDT",
+    "SUIUSDT","TAOUSDT","SOLUSDT","XAGUSDT","HYPEUSDT",
+    "LINKUSDT","PEPEUSDT","BTCUSDT","XRPUSDT","BNBUSDT",
+    "INJUSDT","APTUSDT","ARBUSDT","WIFUSDT","DOTUSDT",
+    "AVAXUSDT","TIAUSDT","FETUSDT","SEIUSDT","ENAUSDT"
   ],
 
   "portfolio_timeframes": {

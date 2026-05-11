@@ -111,7 +111,7 @@
       "name": "ULTRA — 18-Signal Combined Strategy",
       "description": "Kombinira 18 signala: EMA, Cross, E50, RSI zona, E55, ADX>18, Chop, 6Sc, CVD, RSI recovery, MACD hist, E145, Vol, MACD cross, RSI smjer, ADX>25, SRS (S/R bounce), SRB (S/R breakout). Min 9/18 signala. H/L breakout entry. SL 1.5% / TP 2.5% (RR 1:1.67). 50x leverage.",
       "params": {
-        "minSig": 12,
+        "minSig": 5,
         "slPct": 1.5, "tpPct": 2.5
       }
     },

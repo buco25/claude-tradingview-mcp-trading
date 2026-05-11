@@ -346,7 +346,7 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
   let ultraBull = 0, ultraBear = 0;
   let ultraSigs16 = new Array(18).fill(0);
   {
-    const { minSig = 12 } = ultraCfg;
+    const { minSig = 5 } = ultraCfg;
     if (n >= 200 && ema9 && ema21) {
       const rsiV  = rsi ?? 50;
       const adxV  = adx ?? 0;
@@ -356,7 +356,7 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
         ema9 > ema21 ? 1 : -1,                                          //  1. EMA9/21 smjer
         crossUp3 ? 1 : crossDown3 ? -1 : 0,                             //  2. Svježi cross (3 bara)
         ema50 ? (price > ema50 ? 1 : -1) : 0,                           //  3. Cijena vs EMA50
-        rsiV < 45 ? 1 : rsiV > 55 ? -1 : 0,                                //  4. RSI zona (<45=oversold→+1, >55=overbought→-1)
+        rsiV < 45 ? 1 : rsiV > 55 ? -1 : 0,                             //  4. RSI zona
         ema55 ? (price > ema55 ? 1 : -1) : 0,                           //  5. Cijena vs EMA55
         adxV > 18 ? (ema9 > ema21 ? 1 : -1) : 0,                        //  6. ADX > 18 + EMA smjer
         chopV < 61.8 ? 1 : -1,                                           //  7. Nije choppy
@@ -376,10 +376,16 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
       ultraBull = ultraSigs16.filter(s => s === 1).length;
       ultraBear = ultraSigs16.filter(s => s === -1).length;
 
-      if      (ultraBull >= minSig) ultraSig = "LONG";
-      else if (ultraBear >= minSig) ultraSig = "SHORT";
-      else if (ultraBull === minSig - 1) ultraSig = "SETUP↑";
-      else if (ultraBear === minSig - 1) ultraSig = "SETUP↓";
+      // 3 obavezna: ADX>25, EMA smjer, RSI zona 35-65
+      const adxOk     = adxV >= 25;
+      const emaLongOk  = ema9 > ema21;
+      const emaShortOk = ema9 < ema21;
+      const rsiZoneOk  = rsiV >= 35 && rsiV <= 65;
+
+      if      (adxOk && emaLongOk  && rsiZoneOk && ultraBull >= minSig) ultraSig = "LONG";
+      else if (adxOk && emaShortOk && rsiZoneOk && ultraBear >= minSig) ultraSig = "SHORT";
+      else if (adxOk && emaLongOk  && rsiZoneOk && ultraBull === minSig - 1) ultraSig = "SETUP↑";
+      else if (adxOk && emaShortOk && rsiZoneOk && ultraBear === minSig - 1) ultraSig = "SETUP↓";
     }
   }
 
@@ -866,7 +872,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="logo">🎯</div>
       <div>
         <div class="title">ULTRA Trading Bot</div>
-        <div class="subtitle">18 signala · min 12/18 · ulaz odmah · ${tf} · SL 1.5–2.5% / TP 2.5–3.5% per-simbol · 50x · rizik 1%</div>
+        <div class="subtitle">18 signala · 3ob + 5/18 · ulaz odmah · ${tf} · SL 1.5–2.5% / TP 2.5–3.5% per-simbol · 50x · rizik 1%</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -950,7 +956,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <div class="scan-card">
     <div class="scan-header">
       <div>
-        <div class="chart-title" style="margin-bottom:2px">🎯 ULTRA Scanner — ${ALL_SYMBOLS.length} simbola | 18 signala | min 12/18 | H/L breakout</div>
+        <div class="chart-title" style="margin-bottom:2px">🎯 ULTRA Scanner — ${ALL_SYMBOLS.length} simbola | 18 signala | 3ob + 5/18 | H/L breakout</div>
         <div style="font-size:12px;color:var(--text-muted)">
           EMA · CRS · E50 · RSI · E55 · ADX · CHP · 6Sc · CVD · R⟳ · MCD · E145 · VOL · MCC · R↗ · ADX+
           &nbsp;|&nbsp; 🟡 Čeka breakout &nbsp; 🟢 Signal &nbsp; Cache 90s &nbsp;|&nbsp;
@@ -988,7 +994,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <!-- Signal legend (collapsible) -->
   <div id="sig-legend" style="display:none;margin-top:12px">
     <div class="chart-card" style="padding:16px 20px">
-      <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — ULTRA (18 signala, min 12/18 za ulaz)</div>
+      <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — ULTRA (18 signala, 3ob + 5/18 za ulaz)</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:8px;font-size:12px">
         ${[
           ['EMA', '▲ EMA9 > EMA21 → kratkoročni bull trend  |  ▼ EMA9 < EMA21 → bear'],

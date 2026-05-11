@@ -851,23 +851,39 @@ function analyzeUltra(candles, cfg) {
   const bullCnt = sigs.filter(s => s === 1).length;
   const bearCnt = sigs.filter(s => s === -1).length;
 
-  // ── Obavezni ADX filter: tržište mora biti u trendu (ADX > 25) ──
-  const ADX_MIN_REQUIRED = 25;
-  if (adx < ADX_MIN_REQUIRED) {
+  // ══ 3 OBAVEZNA UVJETA — sva 3 moraju biti zadovoljena ══════════════════════
+
+  // 1. ADX > 25 — tržište mora biti u trendu (ne ranging)
+  if (adx < 25) {
     return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
-      reason: `ULTRA: ADX ${adx.toFixed(1)} < ${ADX_MIN_REQUIRED} — ranging tržište, nema ulaza` };
+      reason: `ADX ${adx.toFixed(1)} < 25 — ranging, nema ulaza` };
   }
 
-  if (bullCnt >= minSig) {
+  // 2. EMA9/21 smjer mora odgovarati signalu — razniji trend potvrđen
+  const emaLongOk  = ema9 > ema21;
+  const emaShortOk = ema9 < ema21;
+
+  // 3. RSI mora biti u zoni 35–65 — ne ulazimo u overbought/oversold
+  const rsiZoneOk = rsi >= 35 && rsi <= 65;
+
+  // ── Min 5/18 potvrđujućih signala ─────────────────────────────────────────
+  const MIN_CONFIRM = minSig;  // čita iz rules.json (trenutno 5)
+
+  if (bullCnt >= MIN_CONFIRM && emaLongOk && rsiZoneOk) {
     return { price, signal: "LONG",  bullScore: bullCnt, bearScore: bearCnt,
-      reason: `ULTRA LONG ↑${bullCnt}/18 | RSI:${rsi.toFixed(0)} ADX:${adx.toFixed(0)} SR:${sig17sr}/${sig18bk} 6Sc:${scaleUp}/6` };
+      reason: `ULTRA LONG ↑${bullCnt}/18 | RSI:${rsi.toFixed(0)} ADX:${adx.toFixed(0)} EMA✓ [3ob+${MIN_CONFIRM}]` };
   }
-  if (bearCnt >= minSig) {
+  if (bearCnt >= MIN_CONFIRM && emaShortOk && rsiZoneOk) {
     return { price, signal: "SHORT", bullScore: bullCnt, bearScore: bearCnt,
-      reason: `ULTRA SHORT ↓${bearCnt}/18 | RSI:${rsi.toFixed(0)} ADX:${adx.toFixed(0)} SR:${sig17sr}/${sig18bk} 6Sc:${scaleDn}/6` };
+      reason: `ULTRA SHORT ↓${bearCnt}/18 | RSI:${rsi.toFixed(0)} ADX:${adx.toFixed(0)} EMA✓ [3ob+${MIN_CONFIRM}]` };
   }
+
+  // Dijagnoza zašto nema signala
+  const whyNot = bullCnt > bearCnt
+    ? `↑${bullCnt}/18${!emaLongOk ? " EMA✗" : ""}${!rsiZoneOk ? ` RSI${rsi.toFixed(0)}✗` : ""}`
+    : `↓${bearCnt}/18${!emaShortOk ? " EMA✗" : ""}${!rsiZoneOk ? ` RSI${rsi.toFixed(0)}✗` : ""}`;
   return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
-    reason: `ULTRA: ↑${bullCnt} ↓${bearCnt} /18 (min ${minSig})` };
+    reason: `ULTRA: ${whyNot} (treba 3ob+${MIN_CONFIRM})` };
 }
 
 // ─── ULTRA Immediate Entry ─────────────────────────────────────────────────────

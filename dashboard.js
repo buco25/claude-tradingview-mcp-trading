@@ -354,20 +354,22 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
       const adxV  = adx ?? 0;
       const chopV = chop ?? 100;
 
+      // REVERSANI signali (WR<31.5% kada ▲ → logika invertirana, contrarian/pullback):
+      // E50, RSI zona, E55, CVD, VOL, MCC
       ultraSigs16 = [
-        ema50 ? (price > ema50 ? 1 : -1) : 0,                           //  1. Cijena vs EMA50
-        rsiV < 45 ? 1 : rsiV > 55 ? -1 : 0,                             //  2. RSI zona (<45=oversold, >55=overbought)
-        ema55 ? (price > ema55 ? 1 : -1) : 0,                           //  3. Cijena vs EMA55
-        chopV < 61.8 ? 1 : -1,                                           //  4. Nije choppy
-        cvdSum > 0 ? 1 : -1,                                             //  5. CVD volumen
-        rsiRecovBull ? 1 : rsiRecovBear ? -1 : 0,                        //  6. RSI recovery
-        macdH !== null ? (macdH > 0 ? 1 : -1) : 0,                      //  7. MACD histogram
-        ema145 ? (price > ema145 ? 1 : -1) : 0,                         //  8. EMA145 trend
-        vols[n-1] > volAvg20 ? 1 : 0,                                    //  9. Volumen iznad prosjeka
-        macdCrossV,                                                       // 10. MACD cross
-        rsiRising ? 1 : rsiFalling ? -1 : 0,                             // 11. RSI smjer
-        srsBounce,                                                        // 12. S/R bounce
-        srbBreak,                                                         // 13. S/R breakout
+        ema50 ? (price > ema50 ? -1 : 1) : 0,                           //  1. E50  REV: >EMA50=previsoko=-1, ispod=pullback=+1
+        rsiV < 45 ? -1 : rsiV > 55 ? 1 : 0,                             //  2. RSI  REV: >55=momentum=+1, <45=slabi=-1
+        ema55 ? (price > ema55 ? -1 : 1) : 0,                           //  3. E55  REV: >EMA55=previsoko=-1, ispod=pullback=+1
+        chopV < 61.8 ? 1 : -1,                                           //  4. CHP: nije choppy=+1 (normalan)
+        cvdSum > 0 ? -1 : 1,                                             //  5. CVD  REV: kupni vol=već uđeni=-1, prodajni=+1
+        rsiRecovBull ? 1 : rsiRecovBear ? -1 : 0,                        //  6. R⟳: RSI recovery (normalan)
+        macdH !== null ? (macdH > 0 ? 1 : -1) : 0,                      //  7. MCD: MACD histogram (normalan)
+        ema145 ? (price > ema145 ? 1 : -1) : 0,                         //  8. E145: dugoročni trend (normalan)
+        vols[n-1] > volAvg20 ? -1 : 0,                                   //  9. VOL  REV: visoki vol=kasni ulaz=-1, low=0
+        macdCrossV > 0 ? -1 : macdCrossV < 0 ? 1 : 0,                   // 10. MCC  REV: cross gore=kasno=-1, cross dolje=dno=+1
+        rsiRising ? 1 : rsiFalling ? -1 : 0,                             // 11. RSI↗: RSI smjer (normalan)
+        srsBounce,                                                        // 12. SRS: S/R bounce (normalan)
+        srbBreak,                                                         // 13. SRB: S/R breakout (normalan)
       ];
 
       ultraBull = ultraSigs16.filter(s => s === 1).length;
@@ -1189,51 +1191,52 @@ async function resetOne(pid) {
 const SIG_NAMES = ['E50','RSI','E55','CHP','CVD','R⟳','MCD','E145','VOL','MCC','RSI↗','SRS','SRB'];
 
 // Uvjeti za tooltip — objasni zašto je signal zelen/crven
-// 13 genuinnih signala — CRS (WR 14%), ADXsn i 6Sc maknuti (obavezni gates)
+// 13 genuinnih signala — 6 REVERSANO (WR<31.5% kad ▲, logika invertirana)
+// REV = contrarian/pullback: signal +1 kad je cijena NIŽE / momentum SLAB (potencijalni bounce)
 const SIG_COND_BULL = [
-  'Cijena > EMA50 — srednji trend gore',                       //  1. E50
-  'RSI < 45 — oversold zona, potencijalni bounce',             //  2. RSI
-  'Cijena > EMA55 — srednji/dugi trend gore',                  //  3. E55
-  'Chop < 61.8 — tržište trenira, nije bočno',                //  4. CHP
-  'CVD > 0 — kupci dominiraju volumenom',                      //  5. CVD
-  'RSI izašao iz oversold (<35) i raste — recovery',           //  6. R⟳
-  'MACD histogram > 0 — bullish momentum',                     //  7. MCD
-  'Cijena > EMA145 — dugoročni trend gore',                    //  8. E145
-  'Volumen > 20-bar prosjek — povećana aktivnost',             //  9. VOL
-  'MACD histogram prešao iz neg→poz (zadnja 3 bara)',          // 10. MCC
-  'RSI raste 2+ uzastopna bara — momentum gore',               // 11. RSI↗
-  'Bounce od S/R supporta + RSI raste — reakcija na podršku', // 12. SRS
-  'Proboj S/R resistance gore zadnja 3 bara',                  // 13. SRB
+  '[REV] Cijena < EMA50 — pullback u trendu, potencijalni bounce',      //  1. E50 REV
+  '[REV] RSI > 55 — jak momentum, nastavljanje trenda',                 //  2. RSI REV
+  '[REV] Cijena < EMA55 — pullback, dobra zona za ulaz',               //  3. E55 REV
+  'Chop < 61.8 — tržište trenira, nije bočno',                         //  4. CHP
+  '[REV] CVD prodajni — potencijalno dno, reversal gore',              //  5. CVD REV
+  'RSI izašao iz oversold (<35) i raste — recovery potvrđen',          //  6. R⟳
+  'MACD histogram > 0 — bullish momentum potvrđen',                    //  7. MCD
+  'Cijena > EMA145 — dugoročni trend gore',                            //  8. E145
+  '[REV] Volumen ispod prosjeka — nema gomilanja, nema kasnog ulaza',  //  9. VOL REV
+  '[REV] MACD cross dolje — potencijalno dno, reversal gore',          // 10. MCC REV
+  'RSI raste 2+ uzastopna bara — momentum gore',                       // 11. RSI↗
+  'Bounce od S/R supporta + RSI raste — reakcija na podršku',          // 12. SRS
+  'Proboj S/R resistance gore zadnja 3 bara',                          // 13. SRB
 ];
 const SIG_COND_BEAR = [
-  'Cijena < EMA50 — srednji trend dolje',                      //  1. E50
-  'RSI > 55 — overbought zona, potencijalni pad',              //  2. RSI
-  'Cijena < EMA55 — srednji/dugi trend dolje',                 //  3. E55
-  'Chop > 61.8 — bočno tržište, nema trenda',                 //  4. CHP
-  'CVD < 0 — prodavači dominiraju volumenom',                  //  5. CVD
-  'RSI izašao iz overbought (>65) i pada',                     //  6. R⟳
-  'MACD histogram < 0 — bearish momentum',                     //  7. MCD
-  'Cijena < EMA145 — dugoročni trend dolje',                   //  8. E145
-  '— (niski volumen = neutralan)',                              //  9. VOL
-  'MACD histogram prešao iz poz→neg (zadnja 3 bara)',          // 10. MCC
-  'RSI pada 2+ uzastopna bara — momentum dolje',               // 11. RSI↗
-  'Bounce od S/R resistancea + RSI pada — reakcija na otpor', // 12. SRS
-  'Proboj S/R supporta dolje zadnja 3 bara',                   // 13. SRB
+  '[REV] Cijena > EMA50 — previsoko, iscrpljen move',                  //  1. E50 REV
+  '[REV] RSI < 45 — slab momentum, potencijalni nastavak pada',        //  2. RSI REV
+  '[REV] Cijena > EMA55 — previsoko, iscrpljen move',                  //  3. E55 REV
+  'Chop > 61.8 — bočno tržište, nema trenda',                         //  4. CHP
+  '[REV] CVD kupovni — svi već unutra, potencijalni vrh',              //  5. CVD REV
+  'RSI izašao iz overbought (>65) i pada — pad potvrđen',             //  6. R⟳
+  'MACD histogram < 0 — bearish momentum potvrđen',                   //  7. MCD
+  'Cijena < EMA145 — dugoročni trend dolje',                           //  8. E145
+  '[REV] Visoki volumen — kasni ulaz, svi već uđeni',                  //  9. VOL REV
+  '[REV] MACD cross gore — kasni ulaz na vrhu',                        // 10. MCC REV
+  'RSI pada 2+ uzastopna bara — momentum dolje',                       // 11. RSI↗
+  'Bounce od S/R resistancea + RSI pada — reakcija na otpor',          // 12. SRS
+  'Proboj S/R supporta dolje zadnja 3 bara',                           // 13. SRB
 ];
 const SIG_COND_NEUT = [
-  'EMA50 nedostupan',                           //  1. E50
-  'RSI 45–55 — neutralna zona',                //  2. RSI
-  'EMA55 nedostupan',                           //  3. E55
-  '—',                                          //  4. CHP
-  'CVD = 0',                                    //  5. CVD
-  'RSI nije u recovery zoni',                  //  6. R⟳
-  'MACD nedostupan',                            //  7. MCD
-  'EMA145 nedostupan',                          //  8. E145
-  'Volumen ≤ prosjeku — neutralan',            //  9. VOL
-  'Nema MACD crossa u zadnja 3 bara',          // 10. MCC
-  'RSI ne raste ni pada konzistentno',         // 11. RSI↗
-  'Cijena nije blizu S/R razine',              // 12. SRS
-  'Nema S/R proboja u zadnja 3 bara',          // 13. SRB
+  'EMA50 nedostupan',                                    //  1. E50
+  'RSI 45–55 — neutralna zona (REV: ni jak ni slab)',   //  2. RSI
+  'EMA55 nedostupan',                                    //  3. E55
+  '—',                                                   //  4. CHP
+  'CVD = 0 — nema dominacije',                          //  5. CVD
+  'RSI nije u recovery zoni',                            //  6. R⟳
+  'MACD nedostupan',                                     //  7. MCD
+  'EMA145 nedostupan',                                   //  8. E145
+  'Volumen ispod prosjeka — neutralan (REV: neutralan)', //  9. VOL
+  'Nema MACD crossa u zadnja 3 bara',                   // 10. MCC
+  'RSI ne raste ni pada konzistentno',                  // 11. RSI↗
+  'Cijena nije blizu S/R razine',                       // 12. SRS
+  'Nema S/R proboja u zadnja 3 bara',                   // 13. SRB
 ];
 
 function mandatoryBoxes(s) {

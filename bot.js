@@ -827,22 +827,24 @@ function analyzeUltra(candles, cfg) {
 
   // ── 13 signala: +1 = bullish, -1 = bearish, 0 = neutral ──
   // OBAVEZNI GATING (ne broje se u signale): ADX≥30, 6Sc≥4, RSI asimetričan, 5m S/R test
-  // Maknuti iz signala: CRS (kasni ulaz, WR 14%), ADXsn (obavezan), 6Sc (obavezan)
+  // Maknuti: CRS (WR 14%), ADXsn (obavezan), 6Sc (obavezan)
+  // REVERSANI (WR<31.5% kada ▲ → logika invertirana):
+  //   E50, RSI zona, E55, CVD, VOL, MCC — contrarian/pullback interpretacija
   const sigs = [
-    price > ema50 ? 1 : -1,                          //  1. Cijena vs EMA50
-    rsi < 45 ? 1 : rsi > 55 ? -1 : 0,               //  2. RSI zona (<45=oversold→+1, >55=overbought→-1)
-    price > ema55 ? 1 : -1,                          //  3. Cijena vs EMA55
-    chop < 61.8 ? 1 : -1,                            //  4. Nije choppy
-    cvdSum > 0 ? 1 : -1,                             //  5. CVD volumen
+    price > ema50 ? -1 : 1,                          //  1. E50  REV: cijena>EMA50 = previsoko = -1, ispod = pullback = +1
+    rsi < 45 ? -1 : rsi > 55 ? 1 : 0,               //  2. RSI  REV: RSI>55 = momentum = +1, RSI<45 = slabi = -1
+    price > ema55 ? -1 : 1,                          //  3. E55  REV: cijena>EMA55 = previsoko = -1, ispod = pullback = +1
+    chop < 61.8 ? 1 : -1,                            //  4. CHP: nije choppy = +1 (normalan)
+    cvdSum > 0 ? -1 : 1,                             //  5. CVD  REV: kupni vol = već uđeni = -1, prodajni = potenc. dno = +1
     (rsiMin5 < 35 && rsi > 35 && rsiRising) ? 1
-      : (rsiMax5 > 65 && rsi < 65 && rsiFalling) ? -1 : 0, //  6. RSI recovery
-    macdHist !== null ? (macdHist > 0 ? 1 : -1) : 0, //  7. MACD histogram
-    price > ema145 ? 1 : -1,                          //  8. EMA145 dugoročni trend
-    volLast > volAvg20 ? 1 : 0,                       //  9. Volumen iznad prosjeka
-    macdCross,                                         // 10. MACD cross (zadnja 3 bara)
-    rsiRising ? 1 : rsiFalling ? -1 : 0,              // 11. RSI smjer
-    sig17sr,                                           // 12. S/R bounce (bounce od supporta/resistancea)
-    sig18bk,                                           // 13. S/R breakout (proboj razine u zadnja 3 bara)
+      : (rsiMax5 > 65 && rsi < 65 && rsiFalling) ? -1 : 0, //  6. R⟳: RSI recovery (normalan)
+    macdHist !== null ? (macdHist > 0 ? 1 : -1) : 0, //  7. MCD: MACD histogram (normalan)
+    price > ema145 ? 1 : -1,                          //  8. E145: dugoročni trend (normalan)
+    volLast > volAvg20 ? -1 : 0,                      //  9. VOL  REV: visoki vol = kasni ulaz = -1, low vol = 0 (neutralan)
+    macdCrossUp ? -1 : macdCrossDn ? 1 : 0,           // 10. MCC  REV: cross gore = kasno = -1, cross dolje = dno = +1
+    rsiRising ? 1 : rsiFalling ? -1 : 0,              // 11. RSI↗: RSI smjer (normalan)
+    sig17sr,                                           // 12. SRS: S/R bounce (normalan)
+    sig18bk,                                           // 13. SRB: S/R breakout (normalan)
   ];
 
   const bullCnt = sigs.filter(s => s === 1).length;

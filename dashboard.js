@@ -1380,6 +1380,15 @@ function statusBox(s) {
   return '<span style="color:#444;font-size:12px">—</span>';
 }
 
+// ── Lokalni timestamp helper (UTC+2) — klijentska strana ──────────────────────
+function fmtLocalTs(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d)) return String(iso).slice(0, 16).replace("T", " ");
+  d.setHours(d.getHours() + 2);
+  return d.toISOString().slice(0, 16).replace("T", " ");
+}
+
 async function doScan() {
   const btn   = document.getElementById("scan-btn");
   const tbody = document.getElementById("scan-tbody");

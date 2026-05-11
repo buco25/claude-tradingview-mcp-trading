@@ -1487,7 +1487,7 @@ setInterval(loadBitgetBalance, 30000);
 // Auto-scan on load after 2s delay
 setTimeout(doScan, 2000);
 // Re-scan every 5 minutes
-setInterval(doScan, 5 * 60 * 1000);
+setInterval(doScan, 1 * 60 * 1000);
 </script>
 
 
@@ -1802,7 +1802,7 @@ async function scheduledRun() {
 
 server.listen(PORT, () => {
   console.log(`📊 Dashboard: http://localhost:${PORT}`);
-  console.log(`⚙️  Bot scheduler aktivan (svake 5 min)`);
+  console.log(`⚙️  Bot scheduler aktivan (svake 1 min)`);
   scheduledRun();
   setInterval(scheduledRun, 5 * 60 * 1000);
 

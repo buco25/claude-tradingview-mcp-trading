@@ -4,11 +4,12 @@
  * Portfolio 1 — EMA+RSI    → 1H  | SL 2%  / TP 4%
  * Portfolio 2 — MEGA       → 15m | SL 2%  / TP 4%
  * Portfolio 3 — SYNAPSE-7  → 15m | SL 2%  / TP 4%
- * Portfolio 4 — ULTRA      → 15m | SL 1% / TP 2% | 100x | rizik 1% banke po tradeu
+ * Portfolio 4 — ULTRA      → 15m | Per-simbol SL/TP (ATR tier) | 50x (BTC 75x) | rizik 1% banke po tradeu
  *
- * Risk-based sizing: margin = equity × 1% | notional = margin × 100x
- *   → SL 1% × 100x = 100% margine = likvidacija (gubiš samo ulog)
- *   → TP 2% × 100x = 200% margine = +2% banke po dobitnom tradeu
+ * Risk-based sizing: margin = equity × 1% | notional = margin × 50x (BTC 75x)
+ *   Tier 1 (BTC/ETH/SOL/LINK/XRP): SL 1.5% / TP 4.0% (RR 1:2.67)
+ *   Tier 2 (DOGE/NEAR/ADA/SUI/TAO/HYPE/PEPE/APT/SEI): SL 2.0% / TP 4.5% (RR 1:2.25)
+ *   Tier 3 (ENA): SL 2.5% / TP 5.5% (RR 1:2.20)
  */
 
 import "dotenv/config";
@@ -23,8 +24,8 @@ const LEVERAGE      = 50;     // 50x default → SL 1.5% = 75% margine (više pr
 const BTC_LEVERAGE  = 75;    // BTC posebno — 75x
 const START_CAPITAL = 1000;   // po portfoliju
 const RISK_PCT      = 1.0;    // % banke koji rizikaš po tradeu (= veličina uloga/margine)
-const SL_PCT        = 1.5;    // fiksni SL % | SL 1.5% × 50x = 75% margine
-const TP_PCT        = 2.5;    // fiksni TP % | RR 1:1.67
+const SL_PCT        = 1.5;    // fallback SL % (Tier 1) — override per-simbol u symbol_sltp
+const TP_PCT        = 4.0;    // fallback TP % (Tier 1) — override per-simbol u symbol_sltp
 const MAX_TRADES_PER_DAY = 100;
 const MAX_OPEN_PER_PORTFOLIO = 8;  // max otvorenih pozicija po portfoliju (+ BTC bonus slot)
 

@@ -1,132 +1,298 @@
 {
-  "watchlist_fib_gp":    [],
-  "watchlist_ob":        [],
-
+  "watchlist_fib_gp": [],
+  "watchlist_ob": [],
   "all_symbols": [
-    "DOGEUSDT","NEARUSDT","ADAUSDT","ETHUSDT","SUIUSDT",
-    "TAOUSDT","SOLUSDT","HYPEUSDT","LINKUSDT","PEPEUSDT",
-    "BTCUSDT","XRPUSDT","APTUSDT","SEIUSDT","ENAUSDT"
+    "DOGEUSDT",
+    "NEARUSDT",
+    "ADAUSDT",
+    "ETHUSDT",
+    "SUIUSDT",
+    "TAOUSDT",
+    "SOLUSDT",
+    "HYPEUSDT",
+    "LINKUSDT",
+    "PEPEUSDT",
+    "BTCUSDT",
+    "XRPUSDT",
+    "APTUSDT",
+    "SEIUSDT",
+    "ENAUSDT"
   ],
-
   "watchlist_ema_rsi": [],
   "watchlist_3layer": [],
   "watchlist_mega": [],
   "watchlist_synapse7": [],
   "watchlist_synapse_t": [
-    "DOGEUSDT","NEARUSDT","ADAUSDT","ETHUSDT","SUIUSDT",
-    "TAOUSDT","SOLUSDT","HYPEUSDT","LINKUSDT","PEPEUSDT",
-    "BTCUSDT","XRPUSDT","APTUSDT","SEIUSDT","ENAUSDT"
+    "DOGEUSDT",
+    "NEARUSDT",
+    "ADAUSDT",
+    "ETHUSDT",
+    "SUIUSDT",
+    "TAOUSDT",
+    "SOLUSDT",
+    "HYPEUSDT",
+    "LINKUSDT",
+    "PEPEUSDT",
+    "BTCUSDT",
+    "XRPUSDT",
+    "APTUSDT",
+    "SEIUSDT",
+    "ENAUSDT"
   ],
-
   "portfolio_timeframes": {
-    "ema_rsi":    "1H",
-    "mega":       "15m",
-    "synapse7":   "15m",
-    "synapse_t":  "15m"
+    "ema_rsi": "1H",
+    "mega": "15m",
+    "synapse7": "15m",
+    "synapse_t": "15m"
   },
-
   "symbol_timeframes": {},
-  "mega_timeframes":   {},
+  "mega_timeframes": {},
   "default_timeframe": "1H",
-
   "_sltp_note": "Per-simbol SL/TP na osnovu 30-dnevnog ATR analize. Tier1=niska vol, Tier2=srednja, Tier3=visoka.",
   "symbol_sltp": {
-    "SEIUSDT":  { "slPct": 2.5, "tpPct": 3.5 },
-    "TIAUSDT":  { "slPct": 2.5, "tpPct": 3.5 },
-    "WIFUSDT":  { "slPct": 2.5, "tpPct": 3.5 },
-    "TAOUSDT":  { "slPct": 2.5, "tpPct": 3.5 },
-    "ARBUSDT":  { "slPct": 2.5, "tpPct": 3.5 },
-    "APTUSDT":  { "slPct": 2.5, "tpPct": 3.5 },
-    "INJUSDT":  { "slPct": 2.5, "tpPct": 3.5 },
-    "ENAUSDT":  { "slPct": 2.0, "tpPct": 3.0 },
-    "FETUSDT":  { "slPct": 2.0, "tpPct": 3.0 },
-    "SUIUSDT":  { "slPct": 2.0, "tpPct": 3.0 },
-    "PEPEUSDT": { "slPct": 2.0, "tpPct": 3.0 },
-    "NEARUSDT": { "slPct": 2.0, "tpPct": 3.0 },
-    "DOTUSDT":  { "slPct": 2.0, "tpPct": 3.0 },
-    "HYPEUSDT": { "slPct": 2.0, "tpPct": 3.0 },
-    "DOGEUSDT": { "slPct": 2.0, "tpPct": 3.0 },
-    "ADAUSDT":  { "slPct": 2.0, "tpPct": 3.0 },
-    "AVAXUSDT": { "slPct": 2.0, "tpPct": 3.0 },
-    "LINKUSDT": { "slPct": 1.5, "tpPct": 2.5 },
-    "SOLUSDT":  { "slPct": 1.5, "tpPct": 2.5 },
-    "ETHUSDT":  { "slPct": 1.5, "tpPct": 2.5 },
-    "XRPUSDT":  { "slPct": 1.5, "tpPct": 2.5 },
-    "BTCUSDT":  { "slPct": 1.5, "tpPct": 2.5 },
-    "BNBUSDT":  { "slPct": 1.5, "tpPct": 2.5 },
-    "XAUUSDT":  { "slPct": 1.5, "tpPct": 2.5 },
-    "XAGUSDT":  { "slPct": 1.5, "tpPct": 2.5 }
+    "TIAUSDT": {
+      "slPct": 2.5,
+      "tpPct": 3.5
+    },
+    "WIFUSDT": {
+      "slPct": 2.5,
+      "tpPct": 3.5
+    },
+    "ARBUSDT": {
+      "slPct": 2.5,
+      "tpPct": 3.5
+    },
+    "INJUSDT": {
+      "slPct": 2.5,
+      "tpPct": 3.5
+    },
+    "FETUSDT": {
+      "slPct": 2,
+      "tpPct": 3
+    },
+    "DOTUSDT": {
+      "slPct": 2,
+      "tpPct": 3
+    },
+    "AVAXUSDT": {
+      "slPct": 2,
+      "tpPct": 3
+    },
+    "BNBUSDT": {
+      "slPct": 1.5,
+      "tpPct": 2.5
+    },
+    "XAUUSDT": {
+      "slPct": 1.5,
+      "tpPct": 2.5
+    },
+    "XAGUSDT": {
+      "slPct": 1.5,
+      "tpPct": 2.5
+    },
+    "DOGEUSDT": {
+      "slPct": 2,
+      "tpPct": 4.5,
+      "tier": 2,
+      "avgRange": "4.33%"
+    },
+    "NEARUSDT": {
+      "slPct": 2,
+      "tpPct": 4.5,
+      "tier": 2,
+      "avgRange": "4.93%"
+    },
+    "ADAUSDT": {
+      "slPct": 2,
+      "tpPct": 4.5,
+      "tier": 2,
+      "avgRange": "4.02%"
+    },
+    "ETHUSDT": {
+      "slPct": 1.5,
+      "tpPct": 4,
+      "tier": 1,
+      "avgRange": "3.55%"
+    },
+    "SUIUSDT": {
+      "slPct": 2,
+      "tpPct": 4.5,
+      "tier": 2,
+      "avgRange": "5.36%"
+    },
+    "TAOUSDT": {
+      "slPct": 2,
+      "tpPct": 4.5,
+      "tier": 2,
+      "avgRange": "5.84%"
+    },
+    "SOLUSDT": {
+      "slPct": 1.5,
+      "tpPct": 4,
+      "tier": 1,
+      "avgRange": "3.54%"
+    },
+    "HYPEUSDT": {
+      "slPct": 2,
+      "tpPct": 4.5,
+      "tier": 2,
+      "avgRange": "4.55%"
+    },
+    "LINKUSDT": {
+      "slPct": 1.5,
+      "tpPct": 4,
+      "tier": 1,
+      "avgRange": "3.87%"
+    },
+    "PEPEUSDT": {
+      "slPct": 2,
+      "tpPct": 4.5,
+      "tier": 2,
+      "avgRange": "5.58%"
+    },
+    "BTCUSDT": {
+      "slPct": 1.5,
+      "tpPct": 4,
+      "tier": 1,
+      "avgRange": "2.76%"
+    },
+    "XRPUSDT": {
+      "slPct": 1.5,
+      "tpPct": 4,
+      "tier": 1,
+      "avgRange": "3.07%"
+    },
+    "APTUSDT": {
+      "slPct": 2,
+      "tpPct": 4.5,
+      "tier": 2,
+      "avgRange": "6.09%"
+    },
+    "SEIUSDT": {
+      "slPct": 2,
+      "tpPct": 4.5,
+      "tier": 2,
+      "avgRange": "5.27%"
+    },
+    "ENAUSDT": {
+      "slPct": 2.5,
+      "tpPct": 5.5,
+      "tier": 3,
+      "avgRange": "7.67%"
+    }
   },
-
   "strategies": {
     "fib_gp": {
       "name": "Fib Golden Pocket + Market Structure",
       "symbols": [],
       "note": "Deaktivirana — PF < 1.0 na svim TF-ovima.",
       "params": {
-        "pivotLen": 4, "fibLo": 0.45, "fibHi": 0.65, "fibTp": 1.5,
-        "ema9Len": 9, "ema21Len": 21, "atrLen": 14, "atrSlMult": 0.5
+        "pivotLen": 4,
+        "fibLo": 0.45,
+        "fibHi": 0.65,
+        "fibTp": 1.5,
+        "ema9Len": 9,
+        "ema21Len": 21,
+        "atrLen": 14,
+        "atrSlMult": 0.5
       }
     },
     "ema_rsi": {
       "name": "EMA Cross + RSI Pullback",
       "params": {
-        "ema9Len": 9, "ema21Len": 21, "ema50Len": 50,
-        "rsiLen": 14, "rsiLongLo": 35, "rsiLongHi": 58,
-        "rsiShortLo": 42, "rsiShortHi": 65,
-        "atrLen": 14, "atrSl": 1.0, "atrTp": 2.5
+        "ema9Len": 9,
+        "ema21Len": 21,
+        "ema50Len": 50,
+        "rsiLen": 14,
+        "rsiLongLo": 35,
+        "rsiLongHi": 58,
+        "rsiShortLo": 42,
+        "rsiShortHi": 65,
+        "atrLen": 14,
+        "atrSl": 1,
+        "atrTp": 2.5
       }
     },
     "three_layer": {
       "name": "Signal + Momentum + Trend (3-Layer) — DEAKTIVIRAN",
       "note": "Uklonjen — WR 27.8%, P&L -$14 nakon 18 tradova.",
       "params": {
-        "ema9Len": 9, "ema21Len": 21, "ema145Len": 145,
-        "macdFast": 12, "macdSlow": 26, "macdSignal": 9,
-        "atrLen": 14, "atrSl": 1.0, "atrTp": 1.5
+        "ema9Len": 9,
+        "ema21Len": 21,
+        "ema145Len": 145,
+        "macdFast": 12,
+        "macdSlow": 26,
+        "macdSignal": 9,
+        "atrLen": 14,
+        "atrSl": 1,
+        "atrTp": 1.5
       }
     },
     "order_block": {
       "name": "Order Block — Session Open (deaktiviran)",
       "params": {
-        "sessionHours": [9, 15], "obLookback": 10,
-        "ema21Len": 21, "ema50Len": 50, "rrRatio": 2.0
+        "sessionHours": [
+          9,
+          15
+        ],
+        "obLookback": 10,
+        "ema21Len": 21,
+        "ema50Len": 50,
+        "rrRatio": 2
       }
     },
     "synapse7": {
       "name": "SYNAPSE-7 — AI kNN + AutoTune + 6-Scale + RSI + CVD",
       "description": "Kombinira 5 podsustava. Min 4/5 signala za ulaz. kMem 100 (25h). SL 2% / TP 4%.",
       "params": {
-        "kLen": 10, "kMem": 100, "kK": 5, "kSmth": 5, "kSigLn": 5,
-        "atWin": 20, "yzMin": 3,
-        "rsiLen": 14, "rsiMaLen": 14,
+        "kLen": 10,
+        "kMem": 100,
+        "kK": 5,
+        "kSmth": 5,
+        "kSigLn": 5,
+        "atWin": 20,
+        "yzMin": 3,
+        "rsiLen": 14,
+        "rsiMaLen": 14,
         "cvdLen": 20,
         "minSig": 4,
-        "slPct": 2.0, "tpPct": 4.0
+        "slPct": 2,
+        "tpPct": 4
       }
     },
     "synapse_t": {
-      "name": "ULTRA — 18-Signal Combined Strategy",
-      "description": "Kombinira 18 signala: EMA, Cross, E50, RSI zona, E55, ADX>18, Chop, 6Sc, CVD, RSI recovery, MACD hist, E145, Vol, MACD cross, RSI smjer, ADX>25, SRS (S/R bounce), SRB (S/R breakout). Min 9/18 signala. H/L breakout entry. SL 1.5% / TP 2.5% (RR 1:1.67). 50x leverage.",
+      "name": "ULTRA — 13-Signal Combined Strategy (ATR per-symbol SL/TP)",
+      "description": "Kombinira 13 signala: E50(REV), RSI(REV), E55(REV), CHP, CVD(REV), R⟳, MCD, E145, VOL(REV), MCC(REV), RSI↗, SRS, SRB. Mandatory gates: ADX≥25, 6Sc≥4/6, RSI asimetričan, 5mSR. Min 5/13 signala. Per-simbol SL/TP: Tier1 SL1.5%/TP4% | Tier2 SL2%/TP4.5% | Tier3 SL2.5%/TP5.5%. 50x leverage (BTC 75x).",
       "params": {
         "minSig": 5,
-        "slPct": 1.5, "tpPct": 2.5
+        "slPct": 1.5,
+        "tpPct": 4.0
       }
     },
     "mega": {
       "name": "MEGA — EMA9/21 + EMA55/200 + RSI + ADX + Choppiness",
       "params": {
-        "ema9Len": 9, "ema21Len": 21, "ema55Len": 55, "ema200Len": 200,
-        "rsiLen": 14, "adxLen": 14, "adxMin": 18, "chopLen": 14, "chopMax": 61.8,
-        "rsiLongLo": 30, "rsiLongHi": 60, "rsiShortLo": 40, "rsiShortHi": 70,
-        "slPct": 2.0, "tpPct": 4.0
+        "ema9Len": 9,
+        "ema21Len": 21,
+        "ema55Len": 55,
+        "ema200Len": 200,
+        "rsiLen": 14,
+        "adxLen": 14,
+        "adxMin": 18,
+        "chopLen": 14,
+        "chopMax": 61.8,
+        "rsiLongLo": 30,
+        "rsiLongHi": 60,
+        "rsiShortLo": 40,
+        "rsiShortHi": 70,
+        "slPct": 2,
+        "tpPct": 4
       }
     }
   },
-
   "risk_rules": [
-    "Risk-based sizing: margin = equity × 1% | notional = margin × 50x (BTC: 75x) | SL 1.5% / TP 2.5%",
-    "ULTRA: SL 1.5% / TP 2.5% / 50x leverage (BTC 75x) / rizik 1% banke po tradeu",
+    "Risk-based sizing: margin = equity × 1% | notional = margin × 50x (BTC: 75x) | Per-simbol SL/TP iz symbol_sltp",
+    "ULTRA: Tier1(SL1.5%/TP4%) Tier2(SL2%/TP4.5%) Tier3(SL2.5%/TP5.5%) / 50x leverage (BTC 75x) / rizik 1% banke po tradeu",
     "Samo jedna pozicija po simbolu istovremeno",
     "Max 8 otvorenih pozicija istovremeno + BTC bonus slot",
     "Dnevni limit: 100 tradova",

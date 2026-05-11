@@ -1727,8 +1727,6 @@ function checkDailyLimit(pid) {
 // Ako portfolio ima 5 uzastopnih gubitaka → pauza 8 sati.
 // Stanje se čuva na disku (preživi restart).
 
-const CB_LOSSES    = 7;           // broj uzastopnih gubitaka → blokada
-const CB_COOLDOWN  = 8 * 60 * 60 * 1000;  // 8 sati u ms
 const CB_DRAWDOWN_MIN = 200;      // minimalni equity ($) — ispod = stop trading
 const SYM_CONSEC_LOSSES = 5;      // uzastopni gubici po simbolu → suspendiraj sa liste
 const CB_FILE      = `${DATA_DIR}/circuit_breaker.json`;
@@ -1942,8 +1940,6 @@ export async function run() {
       continue;
     }
 
-    // ── Circuit breaker: 7 uzastopnih gubitaka → 8h pauza ────────────────────
-    if (!await checkCircuitBreaker(pid, pDef.name)) continue;
 
     const openPositions = loadPositions(pid);
     const openSymbols   = openPositions.map(p => p.symbol);

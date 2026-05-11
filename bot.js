@@ -890,21 +890,88 @@ function analyzeUltra(candles, cfg) {
 // Ulaz odmah na close signal-svjećice — bez čekanja H/L breakouta.
 // Signal pali → trade se otvara na trenutnoj cijeni (close zadnje svjećice).
 
+// ── 5m S/R test helper ────────────────────────────────────────────────────────
+// Vraća true ako je cijena u zadnjih 10 svjećica na 5m testirala S/R razinu
+// i odbila se u smjeru signala (LONG = testirala support, SHORT = testirala resistance)
+async function check5mSRTest(symbol, signalSide) {
+  try {
+    const url = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=5m&limit=80`;
+    const res  = await fetch(url);
+    const json = await res.json();
+    if (json.code !== "00000" || !json.data?.length) return false;
+
+    const c5 = json.data.map(k => ({
+      high: parseFloat(k[2]), low: parseFloat(k[3]), close: parseFloat(k[4]),
+    }));
+    const n5    = c5.length;
+    const price = c5[n5 - 1].close;
+
+    // Pivot S/R na 5m (N=3, lookback 60 bara)
+    const pivN = 3, srLookback = 60;
+    const srStart = Math.max(pivN, n5 - srLookback);
+    const srEnd   = n5 - pivN - 1;
+    const resistances5 = [], supports5 = [];
+    for (let i = srStart; i <= srEnd; i++) {
+      let ph = true, pl = true;
+      for (let j = i - pivN; j <= i + pivN; j++) {
+        if (j === i || j < 0 || j >= n5) continue;
+        if (c5[j].high >= c5[i].high) ph = false;
+        if (c5[j].low  <= c5[i].low)  pl = false;
+      }
+      if (ph) resistances5.push(c5[i].high);
+      if (pl) supports5.push(c5[i].low);
+    }
+
+    const srZone = 0.015; // 1.5% zona oko S/R razine
+
+    // Provjeri zadnjih 10 svjećica: je li cijena bila u S/R zoni?
+    const lookback10 = c5.slice(n5 - 10);
+
+    if (signalSide === "LONG") {
+      // Tražimo: wick/close dodirnuo support, ali se current close vratio gore
+      const supBelow = supports5.filter(s => s < price * 1.01).sort((a, b) => b - a);
+      const nearSup  = supBelow[0] ?? null;
+      if (!nearSup) return false;
+      const touched = lookback10.some(bar => bar.low <= nearSup * (1 + srZone));
+      const recovered = price > nearSup * (1 + srZone * 0.3);
+      return touched && recovered;
+    } else {
+      // SHORT: tražimo: wick/close dodirnuo resistance, ali se vratio dolje
+      const resAbove = resistances5.filter(r => r > price * 0.99).sort((a, b) => a - b);
+      const nearRes  = resAbove[0] ?? null;
+      if (!nearRes) return false;
+      const touched  = lookback10.some(bar => bar.high >= nearRes * (1 - srZone));
+      const rejected = price < nearRes * (1 - srZone * 0.3);
+      return touched && rejected;
+    }
+  } catch (e) {
+    console.log(`  ⚠️  [5m SR] ${symbol}: ${e.message}`);
+    return false;
+  }
+}
+
 async function analyzeUltraPullback(symbol, candles, cfg) {
   const last  = candles[candles.length - 1];
   const price = last.close;
 
-  // Očisti stale pending zapise (legacy — više se ne koriste ali ostavljamo čišćenje)
+  // Očisti stale pending zapise (legacy)
   const pid = "synapse_t";
   let pending = loadPending(pid);
   pending = pending.filter(p => p.symbol !== symbol);
   savePending(pid, pending);
 
-  // Pokreni analizu i vrati signal direktno — ulaz na close
+  // Pokreni 15m analizu
   const result = analyzeUltra(candles, cfg);
 
   if (result.signal === "LONG" || result.signal === "SHORT") {
-    console.log(`  ✅ [ULTRA] ${symbol} ${result.signal} @ ${fmtPrice(price)} — ulaz odmah (${result.bullScore ?? 0}↑ ${result.bearScore ?? 0}↓ /18)`);
+    // 4. obavezni uvjet: 5m S/R test u suprotnom smjeru
+    const srOk = await check5mSRTest(symbol, result.signal);
+    if (!srOk) {
+      console.log(`  ⛔ [ULTRA] ${symbol} ${result.signal} — 4. uvjet FAIL: nema 5m S/R testa`);
+      return { ...result, signal: "NEUTRAL",
+        reason: `${result.reason} | 5m SR test✗` };
+    }
+    console.log(`  ✅ [ULTRA] ${symbol} ${result.signal} @ ${fmtPrice(price)} — sva 4 uvjeta OK (${result.bullScore ?? 0}↑/${result.bearScore ?? 0}↓ | 5m SR✓)`);
   }
 
   return result;

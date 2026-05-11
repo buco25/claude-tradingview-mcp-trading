@@ -900,7 +900,7 @@ function analyzeUltra(candles, cfg) {
 // ── 5m S/R test helper ────────────────────────────────────────────────────────
 // Vraća true ako je cijena u zadnjih 10 svjećica na 5m testirala S/R razinu
 // i odbila se u smjeru signala (LONG = testirala support, SHORT = testirala resistance)
-async function check5mSRTest(symbol, signalSide) {
+export async function check5mSRTest(symbol, signalSide) {
   try {
     const url = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=5m&limit=80`;
     const res  = await fetch(url);

@@ -6,7 +6,7 @@
 import "dotenv/config";
 import http from "http";
 import { readFileSync, writeFileSync, existsSync } from "fs";
-import { run as botRun, checkBreakouts, syncPositionsFromBitget } from "./bot.js";
+import { run as botRun, checkBreakouts, syncPositionsFromBitget, check5mSRTest } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -463,7 +463,17 @@ async function runScan(rules) {
         const symSltp = rules.symbol_sltp?.[sym] || {};
         const slPct   = symSltp.slPct ?? 1.5;
         const tpPct   = symSltp.tpPct ?? 2.5;
-        results.push({ symbol: sym, ...s, pending, slPct, tpPct });
+
+        // 5m S/R test — samo za simbole koji imaju aktivan LONG/SHORT signal
+        let srOk = null;  // null = nije primjenjivo / nije provjeravano
+        const activeSig = s.ultraSig === "LONG" || s.ultraSig === "SHORT"
+                       || (s.ultraSig || "").startsWith("SETUP");
+        if (activeSig) {
+          const side = s.ultraSig === "SHORT" || s.ultraSig === "SETUP↓" ? "SHORT" : "LONG";
+          srOk = await check5mSRTest(sym, side).catch(() => null);
+        }
+
+        results.push({ symbol: sym, ...s, pending, slPct, tpPct, srOk });
       } catch (e) {
         results.push({ symbol: sym, error: e.message });
       }
@@ -1295,8 +1305,14 @@ function mandatoryBoxes(s) {
     ? (rsiShortOk ? ' > 30 ✓ (nije oversold)' : ' ≤ 30 ✗ — oversold, blokiran SHORT')
     : (rsiLongOk  ? ' < 72 ✓ (nije overbought)' : ' ≥ 72 ✗ — overbought, blokiran LONG'));
 
-  // 4. 5m S/R test — samo bot zna
-  const srTip = '5m S/R test: provjerava bot pri otvaranju trejda';
+  // 4. 5m S/R test — srOk: true=prošao, false=pao, null=nije provjeravano
+  const srOk  = s.srOk;
+  const srCol = srOk === true ? '#00c48c' : srOk === false ? '#ff4d4d' : '#8b949e';
+  const srBg  = srOk === true ? '#0d3d26' : srOk === false ? '#3d0d0d' : '#1c2128';
+  const srTip = srOk === true  ? '5m S/R test ✓ — cijena je testirala S/R zonu i odbila se u smjeru signala' :
+                srOk === false ? '5m S/R test ✗ — nema potvrde S/R zona na 5m — ulaz blokiran' :
+                                 '5m S/R test: provjerava se samo za LONG/SHORT signale';
+  const srLbl = srOk === true ? '5mSR ✓' : srOk === false ? '5mSR ✗' : '5mSR';
 
   function badge(label, col, bg, tip) {
     return '<span title="' + tip + '" style="display:inline-flex;flex-direction:column;align-items:center;background:' + bg +
@@ -1307,7 +1323,7 @@ function mandatoryBoxes(s) {
   return badge('ADX', adxCol, adxBg, adxTip) +
          badge('6Sc', scaleCol, scaleBg, scaleTip) +
          badge('RSI', rsiCol, rsiBg, rsiTip) +
-         badge('5mSR', '#8b949e', '#1c2128', srTip);
+         badge(srLbl, srCol, srBg, srTip);
 }
 
 function sigBoxes(sigs) {

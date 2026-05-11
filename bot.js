@@ -1462,6 +1462,36 @@ async function setupSymbol(symbol) {
   return actualLeverage;
 }
 
+// ─── Zatvori poziciju na Bitgetu (market order, reduceOnly) ───────────────────
+async function closeBitgetPosition(symbol, side, quantity) {
+  const holdSide  = side === "LONG" ? "long" : "short";
+  const closeSide = side === "LONG" ? "sell" : "buy";
+  try {
+    // Otkaži sve otvorene SL/TP naloge za ovaj simbol
+    await bitgetPost("/api/v2/mix/order/cancel-plan-order", {
+      symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
+      planType: "profit_loss",
+    }).catch(() => {});
+
+    // Market close nalog
+    const r = await bitgetPost("/api/v2/mix/order/place-order", {
+      symbol, productType: "USDT-FUTURES", marginMode: "isolated", marginCoin: "USDT",
+      side: closeSide, tradeSide: "close",
+      orderType: "market", size: String(quantity),
+    });
+    if (r?.code === "00000") {
+      console.log(`  🔄 [FLIP] ${symbol} ${side} zatvoreno @ market (qty=${quantity})`);
+      return true;
+    } else {
+      console.log(`  ❌ [FLIP] Close fail: ${r?.code} ${r?.msg}`);
+      return false;
+    }
+  } catch(e) {
+    console.log(`  ❌ [FLIP] closeBitgetPosition greška: ${e.message}`);
+    return false;
+  }
+}
+
 async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp, slPct, tpPct) {
   // Postavi isolated margin + leverage prije svakog naloga; vrati stvarni leverage
   const actualLeverage = await setupSymbol(symbol);
@@ -1919,9 +1949,53 @@ export async function run() {
     }
 
     for (const symbol of pDef.symbols) {
-      if (openSymbols.includes(symbol)) {
-        console.log(`  ⏭️  [${pDef.name}] ${symbol} — pozicija već otvorena`);
-        continue;
+      const existingPos = openPositions.find(p => p.symbol === symbol);
+      if (existingPos) {
+        // ── Signal flip: kontra signal → zatvori i otvori suprotno ─────────
+        try {
+          const flipCandles = await fetchCandles(symbol, pDef.timeframe, 250);
+          const flipResult  = analyzeUltra(flipCandles, pDef.params);
+          const flipSignal  = flipResult.signal;
+          const isFlip = (existingPos.side === "LONG"  && flipSignal === "SHORT") ||
+                         (existingPos.side === "SHORT" && flipSignal === "LONG");
+
+          if (!isFlip) {
+            console.log(`  ⏭️  [${pDef.name}] ${symbol} — pozicija već otvorena (${existingPos.side}), nema flip signala`);
+            continue;
+          }
+
+          console.log(`  🔄 [FLIP] ${symbol} ${existingPos.side} → ${flipSignal} — kontra signal detektiran!`);
+          await tg(`🔄 <b>FLIP SIGNAL [${pDef.name}]</b>\n${symbol}: <b>${existingPos.side} → ${flipSignal}</b>\nZatvaram staru poziciju i otvaram novu...`);
+
+          const isLive = pDef.live === true && !PAPER_TRADING;
+
+          if (isLive) {
+            const qty = existingPos.quantity || (existingPos.totalUSD / existingPos.entryPrice);
+            const closed = await closeBitgetPosition(symbol, existingPos.side, qty);
+            if (!closed) {
+              console.log(`  ❌ [FLIP] Nije uspjelo zatvaranje ${symbol} — preskačem flip`);
+              continue;
+            }
+          }
+
+          // Zapiši zatvaranje u tracking
+          const flipPos = loadPositions(pid);
+          const updatedPos = flipPos.filter(p => p.symbol !== symbol);
+          savePositions(pid, updatedPos);
+
+          // Kratka pauza da Bitget procesira close
+          if (isLive) await new Promise(r => setTimeout(r, 2000));
+
+          // Otvori novu poziciju — pad kroz u normalnu entry logiku ispod
+          openPositions.length = 0;
+          openPositions.push(...loadPositions(pid));
+          openSymbols.length = 0;
+          openSymbols.push(...openPositions.map(p => p.symbol));
+
+        } catch(e) {
+          console.log(`  ❌ [FLIP] Greška za ${symbol}: ${e.message}`);
+          continue;
+        }
       }
 
       // Provjeri limit ponovo unutar petlje — BTC uvijek prolazi bez obzira na broj

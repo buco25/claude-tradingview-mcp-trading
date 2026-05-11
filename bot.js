@@ -863,68 +863,25 @@ function analyzeUltra(candles, cfg) {
     reason: `ULTRA: ↑${bullCnt} ↓${bearCnt} /18 (min ${minSig})` };
 }
 
-// ─── ULTRA Candle H/L Breakout Entry ──────────────────────────────────────────
-// Signal fires on candle N → spremi H/L te svijeće
-// LONG: ulaz kad price > triggerHigh (breakout iznad higa signal-svijeće)
-// SHORT: ulaz kad price < triggerLow  (breakdown ispod lowa signal-svijeće)
+// ─── ULTRA Immediate Entry ─────────────────────────────────────────────────────
+// Ulaz odmah na close signal-svjećice — bez čekanja H/L breakouta.
+// Signal pali → trade se otvara na trenutnoj cijeni (close zadnje svjećice).
 
 async function analyzeUltraPullback(symbol, candles, cfg) {
   const last  = candles[candles.length - 1];
   const price = last.close;
-  const pid   = "synapse_t";
-  const TTL   = 15 * 60 * 1000;  // 1 svjećica (15m) — signal vrijedi samo do sljedeće svjećice
 
+  // Očisti stale pending zapise (legacy — više se ne koriste ali ostavljamo čišćenje)
+  const pid = "synapse_t";
   let pending = loadPending(pid);
-  const now   = Date.now();
-  pending = pending.filter(p => now - p.ts < TTL);
+  pending = pending.filter(p => p.symbol !== symbol);
+  savePending(pid, pending);
 
-  const existing = pending.find(p => p.symbol === symbol);
-
-  if (existing) {
-    // Provjeri breakout — koristimo HIGH/LOW trenutne svijeće (ne close)
-    // SHORT: aktivira čim wick/close padne ispod lowa signal-svijeće
-    // LONG:  aktivira čim wick/close poraste iznad higa signal-svijeće
-    const hit = existing.side === "LONG"
-      ? last.high > existing.triggerHigh    // hig trenutne svijeće prešao iznad trigera
-      : last.low  < existing.triggerLow;    // low trenutne svijeće pao ispod trigera
-
-    if (hit) {
-      pending = pending.filter(p => p.symbol !== symbol);
-      savePending(pid, pending);
-      const baseResult = analyzeUltra(candles, cfg);
-      return {
-        ...baseResult,
-        signal: existing.side,
-        price,
-        reason: `[ULTRA BRK ${existing.side}] Signal @ ${fmtPrice(existing.signalPrice)} | breakout @ ${fmtPrice(price)}`,
-      };
-    }
-
-    // Cancel ako score pao ili signal flipnuo
-    const freshResult = analyzeUltra(candles, cfg);
-    if (freshResult.signal !== existing.side) {
-      pending = pending.filter(p => p.symbol !== symbol);
-      savePending(pid, pending);
-      console.log(`  🔄 [ULTRA] ${symbol} — pending ${existing.side} canceliran (${freshResult.signal === "NEUTRAL" ? "score pao" : "flip"})`);
-    } else {
-      console.log(`  ⏳ [ULTRA] ${symbol} ${existing.side} čeka breakout | TrigH:${fmtPrice(existing.triggerHigh)} TrigL:${fmtPrice(existing.triggerLow)} | CandH:${fmtPrice(last.high)} CandL:${fmtPrice(last.low)} | Close:${fmtPrice(price)}`);
-    }
-    return { price, signal: "NEUTRAL", reason: `Čeka ULTRA breakout H:${fmtPrice(existing.triggerHigh)} L:${fmtPrice(existing.triggerLow)}` };
-  }
-
-  // Nema pendinga — pokreni normalnu analizu
+  // Pokreni analizu i vrati signal direktno — ulaz na close
   const result = analyzeUltra(candles, cfg);
 
   if (result.signal === "LONG" || result.signal === "SHORT") {
-    // Spremi H/L signal-svijeće kao breakout trigger
-    const sigCandle = candles[candles.length - 1];
-    const triggerHigh = sigCandle.high;
-    const triggerLow  = sigCandle.low;
-
-    pending.push({ symbol, side: result.signal, signalPrice: price, triggerHigh, triggerLow, ts: now });
-    savePending(pid, pending);
-    console.log(`  📌 [ULTRA] ${symbol} ${result.signal} signal @ ${fmtPrice(price)} → čeka breakout iznad ${fmtPrice(triggerHigh)} / ispod ${fmtPrice(triggerLow)}`);
-    return { price, signal: "NEUTRAL", reason: `ULTRA signal, čeka breakout H:${fmtPrice(triggerHigh)} L:${fmtPrice(triggerLow)}` };
+    console.log(`  ✅ [ULTRA] ${symbol} ${result.signal} @ ${fmtPrice(price)} — ulaz odmah (${result.bullScore ?? 0}↑ ${result.bearScore ?? 0}↓ /18)`);
   }
 
   return result;
@@ -2063,114 +2020,15 @@ export async function run() {
   writeHeartbeat("ok", { portfolios: nPort, symbols: totalSymbols, leverage: LEVERAGE });
 }
 
-// ─── Fast breakout checker (svake minute) ──────────────────────────────────────
-// Provjerava pending breakout trigere bez punog signal scana.
-// Čim live cijena probije triggerHigh (LONG) ili triggerLow (SHORT) → odmah otvara trade.
-
+// ─── checkBreakouts — deaktiviran (ulaz je sada immediatan na signal-svjećici) ──
+// Ostavljamo export zbog kompatibilnosti s dashboard.js importom.
 export async function checkBreakouts() {
-  const pid     = "synapse_t";
-  const TTL     = 15 * 60 * 1000;
-  const now     = Date.now();
-  let   pending = loadPending(pid);
-
-  // Makni istekle
-  pending = pending.filter(p => now - p.ts < TTL);
-  if (pending.length === 0) return;
-
-  const rules     = JSON.parse(readFileSync("rules.json", "utf8"));
-  const portfolios = buildPortfolios(rules);
-  const pDef      = portfolios[pid];
-  if (!pDef) return;
-
-  const openPositions = loadPositions(pid);
-  const openSymbols   = openPositions.map(p => p.symbol);
-
-  for (const p of pending) {
-    const { symbol, side, triggerHigh, triggerLow, signalPrice, ts } = p;
-
-    // Provjeri limit svaki put (čitaj svježe da uvaži pozicije otvorene unutar iste petlje)
-    const currentOpen = loadPositions(pid);
-    if (currentOpen.length >= MAX_OPEN_PER_PORTFOLIO) {
-      console.log(`  🔒 [checkBreakouts] Max ${MAX_OPEN_PER_PORTFOLIO} otvorenih — preskačem ${symbol}`);
-      break;
-    }
-
-    // Ako već otvorena pozicija za ovaj simbol — preskoči
-    if (currentOpen.map(x => x.symbol).includes(symbol)) continue;
-
-    // Dohvati live ticker s Bitgeta
-    let livePrice;
-    try {
-      const tickerUrl = `${BITGET.baseUrl}/api/v2/mix/market/ticker?symbol=${symbol}&productType=USDT-FUTURES`;
-      const tj = await fetch(tickerUrl).then(r => r.json());
-      livePrice = parseFloat(tj?.data?.[0]?.lastPr || tj?.data?.[0]?.close || 0);
-    } catch (_) { continue; }
-
-    if (!livePrice) continue;
-
-    const hit = side === "LONG"  ? livePrice >= triggerHigh
-              : side === "SHORT" ? livePrice <= triggerLow
-              : false;
-
-    if (!hit) {
-      console.log(`  ⏳ [ULTRA BRK fast] ${symbol} ${side} | Live: ${fmtPrice(livePrice)} | TrigH: ${fmtPrice(triggerHigh)} TrigL: ${fmtPrice(triggerLow)}`);
-      continue;
-    }
-
-    // BREAKOUT! — makni iz pendinga i otvori trade
-    const newPending = pending.filter(x => !(x.symbol === symbol && x.side === side));
-    savePending(pid, newPending);
-
-    // 🔄 INVERT: isti flag kao u glavnom scanneru
-    const INVERT_SIGNALS = false;
-    const actualSide = INVERT_SIGNALS ? (side === "LONG" ? "SHORT" : "LONG") : side;
-    if (INVERT_SIGNALS) console.log(`  🔄 BRK INVERT: ${side} → ${actualSide} ${symbol}`);
-
-    // SL/TP — per-symbol > per-portfolio > globalna konstanta
-    const symSltpBrk = rules.symbol_sltp?.[symbol] || {};
-    const slPct  = symSltpBrk.slPct ?? pDef.slPct ?? SL_PCT;
-    const tpPct  = symSltpBrk.tpPct ?? pDef.tpPct ?? TP_PCT;
-    const slDist = livePrice * (slPct / 100);
-    const tpDist = livePrice * (tpPct / 100);
-    const sl = actualSide === "LONG" ? livePrice - slDist : livePrice + slDist;
-    const tp = actualSide === "LONG" ? livePrice + tpDist : livePrice - tpDist;
-
-    const startCap   = pDef.startCapital ?? START_CAPITAL;
-    const equity     = getPortfolioEquity(pid, startCap);
-
-    const riskAmount = equity * (RISK_PCT / 100);
-    const tradeSize  = riskAmount / (slPct / 100);
-    const margin     = tradeSize / LEVERAGE;
-
-    if (!checkDailyLimit(pid)) continue;
-
-    console.log(`🚀 [ULTRA BRK fast] ${side} ${symbol} @ ${fmtPrice(livePrice)} | SL ${fmtPrice(sl)} | TP ${fmtPrice(tp)}`);
-
-    const isLive    = pDef.live === true && !PAPER_TRADING;
-    const timestamp = new Date().toISOString();
-    const orderId   = `${isLive ? "LIVE" : "PAPER"}-BRK-${Date.now()}`;
-    const mode      = isLive ? (BITGET_DEMO ? "DEMO" : "LIVE") : "PAPER";
-    const entry     = { symbol, signal: actualSide, price: livePrice, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode };
-
-    if (!isLive) {
-      addPosition(pid, entry);
-      writeEntryCsv(pid, entry);
-      await tg(`📋 PAPER [ULTRA/fast] ${side === "LONG" ? "📈" : "📉"} <b>${side} ${symbol}</b>\nUlaz: ${fmtPrice(livePrice)} | SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}\nBreakout detektiran u realnom vremenu`);
-    } else {
-      try {
-        const order = await placeBitGetOrder(symbol, side, tradeSize, livePrice, sl, tp, slPct, tpPct);
-        const usedLev    = order?.actualLeverage || LEVERAGE;
-        const usedMargin = tradeSize / usedLev;
-        entry.orderId = order?.orderId || orderId;
-        entry.margin  = usedMargin;
-        addPosition(pid, entry);
-        writeEntryCsv(pid, entry);
-        await tg(`🔴 LIVE [ULTRA/fast] ${side === "LONG" ? "📈" : "📉"} <b>${side} ${symbol}</b>\nUlaz: ${fmtPrice(livePrice)} | SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}\nBreakout detektiran u realnom vremenu | ${usedLev}x`);
-      } catch (err) {
-        console.log(`  ❌ LIVE BRK NALOG PAO — ${err.message}`);
-        await tg(`❌ LIVE BRK GREŠKA [ULTRA] ${symbol}\n${err.message}`);
-      }
-    }
+  // Očisti eventualni stale pending file
+  const pid = "synapse_t";
+  const pending = loadPending(pid);
+  if (pending.length > 0) {
+    savePending(pid, []);
+    console.log(`  🧹 [checkBreakouts] Očišćeno ${pending.length} stale pending zapisa`);
   }
 }
 

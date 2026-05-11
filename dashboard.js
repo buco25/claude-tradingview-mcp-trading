@@ -1268,45 +1268,21 @@ function scoreBox(bull, bear, sig) {
 }
 
 function statusBox(s) {
-  const p   = s.pending;
   const sig = s.ultraSig;
 
-  // Pending breakout — čekamo ulaz
-  if (p) {
-    const ageMs  = Date.now() - p.ts;
-    const ageMin = Math.floor(ageMs / 60000);
-    const ageStr = ageMin < 60 ? ageMin + 'm' : Math.floor(ageMin/60) + 'h ' + (ageMin%60) + 'm';
-    const sigCol = p.side === "LONG" ? '#00c48c' : '#ff4d4d';
-    const sigIco = p.side === "LONG" ? '▲' : '▼';
-    // Koliko daleko je cijena od trigger razine
-    const triggerLvl = p.side === "LONG" ? p.triggerHigh : p.triggerLow;
-    const distPct = triggerLvl
-      ? ((Math.abs(s.price - triggerLvl) / triggerLvl) * 100).toFixed(2)
-      : null;
-    const distCol = distPct < 0.3 ? '#00c48c' : distPct < 1.0 ? '#f7b731' : '#8b949e';
-    return '<div style="background:rgba(247,183,49,0.08);border:1px solid #f7b73166;border-radius:8px;padding:8px 10px">' +
-      '<div style="font-size:11px;color:#f7b731;font-weight:700;margin-bottom:4px">⏳ ČEKA BREAKOUT</div>' +
-      '<div style="font-size:12px"><span style="color:' + sigCol + ';font-weight:700">' + sigIco + ' ' + p.side + '</span> signal @ <b>' + fmtLive(p.signalPrice) + '</b></div>' +
-      '<div style="font-size:12px;margin-top:2px">H: <span style="color:#00c48c;font-weight:700">' + fmtLive(p.triggerHigh) + '</span> &nbsp;L: <span style="color:#ff4d4d;font-weight:700">' + fmtLive(p.triggerLow) + '</span></div>' +
-      '<div style="font-size:11px;margin-top:3px;color:#8b949e">Sad: <b style="color:#e6edf3">' + fmtLive(s.price) + '</b> &nbsp;|&nbsp; Čeka: <b style="color:#e6edf3">' + ageStr + '</b>' + (distPct !== null ? ' &nbsp;|&nbsp; Još: <b style="color:' + distCol + '">' + distPct + '%</b>' : '') + '</div>' +
-      '</div>';
-  }
-
-  // Aktivan signal — bot će ga pohraniti u pending na sljedećem ciklusu
+  // Aktivan signal — bot ulazi odmah na close svjećice
   if (sig === "LONG") {
     return '<div style="background:rgba(0,196,140,0.1);border:1px solid #00c48c;border-radius:8px;padding:8px 10px">' +
       '<div style="font-size:11px;color:#00c48c;font-weight:700;margin-bottom:4px">✅ SIGNAL AKTIVIRAN</div>' +
       '<div style="font-size:13px;font-weight:700;color:#00c48c">▲ LONG</div>' +
-      '<div style="font-size:11px;color:#8b949e;margin-top:3px">Signal @ ' + fmtLive(s.price) + '</div>' +
-      '<div style="font-size:11px;color:#8b949e">Breakout trigger: iznad <b>' + fmtLive(s.price) + '</b> (high signal-svijeće)</div>' +
+      '<div style="font-size:11px;color:#8b949e;margin-top:3px">Ulaz odmah @ <b style="color:#e6edf3">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBull||0) + '/18</b></div>' +
       '</div>';
   }
   if (sig === "SHORT") {
     return '<div style="background:rgba(255,77,77,0.1);border:1px solid #ff4d4d;border-radius:8px;padding:8px 10px">' +
       '<div style="font-size:11px;color:#ff4d4d;font-weight:700;margin-bottom:4px">✅ SIGNAL AKTIVIRAN</div>' +
       '<div style="font-size:13px;font-weight:700;color:#ff4d4d">▼ SHORT</div>' +
-      '<div style="font-size:11px;color:#8b949e;margin-top:3px">Signal @ ' + fmtLive(s.price) + '</div>' +
-      '<div style="font-size:11px;color:#8b949e">Breakout trigger: ispod <b>' + fmtLive(s.price) + '</b> (low signal-svijeće)</div>' +
+      '<div style="font-size:11px;color:#8b949e;margin-top:3px">Ulaz odmah @ <b style="color:#e6edf3">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBear||0) + '/18</b></div>' +
       '</div>';
   }
   if (sig === "SETUP↑") return '<span style="color:#f0a500;font-size:12px">◈ SETUP ↑ &nbsp;<span style="color:#555;font-size:11px">(' + (s.ultraBull||0) + '/18)</span></span>';

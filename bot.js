@@ -26,7 +26,8 @@ const RISK_PCT      = 1.0;    // % banke koji rizikaš po tradeu (= veličina ul
 const SL_PCT        = 1.5;    // fiksni SL % | SL 1.5% × 50x = 75% margine
 const TP_PCT        = 2.5;    // fiksni TP % | RR 1:1.67
 const MAX_TRADES_PER_DAY = 100;
-const MAX_OPEN_PER_PORTFOLIO = 10; // max otvorenih pozicija po portfoliju
+const MAX_OPEN_PER_PORTFOLIO = 5;  // max otvorenih pozicija po portfoliju
+const EQUITY_FLOOR = 200;          // ispod ovog iznosa ($) ne otvaramo nove pozicije
 
 const PAPER_TRADING = process.env.PAPER_TRADING !== "false";
 const BITGET_DEMO   = process.env.BITGET_DEMO === "true";
@@ -2005,6 +2006,14 @@ export async function run() {
         // margin = notional / actualLeverage — prilagođava se ako simbol ne podržava 100x
         const startCap   = pDef.startCapital ?? START_CAPITAL;
         const equity     = getPortfolioEquity(pid, startCap);
+
+        // Equity floor — zaštita kapitala: ne otvaraj ako smo ispod minimuma
+        if (equity <= EQUITY_FLOOR) {
+          console.log(`  🛑 [${pDef.name}] EQUITY FLOOR — equity $${equity.toFixed(2)} ≤ $${EQUITY_FLOOR} — trgovanje zaustavljeno!`);
+          await tg(`🛑 <b>EQUITY FLOOR</b> [${pDef.name}]\nEquity: $${equity.toFixed(2)} ≤ $${EQUITY_FLOOR} — novi tradovi zaustavljeni radi zaštite kapitala!`);
+          break;  // Zaustavi cijeli portfolio scan
+        }
+
         const riskAmount = equity * (RISK_PCT / 100);
         const tradeSize  = riskAmount / (slPct / 100);
         const margin     = tradeSize / LEVERAGE;  // preliminarno — ažurira se nakon setupSymbol
@@ -2124,6 +2133,13 @@ export async function checkBreakouts() {
 
     const startCap   = pDef.startCapital ?? START_CAPITAL;
     const equity     = getPortfolioEquity(pid, startCap);
+
+    // Equity floor — ne otvaraj breakout ispod minimuma
+    if (equity <= EQUITY_FLOOR) {
+      console.log(`  🛑 [BRK] EQUITY FLOOR — $${equity.toFixed(2)} ≤ $${EQUITY_FLOOR} — breakout preskočen`);
+      break;
+    }
+
     const riskAmount = equity * (RISK_PCT / 100);
     const tradeSize  = riskAmount / (slPct / 100);
     const margin     = tradeSize / LEVERAGE;

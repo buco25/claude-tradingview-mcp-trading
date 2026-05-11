@@ -222,8 +222,7 @@ sig4  = chop < 61.8 ? 1 : -1
 sig5  = cvd20 > 0 ? -1 : 1
 
 // 6. R⟳   [normal] — RSI recovery iz oversold/overbought zone
-sig6  = rsiMin5 < 35 and rsiVal > 35 and rsiRising  ? 1 :
-        rsiMax5 > 65 and rsiVal < 65 and rsiFalling  ? -1 : 0
+sig6  = rsiMin5 < 35 and rsiVal > 35 and rsiRising ? 1 : rsiMax5 > 65 and rsiVal < 65 and rsiFalling ? -1 : 0
 
 // 7. MCD  [normal] — MACD histogram smjer
 sig7  = histVal > 0 ? 1 : -1
@@ -242,8 +241,7 @@ sig11 = rsiRising ? 1 : rsiFalling ? -1 : 0
 
 // 12. SRS [normal] — S/R Bounce (cijena blizu pivota + RSI smjer)
 srZoneFrac = i_srZone / 100.0
-sig12 = not na(nearSup) and (close - nearSup) / close < srZoneFrac and rsiRising  ? 1 :
-        not na(nearRes) and (nearRes - close) / close < srZoneFrac and rsiFalling  ? -1 : 0
+sig12 = not na(nearSup) and (close - nearSup) / close < srZoneFrac and rsiRising ? 1 : not na(nearRes) and (nearRes - close) / close < srZoneFrac and rsiFalling ? -1 : 0
 
 // 13. SRB [normal] — S/R Breakout (cijena probila pivot u zadnja 3 bara)
 var bool srbUp = false

@@ -426,7 +426,7 @@ async function runScan(rules) {
     const batch = ALL_SYMBOLS.slice(i, i + BATCH);
     await Promise.all(batch.map(async sym => {
       try {
-        const url = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=15m&limit=250`;
+        const url = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=1m&limit=250`;
         const r   = await fetch(url);
         const d   = await r.json();
         if (d.code !== "00000" || !d.data?.length) { results.push({ symbol: sym, error: "no data" }); return; }
@@ -866,7 +866,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="logo">🎯</div>
       <div>
         <div class="title">ULTRA Trading Bot</div>
-        <div class="subtitle">18 signala · min 9/18 · H/L breakout · ${tf} · SL 1.5–2.5% / TP 2.5–3.5% per-simbol · 50x · rizik 1%</div>
+        <div class="subtitle">18 signala · min 9/18 · ulaz odmah · ${tf} · SL 1.5–2.5% / TP 2.5–3.5% per-simbol · 50x · rizik 1%</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -1318,7 +1318,7 @@ async function doScan() {
   const tbody = document.getElementById("scan-tbody");
   btn.disabled = true;
   btn.innerHTML = '<span class="spin">⟳</span> Skenira...';
-  tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:32px;color:#8b949e"><span class="spin" style="font-size:20px">⟳</span><br>Fetcham ${ALL_SYMBOLS.length} simbola na 15m TF...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:32px;color:#8b949e"><span class="spin" style="font-size:20px">⟳</span><br>Fetcham ${ALL_SYMBOLS.length} simbola na 1m TF...</td></tr>';
 
   try {
     const r = await fetch("/api/scan");

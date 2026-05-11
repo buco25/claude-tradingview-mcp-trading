@@ -851,6 +851,13 @@ function analyzeUltra(candles, cfg) {
   const bullCnt = sigs.filter(s => s === 1).length;
   const bearCnt = sigs.filter(s => s === -1).length;
 
+  // ── Obavezni ADX filter: tržište mora biti u trendu (ADX > 25) ──
+  const ADX_MIN_REQUIRED = 25;
+  if (adx < ADX_MIN_REQUIRED) {
+    return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
+      reason: `ULTRA: ADX ${adx.toFixed(1)} < ${ADX_MIN_REQUIRED} — ranging tržište, nema ulaza` };
+  }
+
   if (bullCnt >= minSig) {
     return { price, signal: "LONG",  bullScore: bullCnt, bearScore: bearCnt,
       reason: `ULTRA LONG ↑${bullCnt}/18 | RSI:${rsi.toFixed(0)} ADX:${adx.toFixed(0)} SR:${sig17sr}/${sig18bk} 6Sc:${scaleUp}/6` };

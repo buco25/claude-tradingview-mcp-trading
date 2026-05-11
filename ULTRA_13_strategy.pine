@@ -115,12 +115,18 @@ volAvg = ta.sma(volume, 20)
 
 // ── 6-Scale EMA Consensus (OBVEZNI GATE) ────────────────────────────────────
 // 6 EMA parova — koliko je parova aligned gore/dolje
-e3    = ta.ema(close,  3);  e11  = ta.ema(close, 11)
-e7    = ta.ema(close,  7);  e15  = ta.ema(close, 15)
-e13b  = ta.ema(close, 13);  e21b = ta.ema(close, 21)
-e19   = ta.ema(close, 19);  e29  = ta.ema(close, 29)
-e29b  = ta.ema(close, 29);  e47  = ta.ema(close, 47)
-e45   = ta.ema(close, 45);  e55b = ta.ema(close, 55)
+e3   = ta.ema(close,  3)
+e11  = ta.ema(close, 11)
+e7   = ta.ema(close,  7)
+e15  = ta.ema(close, 15)
+e13b = ta.ema(close, 13)
+e21b = ta.ema(close, 21)
+e19  = ta.ema(close, 19)
+e29  = ta.ema(close, 29)
+e29b = ta.ema(close, 29)
+e47  = ta.ema(close, 47)
+e45  = ta.ema(close, 45)
+e55b = ta.ema(close, 55)
 
 scaleUp = (e3 > e11 ? 1:0) + (e7 > e15 ? 1:0) + (e13b > e21b ? 1:0) +
           (e19 > e29 ? 1:0) + (e29b > e47 ? 1:0) + (e45 > e55b ? 1:0)

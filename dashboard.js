@@ -342,9 +342,10 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
   }
 
   // ── ULTRA — 16 signala (identično bot.js analyzeUltra) ──
+  // EMA smjer i ADX>25 su OBAVEZNI uvjeti (gating) — ne broje se u 16 signala
   let ultraSig = "—";
   let ultraBull = 0, ultraBear = 0;
-  let ultraSigs16 = new Array(18).fill(0);
+  let ultraSigs16 = new Array(16).fill(0);
   {
     const { minSig = 5 } = ultraCfg;
     if (n >= 200 && ema9 && ema21) {
@@ -353,24 +354,22 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
       const chopV = chop ?? 100;
 
       ultraSigs16 = [
-        ema9 > ema21 ? 1 : -1,                                          //  1. EMA9/21 smjer
-        crossUp3 ? 1 : crossDown3 ? -1 : 0,                             //  2. Svježi cross (3 bara)
-        ema50 ? (price > ema50 ? 1 : -1) : 0,                           //  3. Cijena vs EMA50
-        rsiV < 45 ? 1 : rsiV > 55 ? -1 : 0,                             //  4. RSI zona
-        ema55 ? (price > ema55 ? 1 : -1) : 0,                           //  5. Cijena vs EMA55
-        adxV > 18 ? (ema9 > ema21 ? 1 : -1) : 0,                        //  6. ADX > 18 + EMA smjer
-        chopV < 61.8 ? 1 : -1,                                           //  7. Nije choppy
-        (scaleUp >= 4 ? 1 : scaleDn >= 4 ? -1 : 0),                     //  8. 6-Scale EMA
-        cvdSum > 0 ? 1 : -1,                                             //  9. CVD volumen
-        rsiRecovBull ? 1 : rsiRecovBear ? -1 : 0,                        // 10. RSI recovery
-        macdH !== null ? (macdH > 0 ? 1 : -1) : 0,                      // 11. MACD histogram
-        ema145 ? (price > ema145 ? 1 : -1) : 0,                         // 12. EMA145 trend
-        vols[n-1] > volAvg20 ? 1 : 0,                                    // 13. Volumen iznad prosjeka
-        macdCrossV,                                                       // 14. MACD cross
-        rsiRising ? 1 : rsiFalling ? -1 : 0,                             // 15. RSI smjer
-        adxV > 25 ? (ema9 > ema21 ? 1 : -1) : 0,                        // 16. ADX jak >25
-        srsBounce,                                                        // 17. S/R bounce
-        srbBreak,                                                         // 18. S/R breakout
+        crossUp3 ? 1 : crossDown3 ? -1 : 0,                             //  1. Svježi EMA cross (zadnja 3 bara)
+        ema50 ? (price > ema50 ? 1 : -1) : 0,                           //  2. Cijena vs EMA50
+        rsiV < 45 ? 1 : rsiV > 55 ? -1 : 0,                             //  3. RSI zona (<45=oversold, >55=overbought)
+        ema55 ? (price > ema55 ? 1 : -1) : 0,                           //  4. Cijena vs EMA55
+        adxV >= 30 ? 1 : adxV < 20 ? -1 : 0,                            //  5. ADX snaga (≥30=jak, <20=slab)
+        chopV < 61.8 ? 1 : -1,                                           //  6. Nije choppy
+        (scaleUp >= 4 ? 1 : scaleDn >= 4 ? -1 : 0),                     //  7. 6-Scale EMA
+        cvdSum > 0 ? 1 : -1,                                             //  8. CVD volumen
+        rsiRecovBull ? 1 : rsiRecovBear ? -1 : 0,                        //  9. RSI recovery
+        macdH !== null ? (macdH > 0 ? 1 : -1) : 0,                      // 10. MACD histogram
+        ema145 ? (price > ema145 ? 1 : -1) : 0,                         // 11. EMA145 trend
+        vols[n-1] > volAvg20 ? 1 : 0,                                    // 12. Volumen iznad prosjeka
+        macdCrossV,                                                       // 13. MACD cross
+        rsiRising ? 1 : rsiFalling ? -1 : 0,                             // 14. RSI smjer
+        srsBounce,                                                        // 15. S/R bounce
+        srbBreak,                                                         // 16. S/R breakout
       ];
 
       ultraBull = ultraSigs16.filter(s => s === 1).length;
@@ -873,7 +872,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="logo">🎯</div>
       <div>
         <div class="title">ULTRA Trading Bot</div>
-        <div class="subtitle">18 signala · 4ob + 5/18 · ulaz odmah · ${tf} · SL 1.5–2.5% / TP 2.5–3.5% per-simbol · 50x · rizik 1%</div>
+        <div class="subtitle">4 obavezna (ADX·EMA·RSI·5mSR) + 16 neovisnih signala · min 5/16 · ulaz odmah · ${tf} · SL 1.5–2.5% / TP 2.5–3.5% · 50x · rizik 1%</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -957,9 +956,9 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <div class="scan-card">
     <div class="scan-header">
       <div>
-        <div class="chart-title" style="margin-bottom:2px">🎯 ULTRA Scanner — ${ALL_SYMBOLS.length} simbola | 18 signala | 4ob + 5/18 | H/L breakout</div>
+        <div class="chart-title" style="margin-bottom:2px">🎯 ULTRA Scanner — ${ALL_SYMBOLS.length} simbola | 4ob + 16sig | min 5/16 | ulaz odmah</div>
         <div style="font-size:12px;color:var(--text-muted)">
-          EMA · CRS · E50 · RSI · E55 · ADX · CHP · 6Sc · CVD · R⟳ · MCD · E145 · VOL · MCC · R↗ · ADX+
+          CRS · E50 · RSI · E55 · ADXsn · CHP · 6Sc · CVD · R⟳ · MCD · E145 · VOL · MCC · RSI↗ · SRS · SRB
           &nbsp;|&nbsp; 🟡 Čeka breakout &nbsp; 🟢 Signal &nbsp; Cache 90s &nbsp;|&nbsp;
           <button onclick="toggleLegend()" style="background:none;border:1px solid #30363d;border-radius:4px;color:#8b949e;font-size:11px;cursor:pointer;padding:2px 8px">📖 Legenda signala</button>
         </div>
@@ -981,7 +980,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <th style="color:#8b949e">RSI</th>
             <th style="color:#8b949e">ADX</th>
             <th style="color:#f7b731;text-align:center;white-space:nowrap">Obavezni <span style="font-weight:400;font-size:10px;color:#666">ADX · EMA · RSI · 5mSR</span></th>
-            <th style="color:#e85d9a;text-align:center">18 Signala &nbsp;<span style="font-weight:400;font-size:10px;color:#666">EMA · CRS · E50 · RSI · E55 · ADX · CHP · 6Sc · CVD · R⟳ · MCD · E145 · VOL · MCC · R↗ · ADX+ · SRS · SRB</span></th>
+            <th style="color:#e85d9a;text-align:center">16 Signala &nbsp;<span style="font-weight:400;font-size:10px;color:#666">CRS · E50 · RSI · E55 · ADXsn · CHP · 6Sc · CVD · R⟳ · MCD · E145 · VOL · MCC · RSI↗ · SRS · SRB</span></th>
             <th style="color:#e85d9a;text-align:center">Score</th>
             <th style="min-width:260px">Status / Breakout</th>
           </tr>
@@ -996,7 +995,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <!-- Signal legend (collapsible) -->
   <div id="sig-legend" style="display:none;margin-top:12px">
     <div class="chart-card" style="padding:16px 20px">
-      <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — ULTRA (18 signala, 4ob + 5/18 za ulaz)</div>
+      <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — ULTRA (4 obavezna gating + 16 neovisnih signala, min 5/16 za ulaz)</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:8px;font-size:12px">
         ${[
           ['EMA', '▲ EMA9 > EMA21 → kratkoročni bull trend  |  ▼ EMA9 < EMA21 → bear'],
@@ -1025,7 +1024,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       </div>
       <div style="margin-top:10px;font-size:11px;color:#555">
         🟢 Zeleno = bullish signal aktiviran &nbsp;|&nbsp; 🔴 Crveno = bearish &nbsp;|&nbsp; ⬛ Sivo = neutral/nema signala &nbsp;|&nbsp;
-        Min <b style="color:#e85d9a">9/18</b> signala za ulaz · H/L breakout entry · SL <b style="color:#f7b731">1.5–2.5%</b> / TP <b style="color:#f7b731">2.5–3.5%</b> po simbolu · <b>50x</b> leverage · rizik <b>1%</b> banke po tradeu
+        Min <b style="color:#e85d9a">5/16</b> neovisnih signala + 4 obavezna gating (ADX·EMA·RSI·5mSR) · SL <b style="color:#f7b731">1.5–2.5%</b> / TP <b style="color:#f7b731">2.5–3.5%</b> po simbolu · <b>50x</b> leverage · rizik <b>1%</b> banke po tradeu
       </div>
     </div>
   </div>
@@ -1140,19 +1139,20 @@ function ultraHtml(s) {
 
   if (!s.ultraSigs16) return '<span style="color:#555;font-size:11px">—</span>';
 
-  const names16 = ['EMA dir','Cross','P>E50','RSI zona','P>E55','ADX>18','Chop','6Sc','CVD','RSI⟳','MACD hist','E145','Vol','MACD cross','RSI smjer','ADX>25'];
+  // 16 genuinnih signala — EMA smjer i ADX>25 su obavezni gating (ne broje se ovdje)
+  const names16 = ['Cross','P>E50','RSI zona','P>E55','ADX snaga','Chop','6Sc','CVD','RSI⟳','MACD hist','E145','Vol','MACD cross','RSI smjer','SRS','SRB'];
   const tooltipText = names16.map((l,i)=>l+':'+(sig16[i]===1?'↑':sig16[i]===-1?'↓':'·')).join(' | ');
 
-  const dots = sig16.map((v, i) => {
+  const dots = sig16.slice(0, 16).map((v, i) => {
     const col = v===1?'#00c48c':v===-1?'#ff4d4d':'#444';
     return '<span title="'+names16[i]+'" style="color:'+col+';font-size:9px">'+(v===1?'▲':v===-1?'▼':'·')+'</span>';
   }).join('');
 
   const scoreStr = bull > bear
-    ? '<span style="color:#00c48c;font-weight:700">↑'+bull+'/18</span>'
+    ? '<span style="color:#00c48c;font-weight:700">↑'+bull+'/16</span>'
     : bear > bull
-    ? '<span style="color:#ff4d4d;font-weight:700">↓'+bear+'/18</span>'
-    : '<span style="color:#8b949e">'+Math.max(bull,bear)+'/18</span>';
+    ? '<span style="color:#ff4d4d;font-weight:700">↓'+bear+'/16</span>'
+    : '<span style="color:#8b949e">'+Math.max(bull,bear)+'/16</span>';
 
   const sigPart = sig==="LONG"   ? ' <span class="sig-long">▲ LONG</span>'
                 : sig==="SHORT"  ? ' <span class="sig-short">▼ SHORT</span>'
@@ -1186,69 +1186,64 @@ async function resetOne(pid) {
   location.reload();
 }
 
-// ── Signal label boxes (18 signals) ──────────────────────────────────────────
-const SIG_NAMES = ['EMA','CRS','E50','RSI','E55','ADX','CHP','6Sc','CVD','R⟳','MCD','E145','VOL','MCC','R↗','ADX+','SRS','SRB'];
+// ── Signal label boxes (16 genuinnih signala — EMA smjer i ADX>25 su obavezni gating) ──
+const SIG_NAMES = ['CRS','E50','RSI','E55','ADXsn','CHP','6Sc','CVD','R⟳','MCD','E145','VOL','MCC','RSI↗','SRS','SRB'];
 
 // Uvjeti za tooltip — objasni zašto je signal zelen/crven
+// 16 neovisnih signala — EMA smjer (bio #1) i ADX>25 (bio #16) maknuti (obavezni gating)
 const SIG_COND_BULL = [
-  'EMA9 > EMA21 — kratkoročni trend gore',
-  'EMA9/21 cross gore zadnja 3 bara',
-  'Cijena > EMA50 — srednji trend gore',
-  'RSI < 45 — oversold zona, potencijalni bounce',
-  'Cijena > EMA55 — srednji/dugi trend gore',
-  'ADX > 18 + EMA9 > EMA21 — trend potvrđen',
-  'Chop < 61.8 — tržište trenira, nije bočno',
-  '4+ od 6 EMA-para bullish (multi-timeframe)',
-  'CVD > 0 — kupci dominiraju volumenom',
-  'RSI izašao iz oversold (<35) i raste — recovery',
-  'MACD histogram > 0 — bullish momentum',
-  'Cijena > EMA145 — dugoročni trend gore',
-  'Volumen > 20-bar prosjek — povećana aktivnost',
-  'MACD histogram prešao iz neg→poz (zadnja 3 bara)',
-  'RSI raste 2+ uzastopna bara — momentum gore',
-  'ADX > 25 + EMA9 > EMA21 — jak trend gore',
-  'Bounce od S/R supporta + RSI raste — reakcija na podršku',
-  'Proboj S/R resistance gore zadnja 3 bara',
+  'EMA9/21 cross gore zadnja 3 bara',          //  1. CRS
+  'Cijena > EMA50 — srednji trend gore',        //  2. E50
+  'RSI < 45 — oversold zona, potencijalni bounce', //  3. RSI
+  'Cijena > EMA55 — srednji/dugi trend gore',  //  4. E55
+  'ADX ≥ 30 — jak trend, puno momentum',       //  5. ADXsn
+  'Chop < 61.8 — tržište trenira, nije bočno', //  6. CHP
+  '4+ od 6 EMA-para bullish (multi-timeframe)',//  7. 6Sc
+  'CVD > 0 — kupci dominiraju volumenom',      //  8. CVD
+  'RSI izašao iz oversold (<35) i raste — recovery', //  9. R⟳
+  'MACD histogram > 0 — bullish momentum',     // 10. MCD
+  'Cijena > EMA145 — dugoročni trend gore',    // 11. E145
+  'Volumen > 20-bar prosjek — povećana aktivnost', // 12. VOL
+  'MACD histogram prešao iz neg→poz (zadnja 3 bara)', // 13. MCC
+  'RSI raste 2+ uzastopna bara — momentum gore', // 14. RSI↗
+  'Bounce od S/R supporta + RSI raste — reakcija na podršku', // 15. SRS
+  'Proboj S/R resistance gore zadnja 3 bara',  // 16. SRB
 ];
 const SIG_COND_BEAR = [
-  'EMA9 < EMA21 — kratkoročni trend dolje',
-  'EMA9/21 cross dolje zadnja 3 bara',
-  'Cijena < EMA50 — srednji trend dolje',
-  'RSI > 55 — overbought zona, potencijalni pad',
-  'Cijena < EMA55 — srednji/dugi trend dolje',
-  'ADX > 18 + EMA9 < EMA21 — bearish trend potvrđen',
-  'Chop > 61.8 — bočno tržište, nema trenda',
-  '4+ od 6 EMA-para bearish (multi-timeframe)',
-  'CVD < 0 — prodavači dominiraju volumenom',
-  'RSI izašao iz overbought (>65) i pada — pad potvrđen',
-  'MACD histogram < 0 — bearish momentum',
-  'Cijena < EMA145 — dugoročni trend dolje',
-  '— (niski volumen = neutralan)',
-  'MACD histogram prešao iz poz→neg (zadnja 3 bara)',
-  'RSI pada 2+ uzastopna bara — momentum dolje',
-  'ADX > 25 + EMA9 < EMA21 — jak bearish trend',
-  'Bounce od S/R resistancea + RSI pada — reakcija na otpor',
-  'Proboj S/R supporta dolje zadnja 3 bara',
+  'EMA9/21 cross dolje zadnja 3 bara',         //  1. CRS
+  'Cijena < EMA50 — srednji trend dolje',       //  2. E50
+  'RSI > 55 — overbought zona, potencijalni pad', //  3. RSI
+  'Cijena < EMA55 — srednji/dugi trend dolje', //  4. E55
+  'ADX < 20 — slab trend, tržište stagnira',   //  5. ADXsn
+  'Chop > 61.8 — bočno tržište, nema trenda',  //  6. CHP
+  '4+ od 6 EMA-para bearish (multi-timeframe)',//  7. 6Sc
+  'CVD < 0 — prodavači dominiraju volumenom',  //  8. CVD
+  'RSI izašao iz overbought (>65) i pada',     //  9. R⟳
+  'MACD histogram < 0 — bearish momentum',     // 10. MCD
+  'Cijena < EMA145 — dugoročni trend dolje',   // 11. E145
+  '— (niski volumen = neutralan)',              // 12. VOL
+  'MACD histogram prešao iz poz→neg (zadnja 3 bara)', // 13. MCC
+  'RSI pada 2+ uzastopna bara — momentum dolje', // 14. RSI↗
+  'Bounce od S/R resistancea + RSI pada',      // 15. SRS
+  'Proboj S/R supporta dolje zadnja 3 bara',   // 16. SRB
 ];
 const SIG_COND_NEUT = [
-  'EMA9 ≈ EMA21 — bez jasnog smjera',
-  'Nema svježeg crossa (neutralno)',
-  'EMA50 nedostupan',
-  'RSI 45–55 — neutralna zona',
-  'EMA55 nedostupan',
-  'ADX ≤ 18 — tržište ne trenira dovoljno',
-  '—',
-  'Manje od 4 EMA-para poravnano',
-  'CVD = 0',
-  'RSI nije u recovery zoni',
-  'MACD nedostupan',
-  'EMA145 nedostupan',
-  'Volumen ≤ prosjeku — neutralan',
-  'Nema MACD crossa u zadnja 3 bara',
-  'RSI ne raste ni pada konzistentno',
-  'ADX ≤ 25 — trend nije dovoljno jak',
-  'Cijena nije blizu S/R razine',
-  'Nema S/R proboja u zadnja 3 bara',
+  'Nema svježeg crossa (neutralno)',            //  1. CRS
+  'EMA50 nedostupan',                           //  2. E50
+  'RSI 45–55 — neutralna zona',                //  3. RSI
+  'EMA55 nedostupan',                           //  4. E55
+  'ADX 20–29 — umjeren trend',                 //  5. ADXsn
+  '—',                                          //  6. CHP
+  'Manje od 4 EMA-para poravnano',             //  7. 6Sc
+  'CVD = 0',                                    //  8. CVD
+  'RSI nije u recovery zoni',                  //  9. R⟳
+  'MACD nedostupan',                            // 10. MCD
+  'EMA145 nedostupan',                          // 11. E145
+  'Volumen ≤ prosjeku — neutralan',            // 12. VOL
+  'Nema MACD crossa u zadnja 3 bara',          // 13. MCC
+  'RSI ne raste ni pada konzistentno',         // 14. RSI↗
+  'Cijena nije blizu S/R razine',              // 15. SRS
+  'Nema S/R proboja u zadnja 3 bara',          // 16. SRB
 ];
 
 function mandatoryBoxes(s) {
@@ -1262,14 +1257,14 @@ function mandatoryBoxes(s) {
   const adxBg  = adxOk ? '#0d3d26' : '#3d0d0d';
   const adxTip = 'ADX ' + adxNum.toFixed(1) + (adxOk ? ' ≥ 25 ✓' : ' < 25 ✗ — ranging tržište');
 
-  // 2. EMA9/21 smjer (signal #1 iz ultraSigs16)
-  const emaSig     = s.ultraSigs16?.[0] ?? 0;
-  const emaLongOk  = emaSig === 1;   // bullish EMA za LONG
-  const emaShortOk = emaSig === -1;  // bearish EMA za SHORT
+  // 2. EMA9/21 smjer — obavezni gating (čita iz emaBias, ne iz sigs16)
+  const emaBiasVal = s.emaBias ?? "—";
+  const emaLongOk  = emaBiasVal === "↑";   // EMA9 > EMA21 — bullish
+  const emaShortOk = emaBiasVal === "↓";   // EMA9 < EMA21 — bearish
   const emaOk  = sig === "SHORT" ? emaShortOk : emaLongOk;  // zadovoljen za dati smjer?
   const emaCol = emaOk ? '#00c48c' : '#ff4d4d';  // zeleno = uvjet OK, crveno = blokiran
   const emaBg  = emaOk ? '#0d3d26' : '#3d0d0d';
-  const emaTip = 'EMA9/21: ' + (emaSig === 1 ? 'EMA9 > EMA21 — bullish' : emaSig === -1 ? 'EMA9 < EMA21 — bearish' : 'neutralno') +
+  const emaTip = 'EMA9/21: ' + (emaBiasVal === "↑" ? 'EMA9 > EMA21 — bullish' : emaBiasVal === "↓" ? 'EMA9 < EMA21 — bearish' : 'nema podataka') +
     (emaOk ? ' ✓' : ' ✗ — smjer ne odgovara signalu');
 
   // 3. RSI asimetričan — LONG: RSI<72, SHORT: RSI>30
@@ -1311,7 +1306,7 @@ function sigBoxes(sigs) {
 }
 
 function scoreBox(bull, bear, sig) {
-  const total = 18;
+  const total = 16;
   if (sig === "LONG")   return '<div style="background:rgba(0,196,140,0.15);border:1px solid #00c48c;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#00c48c;font-weight:800;font-size:16px">↑' + bull + '</span><span style="color:#555;font-size:11px">/' + total + '</span><br><span class="sig-long" style="font-size:11px">▲ LONG</span></div>';
   if (sig === "SHORT")  return '<div style="background:rgba(255,77,77,0.15);border:1px solid #ff4d4d;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#ff4d4d;font-weight:800;font-size:16px">↓' + bear + '</span><span style="color:#555;font-size:11px">/' + total + '</span><br><span class="sig-short" style="font-size:11px">▼ SHORT</span></div>';
   if (sig === "SETUP↑") return '<div style="background:rgba(240,165,0,0.1);border:1px solid #f0a50066;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#f0a500;font-weight:800;font-size:16px">↑' + bull + '</span><span style="color:#555;font-size:11px">/' + total + '</span><br><span style="color:#f0a500;font-size:11px">◈ SETUP↑</span></div>';
@@ -1329,18 +1324,18 @@ function statusBox(s) {
     return '<div style="background:rgba(0,196,140,0.1);border:1px solid #00c48c;border-radius:8px;padding:8px 10px">' +
       '<div style="font-size:11px;color:#00c48c;font-weight:700;margin-bottom:4px">✅ SIGNAL AKTIVIRAN</div>' +
       '<div style="font-size:13px;font-weight:700;color:#00c48c">▲ LONG</div>' +
-      '<div style="font-size:11px;color:#8b949e;margin-top:3px">Ulaz odmah @ <b style="color:#e6edf3">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBull||0) + '/18</b></div>' +
+      '<div style="font-size:11px;color:#8b949e;margin-top:3px">Ulaz odmah @ <b style="color:#e6edf3">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBull||0) + '/16</b></div>' +
       '</div>';
   }
   if (sig === "SHORT") {
     return '<div style="background:rgba(255,77,77,0.1);border:1px solid #ff4d4d;border-radius:8px;padding:8px 10px">' +
       '<div style="font-size:11px;color:#ff4d4d;font-weight:700;margin-bottom:4px">✅ SIGNAL AKTIVIRAN</div>' +
       '<div style="font-size:13px;font-weight:700;color:#ff4d4d">▼ SHORT</div>' +
-      '<div style="font-size:11px;color:#8b949e;margin-top:3px">Ulaz odmah @ <b style="color:#e6edf3">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBear||0) + '/18</b></div>' +
+      '<div style="font-size:11px;color:#8b949e;margin-top:3px">Ulaz odmah @ <b style="color:#e6edf3">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBear||0) + '/16</b></div>' +
       '</div>';
   }
-  if (sig === "SETUP↑") return '<span style="color:#f0a500;font-size:12px">◈ SETUP ↑ &nbsp;<span style="color:#555;font-size:11px">(' + (s.ultraBull||0) + '/18)</span></span>';
-  if (sig === "SETUP↓") return '<span style="color:#f0a500;font-size:12px">◈ SETUP ↓ &nbsp;<span style="color:#555;font-size:11px">(' + (s.ultraBear||0) + '/18)</span></span>';
+  if (sig === "SETUP↑") return '<span style="color:#f0a500;font-size:12px">◈ SETUP ↑ &nbsp;<span style="color:#555;font-size:11px">(' + (s.ultraBull||0) + '/16)</span></span>';
+  if (sig === "SETUP↓") return '<span style="color:#f0a500;font-size:12px">◈ SETUP ↓ &nbsp;<span style="color:#555;font-size:11px">(' + (s.ultraBear||0) + '/16)</span></span>';
 
   // ── RSI + ADX Watch alert — oba moraju biti overextended ──────────────────
   const rsiNum = parseFloat(s.rsi);

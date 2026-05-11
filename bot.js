@@ -825,27 +825,27 @@ function analyzeUltra(candles, cfg) {
     }
   }
 
-  // ── 18 signala: +1 = bullish, -1 = bearish, 0 = neutral ──
+  // ── 16 signala: +1 = bullish, -1 = bearish, 0 = neutral ──
+  // NAPOMENA: EMA smjer i ADX>25 su OBAVEZNI uvjeti (gating) — ne broje se ovdje
+  // da ne bi dvostruko računali iste uvjete.
   const sigs = [
-    ema9 > ema21 ? 1 : -1,                          //  1. EMA9/21 smjer
-    hadCrossUp ? 1 : hadCrossDn ? -1 : 0,           //  2. Svježi cross (3 bara)
-    price > ema50 ? 1 : -1,                          //  3. Cijena vs EMA50
-    rsi < 45 ? 1 : rsi > 55 ? -1 : 0,                  //  4. RSI zona (>55=overbought→-1, <45=oversold→+1)
-    price > ema55 ? 1 : -1,                          //  5. Cijena vs EMA55
-    adx > 18 ? (ema9 > ema21 ? 1 : -1) : 0,          //  6. ADX > 18 + smjer
-    chop < 61.8 ? 1 : -1,                            //  7. Nije choppy
-    (scaleUp >= 4 ? 1 : scaleDn >= 4 ? -1 : 0),     //  8. 6-Scale multi-EMA
-    cvdSum > 0 ? 1 : -1,                             //  9. CVD volumen
+    hadCrossUp ? 1 : hadCrossDn ? -1 : 0,           //  1. Svježi EMA cross (zadnja 3 bara)
+    price > ema50 ? 1 : -1,                          //  2. Cijena vs EMA50
+    rsi < 45 ? 1 : rsi > 55 ? -1 : 0,               //  3. RSI zona (<45=oversold→+1, >55=overbought→-1)
+    price > ema55 ? 1 : -1,                          //  4. Cijena vs EMA55
+    adx >= 30 ? 1 : adx < 20 ? -1 : 0,              //  5. ADX snaga (≥30=jak trend, <20=slab)
+    chop < 61.8 ? 1 : -1,                            //  6. Nije choppy
+    (scaleUp >= 4 ? 1 : scaleDn >= 4 ? -1 : 0),     //  7. 6-Scale multi-EMA
+    cvdSum > 0 ? 1 : -1,                             //  8. CVD volumen
     (rsiMin5 < 35 && rsi > 35 && rsiRising) ? 1
-      : (rsiMax5 > 65 && rsi < 65 && rsiFalling) ? -1 : 0, // 10. RSI recovery
-    macdHist !== null ? (macdHist > 0 ? 1 : -1) : 0, // 11. MACD histogram
-    price > ema145 ? 1 : -1,                          // 12. EMA145 dugoročni trend
-    volLast > volAvg20 ? 1 : 0,                       // 13. Volumen iznad prosjeka
-    macdCross,                                         // 14. MACD cross (zadnja 3 bara)
-    rsiRising ? 1 : rsiFalling ? -1 : 0,              // 15. RSI smjer
-    adx > 25 ? (ema9 > ema21 ? 1 : -1) : 0,          // 16. ADX jak >25 + smjer
-    sig17sr,                                           // 17. S/R bounce (bounce od supporta/resistancea)
-    sig18bk,                                           // 18. S/R breakout (proboj razine u zadnja 3 bara)
+      : (rsiMax5 > 65 && rsi < 65 && rsiFalling) ? -1 : 0, //  9. RSI recovery
+    macdHist !== null ? (macdHist > 0 ? 1 : -1) : 0, // 10. MACD histogram
+    price > ema145 ? 1 : -1,                          // 11. EMA145 dugoročni trend
+    volLast > volAvg20 ? 1 : 0,                       // 12. Volumen iznad prosjeka
+    macdCross,                                         // 13. MACD cross (zadnja 3 bara)
+    rsiRising ? 1 : rsiFalling ? -1 : 0,              // 14. RSI smjer
+    sig17sr,                                           // 15. S/R bounce (bounce od supporta/resistancea)
+    sig18bk,                                           // 16. S/R breakout (proboj razine u zadnja 3 bara)
   ];
 
   const bullCnt = sigs.filter(s => s === 1).length;
@@ -869,24 +869,24 @@ function analyzeUltra(candles, cfg) {
   const rsiLongOk  = rsi < 72;   // LONG: blokiran samo ako je ekstremno overbought
   const rsiShortOk = rsi > 30;   // SHORT: blokiran samo ako je ekstremno oversold
 
-  // ── Min 5/18 potvrđujućih signala ─────────────────────────────────────────
+  // ── Min 5/16 potvrđujućih signala (16 genuinnih, bez EMA smjera i ADX>25 koji su gates) ──
   const MIN_CONFIRM = minSig;  // čita iz rules.json (trenutno 5)
 
   if (bullCnt >= MIN_CONFIRM && emaLongOk && rsiLongOk) {
     return { price, signal: "LONG",  bullScore: bullCnt, bearScore: bearCnt,
-      reason: `ULTRA LONG ↑${bullCnt}/18 | RSI:${rsi.toFixed(0)}<60✓ ADX:${adx.toFixed(0)} EMA✓ [4ob+${MIN_CONFIRM}]` };
+      reason: `ULTRA LONG ↑${bullCnt}/16 | RSI:${rsi.toFixed(0)}<72✓ ADX:${adx.toFixed(0)}>25✓ EMA9>21✓ [4ob+${MIN_CONFIRM}]` };
   }
   if (bearCnt >= MIN_CONFIRM && emaShortOk && rsiShortOk) {
     return { price, signal: "SHORT", bullScore: bullCnt, bearScore: bearCnt,
-      reason: `ULTRA SHORT ↓${bearCnt}/18 | RSI:${rsi.toFixed(0)}>40✓ ADX:${adx.toFixed(0)} EMA✓ [4ob+${MIN_CONFIRM}]` };
+      reason: `ULTRA SHORT ↓${bearCnt}/16 | RSI:${rsi.toFixed(0)}>30✓ ADX:${adx.toFixed(0)}>25✓ EMA9<21✓ [4ob+${MIN_CONFIRM}]` };
   }
 
   // Dijagnoza zašto nema signala
   const whyNot = bullCnt >= bearCnt
-    ? `↑${bullCnt}/18${!emaLongOk ? " EMA✗" : ""}${!rsiLongOk ? ` RSI${rsi.toFixed(0)}≥60✗` : ""}`
-    : `↓${bearCnt}/18${!emaShortOk ? " EMA✗" : ""}${!rsiShortOk ? ` RSI${rsi.toFixed(0)}≤40✗` : ""}`;
+    ? `↑${bullCnt}/16${!emaLongOk ? " EMA✗" : ""}${!rsiLongOk ? ` RSI${rsi.toFixed(0)}≥72✗` : ""}`
+    : `↓${bearCnt}/16${!emaShortOk ? " EMA✗" : ""}${!rsiShortOk ? ` RSI${rsi.toFixed(0)}≤30✗` : ""}`;
   return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
-    reason: `ULTRA: ${whyNot} (treba 4ob+${MIN_CONFIRM})` };
+    reason: `ULTRA: ${whyNot} (treba 4ob+${MIN_CONFIRM}/16)` };
 }
 
 // ─── ULTRA Immediate Entry ─────────────────────────────────────────────────────

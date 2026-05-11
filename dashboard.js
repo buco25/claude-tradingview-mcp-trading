@@ -346,7 +346,7 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
   let ultraBull = 0, ultraBear = 0;
   let ultraSigs16 = new Array(18).fill(0);
   {
-    const { minSig = 10 } = ultraCfg;
+    const { minSig = 9 } = ultraCfg;
     if (n >= 200 && ema9 && ema21) {
       const rsiV  = rsi ?? 50;
       const adxV  = adx ?? 0;
@@ -866,7 +866,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="logo">🎯</div>
       <div>
         <div class="title">ULTRA Trading Bot</div>
-        <div class="subtitle">18 signala · min 10/18 · H/L breakout · ${tf} · SL 1.5–2.5% / TP 2.5–3.5% per-simbol · 50x · rizik 1%</div>
+        <div class="subtitle">18 signala · min 9/18 · H/L breakout · ${tf} · SL 1.5–2.5% / TP 2.5–3.5% per-simbol · 50x · rizik 1%</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -950,7 +950,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <div class="scan-card">
     <div class="scan-header">
       <div>
-        <div class="chart-title" style="margin-bottom:2px">🎯 ULTRA Scanner — ${ALL_SYMBOLS.length} simbola | 18 signala | min 10/18 | H/L breakout</div>
+        <div class="chart-title" style="margin-bottom:2px">🎯 ULTRA Scanner — ${ALL_SYMBOLS.length} simbola | 18 signala | min 9/18 | H/L breakout</div>
         <div style="font-size:12px;color:var(--text-muted)">
           EMA · CRS · E50 · RSI · E55 · ADX · CHP · 6Sc · CVD · R⟳ · MCD · E145 · VOL · MCC · R↗ · ADX+
           &nbsp;|&nbsp; 🟡 Čeka breakout &nbsp; 🟢 Signal &nbsp; Cache 90s &nbsp;|&nbsp;
@@ -988,7 +988,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <!-- Signal legend (collapsible) -->
   <div id="sig-legend" style="display:none;margin-top:12px">
     <div class="chart-card" style="padding:16px 20px">
-      <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — ULTRA (18 signala, min 12/18 za ulaz)</div>
+      <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — ULTRA (18 signala, min 9/18 za ulaz)</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:8px;font-size:12px">
         ${[
           ['EMA', '▲ EMA9 > EMA21 → kratkoročni bull trend  |  ▼ EMA9 < EMA21 → bear'],
@@ -1017,7 +1017,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       </div>
       <div style="margin-top:10px;font-size:11px;color:#555">
         🟢 Zeleno = bullish signal aktiviran &nbsp;|&nbsp; 🔴 Crveno = bearish &nbsp;|&nbsp; ⬛ Sivo = neutral/nema signala &nbsp;|&nbsp;
-        Min <b style="color:#e85d9a">12/18</b> signala za ulaz · H/L breakout entry · SL <b style="color:#f7b731">1.5–2.5%</b> / TP <b style="color:#f7b731">2.5–3.5%</b> po simbolu · <b>50x</b> leverage · rizik <b>1%</b> banke po tradeu
+        Min <b style="color:#e85d9a">9/18</b> signala za ulaz · H/L breakout entry · SL <b style="color:#f7b731">1.5–2.5%</b> / TP <b style="color:#f7b731">2.5–3.5%</b> po simbolu · <b>50x</b> leverage · rizik <b>1%</b> banke po tradeu
       </div>
     </div>
   </div>

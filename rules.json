@@ -6,8 +6,7 @@
     "XAUUSDT","DOGEUSDT","NEARUSDT","ADAUSDT","ETHUSDT",
     "SUIUSDT","TAOUSDT","SOLUSDT","XAGUSDT","HYPEUSDT",
     "LINKUSDT","PEPEUSDT","BTCUSDT","XRPUSDT","BNBUSDT",
-    "INJUSDT","APTUSDT","ARBUSDT","WIFUSDT","DOTUSDT",
-    "AVAXUSDT","TIAUSDT","FETUSDT","SEIUSDT","ENAUSDT"
+    "APTUSDT","DOTUSDT","AVAXUSDT","SEIUSDT","ENAUSDT"
   ],
 
   "watchlist_ema_rsi": [],
@@ -18,8 +17,7 @@
     "XAUUSDT","DOGEUSDT","NEARUSDT","ADAUSDT","ETHUSDT",
     "SUIUSDT","TAOUSDT","SOLUSDT","XAGUSDT","HYPEUSDT",
     "LINKUSDT","PEPEUSDT","BTCUSDT","XRPUSDT","BNBUSDT",
-    "INJUSDT","APTUSDT","ARBUSDT","WIFUSDT","DOTUSDT",
-    "AVAXUSDT","TIAUSDT","FETUSDT","SEIUSDT","ENAUSDT"
+    "APTUSDT","DOTUSDT","AVAXUSDT","SEIUSDT","ENAUSDT"
   ],
 
   "portfolio_timeframes": {
@@ -136,6 +134,7 @@
     "Max 10 otvorenih pozicija istovremeno",
     "Dnevni limit: 100 tradova",
     "Circuit breaker: 7 uzastopnih gubitaka → 8h pauza",
-    "Uklonjeni simboli (loš WR): ORDIUSDT, WLDUSDT, TRUMPUSDT, AAVEUSDT, RIVERUSDT, ZECUSDT"
+    "Uklonjeni simboli (loš WR): ORDIUSDT, WLDUSDT, TRUMPUSDT, AAVEUSDT, RIVERUSDT, ZECUSDT",
+    "Uklonjeni simboli (mali volumen <10M USD/dan): INJUSDT, ARBUSDT, WIFUSDT, TIAUSDT, FETUSDT"
   ]
 }

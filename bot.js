@@ -863,27 +863,30 @@ function analyzeUltra(candles, cfg) {
   const emaLongOk  = ema9 > ema21;
   const emaShortOk = ema9 < ema21;
 
-  // 3. RSI mora biti u zoni 35–65 — ne ulazimo u overbought/oversold
-  const rsiZoneOk = rsi >= 35 && rsi <= 65;
+  // 3. RSI filter — asimetričan po smjeru:
+  //    LONG:  RSI < 60 — nije overbought, ima prostora gore
+  //    SHORT: RSI > 40 — nije oversold, ima prostora dolje
+  const rsiLongOk  = rsi < 60;
+  const rsiShortOk = rsi > 40;
 
   // ── Min 5/18 potvrđujućih signala ─────────────────────────────────────────
   const MIN_CONFIRM = minSig;  // čita iz rules.json (trenutno 5)
 
-  if (bullCnt >= MIN_CONFIRM && emaLongOk && rsiZoneOk) {
+  if (bullCnt >= MIN_CONFIRM && emaLongOk && rsiLongOk) {
     return { price, signal: "LONG",  bullScore: bullCnt, bearScore: bearCnt,
-      reason: `ULTRA LONG ↑${bullCnt}/18 | RSI:${rsi.toFixed(0)} ADX:${adx.toFixed(0)} EMA✓ [3ob+${MIN_CONFIRM}]` };
+      reason: `ULTRA LONG ↑${bullCnt}/18 | RSI:${rsi.toFixed(0)}<60✓ ADX:${adx.toFixed(0)} EMA✓ [4ob+${MIN_CONFIRM}]` };
   }
-  if (bearCnt >= MIN_CONFIRM && emaShortOk && rsiZoneOk) {
+  if (bearCnt >= MIN_CONFIRM && emaShortOk && rsiShortOk) {
     return { price, signal: "SHORT", bullScore: bullCnt, bearScore: bearCnt,
-      reason: `ULTRA SHORT ↓${bearCnt}/18 | RSI:${rsi.toFixed(0)} ADX:${adx.toFixed(0)} EMA✓ [3ob+${MIN_CONFIRM}]` };
+      reason: `ULTRA SHORT ↓${bearCnt}/18 | RSI:${rsi.toFixed(0)}>40✓ ADX:${adx.toFixed(0)} EMA✓ [4ob+${MIN_CONFIRM}]` };
   }
 
   // Dijagnoza zašto nema signala
-  const whyNot = bullCnt > bearCnt
-    ? `↑${bullCnt}/18${!emaLongOk ? " EMA✗" : ""}${!rsiZoneOk ? ` RSI${rsi.toFixed(0)}✗` : ""}`
-    : `↓${bearCnt}/18${!emaShortOk ? " EMA✗" : ""}${!rsiZoneOk ? ` RSI${rsi.toFixed(0)}✗` : ""}`;
+  const whyNot = bullCnt >= bearCnt
+    ? `↑${bullCnt}/18${!emaLongOk ? " EMA✗" : ""}${!rsiLongOk ? ` RSI${rsi.toFixed(0)}≥60✗` : ""}`
+    : `↓${bearCnt}/18${!emaShortOk ? " EMA✗" : ""}${!rsiShortOk ? ` RSI${rsi.toFixed(0)}≤40✗` : ""}`;
   return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
-    reason: `ULTRA: ${whyNot} (treba 3ob+${MIN_CONFIRM})` };
+    reason: `ULTRA: ${whyNot} (treba 4ob+${MIN_CONFIRM})` };
 }
 
 // ─── ULTRA Immediate Entry ─────────────────────────────────────────────────────

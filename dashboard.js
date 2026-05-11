@@ -376,16 +376,17 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
       ultraBull = ultraSigs16.filter(s => s === 1).length;
       ultraBear = ultraSigs16.filter(s => s === -1).length;
 
-      // 3 obavezna: ADX>25, EMA smjer, RSI zona 35-65
-      const adxOk     = adxV >= 25;
+      // 4 obavezna: ADX>25, EMA smjer, RSI asimetričan, 5m SR test (bot only)
+      const adxOk      = adxV >= 25;
       const emaLongOk  = ema9 > ema21;
       const emaShortOk = ema9 < ema21;
-      const rsiZoneOk  = rsiV >= 35 && rsiV <= 65;
+      const rsiLongOk  = rsiV < 60;   // LONG: nije overbought
+      const rsiShortOk = rsiV > 40;   // SHORT: nije oversold
 
-      if      (adxOk && emaLongOk  && rsiZoneOk && ultraBull >= minSig) ultraSig = "LONG";
-      else if (adxOk && emaShortOk && rsiZoneOk && ultraBear >= minSig) ultraSig = "SHORT";
-      else if (adxOk && emaLongOk  && rsiZoneOk && ultraBull === minSig - 1) ultraSig = "SETUP↑";
-      else if (adxOk && emaShortOk && rsiZoneOk && ultraBear === minSig - 1) ultraSig = "SETUP↓";
+      if      (adxOk && emaLongOk  && rsiLongOk  && ultraBull >= minSig) ultraSig = "LONG";
+      else if (adxOk && emaShortOk && rsiShortOk && ultraBear >= minSig) ultraSig = "SHORT";
+      else if (adxOk && emaLongOk  && rsiLongOk  && ultraBull === minSig - 1) ultraSig = "SETUP↑";
+      else if (adxOk && emaShortOk && rsiShortOk && ultraBear === minSig - 1) ultraSig = "SETUP↓";
     }
   }
 

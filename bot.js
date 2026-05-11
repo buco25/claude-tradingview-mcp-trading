@@ -27,7 +27,6 @@ const SL_PCT        = 1.5;    // fiksni SL % | SL 1.5% × 50x = 75% margine
 const TP_PCT        = 2.5;    // fiksni TP % | RR 1:1.67
 const MAX_TRADES_PER_DAY = 100;
 const MAX_OPEN_PER_PORTFOLIO = 5;  // max otvorenih pozicija po portfoliju
-const EQUITY_FLOOR = 200;          // ispod ovog iznosa ($) ne otvaramo nove pozicije
 
 const PAPER_TRADING = process.env.PAPER_TRADING !== "false";
 const BITGET_DEMO   = process.env.BITGET_DEMO === "true";
@@ -1730,7 +1729,7 @@ function checkDailyLimit(pid) {
 
 const CB_LOSSES    = 7;           // broj uzastopnih gubitaka → blokada
 const CB_COOLDOWN  = 8 * 60 * 60 * 1000;  // 8 sati u ms
-const CB_DRAWDOWN_MIN = 250;      // minimalni equity ($) — ispod = stop trading
+const CB_DRAWDOWN_MIN = 200;      // minimalni equity ($) — ispod = stop trading
 const SYM_CONSEC_LOSSES = 5;      // uzastopni gubici po simbolu → suspendiraj sa liste
 const CB_FILE      = `${DATA_DIR}/circuit_breaker.json`;
 
@@ -1928,11 +1927,18 @@ export async function run() {
       continue;
     }
 
-    // ── Drawdown zaštita: equity < $250 → stop sve ────────────────────────────
+    // ── Drawdown zaštita: equity < $200 → stop sve ────────────────────────────
     const equityNow = getPortfolioEquity(pid, pDef.startCapital || START_CAPITAL);
     if (equityNow < CB_DRAWDOWN_MIN) {
       console.log(`  🛑 [${pDef.name}] DRAWDOWN ZAŠTITA — equity $${equityNow.toFixed(2)} < $${CB_DRAWDOWN_MIN} — trading zablokiran!`);
-      await tg(`🛑 <b>DRAWDOWN ZAŠTITA [${pDef.name}]</b>\nEquity: $${equityNow.toFixed(2)} — ispod minimuma $${CB_DRAWDOWN_MIN}\nTrading zablokiran do ručnog reseta.`);
+      // Telegram alert samo jednom na sat (ne svaki ciklus)
+      const cb = loadCircuitBreaker();
+      const lastDdAlert = cb[pid]?.lastDrawdownAlert || 0;
+      if (Date.now() - lastDdAlert > 60 * 60 * 1000) {
+        await tg(`🛑 <b>DRAWDOWN ZAŠTITA [${pDef.name}]</b>\nEquity: $${equityNow.toFixed(2)} — ispod minimuma $${CB_DRAWDOWN_MIN}\nTrading zablokiran. Resetiraj ručno kad budeš spreman.`);
+        cb[pid] = { ...(cb[pid] || {}), lastDrawdownAlert: Date.now() };
+        saveCircuitBreaker(cb);
+      }
       continue;
     }
 
@@ -2006,13 +2012,6 @@ export async function run() {
         // margin = notional / actualLeverage — prilagođava se ako simbol ne podržava 100x
         const startCap   = pDef.startCapital ?? START_CAPITAL;
         const equity     = getPortfolioEquity(pid, startCap);
-
-        // Equity floor — zaštita kapitala: ne otvaraj ako smo ispod minimuma
-        if (equity <= EQUITY_FLOOR) {
-          console.log(`  🛑 [${pDef.name}] EQUITY FLOOR — equity $${equity.toFixed(2)} ≤ $${EQUITY_FLOOR} — trgovanje zaustavljeno!`);
-          await tg(`🛑 <b>EQUITY FLOOR</b> [${pDef.name}]\nEquity: $${equity.toFixed(2)} ≤ $${EQUITY_FLOOR} — novi tradovi zaustavljeni radi zaštite kapitala!`);
-          break;  // Zaustavi cijeli portfolio scan
-        }
 
         const riskAmount = equity * (RISK_PCT / 100);
         const tradeSize  = riskAmount / (slPct / 100);
@@ -2133,12 +2132,6 @@ export async function checkBreakouts() {
 
     const startCap   = pDef.startCapital ?? START_CAPITAL;
     const equity     = getPortfolioEquity(pid, startCap);
-
-    // Equity floor — ne otvaraj breakout ispod minimuma
-    if (equity <= EQUITY_FLOOR) {
-      console.log(`  🛑 [BRK] EQUITY FLOOR — $${equity.toFixed(2)} ≤ $${EQUITY_FLOOR} — breakout preskočen`);
-      break;
-    }
 
     const riskAmount = equity * (RISK_PCT / 100);
     const tradeSize  = riskAmount / (slPct / 100);

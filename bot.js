@@ -866,8 +866,8 @@ function analyzeUltra(candles, cfg) {
   // 3. RSI filter — asimetričan po smjeru:
   //    LONG:  RSI < 60 — nije overbought, ima prostora gore
   //    SHORT: RSI > 40 — nije oversold, ima prostora dolje
-  const rsiLongOk  = rsi < 60;
-  const rsiShortOk = rsi > 40;
+  const rsiLongOk  = rsi < 72;   // LONG: blokiran samo ako je ekstremno overbought
+  const rsiShortOk = rsi > 30;   // SHORT: blokiran samo ako je ekstremno oversold
 
   // ── Min 5/18 potvrđujućih signala ─────────────────────────────────────────
   const MIN_CONFIRM = minSig;  // čita iz rules.json (trenutno 5)

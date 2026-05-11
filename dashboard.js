@@ -380,8 +380,8 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
       const adxOk      = adxV >= 25;
       const emaLongOk  = ema9 > ema21;
       const emaShortOk = ema9 < ema21;
-      const rsiLongOk  = rsiV < 60;   // LONG: nije overbought
-      const rsiShortOk = rsiV > 40;   // SHORT: nije oversold
+      const rsiLongOk  = rsiV < 72;   // LONG: blokiran samo ako je ekstremno overbought
+      const rsiShortOk = rsiV > 30;   // SHORT: blokiran samo ako je ekstremno oversold
 
       if      (adxOk && emaLongOk  && rsiLongOk  && ultraBull >= minSig) ultraSig = "LONG";
       else if (adxOk && emaShortOk && rsiShortOk && ultraBear >= minSig) ultraSig = "SHORT";

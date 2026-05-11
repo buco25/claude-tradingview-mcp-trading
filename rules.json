@@ -3,10 +3,9 @@
   "watchlist_ob":        [],
 
   "all_symbols": [
-    "XAUUSDT","DOGEUSDT","NEARUSDT","ADAUSDT","ETHUSDT",
-    "SUIUSDT","TAOUSDT","SOLUSDT","XAGUSDT","HYPEUSDT",
-    "LINKUSDT","PEPEUSDT","BTCUSDT","XRPUSDT","BNBUSDT",
-    "APTUSDT","DOTUSDT","AVAXUSDT","SEIUSDT","ENAUSDT"
+    "DOGEUSDT","NEARUSDT","ADAUSDT","ETHUSDT","SUIUSDT",
+    "TAOUSDT","SOLUSDT","HYPEUSDT","LINKUSDT","PEPEUSDT",
+    "BTCUSDT","XRPUSDT","APTUSDT","SEIUSDT","ENAUSDT"
   ],
 
   "watchlist_ema_rsi": [],
@@ -14,10 +13,9 @@
   "watchlist_mega": [],
   "watchlist_synapse7": [],
   "watchlist_synapse_t": [
-    "XAUUSDT","DOGEUSDT","NEARUSDT","ADAUSDT","ETHUSDT",
-    "SUIUSDT","TAOUSDT","SOLUSDT","XAGUSDT","HYPEUSDT",
-    "LINKUSDT","PEPEUSDT","BTCUSDT","XRPUSDT","BNBUSDT",
-    "APTUSDT","DOTUSDT","AVAXUSDT","SEIUSDT","ENAUSDT"
+    "DOGEUSDT","NEARUSDT","ADAUSDT","ETHUSDT","SUIUSDT",
+    "TAOUSDT","SOLUSDT","HYPEUSDT","LINKUSDT","PEPEUSDT",
+    "BTCUSDT","XRPUSDT","APTUSDT","SEIUSDT","ENAUSDT"
   ],
 
   "portfolio_timeframes": {
@@ -134,6 +132,7 @@
     "Dnevni limit: 100 tradova",
     "Circuit breaker: 7 uzastopnih gubitaka → 8h pauza",
     "Uklonjeni simboli (loš WR): ORDIUSDT, WLDUSDT, TRUMPUSDT, AAVEUSDT, RIVERUSDT, ZECUSDT",
-    "Uklonjeni simboli (mali volumen <10M USD/dan): INJUSDT, ARBUSDT, WIFUSDT, TIAUSDT, FETUSDT"
+    "Uklonjeni simboli (mali volumen <10M USD/dan): INJUSDT, ARBUSDT, WIFUSDT, TIAUSDT, FETUSDT",
+    "Uklonjeni simboli (WR 0% analiza): XAUUSDT, XAGUSDT, BNBUSDT, AVAXUSDT, DOTUSDT"
   ]
 }

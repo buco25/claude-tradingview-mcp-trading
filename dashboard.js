@@ -650,8 +650,8 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
           </div>
           <div class="pos-grid">
             <div><label>Entry</label><span>${fmtP(p.entryPrice)}</span></div>
-            <div><label>SL</label><span class="red">${fmtP(p.sl)}</span></div>
-            <div><label>TP</label><span class="green">${fmtP(p.tp)}</span></div>
+            <div><label>SL</label><span class="red">${fmtP(p.sl)}</span>${p.slPct ? `<span style="font-size:10px;color:#ff6b6b;margin-left:4px">${p.slPct}%</span>` : p.entryPrice && p.sl ? `<span style="font-size:10px;color:#ff6b6b;margin-left:4px">${(Math.abs(p.entryPrice - p.sl) / p.entryPrice * 100).toFixed(2)}%</span>` : ''}</div>
+            <div><label>TP</label><span class="green">${fmtP(p.tp)}</span>${p.tpPct ? `<span style="font-size:10px;color:#00c48c;margin-left:4px">${p.tpPct}%</span>` : p.entryPrice && p.tp ? `<span style="font-size:10px;color:#00c48c;margin-left:4px">${(Math.abs(p.tp - p.entryPrice) / p.entryPrice * 100).toFixed(2)}%</span>` : ''}</div>
             <div><label>Notional</label><span>$${p.totalUSD.toFixed(2)}</span></div>
             <div><label>Ulog (margin)</label><span style="color:#f7b731;font-weight:700">$${(p.margin ?? p.totalUSD / 40).toFixed(2)}</span></div>
             <div><label>Qty</label><span>${p.quantity.toFixed(4)}</span></div>
@@ -661,7 +661,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <div id="pnl-${def.id}-${p.symbol}" style="font-size:14px;font-weight:700;color:#8b949e">—</div>
             <div style="flex:1;min-width:0">
               <div class="range-bar"><div id="bar-${def.id}-${p.symbol}" class="range-fill"></div></div>
-              <div class="range-labels"><small>SL ${fmtP(p.sl)}</small><small>TP ${fmtP(p.tp)}</small></div>
+              <div class="range-labels"><small>SL ${fmtP(p.sl)}${p.slPct ? ' ('+p.slPct+'%)' : ''}</small><small>TP ${fmtP(p.tp)}${p.tpPct ? ' ('+p.tpPct+'%)' : ''}</small></div>
             </div>
           </div>
           <script>

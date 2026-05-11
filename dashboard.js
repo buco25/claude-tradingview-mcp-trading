@@ -1263,13 +1263,14 @@ function mandatoryBoxes(s) {
   const adxTip = 'ADX ' + adxNum.toFixed(1) + (adxOk ? ' ≥ 25 ✓' : ' < 25 ✗ — ranging tržište');
 
   // 2. EMA9/21 smjer (signal #1 iz ultraSigs16)
-  const emaSig = s.ultraSigs16?.[0] ?? 0;
-  const emaLongOk  = emaSig === 1;
-  const emaShortOk = emaSig === -1;
-  const emaOk  = sig === "SHORT" ? emaShortOk : emaLongOk;
-  const emaCol = emaSig === 1 ? '#00c48c' : emaSig === -1 ? '#ff4d4d' : '#555';
-  const emaBg  = emaSig === 1 ? '#0d3d26' : emaSig === -1 ? '#3d0d0d' : '#1c2128';
-  const emaTip = 'EMA9/21: ' + (emaSig === 1 ? 'EMA9 > EMA21 — bullish ✓' : emaSig === -1 ? 'EMA9 < EMA21 — bearish ✓' : 'neutralno');
+  const emaSig     = s.ultraSigs16?.[0] ?? 0;
+  const emaLongOk  = emaSig === 1;   // bullish EMA za LONG
+  const emaShortOk = emaSig === -1;  // bearish EMA za SHORT
+  const emaOk  = sig === "SHORT" ? emaShortOk : emaLongOk;  // zadovoljen za dati smjer?
+  const emaCol = emaOk ? '#00c48c' : '#ff4d4d';  // zeleno = uvjet OK, crveno = blokiran
+  const emaBg  = emaOk ? '#0d3d26' : '#3d0d0d';
+  const emaTip = 'EMA9/21: ' + (emaSig === 1 ? 'EMA9 > EMA21 — bullish' : emaSig === -1 ? 'EMA9 < EMA21 — bearish' : 'neutralno') +
+    (emaOk ? ' ✓' : ' ✗ — smjer ne odgovara signalu');
 
   // 3. RSI asimetričan — LONG: RSI<72, SHORT: RSI>30
   const rsiLongOk  = rsiNum < 72;

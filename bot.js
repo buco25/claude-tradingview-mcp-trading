@@ -1949,6 +1949,7 @@ export async function run() {
     }
 
     for (const symbol of pDef.symbols) {
+      let isFlipEntry = false;
       const existingPos = openPositions.find(p => p.symbol === symbol);
       if (existingPos) {
         // ── Signal flip: kontra signal → zatvori i otvori suprotno ─────────
@@ -1987,6 +1988,7 @@ export async function run() {
           if (isLive) await new Promise(r => setTimeout(r, 2000));
 
           // Otvori novu poziciju — pad kroz u normalnu entry logiku ispod
+          isFlipEntry = true;
           openPositions.length = 0;
           openPositions.push(...loadPositions(pid));
           openSymbols.length = 0;
@@ -1998,12 +2000,13 @@ export async function run() {
         }
       }
 
-      // Provjeri limit ponovo unutar petlje — BTC uvijek prolazi bez obzira na broj
+      // Provjeri limit — flip i BTC uvijek prolaze bez obzira na broj
       const currentOpen = loadPositions(pid).length;
-      if (currentOpen >= MAX_OPEN_PER_PORTFOLIO && symbol !== BTC_EXCEPTION) {
-        console.log(`  🔒 [${pDef.name}] Max ${MAX_OPEN_PER_PORTFOLIO} dostignut — preskačem ${symbol} (nije BTC)`);
-        continue;  // continue umjesto break — da BTC na kraju liste ipak prođe
+      if (currentOpen >= MAX_OPEN_PER_PORTFOLIO && symbol !== BTC_EXCEPTION && !isFlipEntry) {
+        console.log(`  🔒 [${pDef.name}] Max ${MAX_OPEN_PER_PORTFOLIO} dostignut — preskačem ${symbol} (nije BTC/flip)`);
+        continue;
       }
+      if (isFlipEntry) console.log(`  🔄 [FLIP] ${symbol} — bypass limit (flip uvijek prolazi)`);
 
       try {
         const candles = await fetchCandles(symbol, pDef.timeframe, 250);

@@ -12,6 +12,23 @@ const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
 const START_CAPITAL = 1000;
 
+// ─── Timezone offset — UTC+2 (CEST) ───────────────────────────────────────────
+const TZ_OFFSET_H = 2;  // sati ispred UTC
+
+/** Pretvara UTC ISO string ili Date u lokalni prikaz "YYYY-MM-DD HH:MM" */
+function fmtLocalTs(iso) {
+  if (!iso) return "—";
+  const d = new Date(typeof iso === "string" ? iso : iso);
+  if (isNaN(d)) return String(iso).slice(0, 16).replace("T", " ");
+  d.setHours(d.getHours() + TZ_OFFSET_H);
+  return d.toISOString().slice(0, 16).replace("T", " ");
+}
+
+/** Vraća trenutno lokalno vrijeme kao string */
+function nowLocal() {
+  return fmtLocalTs(new Date().toISOString());
+}
+
 const PORTFOLIO_DEFS = [
   { id: "synapse_t", name: "ULTRA", color: "#e85d9a", emoji: "🎯", startCapital: 296.99, live: true },
 ];
@@ -661,7 +678,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <div><label>Notional</label><span>$${p.totalUSD.toFixed(2)}</span></div>
             <div><label>Ulog (margin)</label><span style="color:#f7b731;font-weight:700">$${(p.margin ?? p.totalUSD / 40).toFixed(2)}</span></div>
             <div><label>Qty</label><span>${p.quantity.toFixed(4)}</span></div>
-            <div><label>Otvoreno</label><span>${(p.openedAt || "").slice(0,16).replace("T"," ")}</span></div>
+            <div><label>Otvoreno</label><span>${fmtLocalTs(p.openedAt)}</span></div>
           </div>
           <div class="pos-pnl-row">
             <div id="pnl-${def.id}-${p.symbol}" style="font-size:14px;font-weight:700;color:#8b949e">—</div>
@@ -1040,7 +1057,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
 </div>
 
 <div class="footer">
-  Auto-refresh svakih 30s &nbsp;|&nbsp; ${new Date().toISOString().slice(0,16).replace("T"," ")} UTC
+  Auto-refresh svakih 30s &nbsp;|&nbsp; ${nowLocal()} (UTC+2)
 </div>
 
 <script>
@@ -1375,7 +1392,7 @@ async function doScan() {
     const d = await r.json();
     if (d.error) throw new Error(d.error);
 
-    const ts = (d.ts || "").slice(0,16).replace("T"," ");
+    const ts = fmtLocalTs(d.ts || "");
     const results = d.results || [];
 
     // Sort: pending first, then signal, then setup, then score desc, then neutral
@@ -1393,7 +1410,7 @@ async function doScan() {
     const shorts  = results.filter(s => s.ultraSig === "SHORT").length;
     const pending = results.filter(s => s.pending).length;
     const setups  = results.filter(s => (s.ultraSig||"").startsWith("SETUP")).length;
-    document.getElementById("scan-ts").textContent = ts + " UTC | ▲ " + longs + " LONG · ▼ " + shorts + " SHORT · ⏳ " + pending + " čeka · ◈ " + setups + " setup";
+    document.getElementById("scan-ts").textContent = ts + " (UTC+2) | ▲ " + longs + " LONG · ▼ " + shorts + " SHORT · ⏳ " + pending + " čeka · ◈ " + setups + " setup";
 
     tbody.innerHTML = results.map((s, i) => {
       if (s.error) return '<tr><td colspan="9" style="color:#ff4d4d;padding:6px 10px">' + s.symbol + ': ' + s.error + '</td></tr>';

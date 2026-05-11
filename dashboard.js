@@ -342,7 +342,7 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
   }
 
   // ── ULTRA — 13 signala (identično bot.js analyzeUltra) ──
-  // OBAVEZNI GATING: ADX≥30, 6Sc≥4, RSI asimetričan, 5m S/R test
+  // OBAVEZNI GATING: ADX≥25, 6Sc≥4, RSI asimetričan, 5m S/R test
   // Maknuti iz signala: CRS (WR 14%), ADXsn (obavezan), 6Sc (obavezan), EMA smjer (nije obavezan)
   let ultraSig = "—";
   let ultraBull = 0, ultraBear = 0;
@@ -375,8 +375,8 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
       ultraBull = ultraSigs16.filter(s => s === 1).length;
       ultraBear = ultraSigs16.filter(s => s === -1).length;
 
-      // 4 obavezna gating uvjeta: ADX≥30, 6Sc≥4, RSI asimetričan, 5mSR (bot only)
-      const adxOk       = adxV >= 30;
+      // 4 obavezna gating uvjeta: ADX≥25, 6Sc≥4, RSI asimetričan, 5mSR (bot only)
+      const adxOk       = adxV >= 25;
       const scaleOkLong  = scaleUp >= 4;
       const scaleOkShort = scaleDn >= 4;
       const rsiLongOk   = rsiV < 72;
@@ -872,7 +872,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="logo">🎯</div>
       <div>
         <div class="title">ULTRA Trading Bot</div>
-        <div class="subtitle">4 obavezna (ADX≥30·6Sc·RSI·5mSR) + 13 neovisnih signala · min 5/13 · ulaz odmah · ${tf} · SL 1.5–2.5% / TP 2.5–3.5% · 50x · rizik 1%</div>
+        <div class="subtitle">4 obavezna (ADX≥25·6Sc·RSI·5mSR) + 13 neovisnih signala · min 5/13 · ulaz odmah · ${tf} · SL 1.5–2.5% / TP 2.5–3.5% · 50x · rizik 1%</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -979,7 +979,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <th>Cijena</th>
             <th style="color:#8b949e">RSI</th>
             <th style="color:#8b949e">ADX</th>
-            <th style="color:#f7b731;text-align:center;white-space:nowrap">Obavezni <span style="font-weight:400;font-size:10px;color:#666">ADX≥30 · 6Sc · RSI · 5mSR</span></th>
+            <th style="color:#f7b731;text-align:center;white-space:nowrap">Obavezni <span style="font-weight:400;font-size:10px;color:#666">ADX≥25 · 6Sc · RSI · 5mSR</span></th>
             <th style="color:#e85d9a;text-align:center">13 Signala &nbsp;<span style="font-weight:400;font-size:10px;color:#666">E50 · RSI · E55 · CHP · CVD · R⟳ · MCD · E145 · VOL · MCC · RSI↗ · SRS · SRB</span></th>
             <th style="color:#e85d9a;text-align:center">Score</th>
             <th style="min-width:260px">Status / Breakout</th>
@@ -1024,7 +1024,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       </div>
       <div style="margin-top:10px;font-size:11px;color:#555">
         🟢 Zeleno = bullish signal aktiviran &nbsp;|&nbsp; 🔴 Crveno = bearish &nbsp;|&nbsp; ⬛ Sivo = neutral/nema signala &nbsp;|&nbsp;
-        Min <b style="color:#e85d9a">5/13</b> neovisnih signala + 4 obavezna gating (ADX≥30·6Sc·RSI·5mSR) · SL <b style="color:#f7b731">1.5–2.5%</b> / TP <b style="color:#f7b731">2.5–3.5%</b> po simbolu · <b>50x</b> leverage · rizik <b>1%</b> banke po tradeu
+        Min <b style="color:#e85d9a">5/13</b> neovisnih signala + 4 obavezna gating (ADX≥25·6Sc·RSI·5mSR) · SL <b style="color:#f7b731">1.5–2.5%</b> / TP <b style="color:#f7b731">2.5–3.5%</b> po simbolu · <b>50x</b> leverage · rizik <b>1%</b> banke po tradeu
       </div>
     </div>
   </div>
@@ -1245,8 +1245,8 @@ function mandatoryBoxes(s) {
   const sig     = s.ultraSig;
   const sigs13  = s.ultraSigs16 || [];
 
-  // 1. ADX ≥ 30 — jak trend (obavezan, WR potvrđen 40.9%)
-  const adxOk  = adxNum >= 30;
+  // 1. ADX ≥ 25 — jak trend (obavezan, WR potvrđen 40.9%)
+  const adxOk  = adxNum >= 25;
   const adxCol = adxOk ? '#00c48c' : '#ff4d4d';
   const adxBg  = adxOk ? '#0d3d26' : '#3d0d0d';
   const adxTip = 'ADX ' + adxNum.toFixed(1) + (adxOk ? ' ≥ 30 ✓ — jak trend' : ' < 30 ✗ — slab trend, nema ulaza');

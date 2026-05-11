@@ -826,7 +826,7 @@ function analyzeUltra(candles, cfg) {
   }
 
   // ── 13 signala: +1 = bullish, -1 = bearish, 0 = neutral ──
-  // OBAVEZNI GATING (ne broje se u signale): ADX≥30, 6Sc≥4, RSI asimetričan, 5m S/R test
+  // OBAVEZNI GATING (ne broje se u signale): ADX≥25, 6Sc≥4, RSI asimetričan, 5m S/R test
   // Maknuti: CRS (WR 14%), ADXsn (obavezan), 6Sc (obavezan)
   // REVERSANI (WR<31.5% kada ▲ → logika invertirana):
   //   E50, RSI zona, E55, CVD, VOL, MCC — contrarian/pullback interpretacija
@@ -852,10 +852,10 @@ function analyzeUltra(candles, cfg) {
 
   // ══ 4 OBAVEZNA UVJETA — sva 4 moraju biti zadovoljena ══════════════════════
 
-  // 1. ADX ≥ 30 — jak trend (stricter od ranijeg ≥25, potvrđeno analizom WR 40.9%)
-  if (adx < 30) {
+  // 1. ADX ≥ 25 — tržište mora biti u trendu (ne ranging)
+  if (adx < 25) {
     return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
-      reason: `ADX ${adx.toFixed(1)} < 30 — slab trend, nema ulaza` };
+      reason: `ADX ${adx.toFixed(1)} < 25 — ranging, nema ulaza` };
   }
 
   // 2. 6-Scale: min 4/6 multi-EMA parova poravnato u jednom smjeru
@@ -876,11 +876,11 @@ function analyzeUltra(candles, cfg) {
 
   if (bullCnt >= MIN_CONFIRM && scaleOkLong && rsiLongOk) {
     return { price, signal: "LONG",  bullScore: bullCnt, bearScore: bearCnt,
-      reason: `ULTRA LONG ↑${bullCnt}/13 | ADX:${adx.toFixed(0)}≥30✓ 6Sc:${scaleUp}/6✓ RSI:${rsi.toFixed(0)}<72✓ [4ob+${MIN_CONFIRM}]` };
+      reason: `ULTRA LONG ↑${bullCnt}/13 | ADX:${adx.toFixed(0)}≥25✓ 6Sc:${scaleUp}/6✓ RSI:${rsi.toFixed(0)}<72✓ [4ob+${MIN_CONFIRM}]` };
   }
   if (bearCnt >= MIN_CONFIRM && scaleOkShort && rsiShortOk) {
     return { price, signal: "SHORT", bullScore: bullCnt, bearScore: bearCnt,
-      reason: `ULTRA SHORT ↓${bearCnt}/13 | ADX:${adx.toFixed(0)}≥30✓ 6Sc:${scaleDn}/6✓ RSI:${rsi.toFixed(0)}>30✓ [4ob+${MIN_CONFIRM}]` };
+      reason: `ULTRA SHORT ↓${bearCnt}/13 | ADX:${adx.toFixed(0)}≥25✓ 6Sc:${scaleDn}/6✓ RSI:${rsi.toFixed(0)}>30✓ [4ob+${MIN_CONFIRM}]` };
   }
 
   // Dijagnoza zašto nema signala

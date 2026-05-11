@@ -127,11 +127,10 @@
   },
 
   "risk_rules": [
-    "ULTRA portfolio — jedan simbol može biti otvoren istovremeno",
     "Risk-based sizing: margin = equity × 1% | notional = margin × 50x (BTC: 75x) | SL 1.5% / TP 2.5%",
     "ULTRA: SL 1.5% / TP 2.5% / 50x leverage (BTC 75x) / rizik 1% banke po tradeu",
     "Samo jedna pozicija po simbolu istovremeno",
-    "Max 10 otvorenih pozicija istovremeno",
+    "Max 8 otvorenih pozicija istovremeno + BTC bonus slot",
     "Dnevni limit: 100 tradova",
     "Circuit breaker: 7 uzastopnih gubitaka → 8h pauza",
     "Uklonjeni simboli (loš WR): ORDIUSDT, WLDUSDT, TRUMPUSDT, AAVEUSDT, RIVERUSDT, ZECUSDT",

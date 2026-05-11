@@ -33,6 +33,35 @@
   "mega_timeframes":   {},
   "default_timeframe": "1H",
 
+  "_sltp_note": "Per-simbol SL/TP na osnovu 30-dnevnog ATR analize. Tier1=niska vol, Tier2=srednja, Tier3=visoka.",
+  "symbol_sltp": {
+    "SEIUSDT":  { "slPct": 2.5, "tpPct": 3.5 },
+    "TIAUSDT":  { "slPct": 2.5, "tpPct": 3.5 },
+    "WIFUSDT":  { "slPct": 2.5, "tpPct": 3.5 },
+    "TAOUSDT":  { "slPct": 2.5, "tpPct": 3.5 },
+    "ARBUSDT":  { "slPct": 2.5, "tpPct": 3.5 },
+    "APTUSDT":  { "slPct": 2.5, "tpPct": 3.5 },
+    "INJUSDT":  { "slPct": 2.5, "tpPct": 3.5 },
+    "ENAUSDT":  { "slPct": 2.0, "tpPct": 3.0 },
+    "FETUSDT":  { "slPct": 2.0, "tpPct": 3.0 },
+    "SUIUSDT":  { "slPct": 2.0, "tpPct": 3.0 },
+    "PEPEUSDT": { "slPct": 2.0, "tpPct": 3.0 },
+    "NEARUSDT": { "slPct": 2.0, "tpPct": 3.0 },
+    "DOTUSDT":  { "slPct": 2.0, "tpPct": 3.0 },
+    "HYPEUSDT": { "slPct": 2.0, "tpPct": 3.0 },
+    "DOGEUSDT": { "slPct": 2.0, "tpPct": 3.0 },
+    "ADAUSDT":  { "slPct": 2.0, "tpPct": 3.0 },
+    "AVAXUSDT": { "slPct": 2.0, "tpPct": 3.0 },
+    "LINKUSDT": { "slPct": 1.5, "tpPct": 2.5 },
+    "SOLUSDT":  { "slPct": 1.5, "tpPct": 2.5 },
+    "ETHUSDT":  { "slPct": 1.5, "tpPct": 2.5 },
+    "XRPUSDT":  { "slPct": 1.5, "tpPct": 2.5 },
+    "BTCUSDT":  { "slPct": 1.5, "tpPct": 2.5 },
+    "BNBUSDT":  { "slPct": 1.5, "tpPct": 2.5 },
+    "XAUUSDT":  { "slPct": 1.5, "tpPct": 2.5 },
+    "XAGUSDT":  { "slPct": 1.5, "tpPct": 2.5 }
+  },
+
   "strategies": {
     "fib_gp": {
       "name": "Fib Golden Pocket + Market Structure",

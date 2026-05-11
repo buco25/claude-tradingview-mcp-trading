@@ -1262,10 +1262,13 @@ async function checkPortfolioPositions(pid) {
         if (!bitgetOpen.has(bitgetKey)) {
           // Pozicija zatvorena na Bitgetu (SL/TP/likvidacija) — dohvati stvarni P&L
           const closed = await fetchBitgetClosedPnl(pos.symbol, pos);
-          // exitPrice fallback: nikad 0 — koristi sl, pa procijenjeni SL od entry cijene
+          // exitPrice fallback: nikad 0 — koristi sl, pa procijenjeni SL od entry cijene (per-symbol)
+          const _closedRules   = JSON.parse(readFileSync("rules.json", "utf8"));
+          const _symSltp       = _closedRules.symbol_sltp?.[pos.symbol] || {};
+          const _slPctFallback = pos.slPct ?? _symSltp.slPct ?? pDef?.slPct ?? SL_PCT;
           const estimatedSl = pos.side === "LONG"
-            ? pos.entryPrice * (1 - SL_PCT / 100)
-            : pos.entryPrice * (1 + SL_PCT / 100);
+            ? pos.entryPrice * (1 - _slPctFallback / 100)
+            : pos.entryPrice * (1 + _slPctFallback / 100);
           const exitPrice  = (closed?.exitPrice  > 0) ? closed.exitPrice
                            : (pos.sl             > 0) ? pos.sl
                            : estimatedSl;
@@ -1854,13 +1857,16 @@ export async function syncPositionsFromBitget(pid = "synapse_t") {
   let synced = 0;
   const rules = JSON.parse(readFileSync("rules.json", "utf8"));
   const pDef  = buildPortfolios(rules)[pid];
-  const slPct = pDef?.slPct ?? SL_PCT;
-  const tpPct = pDef?.tpPct ?? TP_PCT;
 
   for (const bp of bitgetPos) {
     const side   = bp.holdSide === "long" ? "LONG" : "SHORT";
     const key    = `${bp.symbol}:${side}`;
     if (existingKeys.has(key)) continue;  // već praćena
+
+    // SL/TP — per-symbol > per-portfolio > globalna konstanta
+    const symSltpSync = rules.symbol_sltp?.[bp.symbol] || {};
+    const slPct = symSltpSync.slPct ?? pDef?.slPct ?? SL_PCT;
+    const tpPct = symSltpSync.tpPct ?? pDef?.tpPct ?? TP_PCT;
 
     const entryPrice = parseFloat(bp.openPriceAvg);
     const size       = parseFloat(bp.total);
@@ -1995,9 +2001,10 @@ export async function run() {
           console.log(`  🔄 INVERT: ${orig} → ${signal} ${symbol}`);
         }
 
-        // SL/TP — per-portfolio (fallback na globalne konstante)
-        const slPct  = pDef.slPct ?? SL_PCT;
-        const tpPct  = pDef.tpPct ?? TP_PCT;
+        // SL/TP — per-symbol > per-portfolio > globalna konstanta
+        const symSltp = rules.symbol_sltp?.[symbol] || {};
+        const slPct  = symSltp.slPct ?? pDef.slPct ?? SL_PCT;
+        const tpPct  = symSltp.tpPct ?? pDef.tpPct ?? TP_PCT;
         const slDist = price * (slPct / 100);
         const tpDist = price * (tpPct / 100);
         const sl = signal === "LONG" ? price - slDist : price + slDist;
@@ -2119,8 +2126,10 @@ export async function checkBreakouts() {
     const actualSide = INVERT_SIGNALS ? (side === "LONG" ? "SHORT" : "LONG") : side;
     if (INVERT_SIGNALS) console.log(`  🔄 BRK INVERT: ${side} → ${actualSide} ${symbol}`);
 
-    const slPct  = pDef.slPct ?? SL_PCT;
-    const tpPct  = pDef.tpPct ?? TP_PCT;
+    // SL/TP — per-symbol > per-portfolio > globalna konstanta
+    const symSltpBrk = rules.symbol_sltp?.[symbol] || {};
+    const slPct  = symSltpBrk.slPct ?? pDef.slPct ?? SL_PCT;
+    const tpPct  = symSltpBrk.tpPct ?? pDef.tpPct ?? TP_PCT;
     const slDist = livePrice * (slPct / 100);
     const tpDist = livePrice * (tpPct / 100);
     const sl = actualSide === "LONG" ? livePrice - slDist : livePrice + slDist;

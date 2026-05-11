@@ -437,7 +437,10 @@ async function runScan(rules) {
         }));
         const s       = scanSymbol(candles, {}, {}, {}, ultraCfg);
         const pending = pendingList.find(p => p.symbol === sym) || null;
-        results.push({ symbol: sym, ...s, pending });
+        const symSltp = rules.symbol_sltp?.[sym] || {};
+        const slPct   = symSltp.slPct ?? 1.5;
+        const tpPct   = symSltp.tpPct ?? 2.5;
+        results.push({ symbol: sym, ...s, pending, slPct, tpPct });
       } catch (e) {
         results.push({ symbol: sym, error: e.message });
       }
@@ -863,7 +866,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="logo">🎯</div>
       <div>
         <div class="title">ULTRA Trading Bot</div>
-        <div class="subtitle">18 signala · min 10/18 · H/L breakout · ${tf} · SL 1% / TP 2% · 100x · rizik 1%</div>
+        <div class="subtitle">18 signala · min 10/18 · H/L breakout · ${tf} · SL 1.5–2.5% / TP 2.5–3.5% per-simbol · 50x · rizik 1%</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -909,7 +912,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     <div class="stat-card">
       <div class="stat-label">Strategija</div>
       <div class="stat-value" style="font-size:14px;color:#e85d9a">ULTRA · 50/75x</div>
-      <div class="stat-sub">SL 1.5% / TP 2.5% · rizik 1%</div>
+      <div class="stat-sub">SL 1.5–2.5% / TP 2.5–3.5% · per-simbol · rizik 1%</div>
     </div>
   </div>
 
@@ -1014,7 +1017,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       </div>
       <div style="margin-top:10px;font-size:11px;color:#555">
         🟢 Zeleno = bullish signal aktiviran &nbsp;|&nbsp; 🔴 Crveno = bearish &nbsp;|&nbsp; ⬛ Sivo = neutral/nema signala &nbsp;|&nbsp;
-        Min <b style="color:#e85d9a">10/18</b> signala za ulaz · H/L breakout entry · SL <b>1%</b> / TP <b>2%</b> · <b>100x</b> leverage · rizik <b>1%</b> banke po tradeu
+        Min <b style="color:#e85d9a">12/18</b> signala za ulaz · H/L breakout entry · SL <b style="color:#f7b731">1.5–2.5%</b> / TP <b style="color:#f7b731">2.5–3.5%</b> po simbolu · <b>50x</b> leverage · rizik <b>1%</b> banke po tradeu
       </div>
     </div>
   </div>
@@ -1378,9 +1381,14 @@ async function doScan() {
       const hasSignal  = s.ultraSig === "LONG" || s.ultraSig === "SHORT";
       const rowBg = hasPending ? "background:rgba(247,183,49,0.04)" : hasSignal ? "background:rgba(0,196,140,0.04)" : "";
 
+      // Per-symbol SL/TP tier boja
+      const slTp    = s.slPct && s.tpPct ? 'SL ' + s.slPct + '% / TP ' + s.tpPct + '%' : 'SL 1.5% / TP 2.5%';
+      const slTpCol = (s.slPct >= 2.5) ? '#f7b731' : (s.slPct >= 2.0) ? '#ff8c42' : '#8b949e';
+
       return '<tr style="' + rowBg + '">' +
         '<td style="color:#555;font-size:11px;text-align:center">' + (i+1) + '</td>' +
-        '<td style="font-weight:800;font-size:14px;white-space:nowrap">' + s.symbol.replace("USDT","") + '<span style="color:#555;font-size:10px;font-weight:400">USDT</span></td>' +
+        '<td style="font-weight:800;font-size:14px;white-space:nowrap">' + s.symbol.replace("USDT","") + '<span style="color:#555;font-size:10px;font-weight:400">USDT</span>' +
+          '<div style="font-size:10px;color:' + slTpCol + ';font-weight:500;margin-top:1px">' + slTp + '</div></td>' +
         '<td style="font-weight:600;white-space:nowrap">' + fmtLive(s.price) + '</td>' +
         '<td style="color:' + rsiCol + ';font-weight:700">' + (s.rsi || "—") + '</td>' +
         '<td style="color:' + adxCol + '">' + (s.adx || "—") + '</td>' +

@@ -1474,6 +1474,46 @@ function getPortfolioEquity(pid, startCapital = START_CAPITAL) {
   return closedEquity - lockedRisk;
 }
 
+// ─── Pravi BitGet equity (za live mod drawdown provjeru) ───────────────────────
+// Vraća null ako nije live ili ako API poziv padne
+let _lastBitgetEquity = null;
+let _lastBitgetEquityTs = 0;
+const BITGET_EQUITY_TTL = 60_000; // cache 60s
+
+async function fetchBitgetEquity() {
+  if (PAPER_TRADING) return null;
+  if (Date.now() - _lastBitgetEquityTs < BITGET_EQUITY_TTL && _lastBitgetEquity !== null) {
+    return _lastBitgetEquity;
+  }
+  try {
+    const path = "/api/v2/mix/account/accounts?productType=USDT-FUTURES";
+    const ts   = Date.now().toString();
+    const sign = crypto.createHmac("sha256", BITGET.secretKey)
+      .update(`${ts}GET${path}`).digest("base64");
+    const res = await fetch(`${BITGET.baseUrl}${path}`, {
+      headers: {
+        "ACCESS-KEY":        BITGET.apiKey,
+        "ACCESS-SIGN":       sign,
+        "ACCESS-TIMESTAMP":  ts,
+        "ACCESS-PASSPHRASE": BITGET.passphrase,
+        "Content-Type":      "application/json",
+      },
+    });
+    const d = await res.json();
+    if (d.code !== "00000" || !d.data?.[0]) return null;
+    const acc = d.data[0];
+    const eq  = parseFloat(acc.usdtEquity || acc.equity || acc.available || 0);
+    if (eq > 0) {
+      _lastBitgetEquity   = eq;
+      _lastBitgetEquityTs = Date.now();
+    }
+    return eq > 0 ? eq : null;
+  } catch (e) {
+    console.log(`  ⚠️  fetchBitgetEquity: ${e.message}`);
+    return null;
+  }
+}
+
 function writeExitCsv(pid, pos, exitPrice, reason, pnl) {
   const now     = new Date();
   const date    = now.toISOString().slice(0, 10);
@@ -1815,6 +1855,7 @@ function checkDailyLimit(pid) {
 // Stanje se čuva na disku (preživi restart).
 
 const CB_DRAWDOWN_MIN = 200;      // minimalni equity ($) — ispod = stop trading
+const CB_DRAWDOWN_PCT = 25;       // % gubitak od stvarnog BitGet stanja → stop (backup)
 const SYM_CONSEC_LOSSES = 5;      // uzastopni gubici po simbolu → suspendiraj sa liste
 const CB_FILE      = `${DATA_DIR}/circuit_breaker.json`;
 
@@ -2015,15 +2056,22 @@ export async function run() {
       continue;
     }
 
-    // ── Drawdown zaštita: equity < $200 → stop sve ────────────────────────────
-    const equityNow = getPortfolioEquity(pid, pDef.startCapital || START_CAPITAL);
+    // ── Drawdown zaštita ───────────────────────────────────────────────────────
+    // U live modu: koristi stvarni BitGet balans (ne CSV izračun)
+    // U paper modu: koristi CSV izračun
+    const liveEq  = await fetchBitgetEquity();  // null u paper modu
+    const csvEq   = getPortfolioEquity(pid, pDef.startCapital || START_CAPITAL);
+    const equityNow = liveEq ?? csvEq;
+    const equitySrc = liveEq !== null ? "BitGet" : "CSV";
+
+    console.log(`  💰 [${pDef.name}] Equity: $${equityNow.toFixed(2)} (${equitySrc}) | CSV: $${csvEq.toFixed(2)}`);
+
     if (equityNow < CB_DRAWDOWN_MIN) {
-      console.log(`  🛑 [${pDef.name}] DRAWDOWN ZAŠTITA — equity $${equityNow.toFixed(2)} < $${CB_DRAWDOWN_MIN} — trading zablokiran!`);
-      // Telegram alert samo jednom na sat (ne svaki ciklus)
+      console.log(`  🛑 [${pDef.name}] DRAWDOWN ZAŠTITA — equity $${equityNow.toFixed(2)} (${equitySrc}) < $${CB_DRAWDOWN_MIN} — trading zablokiran!`);
       const cb = loadCircuitBreaker();
       const lastDdAlert = cb[pid]?.lastDrawdownAlert || 0;
       if (Date.now() - lastDdAlert > 60 * 60 * 1000) {
-        await tg(`🛑 <b>DRAWDOWN ZAŠTITA [${pDef.name}]</b>\nEquity: $${equityNow.toFixed(2)} — ispod minimuma $${CB_DRAWDOWN_MIN}\nTrading zablokiran. Resetiraj ručno kad budeš spreman.`);
+        await tg(`🛑 <b>DRAWDOWN ZAŠTITA [${pDef.name}]</b>\nEquity: $${equityNow.toFixed(2)} (${equitySrc}) — ispod minimuma $${CB_DRAWDOWN_MIN}\nTrading zablokiran. Resetiraj ručno kad budeš spreman.`);
         cb[pid] = { ...(cb[pid] || {}), lastDrawdownAlert: Date.now() };
         saveCircuitBreaker(cb);
       }

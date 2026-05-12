@@ -366,8 +366,10 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
   let ultraSig = "—";
   let ultraBull = 0, ultraBear = 0;
   let ultraSigs16 = new Array(13).fill(0);
+  let ultraMinSig = 5;  // default, ažurira se ispod
   {
     const { minSig = 5 } = ultraCfg;
+    ultraMinSig = minSig;
     if (n >= 200 && ema9 && ema21) {
       const rsiV  = rsi ?? 50;
       const adxV  = adx ?? 0;
@@ -416,7 +418,7 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
     trend: trendLabel,
     emaRsiSig, megaSig,
     synapse7Sig, synapse7Bull, synapse7Bear, synapse7Subs,
-    ultraSig, ultraBull, ultraBear, ultraSigs16,
+    ultraSig, ultraBull, ultraBear, ultraSigs16, ultraMinSig,
     synapseTSig: ultraSig,
     scaleUp, scaleDn,   // direktni 6Sc rezultati za badge display
   };
@@ -1497,15 +1499,24 @@ function sigBoxes(sigs) {
   }).join('');
 }
 
-function scoreBox(bull, bear, sig) {
+function scoreBox(bull, bear, sig, minSig) {
   const total = 13;
+  const minLabel = minSig ? '<br><span style="color:#444;font-size:9px">min:' + minSig + '</span>' : '';
   if (sig === "LONG")   return '<div style="background:rgba(0,196,140,0.15);border:1px solid #00c48c;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#00c48c;font-weight:800;font-size:16px">↑' + bull + '</span><span style="color:#555;font-size:11px">/' + total + '</span><br><span class="sig-long" style="font-size:11px">▲ LONG</span></div>';
   if (sig === "SHORT")  return '<div style="background:rgba(255,77,77,0.15);border:1px solid #ff4d4d;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#ff4d4d;font-weight:800;font-size:16px">↓' + bear + '</span><span style="color:#555;font-size:11px">/' + total + '</span><br><span class="sig-short" style="font-size:11px">▼ SHORT</span></div>';
   if (sig === "SETUP↑") return '<div style="background:rgba(240,165,0,0.1);border:1px solid #f0a50066;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#f0a500;font-weight:800;font-size:16px">↑' + bull + '</span><span style="color:#555;font-size:11px">/' + total + '</span><br><span style="color:#f0a500;font-size:11px">◈ SETUP↑</span></div>';
   if (sig === "SETUP↓") return '<div style="background:rgba(240,165,0,0.1);border:1px solid #f0a50066;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#f0a500;font-weight:800;font-size:16px">↓' + bear + '</span><span style="color:#555;font-size:11px">/' + total + '</span><br><span style="color:#f0a500;font-size:11px">◈ SETUP↓</span></div>';
   const top = Math.max(bull, bear);
-  const col = bull > bear ? '#00c48c55' : bear > bull ? '#ff4d4d55' : '#555';
-  return '<div style="text-align:center"><span style="color:' + col + ';font-size:14px">' + top + '</span><span style="color:#444;font-size:11px">/' + total + '</span></div>';
+  // Ako je bull blizu minSig — prikaži žuto upozorenje (1 signal nedostaje)
+  const nearMiss = minSig && bull === minSig - 1;
+  const col = nearMiss ? '#f7b731' : bull > bear ? '#00c48c55' : bear > bull ? '#ff4d4d55' : '#555';
+  const bg  = nearMiss ? 'rgba(247,183,49,0.06)' : 'transparent';
+  const brd = nearMiss ? 'border:1px solid #f7b73133;border-radius:6px;' : '';
+  return '<div style="text-align:center;padding:2px;' + brd + 'background:' + bg + '" title="Bull: ' + bull + ' / Bear: ' + bear + ' / Minimum: ' + (minSig||'?') + '">' +
+    '<span style="color:' + col + ';font-size:14px;font-weight:700">' + top + '</span>' +
+    '<span style="color:#444;font-size:11px">/' + total + '</span>' +
+    (minSig ? '<br><span style="color:' + (nearMiss ? '#f7b731' : '#333') + ';font-size:9px">min:' + minSig + (nearMiss ? ' ⚠' : '') + '</span>' : '') +
+    '</div>';
 }
 
 function statusBox(s) {
@@ -1685,7 +1696,7 @@ async function doScan() {
         '<td style="color:' + adxCol + '">' + (s.adx || "—") + '</td>' +
         '<td style="padding:4px 6px;border-right:1px solid #f7b73133">' + mandatoryBoxes(s) + '</td>' +
         '<td style="padding:4px 6px">' + sigBoxes(s.ultraSigs16) + '</td>' +
-        '<td style="padding:4px 8px">' + scoreBox(s.ultraBull||0, s.ultraBear||0, s.ultraSig) + '</td>' +
+        '<td style="padding:4px 8px">' + scoreBox(s.ultraBull||0, s.ultraBear||0, s.ultraSig, s.ultraMinSig) + '</td>' +
         '<td style="padding:4px 8px">' + statusBox(s) + '</td>' +
         '</tr>';
     }).join("");

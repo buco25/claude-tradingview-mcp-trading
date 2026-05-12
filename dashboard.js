@@ -6,7 +6,7 @@
 import "dotenv/config";
 import http from "http";
 import { readFileSync, writeFileSync, existsSync } from "fs";
-import { run as botRun, checkBreakouts, syncPositionsFromBitget, check5mSRTest } from "./bot.js";
+import { run as botRun, checkBreakouts, syncPositionsFromBitget, check5mSRTest, checkBeStopAll } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -1991,5 +1991,13 @@ server.listen(PORT, () => {
     try { await checkBreakouts(); }
     catch (e) { console.error("Breakout checker greška:", e.message); }
   }, 60 * 1000);
+
+  // ─── BE-STOP fast monitor — svake 30 sekundi ──────────────────────────────
+  // Reagira brzo na pozicije koje dođu na 50% TP-a i pomiče SL na break-even.
+  // Ne čeka 5-min run() ciklus — PEPE situacija se više ne smije ponoviti.
+  setInterval(async () => {
+    try { await checkBeStopAll(); }
+    catch (e) { console.error("BE-STOP monitor greška:", e.message); }
+  }, 30 * 1000);
 
 });

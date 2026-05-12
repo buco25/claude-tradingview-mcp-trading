@@ -1323,9 +1323,13 @@ function addPosition(pid, entry) {
     margin:     entry.margin,
     sl:         entry.sl,
     tp:         entry.tp,
+    slPct:      entry.slPct ?? null,    // za BE-STOP i log
+    tpPct:      entry.tpPct ?? null,    // za BE-STOP threshold
+    sigMask:    entry.sigMask ?? null,  // za signal analitiku
     orderId:    entry.orderId,
     mode:       entry.mode || (PAPER_TRADING ? "PAPER" : BITGET_DEMO ? "DEMO" : "LIVE"),
     openedAt:   entry.timestamp,
+    openTs:     Date.now(),
     portfolio:  pid,
     strategy:   entry.strategy,
     timeframe:  entry.timeframe || "1H",
@@ -1797,6 +1801,20 @@ async function bitgetPost(path, body) {
   return data;
 }
 
+// ─── Live cijene — batch dohvat za listu simbola ──────────────────────────────
+async function fetchLivePrices(symbols) {
+  const prices = {};
+  await Promise.all(symbols.map(async sym => {
+    try {
+      const url = `${BITGET.baseUrl}/api/v2/mix/market/ticker?symbol=${sym}&productType=USDT-FUTURES`;
+      const tj  = await fetch(url).then(r => r.json());
+      const raw = tj?.data?.[0]?.lastPr || tj?.data?.[0]?.close || 0;
+      prices[sym] = parseFloat(raw) || 0;
+    } catch { /* fallback na 0 — caller koristi entryPrice ako 0 */ }
+  }));
+  return prices;
+}
+
 // ─── Break-Even Stop — pomakni SL na entry+buffer kad je 50% TP dostignuto ────
 const BE_TRIGGER_PCT = 50;   // % TP-a koji mora biti dostignut
 const BE_BUFFER_PCT  = 0.2;  // % iznad/ispod entry za SL (pokrije fees)
@@ -1861,6 +1879,50 @@ async function moveSLtoBreakEven(pos) {
   } catch(e) {
     console.log(`  ⚠️  [BE-STOP] ${symbol} greška: ${e.message}`);
     return false;
+  }
+}
+
+// ─── BE-STOP Fast Monitor — pozivati svakih 30s iz dashboard.js ───────────────
+// Lagana petlja: dohvati live cijene za sve otvorene pozicije i odmah
+// pomakni SL na break-even čim pozicija pređe 50% od TP-a.
+// Ne čeka 5-min run() ciklus — reagira unutar 30 sekundi.
+export async function checkBeStopAll() {
+  if (PAPER_TRADING) return;
+  for (const pid of PORTFOLIO_IDS) {
+    try {
+      const pDef = buildPortfolios(JSON.parse(readFileSync("rules.json", "utf8")))[pid];
+      if (!pDef?.live) continue;
+
+      const positions = loadPositions(pid);
+      const unprotected = positions.filter(p => !p.beMoved);
+      if (!unprotected.length) continue;
+
+      const symbols = [...new Set(unprotected.map(p => p.symbol))];
+      const prices  = await fetchLivePrices(symbols);
+
+      for (const pos of unprotected) {
+        const liveP = prices[pos.symbol];
+        if (!liveP) continue;
+
+        const tpPct = pos.tpPct ?? 4.0;
+        const pricePct = pos.side === "LONG"
+          ? (liveP - pos.entryPrice) / pos.entryPrice * 100
+          : (pos.entryPrice - liveP) / pos.entryPrice * 100;
+        const tpProgress = pricePct / tpPct * 100;
+
+        if (tpProgress >= BE_TRIGGER_PCT) {
+          console.log(`  🎯 [BE-STOP 30s] ${pos.symbol} ${pos.side} — ${tpProgress.toFixed(0)}% TP dostignut → pomičem SL na BE`);
+          const moved = await moveSLtoBreakEven(pos);
+          if (moved) {
+            const allPos = loadPositions(pid);
+            const idx    = allPos.findIndex(p => p.symbol === pos.symbol && p.side === pos.side);
+            if (idx >= 0) { allPos[idx].beMoved = true; savePositions(pid, allPos); }
+          }
+        }
+      }
+    } catch(e) {
+      console.log(`  ⚠️  [BE-STOP 30s] ${pid} greška: ${e.message}`);
+    }
   }
 }
 

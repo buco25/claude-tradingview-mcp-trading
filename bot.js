@@ -72,16 +72,16 @@ function getDynamicAdx(pid) {
 }
 
 // ─── 2. SYMBOL BLACKLIST — 3 uzastopna SL → 24h ban ─────────────────────────
-const BLACKLIST_FILE     = `${DATA_DIR}/symbol_blacklist.json`;
 const BLACKLIST_LOSSES   = 3;    // uzastopnih SL → blacklist
 const BLACKLIST_HOURS    = 24;   // sati bana
+const getBlacklistFile   = () => `${DATA_DIR}/symbol_blacklist.json`;
 
 function loadBlacklist() {
-  try { return existsSync(BLACKLIST_FILE) ? JSON.parse(readFileSync(BLACKLIST_FILE, "utf8")) : {}; }
+  try { return existsSync(getBlacklistFile()) ? JSON.parse(readFileSync(getBlacklistFile(), "utf8")) : {}; }
   catch { return {}; }
 }
 function saveBlacklist(bl) {
-  try { writeFileSync(BLACKLIST_FILE, JSON.stringify(bl, null, 2)); } catch {}
+  try { writeFileSync(getBlacklistFile(), JSON.stringify(bl, null, 2)); } catch {}
 }
 
 function isBlacklisted(symbol) {
@@ -182,14 +182,14 @@ async function getBtcRegime() {
 // Svaka 10. analiza ispisuje per-signal WR u konzolu
 
 const SIG_NAMES = ["E50⟳","RSI⟳","E55⟳","CHP","CVD⟳","R⟳","MCD","E145","VOL⟳","MCC⟳","RSI↗","SRS","SRB"];
-const SIG_STATS_FILE = `${DATA_DIR}/signal_stats.json`;
+const getSigStatsFile = () => `${DATA_DIR}/signal_stats.json`;
 
 function loadSigStats() {
-  try { return existsSync(SIG_STATS_FILE) ? JSON.parse(readFileSync(SIG_STATS_FILE,"utf8")) : {}; }
+  try { return existsSync(getSigStatsFile()) ? JSON.parse(readFileSync(getSigStatsFile(),"utf8")) : {}; }
   catch { return {}; }
 }
 function saveSigStats(st) {
-  try { writeFileSync(SIG_STATS_FILE, JSON.stringify(st, null, 2)); } catch {}
+  try { writeFileSync(getSigStatsFile(), JSON.stringify(st, null, 2)); } catch {}
 }
 
 function recordSignalOutcome(sigMask, won) {

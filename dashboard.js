@@ -1421,7 +1421,7 @@ async function resetAll() {
 }
 
 async function closePosition(pid, symbol) {
-  if (!confirm(`Zatvoriti ${symbol} market orderom na Bitgetu?`)) return;
+  if (!confirm("Zatvoriti " + symbol + " market orderom na Bitgetu?")) return;
   try {
     const r = await fetch("/api/close-position", {
       method: "POST",
@@ -1430,13 +1430,13 @@ async function closePosition(pid, symbol) {
     });
     const d = await r.json();
     if (d.ok) {
-      alert(`✅ ${symbol} zatvoreno\nP&L: $${d.pnl}\nCijena: $${d.exitPrice}`);
+      alert("Zatvoreno: " + symbol + "\nP&L: $" + d.pnl + "\nCijena: $" + d.exitPrice);
       location.reload();
     } else {
-      alert(`❌ Greška: ${d.error}`);
+      alert("Greska: " + d.error);
     }
   } catch(e) {
-    alert(`❌ Greška: ${e.message}`);
+    alert("Greska: " + e.message);
   }
 }
 

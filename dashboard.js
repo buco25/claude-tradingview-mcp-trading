@@ -899,7 +899,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="logo">🎯</div>
       <div>
         <div class="title">ULTRA Trading Bot</div>
-        <div class="subtitle">4 obavezna (ADX≥25·6Sc·RSI·5mSR) + 13 neovisnih signala · min 5/13 · ulaz odmah · ${tf} · SL 1.5–2.5% / TP 2.5–3.5% · 50x · rizik 1%</div>
+        <div class="subtitle">ADX≥30 (din.) · 6Sc · RSI · 5mSR · LONG_ONLY · min 7/13 · BTC regime · 4h cooldown · blacklist · ${tf} · 50x · rizik 1%</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -948,6 +948,105 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="stat-sub">SL 1.5–2.5% / TP 2.5–3.5% · per-simbol · rizik 1%</div>
     </div>
   </div>
+
+  <!-- Adaptive Status Panel -->
+  ${(() => {
+    // Učitaj blacklist
+    const blPath = `${DATA_DIR}/symbol_blacklist.json`;
+    const bl = existsSync(blPath) ? (() => { try { return JSON.parse(readFileSync(blPath,"utf8")); } catch { return {}; } })() : {};
+    const blActive = Object.entries(bl).filter(([,v]) => Date.now() < v.until);
+
+    // Učitaj signal stats
+    const ssPath = `${DATA_DIR}/signal_stats.json`;
+    const ss = existsSync(ssPath) ? (() => { try { return JSON.parse(readFileSync(ssPath,"utf8")); } catch { return {}; } })() : {};
+    const ssRows = Object.entries(ss)
+      .filter(([,v]) => v.total >= 3)
+      .map(([k,v]) => ({ name: k, wr: (v.wins/v.total*100).toFixed(0), total: v.total }))
+      .sort((a,b) => b.wr - a.wr);
+
+    // Učitaj recent WR (zadnjih 10 trejdova) za dinamički ADX
+    const csvPath = `${DATA_DIR}/trades_synapse_t.csv`;
+    let dynAdxVal = 30, recentWr = null, recentN = 0;
+    if (existsSync(csvPath)) {
+      try {
+        const lines = readFileSync(csvPath,"utf8").trim().split("\n");
+        const exits = lines.slice(1)
+          .filter(l => l.includes("CLOSE_LONG") || l.includes("CLOSE_SHORT"))
+          .slice(-10);
+        if (exits.length >= 5) {
+          const wins = exits.filter(l => parseFloat(l.split(",")[9]||0) > 0).length;
+          recentWr = Math.round(wins/exits.length*100);
+          recentN  = exits.length;
+          if (recentWr < 25) dynAdxVal = 40;
+          else if (recentWr < 35) dynAdxVal = 35;
+        }
+      } catch {}
+    }
+    const adxCol  = dynAdxVal === 30 ? "#00c48c" : dynAdxVal === 35 ? "#f7b731" : "#ff4d4d";
+    const adxLbl  = dynAdxVal === 30 ? "normalno" : dynAdxVal === 35 ? "WR loš" : "WR kritičan";
+    const wrCol   = recentWr === null ? "#8b949e" : recentWr >= 40 ? "#00c48c" : recentWr >= 30 ? "#f7b731" : "#ff4d4d";
+
+    return `
+  <div style="background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:16px 20px;margin-bottom:20px">
+    <div style="font-size:11px;color:#8b949e;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">⚙️ Adaptivni Status</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
+
+      <!-- Dinamički ADX -->
+      <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#8b949e;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">📊 Dinamički ADX</div>
+        <div style="font-size:22px;font-weight:800;color:${adxCol}">${dynAdxVal}</div>
+        <div style="font-size:11px;color:${adxCol};margin-top:2px">${adxLbl}</div>
+        <div style="font-size:11px;color:#8b949e;margin-top:4px">
+          ${recentWr !== null ? `Zadnjih ${recentN}: WR <b style="color:${wrCol}">${recentWr}%</b>` : "Premalo podataka"}
+        </div>
+      </div>
+
+      <!-- Market Regime -->
+      <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px" id="regime-card">
+        <div style="font-size:10px;color:#8b949e;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">🌍 BTC 4H Regime</div>
+        <div style="font-size:22px;font-weight:800;color:#8b949e" id="regime-val">…</div>
+        <div style="font-size:11px;color:#8b949e;margin-top:2px" id="regime-sub">učitavam…</div>
+      </div>
+
+      <!-- Blacklist -->
+      <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#8b949e;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">🚫 Symbol Blacklist</div>
+        ${blActive.length === 0
+          ? `<div style="font-size:13px;color:#00c48c">Svi simboli aktivni</div>`
+          : blActive.map(([sym,v]) => {
+              const remainH = ((v.until - Date.now())/3600000).toFixed(1);
+              return `<div style="font-size:12px;color:#ff4d4d;margin-bottom:3px">
+                <b>${sym}</b> — još ${remainH}h
+                <span style="color:#8b949e;font-size:10px">(${v.reason})</span>
+              </div>`;
+            }).join("")
+        }
+        <div style="font-size:10px;color:#8b949e;margin-top:6px">Trigger: 3 uzastopna SL → 24h ban</div>
+      </div>
+
+      <!-- Signal Analiza -->
+      <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#8b949e;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">📈 Signal WR (top 6)</div>
+        ${ssRows.length === 0
+          ? `<div style="font-size:12px;color:#8b949e">Nema dovoljno podataka (treba 3+ trejdova)</div>`
+          : ssRows.slice(0,6).map(r => {
+              const col = r.wr >= 40 ? "#00c48c" : r.wr >= 30 ? "#f7b731" : "#ff4d4d";
+              const bar = Math.round(r.wr/10);
+              return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;font-size:11px">
+                <span style="color:#8b949e;width:38px;font-family:monospace">${r.name}</span>
+                <div style="flex:1;background:#21262d;border-radius:2px;height:6px">
+                  <div style="width:${r.wr}%;background:${col};height:6px;border-radius:2px"></div>
+                </div>
+                <span style="color:${col};width:30px;text-align:right">${r.wr}%</span>
+                <span style="color:#444;font-size:10px">${r.total}</span>
+              </div>`;
+            }).join("")
+        }
+      </div>
+
+    </div>
+  </div>`;
+  })()}
 
   <!-- Period P&L -->
   ${(() => {
@@ -1395,6 +1494,47 @@ function statusBox(s) {
 
   return '<span style="color:#444;font-size:12px">—</span>';
 }
+
+// ── Market Regime — BTC 4H detekcija (client-side) ───────────────────────────
+async function loadBtcRegime() {
+  try {
+    const url = "https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=4H&limit=100";
+    const r = await fetch(url);
+    const d = await r.json();
+    if (d.code !== "00000" || !d.data?.length) throw new Error("API");
+    const closes = d.data.map(k => parseFloat(k[4])).reverse();
+    const n = closes.length - 1;
+    // EMA55
+    const k55 = 2/56; let e55 = closes.slice(0,55).reduce((a,b)=>a+b,0)/55;
+    for (let i=55;i<=n;i++) e55 = closes[i]*k55+e55*(1-k55);
+    // 6-Scale parovi
+    const pairs = [[3,11],[7,15],[13,21],[19,29],[29,47],[45,55]];
+    let up = 0;
+    for (const [a,b] of pairs) {
+      const ka=2/(a+1),kb=2/(b+1);
+      let ea=closes.slice(0,a).reduce((s,v)=>s+v,0)/a;
+      let eb=closes.slice(0,b).reduce((s,v)=>s+v,0)/b;
+      for (let i=Math.max(a,b);i<=n;i++){ea=closes[i]*ka+ea*(1-ka);eb=closes[i]*kb+eb*(1-kb);}
+      if(ea>eb) up++;
+    }
+    const price = closes[n];
+    const regime = (up>=4 && price>e55) ? "BULL" : (up<=2 && price<e55) ? "BEAR" : "NEUTRAL";
+    const col = regime==="BULL"?"#00c48c":regime==="BEAR"?"#ff4d4d":"#f7b731";
+    const icon = regime==="BULL"?"📈":regime==="BEAR"?"📉":"➡️";
+    const sub = regime==="BULL"?"LONG ulazi aktivni":regime==="BEAR"?"LONG suspendiran":"Čekamo trend";
+    document.getElementById("regime-val").textContent = icon+" "+regime;
+    document.getElementById("regime-val").style.color = col;
+    document.getElementById("regime-sub").textContent = "6Sc " + up + "/6 | BTC " + (price>e55?"iznad":"ispod") + " EMA55 | " + sub;
+    document.getElementById("regime-sub").style.color = col;
+  } catch(e) {
+    document.getElementById("regime-val").textContent = "UNKNOWN";
+    document.getElementById("regime-sub").textContent = "Greška dohvata";
+  }
+}
+
+// Učitaj regime na startu i svako 5 min
+loadBtcRegime();
+setInterval(loadBtcRegime, 5 * 60 * 1000);
 
 // ── Lokalni timestamp helper (UTC+2) — klijentska strana ──────────────────────
 function fmtLocalTs(iso) {

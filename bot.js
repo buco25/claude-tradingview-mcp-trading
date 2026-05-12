@@ -31,11 +31,193 @@ const MAX_OPEN_PER_PORTFOLIO = 8;  // max otvorenih pozicija po portfoliju (+ BT
 
 // ─── ULTRA strategija — zaštitni parametri ────────────────────────────────────
 const LONG_ONLY      = true;          // SHORT signali isključeni (backtest: SHORT PF=0.59, -29.9%)
-const ADX_MIN        = 30;            // ADX prag — povišen s 25 na 30 (manji broj, kvalitetniji setup)
+const ADX_MIN        = 30;            // ADX prag — bazni (dinamički raste ako WR pada)
 const SL_COOLDOWN_MS = 4 * 60 * 60 * 1000;  // 4h cooldown po simbolu nakon SL-a
 
 // In-memory mapa: symbol → timestamp zadnjeg SL-a
 const symbolSlCooldown = new Map();
+
+// ─── 1. DINAMIČKI ADX — raste kad je WR loš ──────────────────────────────────
+// Čita zadnjih 10 trejdova iz CSV-a i računa trenutni WR.
+// WR < 35% → ADX +5 | WR < 25% → ADX +10 + pauza 2h
+const DYN_ADX_LOOKBACK  = 10;   // zadnjih N trejdova za WR procjenu
+const DYN_ADX_BOOST_1   =  5;   // +5 kad WR < 35%
+const DYN_ADX_BOOST_2   = 10;   // +10 kad WR < 25%
+const DYN_PAUSE_WR      = 20;   // ispod ovog WR% → 2h pauza
+const DYN_PAUSE_MS      = 2 * 60 * 60 * 1000;
+
+let _dynPauseUntil = 0;  // in-memory pauza (reset na restart)
+
+function getDynamicAdx(pid) {
+  const f = csvFilePath(pid);
+  if (!existsSync(f)) return ADX_MIN;
+  try {
+    const lines = readFileSync(f, "utf8").trim().split("\n");
+    const exits = lines.slice(1)
+      .filter(l => l.includes("CLOSE_LONG") || l.includes("CLOSE_SHORT"))
+      .slice(-DYN_ADX_LOOKBACK);
+    if (exits.length < 5) return ADX_MIN;  // premalo podataka
+    const wins = exits.filter(l => parseFloat(l.split(",")[9] || 0) > 0).length;
+    const wr   = (wins / exits.length) * 100;
+    if (wr < DYN_PAUSE_WR) {
+      if (_dynPauseUntil < Date.now()) {
+        _dynPauseUntil = Date.now() + DYN_PAUSE_MS;
+        console.log(`  ⚠️  [DYN] WR=${wr.toFixed(0)}% (zadnjih ${exits.length}) — 2h pauza aktivirana`);
+      }
+    }
+    if (wr < 25) return ADX_MIN + DYN_ADX_BOOST_2;  // ADX 40
+    if (wr < 35) return ADX_MIN + DYN_ADX_BOOST_1;  // ADX 35
+    return ADX_MIN;                                   // ADX 30 (normalno)
+  } catch { return ADX_MIN; }
+}
+
+// ─── 2. SYMBOL BLACKLIST — 3 uzastopna SL → 24h ban ─────────────────────────
+const BLACKLIST_FILE     = `${DATA_DIR}/symbol_blacklist.json`;
+const BLACKLIST_LOSSES   = 3;    // uzastopnih SL → blacklist
+const BLACKLIST_HOURS    = 24;   // sati bana
+
+function loadBlacklist() {
+  try { return existsSync(BLACKLIST_FILE) ? JSON.parse(readFileSync(BLACKLIST_FILE, "utf8")) : {}; }
+  catch { return {}; }
+}
+function saveBlacklist(bl) {
+  try { writeFileSync(BLACKLIST_FILE, JSON.stringify(bl, null, 2)); } catch {}
+}
+
+function isBlacklisted(symbol) {
+  const bl = loadBlacklist();
+  const entry = bl[symbol];
+  if (!entry) return false;
+  if (Date.now() > entry.until) {
+    delete bl[symbol];
+    saveBlacklist(bl);
+    console.log(`  ✅ [BLACKLIST] ${symbol} — ban istekao, vraćen na listu`);
+    return false;
+  }
+  const remainH = ((entry.until - Date.now()) / 3600000).toFixed(1);
+  console.log(`  🚫 [BLACKLIST] ${symbol} — na crnoj listi još ${remainH}h (${entry.reason})`);
+  return true;
+}
+
+async function recordSymbolSl(pid, symbol) {
+  const f = csvFilePath(pid);
+  if (!existsSync(f)) return;
+  try {
+    const lines = readFileSync(f, "utf8").trim().split("\n");
+    const symExits = lines.slice(1)
+      .filter(l => (l.includes("CLOSE_LONG") || l.includes("CLOSE_SHORT")) && l.split(",")[2] === symbol)
+      .slice(-BLACKLIST_LOSSES);
+    if (symExits.length < BLACKLIST_LOSSES) return;
+    const allLoss = symExits.every(l => parseFloat(l.split(",")[9] || 0) < 0);
+    if (!allLoss) return;
+    const bl    = loadBlacklist();
+    const until = Date.now() + BLACKLIST_HOURS * 3600000;
+    const reason = `${BLACKLIST_LOSSES} uzastopna SL`;
+    bl[symbol]  = { until, reason, bannedAt: new Date().toISOString() };
+    saveBlacklist(bl);
+    const untilStr = new Date(until).toLocaleTimeString("hr-HR");
+    console.log(`  🚫 [BLACKLIST] ${symbol} — ${reason} → ban 24h (do ${untilStr})`);
+    await tg(`🚫 <b>BLACKLIST: ${symbol}</b>\n${reason} zaredom → ban 24h\nDo: ${new Date(until).toISOString().slice(11,16)} UTC`);
+  } catch(e) { console.log(`  ⚠️  recordSymbolSl error: ${e.message}`); }
+}
+
+// ─── 3. MARKET REGIME — BTC 4H trend ─────────────────────────────────────────
+// Ako BTC nije u jasnom BULL trendu na 4H → preskačemo sve LONG ulaze
+// BULL = 6Sc ≥ 4/6 parova UP + cijena > EMA55
+// NEUTRAL/BEAR = čekamo bolji trenutak
+
+let _regimeCache = { regime: "UNKNOWN", ts: 0 };
+const REGIME_TTL = 15 * 60 * 1000;  // osvježi svakih 15min
+
+async function getBtcRegime() {
+  if (Date.now() - _regimeCache.ts < REGIME_TTL) return _regimeCache.regime;
+  try {
+    const url = `https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=4H&limit=100`;
+    const r = await fetch(url);
+    const d = await r.json();
+    if (d.code !== "00000" || !d.data?.length) return "UNKNOWN";
+
+    const candles = d.data.map(k => ({
+      close: parseFloat(k[4]), high: parseFloat(k[2]), low: parseFloat(k[3]),
+    })).reverse();
+    const closes = candles.map(c => c.close);
+    const n = closes.length - 1;
+
+    // EMA55
+    const k55 = 2/(55+1);
+    let e55 = closes.slice(0,55).reduce((a,b)=>a+b,0)/55;
+    for (let i=55; i<=n; i++) e55 = closes[i]*k55 + e55*(1-k55);
+
+    // 6-Scale EMA parovi
+    const emaPairs = [[3,11],[7,15],[13,21],[19,29],[29,47],[45,55]];
+    let upPairs = 0;
+    for (const [a,b] of emaPairs) {
+      const ka=2/(a+1), kb=2/(b+1);
+      let ea=closes.slice(0,a).reduce((s,v)=>s+v,0)/a;
+      let eb=closes.slice(0,b).reduce((s,v)=>s+v,0)/b;
+      for (let i=Math.max(a,b); i<=n; i++) {
+        ea = closes[i]*ka + ea*(1-ka);
+        eb = closes[i]*kb + eb*(1-kb);
+      }
+      if (ea > eb) upPairs++;
+    }
+
+    const price = closes[n];
+    const regime = (upPairs >= 4 && price > e55) ? "BULL"
+                 : (upPairs <= 2 && price < e55) ? "BEAR"
+                 : "NEUTRAL";
+
+    _regimeCache = { regime, ts: Date.now() };
+    console.log(`  📊 [REGIME] BTC 4H: ${regime} | 6Sc=${upPairs}/6 | Price${price>e55?">":"<"}EMA55`);
+    return regime;
+  } catch(e) {
+    console.log(`  ⚠️  [REGIME] Greška: ${e.message}`);
+    return "UNKNOWN";
+  }
+}
+
+// ─── 4. SIGNAL ANALIZA — prati koje signale bilježe pobjedu ──────────────────
+// Svaki ulaz bilježi fingerprint aktivnih signala (bitmask)
+// Čitamo nakon izlaza koji signal je bio aktivan i označavamo win/loss
+// Svaka 10. analiza ispisuje per-signal WR u konzolu
+
+const SIG_NAMES = ["E50⟳","RSI⟳","E55⟳","CHP","CVD⟳","R⟳","MCD","E145","VOL⟳","MCC⟳","RSI↗","SRS","SRB"];
+const SIG_STATS_FILE = `${DATA_DIR}/signal_stats.json`;
+
+function loadSigStats() {
+  try { return existsSync(SIG_STATS_FILE) ? JSON.parse(readFileSync(SIG_STATS_FILE,"utf8")) : {}; }
+  catch { return {}; }
+}
+function saveSigStats(st) {
+  try { writeFileSync(SIG_STATS_FILE, JSON.stringify(st, null, 2)); } catch {}
+}
+
+function recordSignalOutcome(sigMask, won) {
+  const st = loadSigStats();
+  for (let i = 0; i < SIG_NAMES.length; i++) {
+    if (!((sigMask >> i) & 1)) continue;
+    const key = SIG_NAMES[i];
+    if (!st[key]) st[key] = { wins: 0, total: 0 };
+    st[key].total++;
+    if (won) st[key].wins++;
+  }
+  saveSigStats(st);
+}
+
+function printSigStats() {
+  const st = loadSigStats();
+  const rows = Object.entries(st)
+    .filter(([,v]) => v.total >= 3)
+    .map(([k,v]) => ({ name: k, wr: v.wins/v.total*100, total: v.total }))
+    .sort((a,b) => b.wr - a.wr);
+  if (!rows.length) return;
+  console.log("  📈 [SIG ANALIZA] Per-signal WR (zadnji trejdovi):");
+  for (const r of rows) {
+    const bar = "█".repeat(Math.round(r.wr/10));
+    const ok  = r.wr >= 40 ? "✓" : r.wr >= 30 ? "~" : "✗";
+    console.log(`     ${r.name.padEnd(6)} ${ok} WR=${r.wr.toFixed(0).padStart(3)}% [${bar.padEnd(10)}] N=${r.total}`);
+  }
+}
 
 const PAPER_TRADING = process.env.PAPER_TRADING !== "false";
 const BITGET_DEMO   = process.env.BITGET_DEMO === "true";
@@ -662,7 +844,8 @@ function analyzeSynapseT(candles, cfg) {
 // SL 1% / TP 2%
 
 function analyzeUltra(candles, cfg) {
-  const { minSig = 8 } = cfg;
+  const { minSig = 8, _dynAdx } = cfg;
+  const effectiveAdx = _dynAdx ?? ADX_MIN;  // koristi dinamički ADX ako dostupan
   const closes = candles.map(c => c.close);
   const vols   = candles.map(c => c.volume || 0);
   const n      = closes.length;
@@ -861,10 +1044,10 @@ function analyzeUltra(candles, cfg) {
 
   // ══ 4 OBAVEZNA UVJETA — sva 4 moraju biti zadovoljena ══════════════════════
 
-  // 1. ADX ≥ 30 — tržište mora biti u jasnom trendu (ne ranging)
-  if (adx < ADX_MIN) {
+  // 1. ADX ≥ effectiveAdx — tržište mora biti u jasnom trendu (dinamički prag)
+  if (adx < effectiveAdx) {
     return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
-      reason: `ADX ${adx.toFixed(1)} < ${ADX_MIN} — ranging, nema ulaza` };
+      reason: `ADX ${adx.toFixed(1)} < ${effectiveAdx} — ranging, nema ulaza` };
   }
 
   // 2. 6-Scale: min 4/6 multi-EMA parova poravnato u jednom smjeru
@@ -884,7 +1067,9 @@ function analyzeUltra(candles, cfg) {
   const MIN_CONFIRM = minSig;  // čita iz rules.json (trenutno 5)
 
   if (bullCnt >= MIN_CONFIRM && scaleOkLong && rsiLongOk) {
-    return { price, signal: "LONG",  bullScore: bullCnt, bearScore: bearCnt,
+    // Bitmask aktivnih BULL signala za signal analizu
+    const sigMask = sigs.reduce((mask, v, i) => v === 1 ? mask | (1 << i) : mask, 0);
+    return { price, signal: "LONG",  bullScore: bullCnt, bearScore: bearCnt, sigMask,
       reason: `ULTRA LONG ↑${bullCnt}/13 | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ 6Sc:${scaleUp}/6✓ RSI:${rsi.toFixed(0)}<72✓ [4ob+${MIN_CONFIRM}]` };
   }
   if (!LONG_ONLY && bearCnt >= MIN_CONFIRM && scaleOkShort && rsiShortOk) {
@@ -1367,12 +1552,19 @@ async function checkPortfolioPositions(pid) {
           console.log(`  ${pnl >= 0 ? "✅ WIN" : "❌ LOSS"} [${pid}] ${pos.symbol} ${pos.side} | P&L ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(4)} | ${exitReason} | exit@${fmtPrice(exitPrice)}`);
           writeExitCsv(pid, pos, exitPrice, exitReason, pnl);
           await tg(`${pnl >= 0 ? "✅ WIN" : "❌ LOSS"} [ULTRA] ${pos.symbol} ${pos.side}\nP&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)} | ${exitReason}\nUlaz: ${fmtPrice(pos.entryPrice)} → Izlaz: ${fmtPrice(exitPrice)}`);
+          // 4. Signal analiza — bilježi outcome po signalima
+          if (pos.sigMask != null) recordSignalOutcome(pos.sigMask, pnl >= 0);
+
           if (pnl < 0) {
             // Cooldown 4h — ne ulazi ponovo u ovaj simbol
             symbolSlCooldown.set(pos.symbol, Date.now());
             console.log(`  🕐 [${pid}] ${pos.symbol} — cooldown 4h aktivan (SL hit)`);
+            // 2. Blacklist — 3 uzastopna SL → 24h ban
+            await recordSymbolSl(pid, pos.symbol);
             await checkAndRemoveSymbol(pid, pos.symbol);
           }
+          // Svaki 5. trade ispiši signal statistiku
+          { const st = loadSigStats(); const tot = Object.values(st).reduce((s,v)=>s+v.total,0); if(tot>0&&tot%5===0) printSigStats(); }
           continue;  // Ne dodaj u stillOpen
         }
         // Još uvijek otvorena na Bitgetu — prikaz unrealized
@@ -2110,6 +2302,33 @@ export async function run() {
       console.log(`  🔒 [${pDef.name}] Max ${MAX_OPEN_PER_PORTFOLIO} dostignut — skeniranje samo BTC (specijalni slot)`);
     }
 
+    // ── 3. Market Regime: BTC 4H mora biti BULL ────────────────────────────
+    if (pDef.strategy === "synapse_t") {
+      const regime = await getBtcRegime();
+      if (regime === "BEAR" || regime === "NEUTRAL") {
+        console.log(`  🌧️  [${pDef.name}] BTC regime: ${regime} — LONG ulazi suspendirani, čekamo BULL`);
+        continue;
+      }
+      if (regime === "UNKNOWN") {
+        console.log(`  ⚠️  [${pDef.name}] BTC regime: UNKNOWN — nastavljamo oprezno`);
+      }
+    }
+
+    // ── 1. Dinamički ADX + pauza ako WR loš ───────────────────────────────
+    if (pDef.strategy === "synapse_t") {
+      if (_dynPauseUntil > Date.now()) {
+        const remainH = (((_dynPauseUntil - Date.now()) / 3600000)).toFixed(1);
+        console.log(`  ⏸️  [${pDef.name}] Dinamička pauza aktivna — WR bio prenizak, još ${remainH}h`);
+        continue;
+      }
+      const dynAdx = getDynamicAdx(pid);
+      if (dynAdx > ADX_MIN) {
+        console.log(`  📊 [${pDef.name}] Dinamički ADX: ${dynAdx} (WR loš → strožiji filter)`);
+      }
+      // Spremi u params da analyzeUltra koristi dinamički prag
+      pDef.params._dynAdx = dynAdx;
+    }
+
     for (const symbol of pDef.symbols) {
       const existingPos = openPositions.find(p => p.symbol === symbol);
       if (existingPos) {
@@ -2124,6 +2343,9 @@ export async function run() {
         console.log(`  🔒 [${pDef.name}] Max ${MAX_OPEN_PER_PORTFOLIO} dostignut — preskačem ${symbol}`);
         continue;
       }
+
+      // ── 2. Symbol Blacklist ─────────────────────────────────────────────
+      if (isBlacklisted(symbol)) continue;
 
       try {
         const candles = await fetchCandles(symbol, pDef.timeframe, 250);
@@ -2190,7 +2412,7 @@ export async function run() {
         const timestamp = new Date().toISOString();
         const orderId   = `${isLive ? "LIVE" : "PAPER"}-${Date.now()}`;
         const mode      = isLive ? (BITGET_DEMO ? "DEMO" : "LIVE") : "PAPER";
-        const entry = { symbol, signal, price, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode };
+        const entry = { symbol, signal, price, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode, sigMask: result.sigMask ?? null };
 
         if (!isLive) {
           addPosition(pid, entry);

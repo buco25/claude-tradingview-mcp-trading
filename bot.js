@@ -2627,11 +2627,22 @@ async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp, slPct, tpP
   return { orderId, fillPrice, actualLeverage };
 }
 
-// Zatvori live poziciju na BitGetu (market close order)
+// Zatvori live poziciju na BitGetu — koristi close-positions (flash close) endpoint
 export async function closeBitGetOrder(pos) {
+  const holdSide = pos.side === "LONG" ? "long" : "short";
+
+  // Pokušaj 1: close-positions endpoint (isti kao "Flash close" u UI, ne treba size)
+  const r1 = await bitgetPost("/api/v2/mix/order/close-positions", {
+    symbol:      pos.symbol,
+    productType: "USDT-FUTURES",
+    holdSide,
+  });
+  console.log(`  📨 BitGet close-positions: code=${r1?.code} msg=${r1?.msg}`);
+  if (r1?.code === "00000") return r1.data;
+
+  // Pokušaj 2: fallback — market place-order bez tradeSide/holdSide (one-way mode)
   const quantity  = (pos.quantity ?? (pos.totalUSD / pos.entryPrice)).toFixed(4);
   const closeSide = pos.side === "LONG" ? "sell" : "buy";
-  const holdSide  = pos.side === "LONG" ? "long" : "short";
   const path = "/api/v2/mix/order/place-order";
   const orderBody = {
     symbol:      pos.symbol,
@@ -2639,10 +2650,9 @@ export async function closeBitGetOrder(pos) {
     marginMode:  "isolated",
     marginCoin:  "USDT",
     side:        closeSide,
-    tradeSide:   "close",
-    holdSide,               // obavezno za v2 — inače "no position to close"
     orderType:   "market",
     size:        quantity,
+    reduceOnly:  "YES",
   };
   const timestamp = Date.now().toString();
   const body = JSON.stringify(orderBody);
@@ -2656,7 +2666,7 @@ export async function closeBitGetOrder(pos) {
   if (BITGET_DEMO) headers["x-simulated-trading"] = "1";
   const res  = await fetch(`${BITGET.baseUrl}${path}`, { method: "POST", headers, body });
   const data = await res.json();
-  console.log(`  📨 BitGet CLOSE response: code=${data.code} msg=${data.msg}`);
+  console.log(`  📨 BitGet place-order fallback: code=${data.code} msg=${data.msg}`);
   if (data.code !== "00000") throw new Error(`BitGet close: ${data.msg}`);
   return data.data;
 }

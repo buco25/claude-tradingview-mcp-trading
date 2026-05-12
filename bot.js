@@ -1574,7 +1574,29 @@ async function checkPortfolioPositions(pid) {
         const unrealized = pos.side === "LONG"
           ? (liveP - pos.entryPrice) * qty
           : (pos.entryPrice - liveP) * qty;
-        console.log(`  ⏳ [${pid}] ${pos.symbol} ${pos.side} | Ulaz ${fmtPrice(pos.entryPrice)} | Sad ${fmtPrice(liveP)} | P&L ${unrealized >= 0 ? "+" : ""}$${unrealized.toFixed(4)}`);
+
+        // ── BE-STOP: ako je 50%+ TP dostignut → pomakni SL na entry+buffer ──
+        if (!pos.beMoved && isLivePortfolio) {
+          const tpPct   = pos.tpPct ?? 4.0;
+          const pricePct = pos.side === "LONG"
+            ? (liveP - pos.entryPrice) / pos.entryPrice * 100
+            : (pos.entryPrice - liveP) / pos.entryPrice * 100;
+          const tpProgress = pricePct / tpPct * 100;
+
+          if (tpProgress >= BE_TRIGGER_PCT) {
+            console.log(`  🎯 [BE-STOP] ${pos.symbol} ${pos.side} — ${tpProgress.toFixed(0)}% TP dostignut → pomičem SL na BE`);
+            const moved = await moveSLtoBreakEven(pos);
+            if (moved) {
+              pos.beMoved = true;
+              // Spremi ažuriranu poziciju
+              const allPos = loadPositions(pid);
+              const idx    = allPos.findIndex(p => p.symbol === pos.symbol && p.side === pos.side);
+              if (idx >= 0) { allPos[idx].beMoved = true; savePositions(pid, allPos); }
+            }
+          }
+        }
+
+        console.log(`  ⏳ [${pid}] ${pos.symbol} ${pos.side} | Ulaz ${fmtPrice(pos.entryPrice)} | Sad ${fmtPrice(liveP)} | P&L ${unrealized >= 0 ? "+" : ""}$${unrealized.toFixed(4)}${pos.beMoved ? " | 🔒 BE-STOP aktivan" : ""}`);
         stillOpen.push(pos);
         continue;
       }
@@ -1773,6 +1795,73 @@ async function bitgetPost(path, body) {
     console.log(`  ⚠️  bitgetPost ${path} → code=${data.code} msg=${data.msg}`);
   }
   return data;
+}
+
+// ─── Break-Even Stop — pomakni SL na entry+buffer kad je 50% TP dostignuto ────
+const BE_TRIGGER_PCT = 50;   // % TP-a koji mora biti dostignut
+const BE_BUFFER_PCT  = 0.2;  // % iznad/ispod entry za SL (pokrije fees)
+
+async function moveSLtoBreakEven(pos) {
+  if (pos.beMoved) return;  // već pomaknuto
+  if (PAPER_TRADING) return;
+
+  const { symbol, side, entryPrice, slPct, tpPct } = pos;
+  const holdSide = side === "LONG" ? "long" : "short";
+
+  // Novi SL: entry ± buffer (LONG = malo iznad entry, SHORT = malo ispod entry)
+  const newSlPrice = side === "LONG"
+    ? entryPrice * (1 + BE_BUFFER_PCT / 100)
+    : entryPrice * (1 - BE_BUFFER_PCT / 100);
+
+  try {
+    // Dohvati pending TPSL ordere da pronađemo orderId SL-a
+    const ts   = Date.now().toString();
+    const path = `/api/v2/mix/order/orders-plan-pending?symbol=${symbol}&productType=USDT-FUTURES&planType=pos_loss`;
+    const sign = signBitGet(ts, "GET", path);
+    const r    = await fetch(`${BITGET.baseUrl}${path}`, {
+      headers: {
+        "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": sign,
+        "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET.passphrase,
+        "Content-Type": "application/json",
+      },
+    });
+    const d = await r.json();
+    const orders = (d.data?.entrustedList || []).filter(o => o.holdSide === holdSide);
+
+    if (orders.length > 0) {
+      // Modificiraj postojeći SL order
+      const orderId = orders[0].orderId;
+      const res = await bitgetPost("/api/v2/mix/order/modify-tpsl-order", {
+        symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
+        orderId, triggerPrice: fmtPrice(newSlPrice, symbol),
+      });
+      if (res.code === "00000") {
+        console.log(`  🔒 [BE-STOP] ${symbol} ${side} — SL pomaknut na ${fmtPrice(newSlPrice, symbol)} (+${BE_BUFFER_PCT}% od entry ${fmtPrice(entryPrice)})`);
+        await tg(`🔒 <b>BE-STOP [ULTRA]</b> ${symbol} ${side}\nSL pomaknut na entry+${BE_BUFFER_PCT}%: ${fmtPrice(newSlPrice, symbol)}\nProfit zagarantiran pri povratku na entry.`);
+      } else {
+        // Fallback: postavi novi SL direktno
+        await bitgetPost("/api/v2/mix/order/place-tpsl-order", {
+          symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
+          planType: "pos_loss", triggerPrice: fmtPrice(newSlPrice, symbol),
+          triggerType: "mark_price", holdSide,
+        });
+        console.log(`  🔒 [BE-STOP] ${symbol} ${side} — novi SL na ${fmtPrice(newSlPrice, symbol)} (fallback)`);
+      }
+    } else {
+      // Nema pending SL — postavi novi
+      await bitgetPost("/api/v2/mix/order/place-tpsl-order", {
+        symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
+        planType: "pos_loss", triggerPrice: fmtPrice(newSlPrice, symbol),
+        triggerType: "mark_price", holdSide,
+      });
+      console.log(`  🔒 [BE-STOP] ${symbol} ${side} — SL postavljen na ${fmtPrice(newSlPrice, symbol)}`);
+    }
+
+    return true;
+  } catch(e) {
+    console.log(`  ⚠️  [BE-STOP] ${symbol} greška: ${e.message}`);
+    return false;
+  }
 }
 
 async function setupSymbol(symbol) {

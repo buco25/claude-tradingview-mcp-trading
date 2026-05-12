@@ -1496,40 +1496,64 @@ function statusBox(s) {
 }
 
 // ── Market Regime — BTC 4H detekcija (client-side) ───────────────────────────
-async function loadBtcRegime() {
-  try {
-    const url = "https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=4H&limit=100";
-    const r = await fetch(url);
-    const d = await r.json();
-    if (d.code !== "00000" || !d.data?.length) throw new Error("API");
-    const closes = d.data.map(k => parseFloat(k[4])).reverse();
-    const n = closes.length - 1;
-    // EMA55
-    const k55 = 2/56; let e55 = closes.slice(0,55).reduce((a,b)=>a+b,0)/55;
-    for (let i=55;i<=n;i++) e55 = closes[i]*k55+e55*(1-k55);
-    // 6-Scale parovi
-    const pairs = [[3,11],[7,15],[13,21],[19,29],[29,47],[45,55]];
-    let up = 0;
-    for (const [a,b] of pairs) {
-      const ka=2/(a+1),kb=2/(b+1);
-      let ea=closes.slice(0,a).reduce((s,v)=>s+v,0)/a;
-      let eb=closes.slice(0,b).reduce((s,v)=>s+v,0)/b;
-      for (let i=Math.max(a,b);i<=n;i++){ea=closes[i]*ka+ea*(1-ka);eb=closes[i]*kb+eb*(1-kb);}
-      if(ea>eb) up++;
-    }
-    const price = closes[n];
-    const regime = (up>=4 && price>e55) ? "BULL" : (up<=2 && price<e55) ? "BEAR" : "NEUTRAL";
-    const col = regime==="BULL"?"#00c48c":regime==="BEAR"?"#ff4d4d":"#f7b731";
-    const icon = regime==="BULL"?"📈":regime==="BEAR"?"📉":"➡️";
-    const sub = regime==="BULL"?"LONG ulazi aktivni":regime==="BEAR"?"LONG suspendiran":"Čekamo trend";
-    document.getElementById("regime-val").textContent = icon+" "+regime;
-    document.getElementById("regime-val").style.color = col;
-    document.getElementById("regime-sub").textContent = "6Sc " + up + "/6 | BTC " + (price>e55?"iznad":"ispod") + " EMA55 | " + sub;
-    document.getElementById("regime-sub").style.color = col;
-  } catch(e) {
-    document.getElementById("regime-val").textContent = "UNKNOWN";
-    document.getElementById("regime-sub").textContent = "Greška dohvata";
+let _lastRegime = null;  // čuva zadnju poznatu vrijednost
+
+async function fetchRegimeOnce() {
+  const url = "https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=4H&limit=100";
+  const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  const d = await r.json();
+  if (d.code !== "00000" || !d.data?.length) throw new Error("API err: " + d.msg);
+  const closes = d.data.map(k => parseFloat(k[4])).reverse();
+  const n = closes.length - 1;
+  const k55 = 2/56; let e55 = closes.slice(0,55).reduce((a,b)=>a+b,0)/55;
+  for (let i=55;i<=n;i++) e55 = closes[i]*k55+e55*(1-k55);
+  const pairs = [[3,11],[7,15],[13,21],[19,29],[29,47],[45,55]];
+  let up = 0;
+  for (const [a,b] of pairs) {
+    const ka=2/(a+1),kb=2/(b+1);
+    let ea=closes.slice(0,a).reduce((s,v)=>s+v,0)/a;
+    let eb=closes.slice(0,b).reduce((s,v)=>s+v,0)/b;
+    for (let i=Math.max(a,b);i<=n;i++){ea=closes[i]*ka+ea*(1-ka);eb=closes[i]*kb+eb*(1-kb);}
+    if(ea>eb) up++;
   }
+  const price = closes[n];
+  const regime = (up>=4 && price>e55) ? "BULL" : (up<=2 && price<e55) ? "BEAR" : "NEUTRAL";
+  return { regime, up, price, e55 };
+}
+
+async function loadBtcRegime() {
+  let result = null;
+  // Pokušaj do 3 puta s pauzom
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      result = await fetchRegimeOnce();
+      break;
+    } catch(e) {
+      if (attempt < 3) await new Promise(r => setTimeout(r, 2000 * attempt));
+    }
+  }
+
+  if (!result) {
+    // Sve 3 greška — prikaži zadnju poznatu vrijednost s oznakom
+    if (_lastRegime) {
+      document.getElementById("regime-sub").textContent = "API nedostupan — zadnja poznata vrijednost";
+    } else {
+      document.getElementById("regime-val").textContent = "—";
+      document.getElementById("regime-sub").textContent = "API nedostupan, pokušavam ponovo...";
+    }
+    return;
+  }
+
+  // Uspjeh — ažuriraj prikaz
+  const { regime, up, price, e55 } = result;
+  _lastRegime = result;
+  const col  = regime==="BULL"?"#00c48c":regime==="BEAR"?"#ff4d4d":"#f7b731";
+  const icon = regime==="BULL"?"📈":regime==="BEAR"?"📉":"➡️";
+  const sub  = regime==="BULL"?"LONG ulazi aktivni":regime==="BEAR"?"LONG suspendiran":"Čekamo trend";
+  document.getElementById("regime-val").textContent = icon + " " + regime;
+  document.getElementById("regime-val").style.color = col;
+  document.getElementById("regime-sub").textContent = "6Sc " + up + "/6 | BTC " + (price>e55?"iznad":"ispod") + " EMA55 | " + sub;
+  document.getElementById("regime-sub").style.color = col;
 }
 
 // Učitaj regime na startu i svako 5 min

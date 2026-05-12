@@ -2371,8 +2371,10 @@ const server = http.createServer(async (req, res) => {
         await closeBitGetOrder(pos);
       } catch (bitgetErr) {
         const msg = bitgetErr.message || "";
-        const alreadyClosed = msg.includes("no position") || msg.includes("Position does not exist")
-          || msg.includes("order not exist") || msg.includes("43025") || msg.includes("43012");
+        const msgL = msg.toLowerCase();
+        const alreadyClosed = msgL.includes("no position") || msgL.includes("position does not exist")
+          || msgL.includes("order not exist") || msg.includes("43025") || msg.includes("43012")
+          || msg.includes("45110") || msg.includes("40788");
         if (!alreadyClosed) throw bitgetErr;  // pravi API error — propagiraj
         bitgetNote = "Zatvoreno na Bitgetu (SL/TP) — cleanup trackinga";
         console.log(`  ℹ️  [CLOSE] ${symbol} — Bitget: "${msg}" → cleanup lokalne pozicije`);

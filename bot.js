@@ -3046,6 +3046,29 @@ export async function run() {
       if (sp.change4h !== null) console.log(`  📈 [SP500] ${sp.change4h}% (4H) — ${sp.regime}`);
     }
 
+    // ── Fear & Greed gate ─────────────────────────────────────────────────────
+    let _fearGreed = null;
+    if (pDef.strategy === "synapse_t") {
+      const fg = await getFearGreed().catch(() => null);
+      _fearGreed = fg?.value ?? null;
+      if (_fearGreed !== null) console.log(`  😨 [F&G] ${_fearGreed} (${fg.label})`);
+    }
+
+    // ── DXY gate — jaki dolar blokira LONG ───────────────────────────────────
+    let _dxyChange = null;
+    if (pDef.strategy === "synapse_t") {
+      const dxy = await getDxyData().catch(() => null);
+      _dxyChange = dxy?.change4h ?? null;
+    }
+
+    // ── Liquidation Risk gate ─────────────────────────────────────────────────
+    let _liqScore = null;
+    if (pDef.strategy === "synapse_t") {
+      const liq = await getLiquidationRisk(pDef.symbols).catch(() => null);
+      _liqScore = liq?.overall ?? null;
+      if (_liqScore !== null && _liqScore > 60) console.log(`  💥 [LIQ] Rizik likvidacija: ${_liqScore}/100`);
+    }
+
     // ── Ekonomski kalendar — dohvati jednom po portfoliju ─────────────────────
     let _econEvents = [];
     if (pDef.strategy === "synapse_t") {
@@ -3152,6 +3175,26 @@ export async function run() {
           // SP500 RISK_OFF → blokira LONG, ali SHORT prolazi
           if (signal === "LONG" && _sp500Regime === "RISK_OFF") {
             console.log(`  🚨 [SP500] ${symbol} — RISK_OFF → LONG blokiran`);
+            continue;
+          }
+          // Fear & Greed: ekstremni strah (≤20) → blokira LONG (panika, ne ulazimo long)
+          if (signal === "LONG" && _fearGreed !== null && _fearGreed <= 20) {
+            console.log(`  😱 [F&G] ${symbol} — Extreme Fear (${_fearGreed}) → LONG blokiran`);
+            continue;
+          }
+          // Fear & Greed: ekstremna pohlepa (≥80) → blokira SHORT (euforija, ne shortamo)
+          if (signal === "SHORT" && _fearGreed !== null && _fearGreed >= 80) {
+            console.log(`  🤑 [F&G] ${symbol} — Extreme Greed (${_fearGreed}) → SHORT blokiran`);
+            continue;
+          }
+          // DXY: jaki dolar (>+0.3% na 4H) → blokira LONG na crypto
+          if (signal === "LONG" && _dxyChange !== null && _dxyChange > 0.3) {
+            console.log(`  💵 [DXY] ${symbol} — DXY +${_dxyChange}% → LONG blokiran (jaki dolar)`);
+            continue;
+          }
+          // Liquidation Risk: visok rizik (>75) → blokira LONG (kaskadni padovi mogući)
+          if (signal === "LONG" && _liqScore !== null && _liqScore > 75) {
+            console.log(`  💥 [LIQ] ${symbol} — rizik ${_liqScore}/100 → LONG blokiran`);
             continue;
           }
           // 1H trend nepoklapa → filtriraj

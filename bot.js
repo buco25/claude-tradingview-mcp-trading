@@ -30,9 +30,16 @@ const MAX_TRADES_PER_DAY = 100;
 const MAX_OPEN_PER_PORTFOLIO = 8;  // max otvorenih pozicija po portfoliju (+ BTC bonus slot)
 
 // ─── ULTRA strategija — zaštitni parametri ────────────────────────────────────
-const LONG_ONLY      = true;          // SHORT signali isključeni (backtest: SHORT PF=0.59, -29.9%)
+const LONG_ONLY      = false;         // SHORT dozvoljeni kada BTC regime BEAR/NEUTRAL
 const ADX_MIN        = 30;            // ADX prag — bazni (dinamički raste ako WR pada)
 const SL_COOLDOWN_MS = 4 * 60 * 60 * 1000;  // 4h cooldown po simbolu nakon SL-a
+
+// ─── Trailing stop — aktivira se nakon BE-STOP ───────────────────────────────
+const TRAIL_ACTIVATE_PCT = 1.5;  // % profita za aktivaciju traila (nakon BE)
+const TRAIL_SL_PCT       = 0.8;  // trail SL X% ispod/iznad peak-a
+
+// ─── Ekonomski kalendar ───────────────────────────────────────────────────────
+const ECON_BLOCK_MIN = 15;  // blokiraj ±15min oko HIGH impact USD eventa
 
 // In-memory mapa: symbol → timestamp zadnjeg SL-a
 const symbolSlCooldown = new Map();
@@ -52,17 +59,18 @@ function getDynamicAdx(pid) {
   const f = csvFilePath(pid);
   if (!existsSync(f)) return ADX_MIN;
   try {
+    const today = new Date().toISOString().slice(0, 10);  // YYYY-MM-DD
     const lines = readFileSync(f, "utf8").trim().split("\n");
+    // Samo današnji trejdovi — svaki dan kreće od nule (nema feedback loopa iz prošlosti)
     const exits = lines.slice(1)
-      .filter(l => l.includes("CLOSE_LONG") || l.includes("CLOSE_SHORT"))
-      .slice(-DYN_ADX_LOOKBACK);
-    if (exits.length < 5) return ADX_MIN;  // premalo podataka
+      .filter(l => l.startsWith(today) && (l.includes("CLOSE_LONG") || l.includes("CLOSE_SHORT")));
+    if (exits.length < 3) return ADX_MIN;  // manje od 3 trejda danas → normalni ADX
     const wins = exits.filter(l => parseFloat(l.split(",")[9] || 0) > 0).length;
     const wr   = (wins / exits.length) * 100;
     if (wr < DYN_PAUSE_WR) {
       if (_dynPauseUntil < Date.now()) {
         _dynPauseUntil = Date.now() + DYN_PAUSE_MS;
-        console.log(`  ⚠️  [DYN] WR=${wr.toFixed(0)}% (zadnjih ${exits.length}) — 2h pauza aktivirana`);
+        console.log(`  ⚠️  [DYN] WR=${wr.toFixed(0)}% (danas: ${exits.length} trejdova) — 2h pauza aktivirana`);
       }
     }
     if (wr < 25) return ADX_MIN + DYN_ADX_BOOST_2;  // ADX 40
@@ -457,6 +465,63 @@ export function calcAtrTrend(candles, atrLen = 14, lookback = 14) {
     currentAtr: parseFloat(currentAtr.toFixed(8)),
     avgAtr: parseFloat(avgAtr.toFixed(8)),
   };
+}
+
+// ─── 1H Trend Filter ─────────────────────────────────────────────────────────
+// Viši timeframe trend — dozvoljava samo LONG kad je 1H bull, SHORT kad je 1H bear
+
+export async function calcTrend1H(symbol) {
+  try {
+    const candles = await fetchCandles(symbol, '1H', 30);
+    const closes  = candles.map(c => c.close);
+    const ema20   = calcEMA(closes, 20);
+    const ema50   = calcEMA(closes, 50);
+    const last    = closes[closes.length - 1];
+    if (!ema20) return { trend: 'UNKNOWN', last, ema20: null, ema50: null };
+    const trend = last > ema20 ? 'BULL' : 'BEAR';
+    return { trend, last, ema20: parseFloat(ema20.toFixed(6)), ema50: ema50 ? parseFloat(ema50.toFixed(6)) : null };
+  } catch {
+    return { trend: 'UNKNOWN', last: 0, ema20: null, ema50: null };
+  }
+}
+
+// ─── Ekonomski kalendar ───────────────────────────────────────────────────────
+// Forex Factory tjedni kalendar — blokira ±15min oko HIGH impact USD eventa
+
+let _econCache = null;
+let _econCacheTs = 0;
+
+export async function getEconEvents() {
+  const now = Date.now();
+  if (_econCache && now - _econCacheTs < 60 * 60 * 1000) return _econCache;
+  try {
+    const r = await fetch('https://nfs.faireconomy.media/ff_calendar_thisweek.json',
+      { headers: { 'User-Agent': 'TradingBot/1.0' }, signal: AbortSignal.timeout(5000) });
+    const all = await r.json();
+    _econCache = all.filter(e => e.impact === 'High' && e.country === 'USD');
+    _econCacheTs = now;
+    return _econCache;
+  } catch {
+    return _econCache || [];
+  }
+}
+
+export function isEconBlocked(events) {
+  if (!events || !events.length) return { blocked: false, event: null };
+  const now = Date.now();
+  const blockMs = ECON_BLOCK_MIN * 60 * 1000;
+  for (const ev of events) {
+    const evTime = new Date(ev.date).getTime();
+    if (Math.abs(now - evTime) < blockMs) {
+      const minLeft = Math.round((evTime - now) / 60000);
+      return { blocked: true, event: ev.title, minLeft };
+    }
+  }
+  // Provjeri sljedeći event — upozorenje 30min unaprijed
+  const upcoming = events
+    .filter(e => new Date(e.date).getTime() > now)
+    .sort((a, b) => new Date(a.date) - new Date(b.date))[0];
+  return { blocked: false, event: null, next: upcoming || null };
 }
 
 // ─── Daily P&L Budget ─────────────────────────────────────────────────────────
@@ -2015,7 +2080,41 @@ async function checkPortfolioPositions(pid) {
           }
         }
 
-        console.log(`  ⏳ [${pid}] ${pos.symbol} ${pos.side} | Ulaz ${fmtPrice(pos.entryPrice)} | Sad ${fmtPrice(liveP)} | P&L ${unrealized >= 0 ? "+" : ""}$${unrealized.toFixed(4)}${pos.beMoved ? " | 🔒 BE-STOP aktivan" : ""}`);
+        // ── TRAILING STOP: aktivira se kad je TRAIL_ACTIVATE_PCT% u profitu ──
+        if (isLivePortfolio) {
+          const pricePct = pos.side === "LONG"
+            ? (liveP - pos.entryPrice) / pos.entryPrice * 100
+            : (pos.entryPrice - liveP) / pos.entryPrice * 100;
+
+          if (pricePct >= TRAIL_ACTIVATE_PCT) {
+            const peak = pos.side === "LONG"
+              ? Math.max(pos.trailPeak || 0, liveP)
+              : Math.min(pos.trailPeak || Infinity, liveP);
+            const prevPeak = pos.trailPeak;
+
+            if (prevPeak === undefined || prevPeak === null ||
+                (pos.side === "LONG" && peak > prevPeak) ||
+                (pos.side === "SHORT" && peak < prevPeak)) {
+              const newSl = pos.side === "LONG"
+                ? peak * (1 - TRAIL_SL_PCT / 100)
+                : peak * (1 + TRAIL_SL_PCT / 100);
+              const improving = pos.side === "LONG" ? newSl > (pos.sl || 0) : newSl < (pos.sl || Infinity);
+              if (improving) {
+                const moved = await updateTrailSL(pos, newSl);
+                if (moved) {
+                  const allPos = loadPositions(pid);
+                  const idx    = allPos.findIndex(p => p.symbol === pos.symbol && p.side === pos.side);
+                  if (idx >= 0) { allPos[idx].trailPeak = peak; allPos[idx].sl = newSl; savePositions(pid, allPos); }
+                  pos.trailPeak = peak; pos.sl = newSl;
+                  console.log(`  📈 [TRAIL] ${pos.symbol} ${pos.side} — peak ${fmtPrice(peak)} → trail SL: ${fmtPrice(newSl)}`);
+                }
+              }
+            }
+          }
+        }
+
+        const trailInfo = pos.trailPeak ? ` | 📈 TRAIL peak ${fmtPrice(pos.trailPeak)}` : "";
+        console.log(`  ⏳ [${pid}] ${pos.symbol} ${pos.side} | Ulaz ${fmtPrice(pos.entryPrice)} | Sad ${fmtPrice(liveP)} | P&L ${unrealized >= 0 ? "+" : ""}$${unrealized.toFixed(4)}${pos.beMoved ? " | 🔒 BE-STOP aktivan" : ""}${trailInfo}`);
         stillOpen.push(pos);
         continue;
       }
@@ -2616,6 +2715,41 @@ export async function closeBitGetExcess(pid, target = MAX_OPEN_PER_PORTFOLIO) {
   return { ok: true, closed, remaining: loadPositions(pid).length, target };
 }
 
+// ─── Trailing Stop — ažurira SL na Bitgetu kad cijena doseže novi peak ──────────
+
+async function updateTrailSL(pos, newSlPrice) {
+  if (PAPER_TRADING) return false;
+  const { symbol, side } = pos;
+  const holdSide = side === "LONG" ? "long" : "short";
+  const slStr = fmtPrice(newSlPrice, symbol);
+  try {
+    const ts   = Date.now().toString();
+    const path = `/api/v2/mix/order/orders-plan-pending?symbol=${symbol}&productType=USDT-FUTURES&planType=pos_loss`;
+    const sign = signBitGet(ts, "GET", path);
+    const r    = await fetch(`${BITGET.baseUrl}${path}`, {
+      headers: { "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": sign,
+        "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET.passphrase, "Content-Type": "application/json" },
+    });
+    const d = await r.json();
+    const orders = (d.data?.entrustedList || []).filter(o => o.holdSide === holdSide);
+    if (orders.length > 0) {
+      await bitgetPost("/api/v2/mix/order/modify-tpsl-order", {
+        symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
+        orderId: orders[0].orderId, triggerPrice: slStr,
+      });
+    } else {
+      await bitgetPost("/api/v2/mix/order/place-tpsl-order", {
+        symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
+        planType: "pos_loss", triggerPrice: slStr, triggerType: "mark_price", holdSide,
+      });
+    }
+    return true;
+  } catch (e) {
+    console.log(`  ⚠️  [TRAIL] updateTrailSL failed ${symbol}: ${e.message}`);
+    return false;
+  }
+}
+
 // ─── Daily trade counter ────────────────────────────────────────────────────────
 
 const _todayTrades = {};
@@ -2884,26 +3018,35 @@ export async function run() {
     const dailyWarnActive = dailyPnl < -(DAILY_LOSS_LIMIT * DAILY_WARN_PCT / 100);
     if (dailyWarnActive) console.log(`  ⚠️  [${pDef.name}] Dnevni P&L upozorenje: $${dailyPnl.toFixed(2)} (${(Math.abs(dailyPnl)/DAILY_LOSS_LIMIT*100).toFixed(0)}% limita)`);
 
-    // ── 3. Market Regime: BTC 4H mora biti BULL ────────────────────────────
+    // ── 3. Market Regime: BTC 4H — LONG samo kad BULL, SHORT samo kad BEAR/NEUTRAL ─
+    let _btcRegime = "UNKNOWN";
     if (pDef.strategy === "synapse_t") {
-      const regime = await getBtcRegime();
-      if (regime === "BEAR" || regime === "NEUTRAL") {
-        console.log(`  🌧️  [${pDef.name}] BTC regime: ${regime} — LONG ulazi suspendirani, čekamo BULL`);
-        continue;
-      }
-      if (regime === "UNKNOWN") {
-        console.log(`  ⚠️  [${pDef.name}] BTC regime: UNKNOWN — nastavljamo oprezno`);
-      }
+      _btcRegime = await getBtcRegime();
+      if (_btcRegime === "UNKNOWN") console.log(`  ⚠️  [${pDef.name}] BTC regime: UNKNOWN — nastavljamo oprezno`);
+      else console.log(`  📊 [${pDef.name}] BTC regime: ${_btcRegime}`);
     }
 
-    // ── SP500 Risk-Off gate ────────────────────────────────────────────────
+    // ── SP500 Risk-Off gate — blokira LONG, ali dozvoljava SHORT ─────────────
+    let _sp500Regime = "NEUTRAL";
     if (pDef.strategy === "synapse_t") {
       const sp = await getSp500Data();
-      if (sp.regime === 'RISK_OFF') {
-        console.log(`  🚨 [SP500] RISK_OFF — S&P500 ${sp.change4h}% (4H) < ${SP500_BLOCK_DROP}% → LONG ulazi suspendirani`);
+      _sp500Regime = sp.regime;
+      if (sp.change4h !== null) console.log(`  📈 [SP500] ${sp.change4h}% (4H) — ${sp.regime}`);
+    }
+
+    // ── Ekonomski kalendar — dohvati jednom po portfoliju ─────────────────────
+    let _econEvents = [];
+    if (pDef.strategy === "synapse_t") {
+      _econEvents = await getEconEvents();
+      const econStatus = isEconBlocked(_econEvents);
+      if (econStatus.blocked) {
+        console.log(`  📅 [ECON] ${econStatus.event} — ${Math.abs(econStatus.minLeft || 0)}min ${econStatus.minLeft > 0 ? "za" : "nazad"} → trading pauziran`);
         continue;
       }
-      if (sp.change4h !== null) console.log(`  📈 [SP500] ${sp.change4h}% (4H) — ${sp.regime}`);
+      if (econStatus.next) {
+        const inMin = Math.round((new Date(econStatus.next.date).getTime() - Date.now()) / 60000);
+        if (inMin > 0 && inMin <= 30) console.log(`  ⏰ [ECON] ${econStatus.next.title} za ${inMin}min — upozorenje`);
+      }
     }
 
     // ── 1. Dinamički ADX + pauza ako WR loš ───────────────────────────────
@@ -2947,6 +3090,9 @@ export async function run() {
           continue;
         }
 
+        // ── 1H Trend Filter ─────────────────────────────────────────────────
+        const trend1h = pDef.strategy === "synapse_t" ? await calcTrend1H(symbol) : { trend: 'UNKNOWN' };
+
         const candles = await fetchCandles(symbol, pDef.timeframe, 250);
         const price   = candles[candles.length - 1].close;
 
@@ -2977,6 +3123,34 @@ export async function run() {
         if (signal === "NEUTRAL") {
           console.log(`  🚫 [${pDef.name}] ${symbol} — ${reason}`);
           continue;
+        }
+
+        // ── Regime + SP500 + 1H trend filter — po smjeru signala ─────────────
+        if (pDef.strategy === "synapse_t") {
+          // BTC BEAR/NEUTRAL → blokira LONG
+          if (signal === "LONG" && (_btcRegime === "BEAR" || _btcRegime === "NEUTRAL")) {
+            console.log(`  🌧️  [REGIME] ${symbol} — BTC ${_btcRegime} → LONG blokiran`);
+            continue;
+          }
+          // BTC BULL → blokira SHORT (trend suprotan shortu)
+          if (signal === "SHORT" && _btcRegime === "BULL") {
+            console.log(`  ☀️  [REGIME] ${symbol} — BTC BULL → SHORT blokiran`);
+            continue;
+          }
+          // SP500 RISK_OFF → blokira LONG, ali SHORT prolazi
+          if (signal === "LONG" && _sp500Regime === "RISK_OFF") {
+            console.log(`  🚨 [SP500] ${symbol} — RISK_OFF → LONG blokiran`);
+            continue;
+          }
+          // 1H trend nepoklapa → filtriraj
+          if (signal === "LONG" && trend1h.trend === "BEAR") {
+            console.log(`  📉 [1H] ${symbol} — 1H trend BEAR → LONG blokiran (close ${fmtPrice(trend1h.last)} < EMA20 ${fmtPrice(trend1h.ema20)})`);
+            continue;
+          }
+          if (signal === "SHORT" && trend1h.trend === "BULL") {
+            console.log(`  📈 [1H] ${symbol} — 1H trend BULL → SHORT blokiran (close ${fmtPrice(trend1h.last)} > EMA20 ${fmtPrice(trend1h.ema20)})`);
+            continue;
+          }
         }
 
         // ── Funding rate gate — blokira LONG ako tržište preokomjerno long ──

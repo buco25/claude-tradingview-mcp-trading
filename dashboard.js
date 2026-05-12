@@ -705,7 +705,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             </div>
           </div>
           <div style="margin-top:8px;text-align:right">
-            <button onclick="closePosition('${def.id}','${p.symbol}')" style="background:#ff4d4d;color:#fff;border:none;border-radius:6px;padding:5px 14px;font-size:12px;font-weight:700;cursor:pointer">✕ Zatvori</button>
+            <button onclick="closePosition('${def.id}','${p.symbol}',this)" style="background:#ff4d4d;color:#fff;border:none;border-radius:6px;padding:5px 14px;font-size:12px;font-weight:700;cursor:pointer">✕ Zatvori</button>
           </div>
           <script>
           (function(){
@@ -1420,23 +1420,46 @@ async function resetAll() {
   location.reload();
 }
 
-async function closePosition(pid, symbol) {
-  if (!confirm("Zatvoriti " + symbol + " market orderom na Bitgetu?")) return;
+async function closePosition(pid, symbol, btn) {
+  if (!btn) return;
+  if (btn.dataset.confirm !== "1") {
+    btn.dataset.confirm = "1";
+    btn.textContent = "⚠️ POTVRDI?";
+    btn.style.background = "#f7b731";
+    btn.style.color = "#000";
+    setTimeout(function() {
+      if (btn.dataset.confirm === "1") {
+        btn.dataset.confirm = "";
+        btn.textContent = "✕ Zatvori";
+        btn.style.background = "#ff4d4d";
+        btn.style.color = "#fff";
+      }
+    }, 4000);
+    return;
+  }
+  btn.dataset.confirm = "";
+  btn.textContent = "⏳ Šaljem...";
+  btn.disabled = true;
   try {
     const r = await fetch("/api/close-position", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pid, symbol })
+      body: JSON.stringify({ pid: pid, symbol: symbol })
     });
     const d = await r.json();
     if (d.ok) {
-      alert("Zatvoreno: " + symbol + "\nP&L: $" + d.pnl + "\nCijena: $" + d.exitPrice);
-      location.reload();
+      btn.textContent = "✅ Zatvoreno";
+      btn.style.background = "#00c48c";
+      setTimeout(function() { location.reload(); }, 1500);
     } else {
-      alert("Greska: " + d.error);
+      btn.textContent = "❌ " + d.error;
+      btn.style.background = "#ff4d4d";
+      btn.style.color = "#fff";
+      btn.disabled = false;
     }
   } catch(e) {
-    alert("Greska: " + e.message);
+    btn.textContent = "❌ Greska";
+    btn.disabled = false;
   }
 }
 

@@ -833,25 +833,25 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
   :root {
-    --bg-primary:   #f5f7fa;
-    --bg-secondary: #eef1f6;
-    --bg-tertiary:  #e4e8f0;
-    --bg-card:      #ffffff;
-    --border:       #e2e8f0;
-    --border-light: #cbd5e1;
-    --text-primary: #0f172a;
-    --text-muted:   #64748b;
-    --text-dim:     #94a3b8;
-    --green:        #059669;
-    --green-dim:    rgba(5,150,105,0.08);
-    --red:          #dc2626;
-    --red-dim:      rgba(220,38,38,0.08);
-    --blue:         #2563eb;
-    --blue-dim:     rgba(37,99,235,0.08);
-    --purple:       #7c3aed;
-    --yellow:       #d97706;
-    --shadow-sm:    0 1px 3px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04);
-    --shadow-md:    0 4px 12px rgba(15,23,42,0.10), 0 2px 4px rgba(15,23,42,0.06);
+    --bg-primary:   #111827;
+    --bg-secondary: #1f2937;
+    --bg-tertiary:  #2d3748;
+    --bg-card:      #1f2937;
+    --border:       #374151;
+    --border-light: #4b5563;
+    --text-primary: #f9fafb;
+    --text-muted:   #9ca3af;
+    --text-dim:     #6b7280;
+    --green:        #10b981;
+    --green-dim:    rgba(16,185,129,0.12);
+    --red:          #ef4444;
+    --red-dim:      rgba(239,68,68,0.12);
+    --blue:         #60a5fa;
+    --blue-dim:     rgba(96,165,250,0.12);
+    --purple:       #a78bfa;
+    --yellow:       #fbbf24;
+    --shadow-sm:    0 1px 3px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3);
+    --shadow-md:    0 4px 6px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.3);
     --radius-sm:    8px;
     --radius-md:    12px;
     --radius-lg:    16px;
@@ -859,19 +859,19 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
   body { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:var(--bg-primary); color:var(--text-primary); min-height:100vh; line-height:1.5; }
   a { color:var(--blue); text-decoration:none; }
-  .top-bar { height:4px; background:linear-gradient(90deg,#2563eb,#7c3aed,#059669); }
+  .top-bar { height:3px; background:linear-gradient(90deg,#3b82f6,#8b5cf6,#10b981); }
   .page-wrap { max-width:1440px; margin:0 auto; padding:28px 24px 80px; }
   .header { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:32px; }
   .header-left { display:flex; align-items:center; gap:14px; }
-  .logo { font-size:24px; }
-  .title { font-size:20px; font-weight:800; letter-spacing:-.03em; color:var(--text-primary); }
-  .subtitle { font-size:11px; color:var(--text-muted); margin-top:3px; letter-spacing:.01em; }
-  .badge { display:inline-flex; align-items:center; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:600; white-space:nowrap; }
-  .green-badge { background:var(--green-dim); color:var(--green); border:1px solid rgba(5,150,105,0.2); }
-  .red-badge   { background:var(--red-dim);   color:var(--red);   border:1px solid rgba(220,38,38,0.2); }
-  .badge-paper { background:var(--blue-dim);  color:var(--blue);  border:1px solid rgba(37,99,235,0.2); font-size:11px; padding:2px 8px; }
-  .badge-long  { background:var(--green-dim); color:var(--green); border:1px solid rgba(5,150,105,0.2); font-size:11px; padding:2px 8px; }
-  .badge-short { background:var(--red-dim);   color:var(--red);   border:1px solid rgba(220,38,38,0.2); font-size:11px; padding:2px 8px; }
+  .logo { font-size:24px; filter:drop-shadow(0 0 10px rgba(16,185,129,0.5)); }
+  .title { font-size:20px; font-weight:700; letter-spacing:-.02em; }
+  .subtitle { font-size:12px; color:var(--text-muted); margin-top:3px; letter-spacing:.01em; }
+  .badge { display:inline-flex; align-items:center; padding:3px 10px; border-radius:20px; font-size:12px; font-weight:600; white-space:nowrap; }
+  .green-badge { background:var(--green-dim); color:var(--green); border:1px solid rgba(16,185,129,0.3); }
+  .red-badge   { background:var(--red-dim);   color:var(--red);   border:1px solid rgba(239,68,68,0.3); }
+  .badge-paper { background:var(--blue-dim);  color:var(--blue);  border:1px solid rgba(96,165,250,0.3); font-size:11px; padding:2px 8px; }
+  .badge-long  { background:var(--green-dim); color:var(--green); border:1px solid rgba(16,185,129,0.3); font-size:11px; padding:2px 8px; }
+  .badge-short { background:var(--red-dim);   color:var(--red);   border:1px solid rgba(239,68,68,0.3); font-size:11px; padding:2px 8px; }
   .muted { color:var(--text-muted); }
   .red   { color:var(--red); }
   .green { color:var(--green); }

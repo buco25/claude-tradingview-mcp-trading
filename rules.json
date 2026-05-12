@@ -262,9 +262,9 @@
     },
     "synapse_t": {
       "name": "ULTRA — 13-Signal Combined Strategy (ATR per-symbol SL/TP)",
-      "description": "Kombinira 13 signala: E50(REV), RSI(REV), E55(REV), CHP, CVD(REV), R⟳, MCD, E145, VOL(REV), MCC(REV), RSI↗, SRS, SRB. Mandatory gates: ADX≥25, 6Sc≥4/6, RSI asimetričan, 5mSR. Min 5/13 signala. Per-simbol SL/TP: Tier1 SL1.5%/TP4% | Tier2 SL2%/TP4.5% | Tier3 SL2.5%/TP5.5%. 50x leverage (BTC 75x).",
+      "description": "Kombinira 13 signala: E50(REV), RSI(REV), E55(REV), CHP, CVD(REV), R⟳, MCD, E145, VOL(REV), MCC(REV), RSI↗, SRS, SRB. Mandatory gates: ADX≥30, 6Sc≥4/6, RSI asimetričan, 5mSR. Min 7/13 signala. LONG_ONLY. Per-simbol SL/TP: Tier1 SL1.5%/TP4% | Tier2 SL2%/TP4.5% | Tier3 SL2.5%/TP5.5%. 50x leverage (BTC 75x).",
       "params": {
-        "minSig": 5,
+        "minSig": 7,
         "slPct": 1.5,
         "tpPct": 4.0
       }

@@ -1869,7 +1869,7 @@ function applyTrail(pos, currentPrice) {
 }
 
 // Dohvati sve stvarno otvorene pozicije na Bitgetu (za sve simbole)
-async function fetchBitgetOpenPositions() {
+export async function fetchBitgetOpenPositions() {
   try {
     const path = "/api/v2/mix/position/all-position?productType=USDT-FUTURES&marginCoin=USDT";
     const ts   = Date.now().toString();

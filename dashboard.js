@@ -2348,7 +2348,7 @@ const server = http.createServer(async (req, res) => {
       const body = await new Promise(r => { let d=""; req.on("data",c=>d+=c); req.on("end",()=>r(d)); });
       const { pid, symbol } = JSON.parse(body);
       if (!pid || !symbol) throw new Error("pid i symbol su obavezni");
-      const { closeBitGetOrder, loadPositions, savePositions, writeExitCsv } = await import("./bot.js");
+      const { closeBitGetOrder, loadPositions, savePositions, writeExitCsv, fetchBitgetOpenPositions } = await import("./bot.js");
       const positions = loadPositions(pid);
       const pos = positions.find(p => p.symbol === symbol);
       if (!pos) throw new Error(`Pozicija ${symbol} nije pronađena u trackingu`);
@@ -2365,19 +2365,32 @@ const server = http.createServer(async (req, res) => {
         ? (exitPrice - pos.entryPrice) * qty
         : (pos.entryPrice - exitPrice) * qty;
 
-      // Pokušaj zatvoriti na Bitgetu — ako već zatvoreno (SL/TP okidan), svejedno cleanup
+      // Pokušaj zatvoriti na Bitgetu
       let bitgetNote = "Ručno zatvoreno (dashboard)";
       try {
         await closeBitGetOrder(pos);
       } catch (bitgetErr) {
         const msg = bitgetErr.message || "";
         const msgL = msg.toLowerCase();
-        const alreadyClosed = msgL.includes("no position") || msgL.includes("position does not exist")
+        const looksLikeNoPos = msgL.includes("no position") || msgL.includes("position does not exist")
           || msgL.includes("order not exist") || msg.includes("43025") || msg.includes("43012")
           || msg.includes("45110") || msg.includes("40788");
-        if (!alreadyClosed) throw bitgetErr;  // pravi API error — propagiraj
-        bitgetNote = "Zatvoreno na Bitgetu (SL/TP) — cleanup trackinga";
-        console.log(`  ℹ️  [CLOSE] ${symbol} — Bitget: "${msg}" → cleanup lokalne pozicije`);
+
+        if (looksLikeNoPos) {
+          // Provjeri je li pozicija stvarno zatvorena na Bitgetu
+          const holdSide = pos.side === "LONG" ? "long" : "short";
+          const openSet  = await fetchBitgetOpenPositions().catch(() => null);
+          const stillOpen = openSet && openSet.has(`${symbol}:${holdSide}`);
+          if (stillOpen) {
+            // Pozicija JOŠ POSTOJI na Bitgetu — close je zaista pao
+            throw new Error(`Close nije uspio (${msg}). Pozicija još otvorena na Bitgetu — zatvori ručno!`);
+          }
+          // Pozicija više ne postoji na Bitgetu → već zatvorena (SL/TP)
+          bitgetNote = "Zatvoreno na Bitgetu (SL/TP) — cleanup trackinga";
+          console.log(`  ℹ️  [CLOSE] ${symbol} — Bitget: "${msg}" → potvrđeno zatvoreno, cleanup`);
+        } else {
+          throw bitgetErr;  // pravi API error — propagiraj
+        }
       }
 
       // Uvijek ukloni iz trackinga i zabilježi u CSV

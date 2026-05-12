@@ -34,7 +34,7 @@ function nowLocal() {
 }
 
 const PORTFOLIO_DEFS = [
-  { id: "synapse_t", name: "ULTRA", color: "#e85d9a", emoji: "🎯", startCapital: 296.99, live: true },
+  { id: "synapse_t", name: "ULTRA", color: "#db2777", emoji: "🎯", startCapital: 296.99, live: true },
 ];
 
 // ─── All symbols — čita iz rules.json (lazily, nakon što loadRules bude definiran) ─
@@ -659,7 +659,7 @@ function fmtP(v) {
 }
 
 function pnlHtml(pnl) {
-  const col = pnl > 0 ? "#00c48c" : pnl < 0 ? "#ff4d4d" : "#8b949e";
+  const col = pnl > 0 ? "#059669" : pnl < 0 ? "#dc2626" : "#94a3b8";
   return `<span style="color:${col}">${pnl > 0 ? "+" : ""}$${pnl.toFixed(2)}</span>`;
 }
 
@@ -681,8 +681,8 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
 
   const pcts   = ((s.equity - def.startCapital) / def.startCapital * 100);
   const pctStr = (pcts >= 0 ? "+" : "") + pcts.toFixed(2) + "%";
-  const eqCol  = s.equity >= def.startCapital ? "#00c48c" : "#ff4d4d";
-  const pnlCol = s.totalPnl >= 0 ? "#00c48c" : "#ff4d4d";
+  const eqCol  = s.equity >= def.startCapital ? "#059669" : "#dc2626";
+  const pnlCol = s.totalPnl >= 0 ? "#059669" : "#dc2626";
 
   // Equity curve chart data
   const curveLabels = JSON.stringify(s.pnlCurve.map(p => p.ts.slice(0,10)));
@@ -706,14 +706,14 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
           <div class="pos-grid">
             <div><label>Entry</label><span>${fmtP(p.entryPrice)}</span></div>
             <div><label>SL</label><span class="red">${fmtP(p.sl)}</span>${p.slPct ? `<span style="font-size:10px;color:#ff6b6b;margin-left:4px">${p.slPct}%</span>` : p.entryPrice && p.sl ? `<span style="font-size:10px;color:#ff6b6b;margin-left:4px">${(Math.abs(p.entryPrice - p.sl) / p.entryPrice * 100).toFixed(2)}%</span>` : ''}</div>
-            <div><label>TP</label><span class="green">${fmtP(p.tp)}</span>${p.tpPct ? `<span style="font-size:10px;color:#00c48c;margin-left:4px">${p.tpPct}%</span>` : p.entryPrice && p.tp ? `<span style="font-size:10px;color:#00c48c;margin-left:4px">${(Math.abs(p.tp - p.entryPrice) / p.entryPrice * 100).toFixed(2)}%</span>` : ''}</div>
+            <div><label>TP</label><span class="green">${fmtP(p.tp)}</span>${p.tpPct ? `<span style="font-size:10px;color:#059669;margin-left:4px">${p.tpPct}%</span>` : p.entryPrice && p.tp ? `<span style="font-size:10px;color:#059669;margin-left:4px">${(Math.abs(p.tp - p.entryPrice) / p.entryPrice * 100).toFixed(2)}%</span>` : ''}</div>
             <div><label>Notional</label><span>$${p.totalUSD.toFixed(2)}</span></div>
-            <div><label>Ulog (margin)</label><span style="color:#f7b731;font-weight:700">$${(p.margin ?? p.totalUSD / 40).toFixed(2)}</span></div>
+            <div><label>Ulog (margin)</label><span style="color:#d97706;font-weight:700">$${(p.margin ?? p.totalUSD / 40).toFixed(2)}</span></div>
             <div><label>Qty</label><span>${p.quantity.toFixed(4)}</span></div>
             <div><label>Otvoreno</label><span>${fmtLocalTs(p.openedAt)}</span></div>
           </div>
           <div class="pos-pnl-row">
-            <div id="pnl-${def.id}-${p.symbol}" style="font-size:14px;font-weight:700;color:#9ca3af">—</div>
+            <div id="pnl-${def.id}-${p.symbol}" style="font-size:14px;font-weight:700;color:#64748b">—</div>
             <div style="flex:1;min-width:0">
               <div class="range-bar"><div id="bar-${def.id}-${p.symbol}" class="range-fill"></div></div>
               <div class="range-labels">
@@ -724,8 +724,8 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
           </div>
           <div style="margin-top:10px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
             <div style="display:flex;gap:6px;flex-wrap:wrap">
-              ${p.beMoved ? '<span style="background:rgba(16,185,129,0.12);border:1px solid #10b981;border-radius:20px;padding:2px 8px;font-size:10px;color:#10b981;font-weight:600">🔒 BE-STOP</span>' : ''}
-              ${p.trailPeak ? '<span style="background:rgba(251,191,36,0.12);border:1px solid #fbbf24;border-radius:20px;padding:2px 8px;font-size:10px;color:#fbbf24;font-weight:600">📈 TRAIL ' + fmtP(p.trailPeak) + '</span>' : ''}
+              ${p.beMoved ? '<span style="background:rgba(5,150,105,0.12);border:1px solid #059669;border-radius:20px;padding:2px 8px;font-size:10px;color:#059669;font-weight:600">🔒 BE-STOP</span>' : ''}
+              ${p.trailPeak ? '<span style="background:rgba(217,119,6,0.12);border:1px solid #d97706;border-radius:20px;padding:2px 8px;font-size:10px;color:#d97706;font-weight:600">📈 TRAIL ' + fmtP(p.trailPeak) + '</span>' : ''}
             </div>
             <button onclick="closePosition('${def.id}','${p.symbol}',this)" style="background:#ef4444;color:#fff;border:none;border-radius:6px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.02em">✕ Zatvori</button>
           </div>
@@ -741,12 +741,12 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
               const pct=(pnl/notional*100).toFixed(2);
               const el=document.getElementById("pnl-"+pid+"-"+sym);
               el.textContent=(pnl>=0?"+":"")+"$"+pnl.toFixed(4)+" ("+pct+"%)";
-              el.style.color=pnl>=0?"#00c48c":"#ff4d4d";
+              el.style.color=pnl>=0?"#059669":"#dc2626";
               const range=Math.abs(tp-sl);
               const pos2=side==="LONG"?(price-sl)/range:(sl-price)/range;
               const pct2=Math.max(0,Math.min(100,pos2*100));
               const bar=document.getElementById("bar-"+pid+"-"+sym);
-              bar.style.width=pct2+"%";bar.style.background=pnl>=0?"#00c48c":"#ff4d4d";
+              bar.style.width=pct2+"%";bar.style.background=pnl>=0?"#059669":"#dc2626";
             }
             async function poll(){try{const r=await fetch("/api/live?sym="+sym);const d=await r.json();if(d.price)update(d.price);}catch{}}
             poll(); setInterval(poll,15000);
@@ -773,7 +773,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <td style="font-weight:700">${r["Symbol"] || ""}</td>
         <td><span class="badge ${r["Side"].includes("LONG") ? "badge-long" : "badge-short"}">${r["Side"]?.replace("CLOSE_","") || ""}</span></td>
         <td>${r["Price"] || ""}</td>
-        <td style="color:${win?"#00c48c":"#ff4d4d"};font-weight:700">${win?"+":""}$${pnl.toFixed(4)}</td>
+        <td style="color:${win?"#059669":"#dc2626"};font-weight:700">${win?"+":""}$${pnl.toFixed(4)}</td>
         <td>${r["Notes"]?.replace(/"/g,"").split("|")[0].trim() || ""}</td>
       </tr>`;
     }).join("");
@@ -781,13 +781,13 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     // Per-symbol statistika
     const symRows = s.symbolStatsArr.map(sym => {
       const wr = sym.total > 0 ? (sym.wins / sym.total * 100).toFixed(0) : 0;
-      const wrCol = wr >= 50 ? "#00c48c" : "#ff4d4d";
-      const pnlCol = sym.pnl >= 0 ? "#00c48c" : "#ff4d4d";
+      const wrCol = wr >= 50 ? "#059669" : "#dc2626";
+      const pnlCol = sym.pnl >= 0 ? "#059669" : "#dc2626";
       const bar = `<div style="display:inline-block;width:${Math.round(wr)}%;max-width:100%;height:4px;background:${wrCol};border-radius:2px;vertical-align:middle"></div>`;
       return `<tr>
-        <td style="font-weight:700;color:#f9fafb">${sym.sym.replace("USDT","")}</td>
-        <td style="color:#00c48c;font-weight:700">${sym.wins}W</td>
-        <td style="color:#ff4d4d;font-weight:700">${sym.losses}L</td>
+        <td style="font-weight:700;color:#0f172a">${sym.sym.replace("USDT","")}</td>
+        <td style="color:#059669;font-weight:700">${sym.wins}W</td>
+        <td style="color:#dc2626;font-weight:700">${sym.losses}L</td>
         <td style="color:${wrCol};font-weight:700">${wr}%</td>
         <td style="width:80px">${bar}</td>
         <td style="color:${pnlCol};font-weight:600">${sym.pnl >= 0 ? "+" : ""}$${sym.pnl.toFixed(2)}</td>
@@ -815,9 +815,9 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         const suspended = allSyms.filter(s => !watchlist.includes(s) &&
           !["ORDIUSDT","WLDUSDT","TRUMPUSDT","AVAXUSDT","AAVEUSDT"].includes(s));
         if (!suspended.length) return "";
-        return `<div class="section-label" style="color:#ff4d4d;margin-top:14px">🚫 Suspendirani coinovi (5+ uzastopnih gubitaka)</div>
+        return `<div class="section-label" style="color:#dc2626;margin-top:14px">🚫 Suspendirani coinovi (5+ uzastopnih gubitaka)</div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">
-            ${suspended.map(s => `<span style="background:#2d1b1b;border:1px solid #ff4d4d33;color:#ff4d4d;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600">${s.replace("USDT","")}</span>`).join("")}
+            ${suspended.map(s => `<span style="background:#fef2f2;border:1px solid #dc262633;color:#dc2626;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600">${s.replace("USDT","")}</span>`).join("")}
           </div>`;
       })()}`;
   })();
@@ -833,25 +833,25 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
   :root {
-    --bg-primary:   #111827;
-    --bg-secondary: #1f2937;
-    --bg-tertiary:  #2d3748;
-    --bg-card:      #1f2937;
-    --border:       #374151;
-    --border-light: #4b5563;
-    --text-primary: #f9fafb;
-    --text-muted:   #9ca3af;
-    --text-dim:     #6b7280;
-    --green:        #10b981;
-    --green-dim:    rgba(16,185,129,0.12);
-    --red:          #ef4444;
-    --red-dim:      rgba(239,68,68,0.12);
-    --blue:         #60a5fa;
-    --blue-dim:     rgba(96,165,250,0.12);
-    --purple:       #a78bfa;
-    --yellow:       #fbbf24;
-    --shadow-sm:    0 1px 3px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3);
-    --shadow-md:    0 4px 6px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.3);
+    --bg-primary:   #f5f7fa;
+    --bg-secondary: #eef1f6;
+    --bg-tertiary:  #e4e8f0;
+    --bg-card:      #ffffff;
+    --border:       #e2e8f0;
+    --border-light: #cbd5e1;
+    --text-primary: #0f172a;
+    --text-muted:   #64748b;
+    --text-dim:     #94a3b8;
+    --green:        #059669;
+    --green-dim:    rgba(5,150,105,0.08);
+    --red:          #dc2626;
+    --red-dim:      rgba(220,38,38,0.08);
+    --blue:         #2563eb;
+    --blue-dim:     rgba(37,99,235,0.08);
+    --purple:       #7c3aed;
+    --yellow:       #d97706;
+    --shadow-sm:    0 1px 3px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04);
+    --shadow-md:    0 4px 12px rgba(15,23,42,0.10), 0 2px 4px rgba(15,23,42,0.06);
     --radius-sm:    8px;
     --radius-md:    12px;
     --radius-lg:    16px;
@@ -859,19 +859,19 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
   body { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:var(--bg-primary); color:var(--text-primary); min-height:100vh; line-height:1.5; }
   a { color:var(--blue); text-decoration:none; }
-  .top-bar { height:3px; background:linear-gradient(90deg,#3b82f6,#8b5cf6,#10b981); }
+  .top-bar { height:4px; background:linear-gradient(90deg,#2563eb,#7c3aed,#059669); }
   .page-wrap { max-width:1440px; margin:0 auto; padding:28px 24px 80px; }
   .header { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:32px; }
   .header-left { display:flex; align-items:center; gap:14px; }
-  .logo { font-size:24px; filter:drop-shadow(0 0 10px rgba(16,185,129,0.5)); }
-  .title { font-size:20px; font-weight:700; letter-spacing:-.02em; }
-  .subtitle { font-size:12px; color:var(--text-muted); margin-top:3px; letter-spacing:.01em; }
-  .badge { display:inline-flex; align-items:center; padding:3px 10px; border-radius:20px; font-size:12px; font-weight:600; white-space:nowrap; }
-  .green-badge { background:var(--green-dim); color:var(--green); border:1px solid rgba(16,185,129,0.3); }
-  .red-badge   { background:var(--red-dim);   color:var(--red);   border:1px solid rgba(239,68,68,0.3); }
-  .badge-paper { background:var(--blue-dim);  color:var(--blue);  border:1px solid rgba(96,165,250,0.3); font-size:11px; padding:2px 8px; }
-  .badge-long  { background:var(--green-dim); color:var(--green); border:1px solid rgba(16,185,129,0.3); font-size:11px; padding:2px 8px; }
-  .badge-short { background:var(--red-dim);   color:var(--red);   border:1px solid rgba(239,68,68,0.3); font-size:11px; padding:2px 8px; }
+  .logo { font-size:24px; }
+  .title { font-size:20px; font-weight:800; letter-spacing:-.03em; color:var(--text-primary); }
+  .subtitle { font-size:11px; color:var(--text-muted); margin-top:3px; letter-spacing:.01em; }
+  .badge { display:inline-flex; align-items:center; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:600; white-space:nowrap; }
+  .green-badge { background:var(--green-dim); color:var(--green); border:1px solid rgba(5,150,105,0.2); }
+  .red-badge   { background:var(--red-dim);   color:var(--red);   border:1px solid rgba(220,38,38,0.2); }
+  .badge-paper { background:var(--blue-dim);  color:var(--blue);  border:1px solid rgba(37,99,235,0.2); font-size:11px; padding:2px 8px; }
+  .badge-long  { background:var(--green-dim); color:var(--green); border:1px solid rgba(5,150,105,0.2); font-size:11px; padding:2px 8px; }
+  .badge-short { background:var(--red-dim);   color:var(--red);   border:1px solid rgba(220,38,38,0.2); font-size:11px; padding:2px 8px; }
   .muted { color:var(--text-muted); }
   .red   { color:var(--red); }
   .green { color:var(--green); }
@@ -890,7 +890,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   .chart-wrap { position:relative; height:220px; }
 
   /* Positions */
-  .section-label { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.08em; margin:32px 0 14px; padding-bottom:10px; border-bottom:1px solid var(--border); color:var(--text-muted); }
+  .section-label { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.09em; margin:32px 0 14px; padding-bottom:10px; border-bottom:2px solid var(--border); color:var(--text-muted); }
   .pos-grid-wrap { display:grid; grid-template-columns:repeat(auto-fill,minmax(370px,1fr)); gap:16px; margin-bottom:8px; }
   .pos-card { background:var(--bg-card); border-radius:var(--radius-md); padding:18px; border:1px solid var(--border); box-shadow:var(--shadow-sm); transition:box-shadow .2s; }
   .pos-card:hover { box-shadow:var(--shadow-md); }
@@ -909,26 +909,26 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   /* Trades table */
   .table-wrap { overflow-x:auto; margin-bottom:8px; }
   .trade-table { width:100%; border-collapse:collapse; font-size:13px; }
-  .trade-table th { padding:10px 14px; text-align:left; color:var(--text-muted); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.05em; border-bottom:2px solid var(--border); }
+  .trade-table th { padding:10px 14px; text-align:left; color:var(--text-muted); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.05em; border-bottom:2px solid var(--border); background:var(--bg-secondary); }
   .trade-table td { padding:10px 14px; border-bottom:1px solid var(--border); }
-  .win-row td  { background:rgba(16,185,129,0.04); }
-  .loss-row td { background:rgba(239,68,68,0.04); }
-  .trade-table tbody tr:hover td { background:var(--bg-tertiary); }
+  .win-row td  { background:rgba(5,150,105,0.04); }
+  .loss-row td { background:rgba(220,38,38,0.04); }
+  .trade-table tbody tr:hover td { background:var(--bg-secondary); }
 
   /* Scanner */
   .scan-card { background:var(--bg-card); border-radius:var(--radius-md); padding:22px; border:1px solid var(--border); box-shadow:var(--shadow-sm); margin-bottom:28px; }
   .scan-header { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:16px; }
-  .scan-btn { background:var(--bg-tertiary); color:var(--text-primary); border:1px solid var(--border); border-radius:var(--radius-sm); padding:7px 16px; font-size:13px; font-weight:600; cursor:pointer; transition:all .15s; font-family:inherit; }
+  .scan-btn { background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border); border-radius:var(--radius-sm); padding:7px 16px; font-size:13px; font-weight:600; cursor:pointer; transition:all .15s; font-family:inherit; }
   .scan-btn:hover { border-color:var(--blue); color:var(--blue); background:var(--blue-dim); }
   .scan-btn:disabled { opacity:.4; cursor:default; }
   .sig-long  { color:var(--green); font-weight:700; }
   .sig-short { color:var(--red);   font-weight:700; }
   .sig-none  { color:var(--text-muted); }
   .scan-table { width:100%; border-collapse:collapse; font-size:13px; }
-  .scan-table th { padding:9px 12px; text-align:left; color:var(--text-muted); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.05em; border-bottom:2px solid var(--border); white-space:nowrap; }
+  .scan-table th { padding:9px 12px; text-align:left; color:var(--text-muted); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.05em; border-bottom:2px solid var(--border); white-space:nowrap; background:var(--bg-secondary); }
   .scan-table td { padding:8px 12px; border-bottom:1px solid var(--border); font-size:13px; }
-  .scan-table tbody tr:hover td { background:var(--bg-tertiary); }
-  .scan-table .any-signal td { background:rgba(96,165,250,0.05); }
+  .scan-table tbody tr:hover td { background:var(--bg-secondary); }
+  .scan-table .any-signal td { background:rgba(37,99,235,0.04); }
   .spin { display:inline-block; animation:spin 1s linear infinite; }
   @keyframes spin { to { transform:rotate(360deg); } }
 
@@ -957,19 +957,19 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
 
   <!-- Stats bar -->
   <div class="stats-bar">
-    <div class="stat-card" style="border-top:3px solid #e85d9a">
-      <div class="stat-label">Equity <span style="font-size:10px;color:#9ca3af">(CSV)</span></div>
+    <div class="stat-card" style="border-top:3px solid #db2777">
+      <div class="stat-label">Equity <span style="font-size:10px;color:#64748b">(CSV)</span></div>
       <div class="stat-value" style="color:${eqCol}">$${s.equity.toFixed(2)}</div>
       <div class="stat-sub" style="color:${eqCol}">${pctStr}</div>
     </div>
-    <div class="stat-card" style="border-top:3px solid #f7b731">
-      <div class="stat-label">Bitget balans <span style="font-size:10px;color:#9ca3af">(live)</span></div>
-      <div class="stat-value" id="bitget-bal" style="color:#f7b731">…</div>
-      <div class="stat-sub" id="bitget-unr" style="color:#9ca3af"></div>
+    <div class="stat-card" style="border-top:3px solid #d97706">
+      <div class="stat-label">Bitget balans <span style="font-size:10px;color:#64748b">(live)</span></div>
+      <div class="stat-value" id="bitget-bal" style="color:#d97706">…</div>
+      <div class="stat-sub" id="bitget-unr" style="color:#64748b"></div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Start kapital</div>
-      <div class="stat-value" style="color:#9ca3af">$${def.startCapital.toFixed(2)}</div>
+      <div class="stat-value" style="color:#64748b">$${def.startCapital.toFixed(2)}</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Net P&amp;L</div>
@@ -977,7 +977,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     </div>
     <div class="stat-card">
       <div class="stat-label">Win Rate</div>
-      <div class="stat-value" style="color:${s.winRate !== null && parseFloat(s.winRate) >= 50 ? "#00c48c" : "#ff4d4d"}">${s.winRate !== null ? s.winRate + "%" : "—"}</div>
+      <div class="stat-value" style="color:${s.winRate !== null && parseFloat(s.winRate) >= 50 ? "#059669" : "#dc2626"}">${s.winRate !== null ? s.winRate + "%" : "—"}</div>
       <div class="stat-sub">${s.wins.length}W / ${s.losses.length}L</div>
     </div>
     <div class="stat-card">
@@ -986,12 +986,12 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     </div>
     <div class="stat-card">
       <div class="stat-label">Otvoreno</div>
-      <div class="stat-value" style="color:#f7b731">${positions.length}</div>
+      <div class="stat-value" style="color:#d97706">${positions.length}</div>
       <div class="stat-sub">pozicija</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Strategija</div>
-      <div class="stat-value" style="font-size:14px;color:#e85d9a">ULTRA · 50/75x</div>
+      <div class="stat-value" style="font-size:14px;color:#db2777">ULTRA · 50/75x</div>
       <div class="stat-sub">SL 1.5–2.5% / TP 2.5–3.5% · per-simbol · rizik 1%</div>
     </div>
   </div>
@@ -1029,59 +1029,59 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         }
       } catch {}
     }
-    const adxCol  = dynAdxVal === 30 ? "#00c48c" : dynAdxVal === 35 ? "#f7b731" : "#ff4d4d";
+    const adxCol  = dynAdxVal === 30 ? "#059669" : dynAdxVal === 35 ? "#d97706" : "#dc2626";
     const adxLbl  = dynAdxVal === 30 ? "normalno" : dynAdxVal === 35 ? "WR loš" : "WR kritičan";
-    const wrCol   = recentWr === null ? "#8b949e" : recentWr >= 40 ? "#00c48c" : recentWr >= 30 ? "#f7b731" : "#ff4d4d";
+    const wrCol   = recentWr === null ? "#94a3b8" : recentWr >= 40 ? "#059669" : recentWr >= 30 ? "#d97706" : "#dc2626";
 
     return `
-  <div style="background:#1f2937;border:1px solid #374151;border-radius:12px;padding:16px 20px;margin-bottom:20px">
-    <div style="font-size:11px;color:#9ca3af;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">⚙️ Adaptivni Status</div>
+  <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:16px 20px;margin-bottom:20px">
+    <div style="font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">⚙️ Adaptivni Status</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
 
       <!-- Dinamički ADX -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">📊 Dinamički ADX</div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">📊 Dinamički ADX</div>
         <div style="font-size:22px;font-weight:800;color:${adxCol}">${dynAdxVal}</div>
         <div style="font-size:11px;color:${adxCol};margin-top:2px">${adxLbl}</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px">
+        <div style="font-size:11px;color:#64748b;margin-top:4px">
           ${recentWr !== null ? `Zadnjih ${recentN}: WR <b style="color:${wrCol}">${recentWr}%</b>` : "Premalo podataka"}
         </div>
       </div>
 
       <!-- Market Regime -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px" id="regime-card">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">🌍 BTC 4H Regime</div>
-        <div style="font-size:22px;font-weight:800;color:#9ca3af" id="regime-val">…</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:2px" id="regime-sub">učitavam…</div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px" id="regime-card">
+        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">🌍 BTC 4H Regime</div>
+        <div style="font-size:22px;font-weight:800;color:#64748b" id="regime-val">…</div>
+        <div style="font-size:11px;color:#64748b;margin-top:2px" id="regime-sub">učitavam…</div>
       </div>
 
       <!-- Blacklist -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">🚫 Symbol Blacklist</div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">🚫 Symbol Blacklist</div>
         ${blActive.length === 0
-          ? `<div style="font-size:13px;color:#00c48c">Svi simboli aktivni</div>`
+          ? `<div style="font-size:13px;color:#059669">Svi simboli aktivni</div>`
           : blActive.map(([sym,v]) => {
               const remainH = ((v.until - Date.now())/3600000).toFixed(1);
-              return `<div style="font-size:12px;color:#ff4d4d;margin-bottom:3px">
+              return `<div style="font-size:12px;color:#dc2626;margin-bottom:3px">
                 <b>${sym}</b> — još ${remainH}h
-                <span style="color:#9ca3af;font-size:10px">(${v.reason})</span>
+                <span style="color:#64748b;font-size:10px">(${v.reason})</span>
               </div>`;
             }).join("")
         }
-        <div style="font-size:10px;color:#9ca3af;margin-top:6px">Trigger: 3 uzastopna SL → 24h ban</div>
+        <div style="font-size:10px;color:#64748b;margin-top:6px">Trigger: 3 uzastopna SL → 24h ban</div>
       </div>
 
       <!-- Signal Analiza -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">📈 Signal WR (top 6)</div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">📈 Signal WR (top 6)</div>
         ${ssRows.length === 0
-          ? `<div style="font-size:12px;color:#9ca3af">Nema dovoljno podataka (treba 3+ trejdova)</div>`
+          ? `<div style="font-size:12px;color:#64748b">Nema dovoljno podataka (treba 3+ trejdova)</div>`
           : ssRows.slice(0,6).map(r => {
-              const col = r.wr >= 40 ? "#00c48c" : r.wr >= 30 ? "#f7b731" : "#ff4d4d";
+              const col = r.wr >= 40 ? "#059669" : r.wr >= 30 ? "#d97706" : "#dc2626";
               const bar = Math.round(r.wr/10);
               return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;font-size:11px">
-                <span style="color:#9ca3af;width:38px;font-family:monospace">${r.name}</span>
-                <div style="flex:1;background:#374151;border-radius:2px;height:6px">
+                <span style="color:#64748b;width:38px;font-family:monospace">${r.name}</span>
+                <div style="flex:1;background:#e2e8f0;border-radius:2px;height:6px">
                   <div style="width:${r.wr}%;background:${col};height:6px;border-radius:2px"></div>
                 </div>
                 <span style="color:${col};width:30px;text-align:right">${r.wr}%</span>
@@ -1096,119 +1096,119 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   })()}
 
   <!-- Market Intelligence Panel -->
-  <div style="background:#1f2937;border:1px solid #374151;border-radius:12px;padding:16px 20px;margin-bottom:20px" id="market-intel-panel">
-    <div style="font-size:11px;color:#9ca3af;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">🧠 Market Intelligence</div>
+  <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:16px 20px;margin-bottom:20px" id="market-intel-panel">
+    <div style="font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">🧠 Market Intelligence</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px" id="intel-grid">
       <!-- Circuit Breaker -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">🛑 Circuit Breaker</div>
-        <div style="font-size:18px;font-weight:800;color:#f7b731" id="cb-count">…/7</div>
-        <div style="background:#374151;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase">🛑 Circuit Breaker</div>
+        <div style="font-size:18px;font-weight:800;color:#d97706" id="cb-count">…/7</div>
+        <div style="background:#e2e8f0;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
           <div id="cb-bar" style="height:100%;border-radius:4px;background:#00c48c;transition:width .5s,background .5s;width:0%"></div>
         </div>
-        <div style="font-size:11px;color:#9ca3af" id="cb-sub">učitavam…</div>
+        <div style="font-size:11px;color:#64748b" id="cb-sub">učitavam…</div>
       </div>
 
       <!-- Daily P&L Budget -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">💰 Dnevni P&L Budget</div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase">💰 Dnevni P&L Budget</div>
         <div style="font-size:18px;font-weight:800" id="daily-pnl-val">…</div>
-        <div style="background:#374151;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
+        <div style="background:#e2e8f0;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
           <div id="daily-pnl-bar" style="height:100%;border-radius:4px;background:#00c48c;transition:width .5s,background .5s;width:0%"></div>
         </div>
-        <div style="font-size:11px;color:#9ca3af" id="daily-pnl-sub">Max: $20 dnevni gubitak</div>
+        <div style="font-size:11px;color:#64748b" id="daily-pnl-sub">Max: $20 dnevni gubitak</div>
       </div>
 
       <!-- Funding Rate -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">💸 Funding Rate</div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase">💸 Funding Rate</div>
         <div style="font-size:14px;font-weight:700" id="fr-val">…</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="fr-sub">&gt;0.05% = LONG blokiran</div>
+        <div style="font-size:11px;color:#64748b;margin-top:4px" id="fr-sub">&gt;0.05% = LONG blokiran</div>
       </div>
 
       <!-- Fear & Greed -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">😱 Fear & Greed</div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase">😱 Fear & Greed</div>
         <div style="font-size:22px;font-weight:800" id="fg-val">…</div>
         <div style="font-size:11px;margin-top:2px" id="fg-label">…</div>
-        <div style="font-size:10px;color:#9ca3af;margin-top:4px">&lt;20=Extreme Fear, &gt;80=Greed</div>
+        <div style="font-size:10px;color:#64748b;margin-top:4px">&lt;20=Extreme Fear, &gt;80=Greed</div>
       </div>
 
       <!-- BTC Dominance -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">₿ BTC Dominance</div>
-        <div style="font-size:22px;font-weight:800;color:#f7b731" id="dom-val">…</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:2px" id="dom-sub">Raste = altovi slabe</div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase">₿ BTC Dominance</div>
+        <div style="font-size:22px;font-weight:800;color:#d97706" id="dom-val">…</div>
+        <div style="font-size:11px;color:#64748b;margin-top:2px" id="dom-sub">Raste = altovi slabe</div>
       </div>
 
       <!-- DXY -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">💵 DXY (4H promjena)</div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase">💵 DXY (4H promjena)</div>
         <div style="font-size:22px;font-weight:800" id="dxy-val">…</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:2px" id="dxy-sub">&gt;+0.3% = LONG risk</div>
+        <div style="font-size:11px;color:#64748b;margin-top:2px" id="dxy-sub">&gt;+0.3% = LONG risk</div>
       </div>
 
       <!-- Session Filter -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">🕐 Trading Sesija</div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase">🕐 Trading Sesija</div>
         <div style="font-size:16px;font-weight:800" id="session-val">…</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="session-sub">01-06 UTC = dead zone blokiran</div>
+        <div style="font-size:11px;color:#64748b;margin-top:4px" id="session-sub">01-06 UTC = dead zone blokiran</div>
       </div>
 
       <!-- ATR Trend -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">📊 ATR Volatilnost (BTC 15m)</div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase">📊 ATR Volatilnost (BTC 15m)</div>
         <div style="font-size:16px;font-weight:800" id="atr-trend-val">…</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="atr-trend-sub">EXPANDING = size ×0.7</div>
+        <div style="font-size:11px;color:#64748b;margin-top:4px" id="atr-trend-sub">EXPANDING = size ×0.7</div>
       </div>
 
       <!-- SP500 -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">📉 S&P500 (4H)</div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase">📉 S&P500 (4H)</div>
         <div style="font-size:18px;font-weight:800" id="sp500-val">…</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="sp500-sub">&lt;-1% = RISK OFF → blokira LONG</div>
+        <div style="font-size:11px;color:#64748b;margin-top:4px" id="sp500-sub">&lt;-1% = RISK OFF → blokira LONG</div>
       </div>
 
       <!-- Korelacijska matrica -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px;grid-column:span 2">
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;grid-column:span 2">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-          <div style="font-size:10px;color:#9ca3af;text-transform:uppercase">🔗 Korelacijska matrica (1H)</div>
-          <button onclick="document.getElementById('corr-heatmap').style.display=document.getElementById('corr-heatmap').style.display==='none'?'block':'none'" style="background:none;border:1px solid #4b5563;color:#9ca3af;border-radius:4px;padding:2px 8px;font-size:10px;cursor:pointer">toggle</button>
+          <div style="font-size:10px;color:#64748b;text-transform:uppercase">🔗 Korelacijska matrica (1H)</div>
+          <button onclick="document.getElementById('corr-heatmap').style.display=document.getElementById('corr-heatmap').style.display==='none'?'block':'none'" style="background:none;border:1px solid #cbd5e1;color:#64748b;border-radius:4px;padding:2px 8px;font-size:10px;cursor:pointer">toggle</button>
         </div>
         <div style="font-size:18px;font-weight:800" id="corr-val">…</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="corr-sub">&gt;0.85 = visok zajednički rizik</div>
+        <div style="font-size:11px;color:#64748b;margin-top:4px" id="corr-sub">&gt;0.85 = visok zajednički rizik</div>
         <div id="corr-heatmap" style="display:none;margin-top:10px;overflow-x:auto"></div>
       </div>
 
       <!-- Deribit Put/Call -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">🎯 Put/Call Ratio (Deribit)</div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase">🎯 Put/Call Ratio (Deribit)</div>
         <div style="font-size:16px;font-weight:800" id="pc-val">…</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="pc-sub">&gt;1.5=Fear · &lt;0.5=Greed</div>
+        <div style="font-size:11px;color:#64748b;margin-top:4px" id="pc-sub">&gt;1.5=Fear · &lt;0.5=Greed</div>
       </div>
 
       <!-- Liquidation Risk -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">💥 Liquidation Risk</div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase">💥 Liquidation Risk</div>
         <div style="font-size:16px;font-weight:800" id="liq-val">…</div>
-        <div style="background:#374151;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
+        <div style="background:#e2e8f0;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
           <div id="liq-bar" style="height:100%;border-radius:4px;background:#00c48c;transition:width .5s,background .5s;width:0%"></div>
         </div>
-        <div style="font-size:11px;color:#9ca3af" id="liq-sub">Funding + OI analiza</div>
+        <div style="font-size:11px;color:#64748b" id="liq-sub">Funding + OI analiza</div>
       </div>
 
       <!-- Ekonomski kalendar -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px;grid-column:span 2">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">📅 Ekonomski kalendar (HIGH impact USD)</div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;grid-column:span 2">
+        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase">📅 Ekonomski kalendar (HIGH impact USD)</div>
         <div style="font-size:16px;font-weight:800" id="econ-val">…</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="econ-sub">FOMC · CPI · NFP · ±15min blokada</div>
+        <div style="font-size:11px;color:#64748b;margin-top:4px" id="econ-sub">FOMC · CPI · NFP · ±15min blokada</div>
         <div id="econ-list" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px"></div>
       </div>
     </div>
 
     <!-- Per-Symbol WR Table -->
     <div style="margin-top:16px">
-      <div style="font-size:11px;color:#9ca3af;font-weight:700;text-transform:uppercase;margin-bottom:8px">📊 Per-Simbol Win Rate</div>
+      <div style="font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px">📊 Per-Simbol Win Rate</div>
       <div id="sym-wr-table" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px"></div>
     </div>
   </div>
@@ -1224,14 +1224,14 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     return `
   <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
     ${periods.map(p => {
-      const col = p.pnl > 0 ? "#00c48c" : p.pnl < 0 ? "#ff4d4d" : "#8b949e";
+      const col = p.pnl > 0 ? "#059669" : p.pnl < 0 ? "#dc2626" : "#94a3b8";
       const icon = p.pnl > 0 ? "▲" : p.pnl < 0 ? "▼" : "—";
       const pct = def.startCapital > 0 ? (p.pnl / def.startCapital * 100).toFixed(2) : "0.00";
-      return `<div style="background:#2d3748;border:1px solid #374151;border-radius:10px;padding:14px 18px">
-        <div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">${p.label}</div>
+      return `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 18px">
+        <div style="font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">${p.label}</div>
         <div style="font-size:22px;font-weight:800;color:${col}">${p.pnl >= 0 ? "+" : ""}$${p.pnl.toFixed(2)}</div>
         <div style="font-size:12px;color:${col};margin-top:2px">${icon} ${p.pnl >= 0 ? "+" : ""}${pct}%</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px">${p.trades} zatvorenih</div>
+        <div style="font-size:11px;color:#64748b;margin-top:4px">${p.trades} zatvorenih</div>
       </div>`;
     }).join("")}
   </div>`;
@@ -1251,14 +1251,14 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div style="font-size:12px;color:var(--text-muted)">
           E50 · RSI · E55 · CHP · CVD · R⟳ · MCD · E145 · VOL · MCC · RSI↗ · SRS · SRB
           &nbsp;|&nbsp; 🟡 Čeka breakout &nbsp; 🟢 Signal &nbsp; Cache 90s &nbsp;|&nbsp;
-          <button onclick="toggleLegend()" style="background:none;border:1px solid #30363d;border-radius:4px;color:#9ca3af;font-size:11px;cursor:pointer;padding:2px 8px">📖 Legenda signala</button>
+          <button onclick="toggleLegend()" style="background:none;border:1px solid #30363d;border-radius:4px;color:#64748b;font-size:11px;cursor:pointer;padding:2px 8px">📖 Legenda signala</button>
         </div>
       </div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <span id="scan-ts" style="font-size:12px;color:var(--text-muted)">—</span>
         <button class="scan-btn" id="scan-btn" onclick="doScan()">🔄 Skeniraj</button>
         <button class="scan-btn" style="border-color:#f85149;color:#f85149" onclick="resetAll()">🗑️ Reset SVE</button>
-        <button class="scan-btn" style="border-color:#e85d9a;color:#e85d9a" onclick="resetOne('synapse_t')">🎯 Reset ULTRA</button>
+        <button class="scan-btn" style="border-color:#db2777;color:#db2777" onclick="resetOne('synapse_t')">🎯 Reset ULTRA</button>
       </div>
     </div>
     <div class="table-wrap">
@@ -1268,12 +1268,12 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <th style="width:28px">#</th>
             <th>Symbol</th>
             <th>Cijena</th>
-            <th style="color:#9ca3af">RSI</th>
-            <th style="color:#9ca3af">ADX</th>
-            <th style="color:#fbbf24;text-align:center">1H</th>
-            <th style="color:#f7b731;text-align:center;white-space:nowrap">Obavezni <span style="font-weight:400;font-size:10px;color:#666">ADX≥30 · 6Sc · RSI</span> <span style="font-weight:400;font-size:10px;color:#555">· 5mSR(info)</span></th>
-            <th style="color:#e85d9a;text-align:center">13 Signala &nbsp;<span style="font-weight:400;font-size:10px;color:#666">E50 · RSI · E55 · CHP · CVD · R⟳ · MCD · E145 · VOL · MCC · RSI↗ · SRS · SRB</span></th>
-            <th style="color:#e85d9a;text-align:center">Score</th>
+            <th style="color:#64748b">RSI</th>
+            <th style="color:#64748b">ADX</th>
+            <th style="color:#d97706;text-align:center">1H</th>
+            <th style="color:#d97706;text-align:center;white-space:nowrap">Obavezni <span style="font-weight:400;font-size:10px;color:#94a3b8">ADX≥30 · 6Sc · RSI</span> <span style="font-weight:400;font-size:10px;color:#94a3b8">· 5mSR(info)</span></th>
+            <th style="color:#db2777;text-align:center">13 Signala &nbsp;<span style="font-weight:400;font-size:10px;color:#94a3b8">E50 · RSI · E55 · CHP · CVD · R⟳ · MCD · E145 · VOL · MCC · RSI↗ · SRS · SRB</span></th>
+            <th style="color:#db2777;text-align:center">Score</th>
             <th style="min-width:260px">Status / Breakout</th>
           </tr>
         </thead>
@@ -1309,14 +1309,14 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
           ['SRS', '▲ Bounce od S/R supporta (unutar 1.2%) + RSI raste  |  ▼ bounce od resistancea + RSI pada  |  · daleko od S/R'],
           ['SRB', '▲ Proboj S/R resistancea gore (zadnja 3 bara)  |  ▼ proboj supporta dolje  |  · bez proboja'],
         ].map(([k,v]) =>
-          '<div style="background:#2d3748;border:1px solid #374151;border-radius:6px;padding:8px 10px">' +
-          '<span style="font-weight:800;color:#e85d9a;font-size:11px;display:inline-block;min-width:36px">' + k + '</span>' +
-          '<span style="color:#9ca3af">' + v + '</span></div>'
+          '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px">' +
+          '<span style="font-weight:800;color:#db2777;font-size:11px;display:inline-block;min-width:36px">' + k + '</span>' +
+          '<span style="color:#64748b">' + v + '</span></div>'
         ).join('')}
       </div>
-      <div style="margin-top:10px;font-size:11px;color:#555">
+      <div style="margin-top:10px;font-size:11px;color:#94a3b8">
         🟢 Zeleno = bullish signal aktiviran &nbsp;|&nbsp; 🔴 Crveno = bearish &nbsp;|&nbsp; ⬛ Sivo = neutral/nema signala &nbsp;|&nbsp;
-        Min <b style="color:#e85d9a">5/13</b> neovisnih signala + 4 obavezna gating (ADX≥25·6Sc·RSI·5mSR) · SL <b style="color:#f7b731">1.5–2.5%</b> / TP <b style="color:#f7b731">2.5–3.5%</b> po simbolu · <b>50x</b> leverage · rizik <b>1%</b> banke po tradeu
+        Min <b style="color:#db2777">5/13</b> neovisnih signala + 4 obavezna gating (ADX≥25·6Sc·RSI·5mSR) · SL <b style="color:#d97706">1.5–2.5%</b> / TP <b style="color:#d97706">2.5–3.5%</b> po simbolu · <b>50x</b> leverage · rizik <b>1%</b> banke po tradeu
       </div>
     </div>
   </div>
@@ -1347,11 +1347,11 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       datasets: [{
         label: "Equity ($)",
         data,
-        borderColor: "#e85d9a",
+        borderColor: "#db2777",
         backgroundColor: "rgba(232,93,154,0.08)",
         borderWidth: 2,
         pointRadius: data.length > 50 ? 0 : 3,
-        pointBackgroundColor: "#e85d9a",
+        pointBackgroundColor: "#db2777",
         tension: 0.3,
         fill: true,
       }]
@@ -1365,9 +1365,9 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         }
       },
       scales: {
-        x: { ticks: { color: "#8b949e", maxTicksLimit: 8 }, grid: { display: false } },
+        x: { ticks: { color: "#94a3b8", maxTicksLimit: 8 }, grid: { display: false } },
         y: {
-          ticks: { color: "#8b949e", callback: v => "$" + v.toFixed(0) },
+          ticks: { color: "#94a3b8", callback: v => "$" + v.toFixed(0) },
           grid: { color: "#21262d" },
           border: { dash: [4,4] }
         }
@@ -1387,8 +1387,8 @@ function toggleLegend() {
 function sigHtml(s) {
   if (s === "LONG")    return '<span class="sig-long" title="Cross u zadnjih 5 barova + svi filteri OK">▲ LONG</span>';
   if (s === "SHORT")   return '<span class="sig-short" title="Cross u zadnjih 5 barova + svi filteri OK">▼ SHORT</span>';
-  if (s === "SETUP↑")  return '<span style="color:#f0a500;font-weight:600" title="Svi filteri OK, čeka cross">◈ SETUP ↑</span>';
-  if (s === "SETUP↓")  return '<span style="color:#f0a500;font-weight:600" title="Svi filteri OK, čeka cross">◈ SETUP ↓</span>';
+  if (s === "SETUP↑")  return '<span style="color:#d97706;font-weight:600" title="Svi filteri OK, čeka cross">◈ SETUP ↑</span>';
+  if (s === "SETUP↓")  return '<span style="color:#d97706;font-weight:600" title="Svi filteri OK, čeka cross">◈ SETUP ↓</span>';
   return '<span class="sig-none">—</span>';
 }
 
@@ -1404,20 +1404,20 @@ function synapse7Html(s) {
   const tooltipText = names5.map((l,i) => l+':'+(vals5[i]===1?'↑':vals5[i]===-1?'↓':'·')).join(' | ');
 
   const dots5 = vals5.map((v,i) => {
-    const col = v===1?'#00c48c':v===-1?'#ff4d4d':'#444';
+    const col = v===1?'#059669':v===-1?'#dc2626':'#94a3b8';
     return '<span title="'+names5[i]+'" style="color:'+col+';font-size:10px">'+(v===1?'▲':v===-1?'▼':'·')+'</span>';
   }).join('');
 
   const scoreStr = bull > bear
-    ? '<span style="color:#00c48c;font-weight:700">↑'+bull+'/5</span>'
+    ? '<span style="color:#059669;font-weight:700">↑'+bull+'/5</span>'
     : bear > bull
-    ? '<span style="color:#ff4d4d;font-weight:700">↓'+bear+'/5</span>'
-    : '<span style="color:#9ca3af">'+Math.max(bull,bear)+'/5</span>';
+    ? '<span style="color:#dc2626;font-weight:700">↓'+bear+'/5</span>'
+    : '<span style="color:#64748b">'+Math.max(bull,bear)+'/5</span>';
 
   const sigPart = sig==="LONG"   ? ' <span class="sig-long">▲</span>'
                 : sig==="SHORT"  ? ' <span class="sig-short">▼</span>'
-                : sig==="SETUP↑" ? ' <span style="color:#f0a500">◈↑</span>'
-                : sig==="SETUP↓" ? ' <span style="color:#f0a500">◈↓</span>' : '';
+                : sig==="SETUP↑" ? ' <span style="color:#d97706">◈↑</span>'
+                : sig==="SETUP↓" ? ' <span style="color:#d97706">◈↓</span>' : '';
 
   return '<span title="'+tooltipText+'" style="font-size:12px">'+scoreStr+sigPart+'<br>'+dots5+'</span>';
 }
@@ -1429,27 +1429,27 @@ function ultraHtml(s) {
   const sig16  = s.ultraSigs16 || new Array(13).fill(0);
   const sig    = s.ultraSig || "—";
 
-  if (!s.ultraSigs16) return '<span style="color:#555;font-size:11px">—</span>';
+  if (!s.ultraSigs16) return '<span style="color:#94a3b8;font-size:11px">—</span>';
 
   // 13 genuinnih signala — CRS, ADXsn, 6Sc maknuti (obavezni gates ili WR 14%)
   const names16 = ['E50','RSI zona','E55','Chop','CVD','RSI⟳','MACD hist','E145','Vol','MACD cross','RSI smjer','SRS','SRB'];
   const tooltipText = names16.map((l,i)=>l+':'+(sig16[i]===1?'↑':sig16[i]===-1?'↓':'·')).join(' | ');
 
   const dots = sig16.slice(0, 13).map((v, i) => {
-    const col = v===1?'#00c48c':v===-1?'#ff4d4d':'#444';
+    const col = v===1?'#059669':v===-1?'#dc2626':'#94a3b8';
     return '<span title="'+names16[i]+'" style="color:'+col+';font-size:9px">'+(v===1?'▲':v===-1?'▼':'·')+'</span>';
   }).join('');
 
   const scoreStr = bull > bear
-    ? '<span style="color:#00c48c;font-weight:700">↑'+bull+'/13</span>'
+    ? '<span style="color:#059669;font-weight:700">↑'+bull+'/13</span>'
     : bear > bull
-    ? '<span style="color:#ff4d4d;font-weight:700">↓'+bear+'/13</span>'
-    : '<span style="color:#9ca3af">'+Math.max(bull,bear)+'/13</span>';
+    ? '<span style="color:#dc2626;font-weight:700">↓'+bear+'/13</span>'
+    : '<span style="color:#64748b">'+Math.max(bull,bear)+'/13</span>';
 
   const sigPart = sig==="LONG"   ? ' <span class="sig-long">▲ LONG</span>'
                 : sig==="SHORT"  ? ' <span class="sig-short">▼ SHORT</span>'
-                : sig==="SETUP↑" ? ' <span style="color:#f0a500;font-weight:600">◈↑</span>'
-                : sig==="SETUP↓" ? ' <span style="color:#f0a500;font-weight:600">◈↓</span>' : '';
+                : sig==="SETUP↑" ? ' <span style="color:#d97706;font-weight:600">◈↑</span>'
+                : sig==="SETUP↓" ? ' <span style="color:#d97706;font-weight:600">◈↓</span>' : '';
 
   return '<span title="'+tooltipText+'" style="font-size:12px">'+scoreStr+sigPart+'<br><span style="letter-spacing:1px">'+dots+'</span></span>';
 }
@@ -1475,13 +1475,13 @@ async function closePosition(pid, symbol, btn) {
   if (btn.dataset.confirm !== "1") {
     btn.dataset.confirm = "1";
     btn.textContent = "⚠️ POTVRDI?";
-    btn.style.background = "#f7b731";
+    btn.style.background = "#d97706";
     btn.style.color = "#000";
     setTimeout(function() {
       if (btn.dataset.confirm === "1") {
         btn.dataset.confirm = "";
         btn.textContent = "✕ Zatvori";
-        btn.style.background = "#ff4d4d";
+        btn.style.background = "#dc2626";
         btn.style.color = "#fff";
       }
     }, 4000);
@@ -1499,11 +1499,11 @@ async function closePosition(pid, symbol, btn) {
     const d = await r.json();
     if (d.ok) {
       btn.textContent = "✅ Zatvoreno";
-      btn.style.background = "#00c48c";
+      btn.style.background = "#059669";
       setTimeout(function() { location.reload(); }, 1500);
     } else {
       btn.textContent = "❌ " + d.error;
-      btn.style.background = "#ff4d4d";
+      btn.style.background = "#dc2626";
       btn.style.color = "#fff";
       btn.disabled = false;
     }
@@ -1582,7 +1582,7 @@ function mandatoryBoxes(s) {
 
   // 1. ADX ≥ 30 dynamic — jak trend (obavezan). Dashboard prikazuje ≥30 (bot koristi 30/35/40 ovisno o WR)
   const adxOk  = adxNum >= 30;
-  const adxCol = adxOk ? '#00c48c' : '#ff4d4d';
+  const adxCol = adxOk ? '#059669' : '#dc2626';
   const adxBg  = adxOk ? '#0d3d26' : '#3d0d0d';
   const adxTip = 'ADX ' + adxNum.toFixed(1) + (adxOk ? ' ≥ 30 ✓ — jak trend' : ' < 30 ✗ — slab trend, nema ulaza');
 
@@ -1592,7 +1592,7 @@ function mandatoryBoxes(s) {
   const scDn = s.scaleDn ?? 0;
   const scaleOkLong  = scUp >= 4;
   const scaleOkShort = scDn >= 4;
-  const scaleCol = scaleOkLong ? '#00c48c' : scaleOkShort ? '#00c48c' : '#ff4d4d';
+  const scaleCol = scaleOkLong ? '#059669' : scaleOkShort ? '#059669' : '#dc2626';
   const scaleBg  = scaleOkLong ? '#0d3d26' : scaleOkShort ? '#0d3d26' : '#3d0d0d';
   const scaleDir = scaleOkLong ? scUp + '/6↑' : scaleOkShort ? scDn + '/6↓' : scUp + '/6';
   const scaleTip = '6-Scale: ' + scUp + '↑ / ' + scDn + '↓ od 6 EMA parova (treba ≥4)' +
@@ -1602,7 +1602,7 @@ function mandatoryBoxes(s) {
   const rsiLongOk  = rsiNum < 72;
   const rsiShortOk = rsiNum > 30;
   const rsiOk  = sig === "SHORT" || sig === "SETUP↓" ? rsiShortOk : rsiLongOk;
-  const rsiCol = rsiOk ? '#00c48c' : '#ff4d4d';
+  const rsiCol = rsiOk ? '#059669' : '#dc2626';
   const rsiBg  = rsiOk ? '#0d3d26' : '#3d0d0d';
   const rsiTip = 'RSI ' + rsiNum.toFixed(1) + (sig === "SHORT" || sig === "SETUP↓"
     ? (rsiShortOk ? ' > 30 ✓ (nije oversold)' : ' ≤ 30 ✗ — oversold, blokiran SHORT')
@@ -1610,7 +1610,7 @@ function mandatoryBoxes(s) {
 
   // 4. 5m S/R test — informativan, NE blokira ulaz
   const srOk  = s.srOk;
-  const srCol = srOk === true ? '#00c48c' : srOk === false ? '#f7b731' : '#8b949e';
+  const srCol = srOk === true ? '#059669' : srOk === false ? '#d97706' : '#94a3b8';
   const srBg  = srOk === true ? '#0d3d26' : srOk === false ? '#3d2a00' : '#1c2128';
   const srTip = srOk === true  ? '5m S/R test ✓ — cijena testirala S/R zonu (informativno, ne blokira)' :
                 srOk === false ? '5m S/R test — nema S/R potvrde (informativno, ulaz i dalje moguć)' :
@@ -1633,7 +1633,7 @@ function sigBoxes(sigs) {
   if (!sigs || sigs.length === 0) return '<span style="color:#444">—</span>';
   return sigs.map((v, i) => {
     const bg   = v === 1 ? '#0d3d26' : v === -1 ? '#3d0d0d' : '#1c2128';
-    const col  = v === 1 ? '#00c48c' : v === -1 ? '#ff4d4d' : '#444';
+    const col  = v === 1 ? '#059669' : v === -1 ? '#dc2626' : '#94a3b8';
     const bdr  = v === 1 ? '1px solid #00c48c44' : v === -1 ? '1px solid #ff4d4d44' : '1px solid #30363d';
     const icon = v === 1 ? '▲' : v === -1 ? '▼' : '·';
     const lbl  = SIG_NAMES[i] || i;
@@ -1645,20 +1645,20 @@ function sigBoxes(sigs) {
 function scoreBox(bull, bear, sig, minSig) {
   const total = 13;
   const minLabel = minSig ? '<br><span style="color:#444;font-size:9px">min:' + minSig + '</span>' : '';
-  if (sig === "LONG")   return '<div style="background:rgba(0,196,140,0.15);border:1px solid #00c48c;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#00c48c;font-weight:800;font-size:16px">↑' + bull + '</span><span style="color:#555;font-size:11px">/' + total + '</span><br><span class="sig-long" style="font-size:11px">▲ LONG</span></div>';
-  if (sig === "SHORT")  return '<div style="background:rgba(255,77,77,0.15);border:1px solid #ff4d4d;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#ff4d4d;font-weight:800;font-size:16px">↓' + bear + '</span><span style="color:#555;font-size:11px">/' + total + '</span><br><span class="sig-short" style="font-size:11px">▼ SHORT</span></div>';
-  if (sig === "SETUP↑") return '<div style="background:rgba(240,165,0,0.1);border:1px solid #f0a50066;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#f0a500;font-weight:800;font-size:16px">↑' + bull + '</span><span style="color:#555;font-size:11px">/' + total + '</span><br><span style="color:#f0a500;font-size:11px">◈ SETUP↑</span></div>';
-  if (sig === "SETUP↓") return '<div style="background:rgba(240,165,0,0.1);border:1px solid #f0a50066;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#f0a500;font-weight:800;font-size:16px">↓' + bear + '</span><span style="color:#555;font-size:11px">/' + total + '</span><br><span style="color:#f0a500;font-size:11px">◈ SETUP↓</span></div>';
+  if (sig === "LONG")   return '<div style="background:rgba(5,150,105,0.15);border:1px solid #059669;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#059669;font-weight:800;font-size:16px">↑' + bull + '</span><span style="color:#94a3b8;font-size:11px">/' + total + '</span><br><span class="sig-long" style="font-size:11px">▲ LONG</span></div>';
+  if (sig === "SHORT")  return '<div style="background:rgba(220,38,38,0.15);border:1px solid #dc2626;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#dc2626;font-weight:800;font-size:16px">↓' + bear + '</span><span style="color:#94a3b8;font-size:11px">/' + total + '</span><br><span class="sig-short" style="font-size:11px">▼ SHORT</span></div>';
+  if (sig === "SETUP↑") return '<div style="background:rgba(240,165,0,0.1);border:1px solid #d9770644;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#d97706;font-weight:800;font-size:16px">↑' + bull + '</span><span style="color:#94a3b8;font-size:11px">/' + total + '</span><br><span style="color:#d97706;font-size:11px">◈ SETUP↑</span></div>';
+  if (sig === "SETUP↓") return '<div style="background:rgba(240,165,0,0.1);border:1px solid #d9770644;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#d97706;font-weight:800;font-size:16px">↓' + bear + '</span><span style="color:#94a3b8;font-size:11px">/' + total + '</span><br><span style="color:#d97706;font-size:11px">◈ SETUP↓</span></div>';
   const top = Math.max(bull, bear);
   // Ako je bull blizu minSig — prikaži žuto upozorenje (1 signal nedostaje)
   const nearMiss = minSig && bull === minSig - 1;
-  const col = nearMiss ? '#f7b731' : bull > bear ? '#00c48c55' : bear > bull ? '#ff4d4d55' : '#555';
+  const col = nearMiss ? '#d97706' : bull > bear ? '#05966950' : bear > bull ? '#dc262650' : '#555';
   const bg  = nearMiss ? 'rgba(247,183,49,0.06)' : 'transparent';
-  const brd = nearMiss ? 'border:1px solid #f7b73133;border-radius:6px;' : '';
+  const brd = nearMiss ? 'border:1px solid #d9770633;border-radius:6px;' : '';
   return '<div style="text-align:center;padding:2px;' + brd + 'background:' + bg + '" title="Bull: ' + bull + ' / Bear: ' + bear + ' / Minimum: ' + (minSig||'?') + '">' +
     '<span style="color:' + col + ';font-size:14px;font-weight:700">' + top + '</span>' +
     '<span style="color:#444;font-size:11px">/' + total + '</span>' +
-    (minSig ? '<br><span style="color:' + (nearMiss ? '#f7b731' : '#333') + ';font-size:9px">min:' + minSig + (nearMiss ? ' ⚠' : '') + '</span>' : '') +
+    (minSig ? '<br><span style="color:' + (nearMiss ? '#d97706' : '#333') + ';font-size:9px">min:' + minSig + (nearMiss ? ' ⚠' : '') + '</span>' : '') +
     '</div>';
 }
 
@@ -1667,21 +1667,21 @@ function statusBox(s) {
 
   // Aktivan signal — bot ulazi odmah na close svjećice
   if (sig === "LONG") {
-    return '<div style="background:rgba(0,196,140,0.1);border:1px solid #00c48c;border-radius:8px;padding:8px 10px">' +
-      '<div style="font-size:11px;color:#00c48c;font-weight:700;margin-bottom:4px">✅ SIGNAL AKTIVIRAN</div>' +
-      '<div style="font-size:13px;font-weight:700;color:#00c48c">▲ LONG</div>' +
-      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Ulaz odmah @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBull||0) + '/13</b></div>' +
+    return '<div style="background:rgba(5,150,105,0.1);border:1px solid #059669;border-radius:8px;padding:8px 10px">' +
+      '<div style="font-size:11px;color:#059669;font-weight:700;margin-bottom:4px">✅ SIGNAL AKTIVIRAN</div>' +
+      '<div style="font-size:13px;font-weight:700;color:#059669">▲ LONG</div>' +
+      '<div style="font-size:11px;color:#64748b;margin-top:3px">Ulaz odmah @ <b style="color:#0f172a">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBull||0) + '/13</b></div>' +
       '</div>';
   }
   if (sig === "SHORT") {
-    return '<div style="background:rgba(255,77,77,0.1);border:1px solid #ff4d4d;border-radius:8px;padding:8px 10px">' +
-      '<div style="font-size:11px;color:#ff4d4d;font-weight:700;margin-bottom:4px">✅ SIGNAL AKTIVIRAN</div>' +
-      '<div style="font-size:13px;font-weight:700;color:#ff4d4d">▼ SHORT</div>' +
-      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Ulaz odmah @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBear||0) + '/13</b></div>' +
+    return '<div style="background:rgba(220,38,38,0.1);border:1px solid #dc2626;border-radius:8px;padding:8px 10px">' +
+      '<div style="font-size:11px;color:#dc2626;font-weight:700;margin-bottom:4px">✅ SIGNAL AKTIVIRAN</div>' +
+      '<div style="font-size:13px;font-weight:700;color:#dc2626">▼ SHORT</div>' +
+      '<div style="font-size:11px;color:#64748b;margin-top:3px">Ulaz odmah @ <b style="color:#0f172a">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBear||0) + '/13</b></div>' +
       '</div>';
   }
-  if (sig === "SETUP↑") return '<span style="color:#f0a500;font-size:12px">◈ SETUP ↑ &nbsp;<span style="color:#555;font-size:11px">(' + (s.ultraBull||0) + '/13)</span></span>';
-  if (sig === "SETUP↓") return '<span style="color:#f0a500;font-size:12px">◈ SETUP ↓ &nbsp;<span style="color:#555;font-size:11px">(' + (s.ultraBear||0) + '/13)</span></span>';
+  if (sig === "SETUP↑") return '<span style="color:#d97706;font-size:12px">◈ SETUP ↑ &nbsp;<span style="color:#94a3b8;font-size:11px">(' + (s.ultraBull||0) + '/13)</span></span>';
+  if (sig === "SETUP↓") return '<span style="color:#d97706;font-size:12px">◈ SETUP ↓ &nbsp;<span style="color:#94a3b8;font-size:11px">(' + (s.ultraBear||0) + '/13)</span></span>';
 
   // ── RSI + ADX Watch alert — oba moraju biti overextended ──────────────────
   const rsiNum = parseFloat(s.rsi);
@@ -1689,18 +1689,18 @@ function statusBox(s) {
   if (!isNaN(rsiNum) && adxNum > 60) {
     // WATCH SHORT — RSI > 70 + ADX > 50: overbought + ekstremni trend
     if (rsiNum > 70) {
-      return '<div style="background:rgba(255,77,77,0.06);border:1px solid #ff4d4d55;border-radius:8px;padding:6px 10px">' +
-        '<div style="font-size:11px;color:#ff4d4d;font-weight:700">⚠️ WATCH SHORT</div>' +
-        '<div style="font-size:11px;color:#9ca3af;margin-top:2px">RSI <b style="color:#ff4d4d">' + s.rsi + '</b> + ADX <b style="color:#ff4d4d">' + s.adx + '</b> — overextended, moguć vrh</div>' +
-        '<div style="font-size:10px;color:#555;margin-top:2px">Bull: ' + (s.ultraBull||0) + ' · Bear: ' + (s.ultraBear||0) + ' · Treba 12+ za SHORT</div>' +
+      return '<div style="background:rgba(220,38,38,0.06);border:1px solid #dc262650;border-radius:8px;padding:6px 10px">' +
+        '<div style="font-size:11px;color:#dc2626;font-weight:700">⚠️ WATCH SHORT</div>' +
+        '<div style="font-size:11px;color:#64748b;margin-top:2px">RSI <b style="color:#dc2626">' + s.rsi + '</b> + ADX <b style="color:#dc2626">' + s.adx + '</b> — overextended, moguć vrh</div>' +
+        '<div style="font-size:10px;color:#94a3b8;margin-top:2px">Bull: ' + (s.ultraBull||0) + ' · Bear: ' + (s.ultraBear||0) + ' · Treba 12+ za SHORT</div>' +
         '</div>';
     }
     // WATCH LONG — RSI < 30 + ADX > 50: oversold + ekstremni downtrend
     if (rsiNum < 30) {
-      return '<div style="background:rgba(0,196,140,0.06);border:1px solid #00c48c55;border-radius:8px;padding:6px 10px">' +
-        '<div style="font-size:11px;color:#00c48c;font-weight:700">⚠️ WATCH LONG</div>' +
-        '<div style="font-size:11px;color:#9ca3af;margin-top:2px">RSI <b style="color:#00c48c">' + s.rsi + '</b> + ADX <b style="color:#00c48c">' + s.adx + '</b> — overextended, moguć bounce</div>' +
-        '<div style="font-size:10px;color:#555;margin-top:2px">Bull: ' + (s.ultraBull||0) + ' · Bear: ' + (s.ultraBear||0) + ' · Treba 12+ za LONG</div>' +
+      return '<div style="background:rgba(5,150,105,0.06);border:1px solid #05966950;border-radius:8px;padding:6px 10px">' +
+        '<div style="font-size:11px;color:#059669;font-weight:700">⚠️ WATCH LONG</div>' +
+        '<div style="font-size:11px;color:#64748b;margin-top:2px">RSI <b style="color:#059669">' + s.rsi + '</b> + ADX <b style="color:#059669">' + s.adx + '</b> — overextended, moguć bounce</div>' +
+        '<div style="font-size:10px;color:#94a3b8;margin-top:2px">Bull: ' + (s.ultraBull||0) + ' · Bear: ' + (s.ultraBear||0) + ' · Treba 12+ za LONG</div>' +
         '</div>';
     }
   }
@@ -1760,7 +1760,7 @@ async function loadBtcRegime() {
   // Uspjeh — ažuriraj prikaz
   const { regime, up, price, e55 } = result;
   _lastRegime = result;
-  const col  = regime==="BULL"?"#00c48c":regime==="BEAR"?"#ff4d4d":"#f7b731";
+  const col  = regime==="BULL"?"#059669":regime==="BEAR"?"#dc2626":"#d97706";
   const icon = regime==="BULL"?"📈":regime==="BEAR"?"📉":"➡️";
   const sub  = regime==="BULL"?"LONG ulazi aktivni":regime==="BEAR"?"LONG suspendiran":"Čekamo trend";
   document.getElementById("regime-val").textContent = icon + " " + regime;
@@ -1787,7 +1787,7 @@ async function doScan() {
   const tbody = document.getElementById("scan-tbody");
   btn.disabled = true;
   btn.innerHTML = '<span class="spin">⟳</span> Skenira...';
-  tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:32px;color:#9ca3af"><span class="spin" style="font-size:20px">⟳</span><br>Fetcham ${ALL_SYMBOLS.length} simbola na 15m+1H TF...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:32px;color:#64748b"><span class="spin" style="font-size:20px">⟳</span><br>Fetcham ${ALL_SYMBOLS.length} simbola na 15m+1H TF...</td></tr>';
 
   try {
     const r = await fetch("/api/scan");
@@ -1815,34 +1815,34 @@ async function doScan() {
     document.getElementById("scan-ts").textContent = ts + " (UTC+2) | ▲ " + longs + " LONG · ▼ " + shorts + " SHORT · ⏳ " + pending + " čeka · ◈ " + setups + " setup";
 
     tbody.innerHTML = results.map((s, i) => {
-      if (s.error) return '<tr><td colspan="10" style="color:#ff4d4d;padding:6px 10px">' + s.symbol + ': ' + s.error + '</td></tr>';
+      if (s.error) return '<tr><td colspan="10" style="color:#dc2626;padding:6px 10px">' + s.symbol + ': ' + s.error + '</td></tr>';
 
       const rsiNum = parseFloat(s.rsi);
-      const rsiCol = isNaN(rsiNum) ? "#8b949e" : rsiNum > 70 ? "#ff4d4d" : rsiNum < 30 ? "#00c48c" : rsiNum > 60 ? "#ff8c42" : rsiNum < 40 ? "#42c8ff" : "#e6edf3";
+      const rsiCol = isNaN(rsiNum) ? "#94a3b8" : rsiNum > 70 ? "#dc2626" : rsiNum < 30 ? "#059669" : rsiNum > 60 ? "#ea580c" : rsiNum < 40 ? "#0284c7" : "#475569";
       const adxNum = parseFloat(s.adx);
-      const adxCol = isNaN(adxNum) ? "#555" : adxNum > 25 ? "#00c48c" : adxNum > 18 ? "#f7b731" : "#555";
+      const adxCol = isNaN(adxNum) ? "#94a3b8" : adxNum > 25 ? "#059669" : adxNum > 18 ? "#d97706" : "#94a3b8";
 
       const hasPending = !!s.pending;
       const hasSignal  = s.ultraSig === "LONG" || s.ultraSig === "SHORT";
-      const rowBg = hasPending ? "background:rgba(247,183,49,0.04)" : hasSignal ? "background:rgba(0,196,140,0.04)" : "";
+      const rowBg = hasPending ? "background:rgba(247,183,49,0.04)" : hasSignal ? "background:rgba(5,150,105,0.04)" : "";
 
       // Per-symbol SL/TP tier boja
       const slTp    = s.slPct && s.tpPct ? 'SL ' + s.slPct + '% / TP ' + s.tpPct + '%' : 'SL 1.5% / TP 2.5%';
-      const slTpCol = (s.slPct >= 2.5) ? '#f7b731' : (s.slPct >= 2.0) ? '#ff8c42' : '#8b949e';
+      const slTpCol = (s.slPct >= 2.5) ? '#d97706' : (s.slPct >= 2.0) ? '#ff8c42' : '#94a3b8';
 
       const t1h = s.trend1h || 'UNKNOWN';
       const t1hCol  = t1h === 'BULL' ? '#10b981' : t1h === 'BEAR' ? '#ef4444' : '#6b7280';
       const t1hIcon = t1h === 'BULL' ? '▲' : t1h === 'BEAR' ? '▼' : '·';
 
       return '<tr style="' + rowBg + '">' +
-        '<td style="color:#555;font-size:11px;text-align:center">' + (i+1) + '</td>' +
-        '<td style="font-weight:800;font-size:14px;white-space:nowrap">' + s.symbol.replace("USDT","") + '<span style="color:#555;font-size:10px;font-weight:400">USDT</span>' +
+        '<td style="color:#94a3b8;font-size:11px;text-align:center">' + (i+1) + '</td>' +
+        '<td style="font-weight:800;font-size:14px;white-space:nowrap">' + s.symbol.replace("USDT","") + '<span style="color:#94a3b8;font-size:10px;font-weight:400">USDT</span>' +
           '<div style="font-size:10px;color:' + slTpCol + ';font-weight:500;margin-top:1px">' + slTp + '</div></td>' +
         '<td style="font-weight:600;white-space:nowrap">' + fmtLive(s.price) + '</td>' +
         '<td style="color:' + rsiCol + ';font-weight:700">' + (s.rsi || "—") + '</td>' +
         '<td style="color:' + adxCol + '">' + (s.adx || "—") + '</td>' +
         '<td style="text-align:center;font-weight:800;color:' + t1hCol + ';font-size:13px" title="1H EMA20 trend: ' + t1h + '">' + t1hIcon + '</td>' +
-        '<td style="padding:4px 6px;border-right:1px solid #f7b73133">' + mandatoryBoxes(s) + '</td>' +
+        '<td style="padding:4px 6px;border-right:1px solid #d9770633">' + mandatoryBoxes(s) + '</td>' +
         '<td style="padding:4px 6px">' + sigBoxes(s.ultraSigs16) + '</td>' +
         '<td style="padding:4px 8px">' + scoreBox(s.ultraBull||0, s.ultraBear||0, s.ultraSig, s.ultraMinSig) + '</td>' +
         '<td style="padding:4px 8px">' + statusBox(s) + '</td>' +
@@ -1850,7 +1850,7 @@ async function doScan() {
     }).join("");
 
   } catch(e) {
-    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#ff4d4d;padding:24px">Greška: ' + e.message + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#dc2626;padding:24px">Greška: ' + e.message + '</td></tr>';
   }
 
   btn.disabled = false;
@@ -1870,7 +1870,7 @@ async function loadBitgetBalance() {
       el.textContent = '$' + eq.toFixed(2);
       const unrPnl = parseFloat(d.balance.unrealizedPnl);
       unr.textContent = 'Unrealized: ' + (unrPnl >= 0 ? '+' : '') + '$' + unrPnl.toFixed(2);
-      unr.style.color = unrPnl >= 0 ? '#00c48c' : '#ff4d4d';
+      unr.style.color = unrPnl >= 0 ? '#059669' : '#dc2626';
     } else {
       el.textContent = 'N/A';
     }
@@ -1896,7 +1896,7 @@ async function loadMarketContext() {
     const cbCount = d.consecLosses || 0;
     const cbMax = d.cbLosses || 7;
     const cbPct = Math.min(cbCount / cbMax * 100, 100);
-    const cbColor = cbPct >= 85 ? '#ff4d4d' : cbPct >= 57 ? '#f7b731' : '#00c48c';
+    const cbColor = cbPct >= 85 ? '#dc2626' : cbPct >= 57 ? '#d97706' : '#059669';
     document.getElementById('cb-count').textContent = cbCount + '/' + cbMax + ' gubitaka';
     document.getElementById('cb-count').style.color = cbColor;
     document.getElementById('cb-bar').style.width = cbPct + '%';
@@ -1907,9 +1907,9 @@ async function loadMarketContext() {
     const dp = d.dailyPnl || 0;
     const dlim = d.dailyLimit || 20;
     const dpPct = Math.min(Math.abs(dp) / dlim * 100, 100);
-    const dpColor = dpPct >= 80 ? '#ff4d4d' : dpPct >= 60 ? '#f7b731' : '#00c48c';
+    const dpColor = dpPct >= 80 ? '#dc2626' : dpPct >= 60 ? '#d97706' : '#059669';
     document.getElementById('daily-pnl-val').textContent = (dp >= 0 ? '+' : '') + '$' + dp.toFixed(2);
-    document.getElementById('daily-pnl-val').style.color = dp < 0 ? '#ff4d4d' : '#00c48c';
+    document.getElementById('daily-pnl-val').style.color = dp < 0 ? '#dc2626' : '#059669';
     document.getElementById('daily-pnl-bar').style.width = dpPct + '%';
     document.getElementById('daily-pnl-bar').style.background = dpColor;
     document.getElementById('daily-pnl-sub').textContent = 'Iskorišteno: ' + dpPct.toFixed(0) + '% limita ($' + dlim + ')';
@@ -1918,7 +1918,7 @@ async function loadMarketContext() {
     if (d.fr && Object.keys(d.fr).length > 0) {
       const sorted = Object.entries(d.fr).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 4);
       const frHtml = sorted.map(([sym, rate]) => {
-        const color = rate > 0.05 ? '#ff4d4d' : rate > 0.02 ? '#f7b731' : '#00c48c';
+        const color = rate > 0.05 ? '#dc2626' : rate > 0.02 ? '#d97706' : '#059669';
         const blocked = rate > 0.05 ? ' 🚫' : '';
         return '<span style="color:' + color + ';font-size:12px">' + sym.replace('USDT','') + ': ' + rate.toFixed(3) + '%' + blocked + '</span>';
       }).join('<br>');
@@ -1928,7 +1928,7 @@ async function loadMarketContext() {
     // Fear & Greed
     if (d.fg && d.fg.value !== null) {
       const fgV = d.fg.value;
-      const fgColor = fgV < 25 ? '#388bfd' : fgV < 45 ? '#00c48c' : fgV < 55 ? '#8b949e' : fgV < 75 ? '#f7b731' : '#ff4d4d';
+      const fgColor = fgV < 25 ? '#388bfd' : fgV < 45 ? '#059669' : fgV < 55 ? '#94a3b8' : fgV < 75 ? '#d97706' : '#dc2626';
       document.getElementById('fg-val').textContent = fgV;
       document.getElementById('fg-val').style.color = fgColor;
       document.getElementById('fg-label').textContent = d.fg.label || '';
@@ -1943,7 +1943,7 @@ async function loadMarketContext() {
     // DXY
     if (d.dxy && d.dxy.change4h !== null) {
       const dxyV = d.dxy.change4h;
-      const dxyColor = dxyV > 0.3 ? '#ff4d4d' : dxyV < -0.3 ? '#00c48c' : '#8b949e';
+      const dxyColor = dxyV > 0.3 ? '#dc2626' : dxyV < -0.3 ? '#059669' : '#94a3b8';
       document.getElementById('dxy-val').textContent = (dxyV > 0 ? '+' : '') + dxyV + '%';
       document.getElementById('dxy-val').style.color = dxyColor;
       document.getElementById('dxy-sub').textContent = d.dxy.direction + ' | >+0.3% = LONG risk';
@@ -1952,7 +1952,7 @@ async function loadMarketContext() {
     // Session Info
     if (d.session) {
       const s = d.session;
-      const sessColor = s.dead ? '#ff4d4d' : s.quality === 'PRIME' ? '#00c48c' : s.quality === 'GOOD' ? '#f7b731' : '#8b949e';
+      const sessColor = s.dead ? '#dc2626' : s.quality === 'PRIME' ? '#059669' : s.quality === 'GOOD' ? '#d97706' : '#94a3b8';
       const sessIcon  = s.dead ? '🌙' : s.quality === 'PRIME' ? '🟢' : s.quality === 'GOOD' ? '🟡' : '🔵';
       const sessEl = document.getElementById('session-val');
       if (sessEl) {
@@ -1969,7 +1969,7 @@ async function loadMarketContext() {
     // ATR Trend
     if (d.atrTrend) {
       const at = d.atrTrend;
-      const atColor = at.trend === 'EXPANDING' ? '#ff4d4d' : at.trend === 'CONTRACTING' ? '#388bfd' : '#00c48c';
+      const atColor = at.trend === 'EXPANDING' ? '#dc2626' : at.trend === 'CONTRACTING' ? '#388bfd' : '#059669';
       const atIcon  = at.trend === 'EXPANDING' ? '📈' : at.trend === 'CONTRACTING' ? '📉' : '➡️';
       const atEl = document.getElementById('atr-trend-val');
       if (atEl) {
@@ -1985,7 +1985,7 @@ async function loadMarketContext() {
     // SP500
     if (d.sp500 && d.sp500.change4h !== null) {
       const sp = d.sp500;
-      const spColor = sp.regime === 'RISK_OFF' ? '#ff4d4d' : sp.regime === 'RISK_ON' ? '#00c48c' : '#8b949e';
+      const spColor = sp.regime === 'RISK_OFF' ? '#dc2626' : sp.regime === 'RISK_ON' ? '#059669' : '#94a3b8';
       const spIcon  = sp.regime === 'RISK_OFF' ? '🚨' : sp.regime === 'RISK_ON' ? '🟢' : '➡️';
       document.getElementById('sp500-val').textContent = (sp.change4h > 0 ? '+' : '') + sp.change4h + '%';
       document.getElementById('sp500-val').style.color = spColor;
@@ -1996,7 +1996,7 @@ async function loadMarketContext() {
     // Korelacijska matrica
     if (d.corr && d.corr.avgCorr !== null) {
       const c = d.corr;
-      const corrColor = c.avgCorr > 0.85 ? '#ff4d4d' : c.avgCorr > 0.65 ? '#f7b731' : '#00c48c';
+      const corrColor = c.avgCorr > 0.85 ? '#dc2626' : c.avgCorr > 0.65 ? '#d97706' : '#059669';
       const corrIcon  = c.avgCorr > 0.85 ? '⚠️' : c.avgCorr > 0.65 ? '🟡' : '🟢';
       document.getElementById('corr-val').textContent = corrIcon + ' avg ' + c.avgCorr;
       document.getElementById('corr-val').style.color = corrColor;
@@ -2012,10 +2012,10 @@ async function loadMarketContext() {
         const n = syms.length;
         const cell = 28;
         function corrColor2(v) {
-          if (v >= 0.9)  return '#ff4d4d';
+          if (v >= 0.9)  return '#dc2626';
           if (v >= 0.75) return '#f7913a';
-          if (v >= 0.5)  return '#f7b731';
-          if (v >= 0.25) return '#8b949e';
+          if (v >= 0.5)  return '#d97706';
+          if (v >= 0.25) return '#94a3b8';
           if (v >= 0)    return '#21262d';
           return '#388bfd';
         }
@@ -2023,26 +2023,26 @@ async function loadMarketContext() {
         // Header row
         html += '<div style="display:flex;margin-left:' + (cell+2) + 'px">';
         for (var j=0; j<n; j++) {
-          html += '<div style="width:' + cell + 'px;text-align:center;color:#9ca3af;overflow:hidden;white-space:nowrap;font-size:8px">' + syms[j] + '</div>';
+          html += '<div style="width:' + cell + 'px;text-align:center;color:#64748b;overflow:hidden;white-space:nowrap;font-size:8px">' + syms[j] + '</div>';
         }
         html += '</div>';
         // Data rows
         for (var i=0; i<n; i++) {
           html += '<div style="display:flex;align-items:center">';
-          html += '<div style="width:' + cell + 'px;text-align:right;padding-right:4px;color:#9ca3af;font-size:8px;white-space:nowrap">' + syms[i] + '</div>';
+          html += '<div style="width:' + cell + 'px;text-align:right;padding-right:4px;color:#64748b;font-size:8px;white-space:nowrap">' + syms[i] + '</div>';
           for (var j2=0; j2<n; j2++) {
             var v = c.matrix[i] ? (c.matrix[i][j2] !== undefined ? c.matrix[i][j2] : 0) : 0;
             var bg = corrColor2(v);
             var txt = i===j2 ? '—' : (v >= 0 ? '+' : '') + v.toFixed(2);
-            var txtColor = (v > 0.5 || v < 0) ? '#fff' : '#8b949e';
+            var txtColor = (v > 0.5 || v < 0) ? '#fff' : '#94a3b8';
             html += '<div title="' + syms[i] + '/' + syms[j2] + ': ' + v.toFixed(3) + '" style="width:' + cell + 'px;height:' + cell + 'px;background:' + bg + ';display:flex;align-items:center;justify-content:center;color:' + txtColor + ';font-size:7px;border:1px solid #0d1117;border-radius:2px">' + txt + '</div>';
           }
           html += '</div>';
         }
         // Legend
-        html += '<div style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:9px;color:#9ca3af">';
+        html += '<div style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:9px;color:#64748b">';
         html += '<span>Korelacija:</span>';
-        var legend = [['#388bfd','<0'],['#21262d','0–0.25'],['#8b949e','0.25–0.5'],['#f7b731','0.5–0.75'],['#f7913a','0.75–0.9'],['#ff4d4d','>0.9']];
+        var legend = [['#388bfd','<0'],['#21262d','0–0.25'],['#94a3b8','0.25–0.5'],['#d97706','0.5–0.75'],['#f7913a','0.75–0.9'],['#dc2626','>0.9']];
         for (var l=0; l<legend.length; l++) {
           html += '<span style="display:inline-flex;align-items:center;gap:2px"><span style="display:inline-block;width:10px;height:10px;background:' + legend[l][0] + ';border-radius:2px"></span>' + legend[l][1] + '</span>';
         }
@@ -2056,10 +2056,10 @@ async function loadMarketContext() {
     if (d.pc && d.pc.btc) {
       const btc = d.pc.btc;
       const pcColor = btc.sentiment === 'FEAR'    ? '#388bfd'
-                    : btc.sentiment === 'BEARISH'  ? '#8b949e'
-                    : btc.sentiment === 'BULLISH'  ? '#f7b731'
-                    : btc.sentiment === 'GREED'    ? '#ff4d4d'
-                    : '#8b949e';
+                    : btc.sentiment === 'BEARISH'  ? '#94a3b8'
+                    : btc.sentiment === 'BULLISH'  ? '#d97706'
+                    : btc.sentiment === 'GREED'    ? '#dc2626'
+                    : '#94a3b8';
       const pcIcon  = btc.sentiment === 'FEAR'  ? '😰'
                     : btc.sentiment === 'GREED' ? '🤑' : '😐';
       const pcEl = document.getElementById('pc-val');
@@ -2077,8 +2077,8 @@ async function loadMarketContext() {
     // Liquidation Risk
     if (d.liq && d.liq.overall !== null) {
       const liq = d.liq;
-      const liqColor = liq.risk === 'HIGH'   ? '#ff4d4d'
-                     : liq.risk === 'MEDIUM' ? '#f7b731' : '#00c48c';
+      const liqColor = liq.risk === 'HIGH'   ? '#dc2626'
+                     : liq.risk === 'MEDIUM' ? '#d97706' : '#059669';
       const liqIcon  = liq.risk === 'HIGH' ? '🚨' : liq.risk === 'MEDIUM' ? '⚠️' : '✅';
       const liqEl = document.getElementById('liq-val');
       if (liqEl) {
@@ -2146,9 +2146,9 @@ async function loadMarketContext() {
 
     if (symEntries.length > 0) {
       document.getElementById('sym-wr-table').innerHTML = symEntries.map(function(e) {
-        const color = e.wr >= 50 ? '#00c48c' : e.wr >= 35 ? '#f7b731' : '#ff4d4d';
+        const color = e.wr >= 50 ? '#059669' : e.wr >= 35 ? '#d97706' : '#dc2626';
         const bar = Math.round(e.wr);
-        return '<div style="background:#374151;border-radius:6px;padding:8px 10px">' +
+        return '<div style="background:#f1f5f9;border-radius:6px;padding:8px 10px">' +
           '<div style="display:flex;justify-content:space-between;margin-bottom:4px">' +
           '<span style="font-size:12px;font-weight:700">' + e.sym.replace('USDT','') + '</span>' +
           '<span style="font-size:12px;color:' + color + ';font-weight:700">' + e.wr.toFixed(0) + '%</span>' +
@@ -2156,11 +2156,11 @@ async function loadMarketContext() {
           '<div style="background:#30363d;border-radius:2px;height:4px;overflow:hidden">' +
           '<div style="width:' + bar + '%;height:100%;background:' + color + ';border-radius:2px"></div>' +
           '</div>' +
-          '<div style="font-size:10px;color:#9ca3af;margin-top:3px">N=' + e.total + '</div>' +
+          '<div style="font-size:10px;color:#64748b;margin-top:3px">N=' + e.total + '</div>' +
           '</div>';
       }).join('');
     } else {
-      document.getElementById('sym-wr-table').innerHTML = '<div style="font-size:12px;color:#9ca3af">Nema dovoljno podataka (treba 2+ tradova po simbolu)</div>';
+      document.getElementById('sym-wr-table').innerHTML = '<div style="font-size:12px;color:#64748b">Nema dovoljno podataka (treba 2+ tradova po simbolu)</div>';
     }
 
   } catch(e) { console.error('market-context error:', e); }

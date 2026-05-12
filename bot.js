@@ -29,6 +29,14 @@ const TP_PCT        = 4.0;    // fallback TP % (Tier 1) — override per-simbol 
 const MAX_TRADES_PER_DAY = 100;
 const MAX_OPEN_PER_PORTFOLIO = 8;  // max otvorenih pozicija po portfoliju (+ BTC bonus slot)
 
+// ─── ULTRA strategija — zaštitni parametri ────────────────────────────────────
+const LONG_ONLY      = true;          // SHORT signali isključeni (backtest: SHORT PF=0.59, -29.9%)
+const ADX_MIN        = 30;            // ADX prag — povišen s 25 na 30 (manji broj, kvalitetniji setup)
+const SL_COOLDOWN_MS = 4 * 60 * 60 * 1000;  // 4h cooldown po simbolu nakon SL-a
+
+// In-memory mapa: symbol → timestamp zadnjeg SL-a
+const symbolSlCooldown = new Map();
+
 const PAPER_TRADING = process.env.PAPER_TRADING !== "false";
 const BITGET_DEMO   = process.env.BITGET_DEMO === "true";
 const BITGET = {
@@ -853,10 +861,10 @@ function analyzeUltra(candles, cfg) {
 
   // ══ 4 OBAVEZNA UVJETA — sva 4 moraju biti zadovoljena ══════════════════════
 
-  // 1. ADX ≥ 25 — tržište mora biti u trendu (ne ranging)
-  if (adx < 25) {
+  // 1. ADX ≥ 30 — tržište mora biti u jasnom trendu (ne ranging)
+  if (adx < ADX_MIN) {
     return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
-      reason: `ADX ${adx.toFixed(1)} < 25 — ranging, nema ulaza` };
+      reason: `ADX ${adx.toFixed(1)} < ${ADX_MIN} — ranging, nema ulaza` };
   }
 
   // 2. 6-Scale: min 4/6 multi-EMA parova poravnato u jednom smjeru
@@ -877,11 +885,15 @@ function analyzeUltra(candles, cfg) {
 
   if (bullCnt >= MIN_CONFIRM && scaleOkLong && rsiLongOk) {
     return { price, signal: "LONG",  bullScore: bullCnt, bearScore: bearCnt,
-      reason: `ULTRA LONG ↑${bullCnt}/13 | ADX:${adx.toFixed(0)}≥25✓ 6Sc:${scaleUp}/6✓ RSI:${rsi.toFixed(0)}<72✓ [4ob+${MIN_CONFIRM}]` };
+      reason: `ULTRA LONG ↑${bullCnt}/13 | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ 6Sc:${scaleUp}/6✓ RSI:${rsi.toFixed(0)}<72✓ [4ob+${MIN_CONFIRM}]` };
   }
-  if (bearCnt >= MIN_CONFIRM && scaleOkShort && rsiShortOk) {
+  if (!LONG_ONLY && bearCnt >= MIN_CONFIRM && scaleOkShort && rsiShortOk) {
     return { price, signal: "SHORT", bullScore: bullCnt, bearScore: bearCnt,
-      reason: `ULTRA SHORT ↓${bearCnt}/13 | ADX:${adx.toFixed(0)}≥25✓ 6Sc:${scaleDn}/6✓ RSI:${rsi.toFixed(0)}>30✓ [4ob+${MIN_CONFIRM}]` };
+      reason: `ULTRA SHORT ↓${bearCnt}/13 | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ 6Sc:${scaleDn}/6✓ RSI:${rsi.toFixed(0)}>30✓ [4ob+${MIN_CONFIRM}]` };
+  }
+  if (LONG_ONLY && bearCnt >= MIN_CONFIRM && scaleOkShort && rsiShortOk) {
+    return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
+      reason: `SHORT↓${bearCnt}/13 blokiran — LONG_ONLY mod aktivan` };
   }
 
   // Dijagnoza zašto nema signala
@@ -1355,7 +1367,12 @@ async function checkPortfolioPositions(pid) {
           console.log(`  ${pnl >= 0 ? "✅ WIN" : "❌ LOSS"} [${pid}] ${pos.symbol} ${pos.side} | P&L ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(4)} | ${exitReason} | exit@${fmtPrice(exitPrice)}`);
           writeExitCsv(pid, pos, exitPrice, exitReason, pnl);
           await tg(`${pnl >= 0 ? "✅ WIN" : "❌ LOSS"} [ULTRA] ${pos.symbol} ${pos.side}\nP&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)} | ${exitReason}\nUlaz: ${fmtPrice(pos.entryPrice)} → Izlaz: ${fmtPrice(exitPrice)}`);
-          if (pnl < 0) await checkAndRemoveSymbol(pid, pos.symbol);
+          if (pnl < 0) {
+            // Cooldown 4h — ne ulazi ponovo u ovaj simbol
+            symbolSlCooldown.set(pos.symbol, Date.now());
+            console.log(`  🕐 [${pid}] ${pos.symbol} — cooldown 4h aktivan (SL hit)`);
+            await checkAndRemoveSymbol(pid, pos.symbol);
+          }
           continue;  // Ne dodaj u stillOpen
         }
         // Još uvijek otvorena na Bitgetu — prikaz unrealized
@@ -2169,6 +2186,14 @@ export async function run() {
 
         if (signal === "NEUTRAL") {
           console.log(`  🚫 [${pDef.name}] ${symbol} — ${reason}`);
+          continue;
+        }
+
+        // ── Cooldown provjera: 4h pauza po simbolu nakon SL-a ──────────────
+        const lastSl = symbolSlCooldown.get(symbol);
+        if (lastSl && (Date.now() - lastSl) < SL_COOLDOWN_MS) {
+          const remainMin = Math.ceil((SL_COOLDOWN_MS - (Date.now() - lastSl)) / 60000);
+          console.log(`  🕐 [${pDef.name}] ${symbol} — cooldown aktivan, još ${remainMin}min (SL bio ${Math.round((Date.now()-lastSl)/60000)}min nazad)`);
           continue;
         }
 

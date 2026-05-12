@@ -704,6 +704,9 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
               <div class="range-labels"><small>SL ${fmtP(p.sl)}${p.slPct ? ' ('+p.slPct+'%)' : ''}</small><small>TP ${fmtP(p.tp)}${p.tpPct ? ' ('+p.tpPct+'%)' : ''}</small></div>
             </div>
           </div>
+          <div style="margin-top:8px;text-align:right">
+            <button onclick="closePosition('${def.id}','${p.symbol}')" style="background:#ff4d4d;color:#fff;border:none;border-radius:6px;padding:5px 14px;font-size:12px;font-weight:700;cursor:pointer">✕ Zatvori</button>
+          </div>
           <script>
           (function(){
             const sym="${p.symbol}", side="${p.side}", pid="${def.id}";
@@ -1415,6 +1418,26 @@ async function resetAll() {
   const d = await r.json();
   alert(d.message || "Reset done");
   location.reload();
+}
+
+async function closePosition(pid, symbol) {
+  if (!confirm(`Zatvoriti ${symbol} market orderom na Bitgetu?`)) return;
+  try {
+    const r = await fetch("/api/close-position", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pid, symbol })
+    });
+    const d = await r.json();
+    if (d.ok) {
+      alert(`✅ ${symbol} zatvoreno\nP&L: $${d.pnl}\nCijena: $${d.exitPrice}`);
+      location.reload();
+    } else {
+      alert(`❌ Greška: ${d.error}`);
+    }
+  } catch(e) {
+    alert(`❌ Greška: ${e.message}`);
+  }
 }
 
 async function resetOne(pid) {
@@ -2143,6 +2166,45 @@ const server = http.createServer(async (req, res) => {
       writeFileSync(f, JSON.stringify(filtered, null, 2));
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true, removed: before - filtered.length, remaining: filtered.length }));
+    } catch(e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+
+  // Ručno zatvori jednu poziciju — POST /api/close-position
+  // Body: { pid, symbol }  — šalje market close nalog na Bitget + uklanja iz trackinga
+  if (url.pathname === "/api/close-position" && req.method === "POST") {
+    try {
+      const body = await new Promise(r => { let d=""; req.on("data",c=>d+=c); req.on("end",()=>r(d)); });
+      const { pid, symbol } = JSON.parse(body);
+      if (!pid || !symbol) throw new Error("pid i symbol su obavezni");
+      const { closeBitGetOrder, loadPositions, savePositions, writeExitCsv } = await import("./bot.js");
+      const positions = loadPositions(pid);
+      const pos = positions.find(p => p.symbol === symbol);
+      if (!pos) throw new Error(`Pozicija ${symbol} nije pronađena`);
+
+      // Dohvati live cijenu
+      let exitPrice = pos.entryPrice;
+      try {
+        const tj = await fetch(`https://api.bitget.com/api/v2/mix/market/ticker?symbol=${symbol}&productType=USDT-FUTURES`).then(r => r.json());
+        exitPrice = parseFloat(tj?.data?.[0]?.lastPr || tj?.data?.[0]?.close || pos.entryPrice);
+      } catch {}
+
+      const qty = pos.quantity ?? (pos.totalUSD / pos.entryPrice);
+      const pnl = pos.side === "LONG"
+        ? (exitPrice - pos.entryPrice) * qty
+        : (pos.entryPrice - exitPrice) * qty;
+
+      await closeBitGetOrder(pos);
+
+      const remaining = loadPositions(pid).filter(p => !(p.symbol === pos.symbol && p.side === pos.side));
+      savePositions(pid, remaining);
+      writeExitCsv(pid, pos, exitPrice, "Ručno zatvoreno (dashboard)", pnl);
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, symbol, side: pos.side, exitPrice, pnl: pnl.toFixed(4) }));
     } catch(e) {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: e.message }));

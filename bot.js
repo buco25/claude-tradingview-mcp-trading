@@ -2529,7 +2529,7 @@ async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp, slPct, tpP
 }
 
 // Zatvori live poziciju na BitGetu (market close order)
-async function closeBitGetOrder(pos) {
+export async function closeBitGetOrder(pos) {
   const quantity = (pos.quantity ?? (pos.totalUSD / pos.entryPrice)).toFixed(4);
   const closeSide = pos.side === "LONG" ? "sell" : "buy";
   const path = "/api/v2/mix/order/place-order";

@@ -1715,14 +1715,14 @@ function fmtPrice(p, symbol) {
 
 function posFile(pid) { return `${DATA_DIR}/open_positions_${pid}.json`; }
 
-function loadPositions(pid) {
+export function loadPositions(pid) {
   const f = posFile(pid);
   if (!existsSync(f)) return [];
   try { return JSON.parse(readFileSync(f, "utf8")); }
   catch { return []; }
 }
 
-function savePositions(pid, positions) {
+export function savePositions(pid, positions) {
   writeFileSync(posFile(pid), JSON.stringify(positions, null, 2));
 }
 
@@ -2164,7 +2164,7 @@ async function fetchBitgetEquity() {
   }
 }
 
-function writeExitCsv(pid, pos, exitPrice, reason, pnl) {
+export function writeExitCsv(pid, pos, exitPrice, reason, pnl) {
   const now     = new Date();
   const date    = now.toISOString().slice(0, 10);
   const time    = now.toISOString().slice(11, 19);

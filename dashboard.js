@@ -713,7 +713,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <div><label>Otvoreno</label><span>${fmtLocalTs(p.openedAt)}</span></div>
           </div>
           <div class="pos-pnl-row">
-            <div id="pnl-${def.id}-${p.symbol}" style="font-size:14px;font-weight:700;color:#64748b">—</div>
+            <div id="pnl-${def.id}-${p.symbol}" style="font-size:14px;font-weight:700;color:#9ca3af">—</div>
             <div style="flex:1;min-width:0">
               <div class="range-bar"><div id="bar-${def.id}-${p.symbol}" class="range-fill"></div></div>
               <div class="range-labels">
@@ -785,7 +785,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       const pnlCol = sym.pnl >= 0 ? "#059669" : "#dc2626";
       const bar = `<div style="display:inline-block;width:${Math.round(wr)}%;max-width:100%;height:4px;background:${wrCol};border-radius:2px;vertical-align:middle"></div>`;
       return `<tr>
-        <td style="font-weight:700;color:#0f172a">${sym.sym.replace("USDT","")}</td>
+        <td style="font-weight:700;color:#f9fafb">${sym.sym.replace("USDT","")}</td>
         <td style="color:#059669;font-weight:700">${sym.wins}W</td>
         <td style="color:#dc2626;font-weight:700">${sym.losses}L</td>
         <td style="color:${wrCol};font-weight:700">${wr}%</td>
@@ -817,7 +817,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         if (!suspended.length) return "";
         return `<div class="section-label" style="color:#dc2626;margin-top:14px">🚫 Suspendirani coinovi (5+ uzastopnih gubitaka)</div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">
-            ${suspended.map(s => `<span style="background:#fef2f2;border:1px solid #dc262633;color:#dc2626;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600">${s.replace("USDT","")}</span>`).join("")}
+            ${suspended.map(s => `<span style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);color:#ef4444;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600">${s.replace("USDT","")}</span>`).join("")}
           </div>`;
       })()}`;
   })();
@@ -958,18 +958,18 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <!-- Stats bar -->
   <div class="stats-bar">
     <div class="stat-card" style="border-top:3px solid #db2777">
-      <div class="stat-label">Equity <span style="font-size:10px;color:#64748b">(CSV)</span></div>
+      <div class="stat-label">Equity <span style="font-size:10px;color:#9ca3af">(CSV)</span></div>
       <div class="stat-value" style="color:${eqCol}">$${s.equity.toFixed(2)}</div>
       <div class="stat-sub" style="color:${eqCol}">${pctStr}</div>
     </div>
     <div class="stat-card" style="border-top:3px solid #d97706">
-      <div class="stat-label">Bitget balans <span style="font-size:10px;color:#64748b">(live)</span></div>
+      <div class="stat-label">Bitget balans <span style="font-size:10px;color:#9ca3af">(live)</span></div>
       <div class="stat-value" id="bitget-bal" style="color:#d97706">…</div>
-      <div class="stat-sub" id="bitget-unr" style="color:#64748b"></div>
+      <div class="stat-sub" id="bitget-unr" style="color:#9ca3af"></div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Start kapital</div>
-      <div class="stat-value" style="color:#64748b">$${def.startCapital.toFixed(2)}</div>
+      <div class="stat-value" style="color:#9ca3af">$${def.startCapital.toFixed(2)}</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Net P&amp;L</div>
@@ -1034,54 +1034,54 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     const wrCol   = recentWr === null ? "#94a3b8" : recentWr >= 40 ? "#059669" : recentWr >= 30 ? "#d97706" : "#dc2626";
 
     return `
-  <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:16px 20px;margin-bottom:20px">
-    <div style="font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">⚙️ Adaptivni Status</div>
+  <div style="background:#1f2937;border:1px solid #374151;border-radius:12px;padding:16px 20px;margin-bottom:20px">
+    <div style="font-size:11px;color:#9ca3af;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">⚙️ Adaptivni Status</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
 
       <!-- Dinamički ADX -->
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">📊 Dinamički ADX</div>
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">📊 Dinamički ADX</div>
         <div style="font-size:22px;font-weight:800;color:${adxCol}">${dynAdxVal}</div>
         <div style="font-size:11px;color:${adxCol};margin-top:2px">${adxLbl}</div>
-        <div style="font-size:11px;color:#64748b;margin-top:4px">
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px">
           ${recentWr !== null ? `Zadnjih ${recentN}: WR <b style="color:${wrCol}">${recentWr}%</b>` : "Premalo podataka"}
         </div>
       </div>
 
       <!-- Market Regime -->
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px" id="regime-card">
-        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">🌍 BTC 4H Regime</div>
-        <div style="font-size:22px;font-weight:800;color:#64748b" id="regime-val">…</div>
-        <div style="font-size:11px;color:#64748b;margin-top:2px" id="regime-sub">učitavam…</div>
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px" id="regime-card">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">🌍 BTC 4H Regime</div>
+        <div style="font-size:22px;font-weight:800;color:#9ca3af" id="regime-val">…</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:2px" id="regime-sub">učitavam…</div>
       </div>
 
       <!-- Blacklist -->
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">🚫 Symbol Blacklist</div>
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">🚫 Symbol Blacklist</div>
         ${blActive.length === 0
           ? `<div style="font-size:13px;color:#059669">Svi simboli aktivni</div>`
           : blActive.map(([sym,v]) => {
               const remainH = ((v.until - Date.now())/3600000).toFixed(1);
               return `<div style="font-size:12px;color:#dc2626;margin-bottom:3px">
                 <b>${sym}</b> — još ${remainH}h
-                <span style="color:#64748b;font-size:10px">(${v.reason})</span>
+                <span style="color:#9ca3af;font-size:10px">(${v.reason})</span>
               </div>`;
             }).join("")
         }
-        <div style="font-size:10px;color:#64748b;margin-top:6px">Trigger: 3 uzastopna SL → 24h ban</div>
+        <div style="font-size:10px;color:#9ca3af;margin-top:6px">Trigger: 3 uzastopna SL → 24h ban</div>
       </div>
 
       <!-- Signal Analiza -->
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">📈 Signal WR (top 6)</div>
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">📈 Signal WR (top 6)</div>
         ${ssRows.length === 0
-          ? `<div style="font-size:12px;color:#64748b">Nema dovoljno podataka (treba 3+ trejdova)</div>`
+          ? `<div style="font-size:12px;color:#9ca3af">Nema dovoljno podataka (treba 3+ trejdova)</div>`
           : ssRows.slice(0,6).map(r => {
               const col = r.wr >= 40 ? "#059669" : r.wr >= 30 ? "#d97706" : "#dc2626";
               const bar = Math.round(r.wr/10);
               return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;font-size:11px">
-                <span style="color:#64748b;width:38px;font-family:monospace">${r.name}</span>
-                <div style="flex:1;background:#e2e8f0;border-radius:2px;height:6px">
+                <span style="color:#9ca3af;width:38px;font-family:monospace">${r.name}</span>
+                <div style="flex:1;background:#374151;border-radius:2px;height:6px">
                   <div style="width:${r.wr}%;background:${col};height:6px;border-radius:2px"></div>
                 </div>
                 <span style="color:${col};width:30px;text-align:right">${r.wr}%</span>
@@ -1096,119 +1096,119 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   })()}
 
   <!-- Market Intelligence Panel -->
-  <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:16px 20px;margin-bottom:20px" id="market-intel-panel">
-    <div style="font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">🧠 Market Intelligence</div>
+  <div style="background:#1f2937;border:1px solid #374151;border-radius:12px;padding:16px 20px;margin-bottom:20px" id="market-intel-panel">
+    <div style="font-size:11px;color:#9ca3af;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">🧠 Market Intelligence</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px" id="intel-grid">
       <!-- Circuit Breaker -->
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase">🛑 Circuit Breaker</div>
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">🛑 Circuit Breaker</div>
         <div style="font-size:18px;font-weight:800;color:#d97706" id="cb-count">…/7</div>
-        <div style="background:#e2e8f0;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
+        <div style="background:#374151;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
           <div id="cb-bar" style="height:100%;border-radius:4px;background:#00c48c;transition:width .5s,background .5s;width:0%"></div>
         </div>
-        <div style="font-size:11px;color:#64748b" id="cb-sub">učitavam…</div>
+        <div style="font-size:11px;color:#9ca3af" id="cb-sub">učitavam…</div>
       </div>
 
       <!-- Daily P&L Budget -->
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase">💰 Dnevni P&L Budget</div>
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">💰 Dnevni P&L Budget</div>
         <div style="font-size:18px;font-weight:800" id="daily-pnl-val">…</div>
-        <div style="background:#e2e8f0;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
+        <div style="background:#374151;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
           <div id="daily-pnl-bar" style="height:100%;border-radius:4px;background:#00c48c;transition:width .5s,background .5s;width:0%"></div>
         </div>
-        <div style="font-size:11px;color:#64748b" id="daily-pnl-sub">Max: $20 dnevni gubitak</div>
+        <div style="font-size:11px;color:#9ca3af" id="daily-pnl-sub">Max: $20 dnevni gubitak</div>
       </div>
 
       <!-- Funding Rate -->
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase">💸 Funding Rate</div>
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">💸 Funding Rate</div>
         <div style="font-size:14px;font-weight:700" id="fr-val">…</div>
-        <div style="font-size:11px;color:#64748b;margin-top:4px" id="fr-sub">&gt;0.05% = LONG blokiran</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="fr-sub">&gt;0.05% = LONG blokiran</div>
       </div>
 
       <!-- Fear & Greed -->
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase">😱 Fear & Greed</div>
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">😱 Fear & Greed</div>
         <div style="font-size:22px;font-weight:800" id="fg-val">…</div>
         <div style="font-size:11px;margin-top:2px" id="fg-label">…</div>
-        <div style="font-size:10px;color:#64748b;margin-top:4px">&lt;20=Extreme Fear, &gt;80=Greed</div>
+        <div style="font-size:10px;color:#9ca3af;margin-top:4px">&lt;20=Extreme Fear, &gt;80=Greed</div>
       </div>
 
       <!-- BTC Dominance -->
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase">₿ BTC Dominance</div>
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">₿ BTC Dominance</div>
         <div style="font-size:22px;font-weight:800;color:#d97706" id="dom-val">…</div>
-        <div style="font-size:11px;color:#64748b;margin-top:2px" id="dom-sub">Raste = altovi slabe</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:2px" id="dom-sub">Raste = altovi slabe</div>
       </div>
 
       <!-- DXY -->
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase">💵 DXY (4H promjena)</div>
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">💵 DXY (4H promjena)</div>
         <div style="font-size:22px;font-weight:800" id="dxy-val">…</div>
-        <div style="font-size:11px;color:#64748b;margin-top:2px" id="dxy-sub">&gt;+0.3% = LONG risk</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:2px" id="dxy-sub">&gt;+0.3% = LONG risk</div>
       </div>
 
       <!-- Session Filter -->
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase">🕐 Trading Sesija</div>
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">🕐 Trading Sesija</div>
         <div style="font-size:16px;font-weight:800" id="session-val">…</div>
-        <div style="font-size:11px;color:#64748b;margin-top:4px" id="session-sub">01-06 UTC = dead zone blokiran</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="session-sub">01-06 UTC = dead zone blokiran</div>
       </div>
 
       <!-- ATR Trend -->
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase">📊 ATR Volatilnost (BTC 15m)</div>
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">📊 ATR Volatilnost (BTC 15m)</div>
         <div style="font-size:16px;font-weight:800" id="atr-trend-val">…</div>
-        <div style="font-size:11px;color:#64748b;margin-top:4px" id="atr-trend-sub">EXPANDING = size ×0.7</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="atr-trend-sub">EXPANDING = size ×0.7</div>
       </div>
 
       <!-- SP500 -->
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase">📉 S&P500 (4H)</div>
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">📉 S&P500 (4H)</div>
         <div style="font-size:18px;font-weight:800" id="sp500-val">…</div>
-        <div style="font-size:11px;color:#64748b;margin-top:4px" id="sp500-sub">&lt;-1% = RISK OFF → blokira LONG</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="sp500-sub">&lt;-1% = RISK OFF → blokira LONG</div>
       </div>
 
       <!-- Korelacijska matrica -->
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;grid-column:span 2">
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px;grid-column:span 2">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-          <div style="font-size:10px;color:#64748b;text-transform:uppercase">🔗 Korelacijska matrica (1H)</div>
-          <button onclick="document.getElementById('corr-heatmap').style.display=document.getElementById('corr-heatmap').style.display==='none'?'block':'none'" style="background:none;border:1px solid #cbd5e1;color:#64748b;border-radius:4px;padding:2px 8px;font-size:10px;cursor:pointer">toggle</button>
+          <div style="font-size:10px;color:#9ca3af;text-transform:uppercase">🔗 Korelacijska matrica (1H)</div>
+          <button onclick="document.getElementById('corr-heatmap').style.display=document.getElementById('corr-heatmap').style.display==='none'?'block':'none'" style="background:none;border:1px solid #cbd5e1;color:#9ca3af;border-radius:4px;padding:2px 8px;font-size:10px;cursor:pointer">toggle</button>
         </div>
         <div style="font-size:18px;font-weight:800" id="corr-val">…</div>
-        <div style="font-size:11px;color:#64748b;margin-top:4px" id="corr-sub">&gt;0.85 = visok zajednički rizik</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="corr-sub">&gt;0.85 = visok zajednički rizik</div>
         <div id="corr-heatmap" style="display:none;margin-top:10px;overflow-x:auto"></div>
       </div>
 
       <!-- Deribit Put/Call -->
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase">🎯 Put/Call Ratio (Deribit)</div>
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">🎯 Put/Call Ratio (Deribit)</div>
         <div style="font-size:16px;font-weight:800" id="pc-val">…</div>
-        <div style="font-size:11px;color:#64748b;margin-top:4px" id="pc-sub">&gt;1.5=Fear · &lt;0.5=Greed</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="pc-sub">&gt;1.5=Fear · &lt;0.5=Greed</div>
       </div>
 
       <!-- Liquidation Risk -->
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase">💥 Liquidation Risk</div>
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">💥 Liquidation Risk</div>
         <div style="font-size:16px;font-weight:800" id="liq-val">…</div>
-        <div style="background:#e2e8f0;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
+        <div style="background:#374151;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
           <div id="liq-bar" style="height:100%;border-radius:4px;background:#00c48c;transition:width .5s,background .5s;width:0%"></div>
         </div>
-        <div style="font-size:11px;color:#64748b" id="liq-sub">Funding + OI analiza</div>
+        <div style="font-size:11px;color:#9ca3af" id="liq-sub">Funding + OI analiza</div>
       </div>
 
       <!-- Ekonomski kalendar -->
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;grid-column:span 2">
-        <div style="font-size:10px;color:#64748b;margin-bottom:6px;text-transform:uppercase">📅 Ekonomski kalendar (HIGH impact USD)</div>
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px;grid-column:span 2">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">📅 Ekonomski kalendar (HIGH impact USD)</div>
         <div style="font-size:16px;font-weight:800" id="econ-val">…</div>
-        <div style="font-size:11px;color:#64748b;margin-top:4px" id="econ-sub">FOMC · CPI · NFP · ±15min blokada</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="econ-sub">FOMC · CPI · NFP · ±15min blokada</div>
         <div id="econ-list" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px"></div>
       </div>
     </div>
 
     <!-- Per-Symbol WR Table -->
     <div style="margin-top:16px">
-      <div style="font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px">📊 Per-Simbol Win Rate</div>
+      <div style="font-size:11px;color:#9ca3af;font-weight:700;text-transform:uppercase;margin-bottom:8px">📊 Per-Simbol Win Rate</div>
       <div id="sym-wr-table" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px"></div>
     </div>
   </div>
@@ -1227,11 +1227,11 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       const col = p.pnl > 0 ? "#059669" : p.pnl < 0 ? "#dc2626" : "#94a3b8";
       const icon = p.pnl > 0 ? "▲" : p.pnl < 0 ? "▼" : "—";
       const pct = def.startCapital > 0 ? (p.pnl / def.startCapital * 100).toFixed(2) : "0.00";
-      return `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 18px">
-        <div style="font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">${p.label}</div>
+      return `<div style="background:#2d3748;border:1px solid #374151;border-radius:10px;padding:14px 18px">
+        <div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">${p.label}</div>
         <div style="font-size:22px;font-weight:800;color:${col}">${p.pnl >= 0 ? "+" : ""}$${p.pnl.toFixed(2)}</div>
         <div style="font-size:12px;color:${col};margin-top:2px">${icon} ${p.pnl >= 0 ? "+" : ""}${pct}%</div>
-        <div style="font-size:11px;color:#64748b;margin-top:4px">${p.trades} zatvorenih</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px">${p.trades} zatvorenih</div>
       </div>`;
     }).join("")}
   </div>`;
@@ -1251,7 +1251,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div style="font-size:12px;color:var(--text-muted)">
           E50 · RSI · E55 · CHP · CVD · R⟳ · MCD · E145 · VOL · MCC · RSI↗ · SRS · SRB
           &nbsp;|&nbsp; 🟡 Čeka breakout &nbsp; 🟢 Signal &nbsp; Cache 90s &nbsp;|&nbsp;
-          <button onclick="toggleLegend()" style="background:none;border:1px solid #30363d;border-radius:4px;color:#64748b;font-size:11px;cursor:pointer;padding:2px 8px">📖 Legenda signala</button>
+          <button onclick="toggleLegend()" style="background:none;border:1px solid #30363d;border-radius:4px;color:#9ca3af;font-size:11px;cursor:pointer;padding:2px 8px">📖 Legenda signala</button>
         </div>
       </div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -1268,8 +1268,8 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <th style="width:28px">#</th>
             <th>Symbol</th>
             <th>Cijena</th>
-            <th style="color:#64748b">RSI</th>
-            <th style="color:#64748b">ADX</th>
+            <th style="color:#9ca3af">RSI</th>
+            <th style="color:#9ca3af">ADX</th>
             <th style="color:#d97706;text-align:center">1H</th>
             <th style="color:#d97706;text-align:center;white-space:nowrap">Obavezni <span style="font-weight:400;font-size:10px;color:#94a3b8">ADX≥30 · 6Sc · RSI</span> <span style="font-weight:400;font-size:10px;color:#94a3b8">· 5mSR(info)</span></th>
             <th style="color:#db2777;text-align:center">13 Signala &nbsp;<span style="font-weight:400;font-size:10px;color:#94a3b8">E50 · RSI · E55 · CHP · CVD · R⟳ · MCD · E145 · VOL · MCC · RSI↗ · SRS · SRB</span></th>
@@ -1309,9 +1309,9 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
           ['SRS', '▲ Bounce od S/R supporta (unutar 1.2%) + RSI raste  |  ▼ bounce od resistancea + RSI pada  |  · daleko od S/R'],
           ['SRB', '▲ Proboj S/R resistancea gore (zadnja 3 bara)  |  ▼ proboj supporta dolje  |  · bez proboja'],
         ].map(([k,v]) =>
-          '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px">' +
+          '<div style="background:#2d3748;border:1px solid #374151;border-radius:6px;padding:8px 10px">' +
           '<span style="font-weight:800;color:#db2777;font-size:11px;display:inline-block;min-width:36px">' + k + '</span>' +
-          '<span style="color:#64748b">' + v + '</span></div>'
+          '<span style="color:#9ca3af">' + v + '</span></div>'
         ).join('')}
       </div>
       <div style="margin-top:10px;font-size:11px;color:#94a3b8">
@@ -1412,7 +1412,7 @@ function synapse7Html(s) {
     ? '<span style="color:#059669;font-weight:700">↑'+bull+'/5</span>'
     : bear > bull
     ? '<span style="color:#dc2626;font-weight:700">↓'+bear+'/5</span>'
-    : '<span style="color:#64748b">'+Math.max(bull,bear)+'/5</span>';
+    : '<span style="color:#9ca3af">'+Math.max(bull,bear)+'/5</span>';
 
   const sigPart = sig==="LONG"   ? ' <span class="sig-long">▲</span>'
                 : sig==="SHORT"  ? ' <span class="sig-short">▼</span>'
@@ -1444,7 +1444,7 @@ function ultraHtml(s) {
     ? '<span style="color:#059669;font-weight:700">↑'+bull+'/13</span>'
     : bear > bull
     ? '<span style="color:#dc2626;font-weight:700">↓'+bear+'/13</span>'
-    : '<span style="color:#64748b">'+Math.max(bull,bear)+'/13</span>';
+    : '<span style="color:#9ca3af">'+Math.max(bull,bear)+'/13</span>';
 
   const sigPart = sig==="LONG"   ? ' <span class="sig-long">▲ LONG</span>'
                 : sig==="SHORT"  ? ' <span class="sig-short">▼ SHORT</span>'
@@ -1670,14 +1670,14 @@ function statusBox(s) {
     return '<div style="background:rgba(5,150,105,0.1);border:1px solid #059669;border-radius:8px;padding:8px 10px">' +
       '<div style="font-size:11px;color:#059669;font-weight:700;margin-bottom:4px">✅ SIGNAL AKTIVIRAN</div>' +
       '<div style="font-size:13px;font-weight:700;color:#059669">▲ LONG</div>' +
-      '<div style="font-size:11px;color:#64748b;margin-top:3px">Ulaz odmah @ <b style="color:#0f172a">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBull||0) + '/13</b></div>' +
+      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Ulaz odmah @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBull||0) + '/13</b></div>' +
       '</div>';
   }
   if (sig === "SHORT") {
     return '<div style="background:rgba(220,38,38,0.1);border:1px solid #dc2626;border-radius:8px;padding:8px 10px">' +
       '<div style="font-size:11px;color:#dc2626;font-weight:700;margin-bottom:4px">✅ SIGNAL AKTIVIRAN</div>' +
       '<div style="font-size:13px;font-weight:700;color:#dc2626">▼ SHORT</div>' +
-      '<div style="font-size:11px;color:#64748b;margin-top:3px">Ulaz odmah @ <b style="color:#0f172a">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBear||0) + '/13</b></div>' +
+      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Ulaz odmah @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBear||0) + '/13</b></div>' +
       '</div>';
   }
   if (sig === "SETUP↑") return '<span style="color:#d97706;font-size:12px">◈ SETUP ↑ &nbsp;<span style="color:#94a3b8;font-size:11px">(' + (s.ultraBull||0) + '/13)</span></span>';
@@ -1691,7 +1691,7 @@ function statusBox(s) {
     if (rsiNum > 70) {
       return '<div style="background:rgba(220,38,38,0.06);border:1px solid #dc262650;border-radius:8px;padding:6px 10px">' +
         '<div style="font-size:11px;color:#dc2626;font-weight:700">⚠️ WATCH SHORT</div>' +
-        '<div style="font-size:11px;color:#64748b;margin-top:2px">RSI <b style="color:#dc2626">' + s.rsi + '</b> + ADX <b style="color:#dc2626">' + s.adx + '</b> — overextended, moguć vrh</div>' +
+        '<div style="font-size:11px;color:#9ca3af;margin-top:2px">RSI <b style="color:#dc2626">' + s.rsi + '</b> + ADX <b style="color:#dc2626">' + s.adx + '</b> — overextended, moguć vrh</div>' +
         '<div style="font-size:10px;color:#94a3b8;margin-top:2px">Bull: ' + (s.ultraBull||0) + ' · Bear: ' + (s.ultraBear||0) + ' · Treba 12+ za SHORT</div>' +
         '</div>';
     }
@@ -1699,7 +1699,7 @@ function statusBox(s) {
     if (rsiNum < 30) {
       return '<div style="background:rgba(5,150,105,0.06);border:1px solid #05966950;border-radius:8px;padding:6px 10px">' +
         '<div style="font-size:11px;color:#059669;font-weight:700">⚠️ WATCH LONG</div>' +
-        '<div style="font-size:11px;color:#64748b;margin-top:2px">RSI <b style="color:#059669">' + s.rsi + '</b> + ADX <b style="color:#059669">' + s.adx + '</b> — overextended, moguć bounce</div>' +
+        '<div style="font-size:11px;color:#9ca3af;margin-top:2px">RSI <b style="color:#059669">' + s.rsi + '</b> + ADX <b style="color:#059669">' + s.adx + '</b> — overextended, moguć bounce</div>' +
         '<div style="font-size:10px;color:#94a3b8;margin-top:2px">Bull: ' + (s.ultraBull||0) + ' · Bear: ' + (s.ultraBear||0) + ' · Treba 12+ za LONG</div>' +
         '</div>';
     }
@@ -1787,7 +1787,7 @@ async function doScan() {
   const tbody = document.getElementById("scan-tbody");
   btn.disabled = true;
   btn.innerHTML = '<span class="spin">⟳</span> Skenira...';
-  tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:32px;color:#64748b"><span class="spin" style="font-size:20px">⟳</span><br>Fetcham ${ALL_SYMBOLS.length} simbola na 15m+1H TF...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:32px;color:#9ca3af"><span class="spin" style="font-size:20px">⟳</span><br>Fetcham ${ALL_SYMBOLS.length} simbola na 15m+1H TF...</td></tr>';
 
   try {
     const r = await fetch("/api/scan");
@@ -2023,13 +2023,13 @@ async function loadMarketContext() {
         // Header row
         html += '<div style="display:flex;margin-left:' + (cell+2) + 'px">';
         for (var j=0; j<n; j++) {
-          html += '<div style="width:' + cell + 'px;text-align:center;color:#64748b;overflow:hidden;white-space:nowrap;font-size:8px">' + syms[j] + '</div>';
+          html += '<div style="width:' + cell + 'px;text-align:center;color:#9ca3af;overflow:hidden;white-space:nowrap;font-size:8px">' + syms[j] + '</div>';
         }
         html += '</div>';
         // Data rows
         for (var i=0; i<n; i++) {
           html += '<div style="display:flex;align-items:center">';
-          html += '<div style="width:' + cell + 'px;text-align:right;padding-right:4px;color:#64748b;font-size:8px;white-space:nowrap">' + syms[i] + '</div>';
+          html += '<div style="width:' + cell + 'px;text-align:right;padding-right:4px;color:#9ca3af;font-size:8px;white-space:nowrap">' + syms[i] + '</div>';
           for (var j2=0; j2<n; j2++) {
             var v = c.matrix[i] ? (c.matrix[i][j2] !== undefined ? c.matrix[i][j2] : 0) : 0;
             var bg = corrColor2(v);
@@ -2040,7 +2040,7 @@ async function loadMarketContext() {
           html += '</div>';
         }
         // Legend
-        html += '<div style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:9px;color:#64748b">';
+        html += '<div style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:9px;color:#9ca3af">';
         html += '<span>Korelacija:</span>';
         var legend = [['#388bfd','<0'],['#21262d','0–0.25'],['#94a3b8','0.25–0.5'],['#d97706','0.5–0.75'],['#f7913a','0.75–0.9'],['#dc2626','>0.9']];
         for (var l=0; l<legend.length; l++) {
@@ -2148,7 +2148,7 @@ async function loadMarketContext() {
       document.getElementById('sym-wr-table').innerHTML = symEntries.map(function(e) {
         const color = e.wr >= 50 ? '#059669' : e.wr >= 35 ? '#d97706' : '#dc2626';
         const bar = Math.round(e.wr);
-        return '<div style="background:#f1f5f9;border-radius:6px;padding:8px 10px">' +
+        return '<div style="background:#2d3748;border-radius:6px;padding:8px 10px">' +
           '<div style="display:flex;justify-content:space-between;margin-bottom:4px">' +
           '<span style="font-size:12px;font-weight:700">' + e.sym.replace('USDT','') + '</span>' +
           '<span style="font-size:12px;color:' + color + ';font-weight:700">' + e.wr.toFixed(0) + '%</span>' +
@@ -2156,11 +2156,11 @@ async function loadMarketContext() {
           '<div style="background:#30363d;border-radius:2px;height:4px;overflow:hidden">' +
           '<div style="width:' + bar + '%;height:100%;background:' + color + ';border-radius:2px"></div>' +
           '</div>' +
-          '<div style="font-size:10px;color:#64748b;margin-top:3px">N=' + e.total + '</div>' +
+          '<div style="font-size:10px;color:#9ca3af;margin-top:3px">N=' + e.total + '</div>' +
           '</div>';
       }).join('');
     } else {
-      document.getElementById('sym-wr-table').innerHTML = '<div style="font-size:12px;color:#64748b">Nema dovoljno podataka (treba 2+ tradova po simbolu)</div>';
+      document.getElementById('sym-wr-table').innerHTML = '<div style="font-size:12px;color:#9ca3af">Nema dovoljno podataka (treba 2+ tradova po simbolu)</div>';
     }
 
   } catch(e) { console.error('market-context error:', e); }

@@ -1202,7 +1202,7 @@ function analyzeUltra(candles, cfg) {
   }
 
   // ── 13 signala: +1 = bullish, -1 = bearish, 0 = neutral ──
-  // OBAVEZNI GATING (ne broje se u signale): ADX≥25, 6Sc≥4, RSI asimetričan, 5m S/R test
+  // OBAVEZNI GATING (ne broje se u signale): ADX≥dynamic, 6Sc≥4, RSI asimetričan | 5mSR informativan
   // Maknuti: CRS (WR 14%), ADXsn (obavezan), 6Sc (obavezan)
   // REVERSANI (WR<31.5% kada ▲ → logika invertirana):
   //   E50, RSI zona, E55, CVD, VOL, MCC — contrarian/pullback interpretacija
@@ -1226,7 +1226,7 @@ function analyzeUltra(candles, cfg) {
   const bullCnt = sigs.filter(s => s === 1).length;
   const bearCnt = sigs.filter(s => s === -1).length;
 
-  // ══ 4 OBAVEZNA UVJETA — sva 4 moraju biti zadovoljena ══════════════════════
+  // ══ 3 OBAVEZNA UVJETA — sva 3 moraju biti zadovoljena (5mSR je informativan) ══
 
   // 1. ADX ≥ effectiveAdx — tržište mora biti u jasnom trendu (dinamički prag)
   if (adx < effectiveAdx) {
@@ -1254,11 +1254,11 @@ function analyzeUltra(candles, cfg) {
     // Bitmask aktivnih BULL signala za signal analizu
     const sigMask = sigs.reduce((mask, v, i) => v === 1 ? mask | (1 << i) : mask, 0);
     return { price, signal: "LONG",  bullScore: bullCnt, bearScore: bearCnt, sigMask,
-      reason: `ULTRA LONG ↑${bullCnt}/13 | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ 6Sc:${scaleUp}/6✓ RSI:${rsi.toFixed(0)}<72✓ [4ob+${MIN_CONFIRM}]` };
+      reason: `ULTRA LONG ↑${bullCnt}/13 | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ 6Sc:${scaleUp}/6✓ RSI:${rsi.toFixed(0)}<72✓ [3ob+${MIN_CONFIRM}]` };
   }
   if (!LONG_ONLY && bearCnt >= MIN_CONFIRM && scaleOkShort && rsiShortOk) {
     return { price, signal: "SHORT", bullScore: bullCnt, bearScore: bearCnt,
-      reason: `ULTRA SHORT ↓${bearCnt}/13 | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ 6Sc:${scaleDn}/6✓ RSI:${rsi.toFixed(0)}>30✓ [4ob+${MIN_CONFIRM}]` };
+      reason: `ULTRA SHORT ↓${bearCnt}/13 | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ 6Sc:${scaleDn}/6✓ RSI:${rsi.toFixed(0)}>30✓ [3ob+${MIN_CONFIRM}]` };
   }
   if (LONG_ONLY && bearCnt >= MIN_CONFIRM && scaleOkShort && rsiShortOk) {
     return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
@@ -1352,14 +1352,10 @@ async function analyzeUltraPullback(symbol, candles, cfg) {
   const result = analyzeUltra(candles, cfg);
 
   if (result.signal === "LONG" || result.signal === "SHORT") {
-    // 4. obavezni uvjet: 5m S/R test u suprotnom smjeru
-    const srOk = await check5mSRTest(symbol, result.signal);
-    if (!srOk) {
-      console.log(`  ⛔ [ULTRA] ${symbol} ${result.signal} — 4. uvjet FAIL: nema 5m S/R testa`);
-      return { ...result, signal: "NEUTRAL",
-        reason: `${result.reason} | 5m SR test✗` };
-    }
-    console.log(`  ✅ [ULTRA] ${symbol} ${result.signal} @ ${fmtPrice(price)} — sva 4 uvjeta OK (${result.bullScore ?? 0}↑/${result.bearScore ?? 0}↓ | 5m SR✓)`);
+    // 5m S/R test — informativan, NE blokira ulaz
+    const srOk = await check5mSRTest(symbol, result.signal).catch(() => null);
+    const srLabel = srOk === true ? "5mSR✓" : srOk === false ? "5mSR✗(info)" : "5mSR?";
+    console.log(`  ✅ [ULTRA] ${symbol} ${result.signal} @ ${fmtPrice(price)} — 3 uvjeta OK (${result.bullScore ?? 0}↑/${result.bearScore ?? 0}↓ | ${srLabel})`);
   }
 
   return result;

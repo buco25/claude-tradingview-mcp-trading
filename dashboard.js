@@ -361,7 +361,7 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
   }
 
   // ── ULTRA — 13 signala (identično bot.js analyzeUltra) ──
-  // OBAVEZNI GATING: ADX≥25, 6Sc≥4, RSI asimetričan, 5m S/R test
+  // OBAVEZNI GATING: ADX≥30, 6Sc≥4, RSI asimetričan (5mSR informativan, ne blokira)
   // Maknuti iz signala: CRS (WR 14%), ADXsn (obavezan), 6Sc (obavezan), EMA smjer (nije obavezan)
   let ultraSig = "—";
   let ultraBull = 0, ultraBear = 0;
@@ -394,7 +394,7 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
       ultraBull = ultraSigs16.filter(s => s === 1).length;
       ultraBear = ultraSigs16.filter(s => s === -1).length;
 
-      // 4 obavezna gating uvjeta: ADX≥30, 6Sc≥4, RSI asimetričan, 5mSR (bot only)
+      // 3 obavezna gating uvjeta: ADX≥30, 6Sc≥4, RSI asimetričan (5mSR informativan)
       const adxOk       = adxV >= 30;
       const scaleOkLong  = scaleUp >= 4;
       const scaleOkShort = scaleDn >= 4;
@@ -902,7 +902,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="logo">🎯</div>
       <div>
         <div class="title">ULTRA Trading Bot</div>
-        <div class="subtitle">ADX≥30 (din.) · 6Sc · RSI · 5mSR · LONG_ONLY · min 7/13 · BTC regime · 4h cooldown · blacklist · ${tf} · 50x · rizik 1%</div>
+        <div class="subtitle">ADX≥30 (din.) · 6Sc · RSI · LONG_ONLY · min 7/13 · BTC regime · 4h cooldown · blacklist · ${tf} · 50x · rizik 1%</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -1169,7 +1169,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <th>Cijena</th>
             <th style="color:#8b949e">RSI</th>
             <th style="color:#8b949e">ADX</th>
-            <th style="color:#f7b731;text-align:center;white-space:nowrap">Obavezni <span style="font-weight:400;font-size:10px;color:#666">ADX≥30 · 6Sc · RSI · 5mSR</span></th>
+            <th style="color:#f7b731;text-align:center;white-space:nowrap">Obavezni <span style="font-weight:400;font-size:10px;color:#666">ADX≥30 · 6Sc · RSI</span> <span style="font-weight:400;font-size:10px;color:#555">· 5mSR(info)</span></th>
             <th style="color:#e85d9a;text-align:center">13 Signala &nbsp;<span style="font-weight:400;font-size:10px;color:#666">E50 · RSI · E55 · CHP · CVD · R⟳ · MCD · E145 · VOL · MCC · RSI↗ · SRS · SRB</span></th>
             <th style="color:#e85d9a;text-align:center">Score</th>
             <th style="min-width:260px">Status / Breakout</th>
@@ -1463,14 +1463,14 @@ function mandatoryBoxes(s) {
     ? (rsiShortOk ? ' > 30 ✓ (nije oversold)' : ' ≤ 30 ✗ — oversold, blokiran SHORT')
     : (rsiLongOk  ? ' < 72 ✓ (nije overbought)' : ' ≥ 72 ✗ — overbought, blokiran LONG'));
 
-  // 4. 5m S/R test — srOk: true=prošao, false=pao, null=nije provjeravano
+  // 4. 5m S/R test — informativan, NE blokira ulaz
   const srOk  = s.srOk;
-  const srCol = srOk === true ? '#00c48c' : srOk === false ? '#ff4d4d' : '#8b949e';
-  const srBg  = srOk === true ? '#0d3d26' : srOk === false ? '#3d0d0d' : '#1c2128';
-  const srTip = srOk === true  ? '5m S/R test ✓ — cijena je testirala S/R zonu i odbila se u smjeru signala' :
-                srOk === false ? '5m S/R test ✗ — nema potvrde S/R zona na 5m — ulaz blokiran' :
-                                 '5m S/R test: provjerava se samo za LONG/SHORT signale';
-  const srLbl = srOk === true ? '5mSR ✓' : srOk === false ? '5mSR ✗' : '5mSR';
+  const srCol = srOk === true ? '#00c48c' : srOk === false ? '#f7b731' : '#8b949e';
+  const srBg  = srOk === true ? '#0d3d26' : srOk === false ? '#3d2a00' : '#1c2128';
+  const srTip = srOk === true  ? '5m S/R test ✓ — cijena testirala S/R zonu (informativno, ne blokira)' :
+                srOk === false ? '5m S/R test — nema S/R potvrde (informativno, ulaz i dalje moguć)' :
+                                 '5m S/R test: provjerava se samo za LONG/SHORT signale (informativno)';
+  const srLbl = srOk === true ? '5mSR✓' : srOk === false ? '5mSR·' : '5mSR';
 
   function badge(label, col, bg, tip) {
     return '<span title="' + tip + '" style="display:inline-flex;flex-direction:column;align-items:center;background:' + bg +

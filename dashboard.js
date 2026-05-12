@@ -2351,7 +2351,7 @@ const server = http.createServer(async (req, res) => {
       const { closeBitGetOrder, loadPositions, savePositions, writeExitCsv } = await import("./bot.js");
       const positions = loadPositions(pid);
       const pos = positions.find(p => p.symbol === symbol);
-      if (!pos) throw new Error(`Pozicija ${symbol} nije pronađena`);
+      if (!pos) throw new Error(`Pozicija ${symbol} nije pronađena u trackingu`);
 
       // Dohvati live cijenu
       let exitPrice = pos.entryPrice;
@@ -2365,14 +2365,26 @@ const server = http.createServer(async (req, res) => {
         ? (exitPrice - pos.entryPrice) * qty
         : (pos.entryPrice - exitPrice) * qty;
 
-      await closeBitGetOrder(pos);
+      // Pokušaj zatvoriti na Bitgetu — ako već zatvoreno (SL/TP okidan), svejedno cleanup
+      let bitgetNote = "Ručno zatvoreno (dashboard)";
+      try {
+        await closeBitGetOrder(pos);
+      } catch (bitgetErr) {
+        const msg = bitgetErr.message || "";
+        const alreadyClosed = msg.includes("no position") || msg.includes("Position does not exist")
+          || msg.includes("order not exist") || msg.includes("43025") || msg.includes("43012");
+        if (!alreadyClosed) throw bitgetErr;  // pravi API error — propagiraj
+        bitgetNote = "Zatvoreno na Bitgetu (SL/TP) — cleanup trackinga";
+        console.log(`  ℹ️  [CLOSE] ${symbol} — Bitget: "${msg}" → cleanup lokalne pozicije`);
+      }
 
+      // Uvijek ukloni iz trackinga i zabilježi u CSV
       const remaining = loadPositions(pid).filter(p => !(p.symbol === pos.symbol && p.side === pos.side));
       savePositions(pid, remaining);
-      writeExitCsv(pid, pos, exitPrice, "Ručno zatvoreno (dashboard)", pnl);
+      writeExitCsv(pid, pos, exitPrice, bitgetNote, pnl);
 
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, symbol, side: pos.side, exitPrice, pnl: pnl.toFixed(4) }));
+      res.end(JSON.stringify({ ok: true, symbol, side: pos.side, exitPrice, pnl: pnl.toFixed(4), note: bitgetNote }));
     } catch(e) {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: e.message }));

@@ -225,6 +225,95 @@ function checkVolumeAnomaly(candles) {
   };
 }
 
+// ─── Deribit Put/Call Ratio ───────────────────────────────────────────────────
+// P/C > 1.5 = tržište kupuje zaštitu od pada (strah) = potencijalni bottom
+// P/C < 0.5 = previše calls = euforija = potencijalni vrh
+let _pcCache = { btc: null, eth: null, ts: 0 };
+const PC_TTL = 30 * 60 * 1000;
+
+async function _fetchDeribitPC(currency) {
+  const url = `https://www.deribit.com/api/v2/public/get_book_summary_by_currency?currency=${currency}&kind=option`;
+  const d = await fetch(url, { signal: AbortSignal.timeout(8000) }).then(r => r.json());
+  const opts = d?.result ?? [];
+  let callOI = 0, putOI = 0;
+  for (const o of opts) {
+    if (!o.open_interest) continue;
+    if (o.instrument_name.endsWith('-C')) callOI += o.open_interest;
+    else if (o.instrument_name.endsWith('-P')) putOI  += o.open_interest;
+  }
+  const ratio = callOI > 0 ? parseFloat((putOI / callOI).toFixed(3)) : null;
+  const sentiment = ratio === null ? 'N/A'
+    : ratio > 1.5 ? 'FEAR'       // puno puta = zaštita od pada
+    : ratio > 1.0 ? 'BEARISH'
+    : ratio > 0.7 ? 'NEUTRAL'
+    : ratio > 0.5 ? 'BULLISH'
+    : 'GREED';                    // malo puta = euforija
+  return { ratio, callOI: Math.round(callOI), putOI: Math.round(putOI), sentiment };
+}
+
+export async function getDeribitPutCall() {
+  if (_pcCache.btc !== null && Date.now() - _pcCache.ts < PC_TTL) return _pcCache;
+  try {
+    const [btc, eth] = await Promise.all([_fetchDeribitPC('BTC'), _fetchDeribitPC('ETH')]);
+    _pcCache = { btc, eth, ts: Date.now() };
+    return _pcCache;
+  } catch(e) {
+    console.log(`  ⚠️  [DERIBIT P/C] ${e.message}`);
+    return _pcCache;
+  }
+}
+
+// ─── Liquidation Risk Score ───────────────────────────────────────────────────
+// Bez vanjskog API — procjena iz funding rate + OI promjene + price action
+// Score 0-100: >70 = visok rizik likvidacija (kaskadni padovi mogući)
+let _liqCache = { scores: {}, overall: null, ts: 0 };
+const LIQ_TTL = 10 * 60 * 1000;
+
+export async function getLiquidationRisk(symbols) {
+  if (_liqCache.overall !== null && Date.now() - _liqCache.ts < LIQ_TTL) return _liqCache;
+  try {
+    const scores = {};
+    let totalScore = 0, count = 0;
+
+    await Promise.all(symbols.slice(0, 10).map(async sym => {
+      try {
+        // Funding rate — visok pozitivan = previše longova = liquidation risk
+        const frUrl = `${BITGET.baseUrl}/api/v2/mix/market/current-fund-rate?symbol=${sym}&productType=USDT-FUTURES`;
+        const frD   = await fetch(frUrl).then(r => r.json());
+        const fr    = parseFloat(frD?.data?.[0]?.fundingRate || 0) * 100;
+
+        // OI — dohvati 2 zadnja perioda da vidiš promjenu
+        const oiUrl = `${BITGET.baseUrl}/api/v2/mix/market/open-interest?symbol=${sym}&productType=USDT-FUTURES`;
+        const oiD   = await fetch(oiUrl).then(r => r.json());
+        const oi    = parseFloat(oiD?.data?.[0]?.openInterestList?.[0]?.size || 0);
+
+        // Liquidation score po simbolu (0-100):
+        // FR > 0.05% = +30pts, FR > 0.03% = +15pts
+        // FR < -0.02% = -10pts (shorters at risk, ali za LONG strategy manji rizik)
+        let score = 50;
+        if (fr > 0.05)       score += 30;
+        else if (fr > 0.03)  score += 15;
+        else if (fr < -0.02) score -= 10;
+
+        scores[sym] = { score: Math.max(0, Math.min(100, Math.round(score))), fr, oi };
+        totalScore += scores[sym].score; count++;
+      } catch { }
+    }));
+
+    const overall = count > 0 ? Math.round(totalScore / count) : null;
+    const risk    = overall === null ? 'N/A'
+      : overall > 70 ? 'HIGH'
+      : overall > 50 ? 'MEDIUM'
+      : 'LOW';
+
+    _liqCache = { scores, overall, risk, ts: Date.now() };
+    return _liqCache;
+  } catch(e) {
+    console.log(`  ⚠️  [LIQ RISK] ${e.message}`);
+    return _liqCache;
+  }
+}
+
 // ─── SP500 / Risk-Off gate ────────────────────────────────────────────────────
 // Yahoo Finance (ES=F futures) — blokira LONG ako S&P500 padne > 1% u zadnjem 4H
 let _sp500Cache = { change4h: null, regime: 'UNKNOWN', ts: 0 };

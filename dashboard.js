@@ -9,7 +9,8 @@ import { readFileSync, writeFileSync, existsSync } from "fs";
 import { run as botRun, checkBreakouts, syncPositionsFromBitget, check5mSRTest, checkBeStopAll,
   getAllFundingRates, getDailyPnlExport, getSymbolStats, getOIForSymbols,
   getFearGreed, getBtcDominance, getDxyData, getConsecutiveLossCount,
-  getSessionInfo, calcAtrTrend, getSp500Data, calcSymbolCorrelation } from "./bot.js";
+  getSessionInfo, calcAtrTrend, getSp500Data, calcSymbolCorrelation,
+  getDeribitPutCall, getLiquidationRisk } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -1134,6 +1135,23 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div style="font-size:18px;font-weight:800" id="corr-val">…</div>
         <div style="font-size:11px;color:#8b949e;margin-top:4px" id="corr-sub">&gt;0.85 = visok zajednički rizik</div>
       </div>
+
+      <!-- Deribit Put/Call -->
+      <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#8b949e;margin-bottom:6px;text-transform:uppercase">🎯 Put/Call Ratio (Deribit)</div>
+        <div style="font-size:16px;font-weight:800" id="pc-val">…</div>
+        <div style="font-size:11px;color:#8b949e;margin-top:4px" id="pc-sub">&gt;1.5=Fear · &lt;0.5=Greed</div>
+      </div>
+
+      <!-- Liquidation Risk -->
+      <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#8b949e;margin-bottom:6px;text-transform:uppercase">💥 Liquidation Risk</div>
+        <div style="font-size:16px;font-weight:800" id="liq-val">…</div>
+        <div style="background:#21262d;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
+          <div id="liq-bar" style="height:100%;border-radius:4px;background:#00c48c;transition:width .5s,background .5s;width:0%"></div>
+        </div>
+        <div style="font-size:11px;color:#8b949e" id="liq-sub">Funding + OI analiza</div>
+      </div>
     </div>
 
     <!-- Per-Symbol WR Table -->
@@ -1887,6 +1905,47 @@ async function loadMarketContext() {
         'Niska korelacija — dobra diversifikacija (' + (c.syms?.length || 0) + ' simbola)';
     }
 
+    // Deribit Put/Call Ratio
+    if (d.pc && d.pc.btc) {
+      const btc = d.pc.btc;
+      const pcColor = btc.sentiment === 'FEAR'    ? '#388bfd'
+                    : btc.sentiment === 'BEARISH'  ? '#8b949e'
+                    : btc.sentiment === 'BULLISH'  ? '#f7b731'
+                    : btc.sentiment === 'GREED'    ? '#ff4d4d'
+                    : '#8b949e';
+      const pcIcon  = btc.sentiment === 'FEAR'  ? '😰'
+                    : btc.sentiment === 'GREED' ? '🤑' : '😐';
+      const pcEl = document.getElementById('pc-val');
+      if (pcEl) {
+        pcEl.textContent = 'BTC: ' + (btc.ratio ?? '—') + '  ETH: ' + (d.pc.eth?.ratio ?? '—');
+        pcEl.style.color = pcColor;
+        document.getElementById('pc-sub').textContent =
+          pcIcon + ' BTC ' + (btc.sentiment || '') +
+          (btc.sentiment === 'FEAR'  ? ' — institucije kupuju puts (zaštita)' :
+           btc.sentiment === 'GREED' ? ' — previše calls, euforija' :
+           ' · >1.5=Fear · <0.5=Greed');
+      }
+    }
+
+    // Liquidation Risk
+    if (d.liq && d.liq.overall !== null) {
+      const liq = d.liq;
+      const liqColor = liq.risk === 'HIGH'   ? '#ff4d4d'
+                     : liq.risk === 'MEDIUM' ? '#f7b731' : '#00c48c';
+      const liqIcon  = liq.risk === 'HIGH' ? '🚨' : liq.risk === 'MEDIUM' ? '⚠️' : '✅';
+      const liqEl = document.getElementById('liq-val');
+      if (liqEl) {
+        liqEl.textContent = liqIcon + ' ' + liq.risk + '  (' + liq.overall + '/100)';
+        liqEl.style.color = liqColor;
+        document.getElementById('liq-bar').style.width = liq.overall + '%';
+        document.getElementById('liq-bar').style.background = liqColor;
+        document.getElementById('liq-sub').textContent =
+          liq.risk === 'HIGH'   ? 'Visok funding — previše longova, kaskadni pad moguć' :
+          liq.risk === 'MEDIUM' ? 'Srednji rizik — prati funding rate' :
+          'Nizak rizik — balansiran leverage u tržištu';
+      }
+    }
+
     // Per-Symbol WR
     const symStats = d.symStats || {};
     const symEntries = Object.entries(symStats)
@@ -2186,7 +2245,7 @@ const server = http.createServer(async (req, res) => {
       const rules = JSON.parse(readFileSync("rules.json","utf8"));
       const symbols = rules.watchlist_synapse_t || [];
 
-      const [fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, sp500, corr] = await Promise.all([
+      const [fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, sp500, corr, pc, liq] = await Promise.all([
         getFearGreed(),
         getBtcDominance(),
         getDxyData(),
@@ -2195,7 +2254,9 @@ const server = http.createServer(async (req, res) => {
         Promise.resolve(getConsecutiveLossCount(pid)),
         Promise.resolve(getSymbolStats()),
         getSp500Data(),
-        calcSymbolCorrelation(symbols.slice(0, 12)),  // prvih 12 simbola (API limit)
+        calcSymbolCorrelation(symbols.slice(0, 12)),
+        getDeribitPutCall(),
+        getLiquidationRisk(symbols),
       ]);
 
       // Session info — sinhrono, ne zahtijeva fetch
@@ -2216,7 +2277,7 @@ const server = http.createServer(async (req, res) => {
       } catch { /* ignoriraj */ }
 
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, dailyLimit: 20, cbLosses: 7, session, atrTrend, sp500, corr }));
+      res.end(JSON.stringify({ fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, dailyLimit: 20, cbLosses: 7, session, atrTrend, sp500, corr, pc, liq }));
     } catch(e) {
       res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
     }

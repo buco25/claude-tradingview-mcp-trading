@@ -1826,10 +1826,13 @@ async function moveSLtoBreakEven(pos) {
   const { symbol, side, entryPrice, slPct, tpPct } = pos;
   const holdSide = side === "LONG" ? "long" : "short";
 
-  // Novi SL: entry ± buffer (LONG = malo iznad entry, SHORT = malo ispod entry)
-  const newSlPrice = side === "LONG"
-    ? entryPrice * (1 + BE_BUFFER_PCT / 100)
-    : entryPrice * (1 - BE_BUFFER_PCT / 100);
+  // Novi SL: entry ± buffer
+  // LONG:  SL malo IZNAD entry (ako cijena padne nazad na entry → izlaz s malim dobitkom)
+  // SHORT: SL malo IZNAD entry (ako cijena poraste nazad na entry → izlaz s malim gubitkom)
+  // Za SHORT, SL mora biti IZNAD trenutne cijene koja je ispod entry-ja (jer je u profitu)
+  // Dakle i LONG i SHORT: newSL = entry * (1 + buffer%) — IZNAD entry
+  // Razlika: za LONG to je dobitak, za SHORT je to minimalni gubitak (bolje od -2%)
+  const newSlPrice = entryPrice * (1 + BE_BUFFER_PCT / 100);
 
   try {
     // Dohvati pending TPSL ordere da pronađemo orderId SL-a

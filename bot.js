@@ -209,10 +209,13 @@ const VOL_LOW_MULT = 0.5;
 const VOL_HIGH_MULT = 2.0;
 
 function checkVolumeAnomaly(candles) {
-  const vols = candles.slice(-VOL_LOOKBACK - 1, -1).map(c => c.volume);
+  // Koristimo zadnju ZATVORENU svjeću (index -2), ne posljednju koja se još formira!
+  // Aktivna svjeća uvijek ima parcijalni volumen → krivo bi zaključivala "nizak volumen"
+  if (candles.length < VOL_LOOKBACK + 3) return { ok: true, ratio: 1, label: 'N/A' };
+  const vols = candles.slice(-VOL_LOOKBACK - 2, -2).map(c => c.volume);
   if (vols.length < 5) return { ok: true, ratio: 1, label: 'N/A' };
   const avg = vols.reduce((a, b) => a + b, 0) / vols.length;
-  const cur = candles[candles.length - 1].volume;
+  const cur = candles[candles.length - 2].volume;  // zadnja zatvorena
   const ratio = avg > 0 ? cur / avg : 1;
   return {
     ok: ratio >= VOL_LOW_MULT,

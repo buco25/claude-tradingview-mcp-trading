@@ -394,8 +394,8 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
       ultraBull = ultraSigs16.filter(s => s === 1).length;
       ultraBear = ultraSigs16.filter(s => s === -1).length;
 
-      // 4 obavezna gating uvjeta: ADX≥25, 6Sc≥4, RSI asimetričan, 5mSR (bot only)
-      const adxOk       = adxV >= 25;
+      // 4 obavezna gating uvjeta: ADX≥30, 6Sc≥4, RSI asimetričan, 5mSR (bot only)
+      const adxOk       = adxV >= 30;
       const scaleOkLong  = scaleUp >= 4;
       const scaleOkShort = scaleDn >= 4;
       const rsiLongOk   = rsiV < 72;
@@ -418,6 +418,7 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
     synapse7Sig, synapse7Bull, synapse7Bear, synapse7Subs,
     ultraSig, ultraBull, ultraBear, ultraSigs16,
     synapseTSig: ultraSig,
+    scaleUp, scaleDn,   // direktni 6Sc rezultati za badge display
   };
 }
 
@@ -1168,7 +1169,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <th>Cijena</th>
             <th style="color:#8b949e">RSI</th>
             <th style="color:#8b949e">ADX</th>
-            <th style="color:#f7b731;text-align:center;white-space:nowrap">Obavezni <span style="font-weight:400;font-size:10px;color:#666">ADX≥25 · 6Sc · RSI · 5mSR</span></th>
+            <th style="color:#f7b731;text-align:center;white-space:nowrap">Obavezni <span style="font-weight:400;font-size:10px;color:#666">ADX≥30 · 6Sc · RSI · 5mSR</span></th>
             <th style="color:#e85d9a;text-align:center">13 Signala &nbsp;<span style="font-weight:400;font-size:10px;color:#666">E50 · RSI · E55 · CHP · CVD · R⟳ · MCD · E145 · VOL · MCC · RSI↗ · SRS · SRB</span></th>
             <th style="color:#e85d9a;text-align:center">Score</th>
             <th style="min-width:260px">Status / Breakout</th>
@@ -1434,28 +1435,23 @@ function mandatoryBoxes(s) {
   const sig     = s.ultraSig;
   const sigs13  = s.ultraSigs16 || [];
 
-  // 1. ADX ≥ 25 — jak trend (obavezan, WR potvrđen 40.9%)
-  const adxOk  = adxNum >= 25;
+  // 1. ADX ≥ 30 dynamic — jak trend (obavezan). Dashboard prikazuje ≥30 (bot koristi 30/35/40 ovisno o WR)
+  const adxOk  = adxNum >= 30;
   const adxCol = adxOk ? '#00c48c' : '#ff4d4d';
   const adxBg  = adxOk ? '#0d3d26' : '#3d0d0d';
   const adxTip = 'ADX ' + adxNum.toFixed(1) + (adxOk ? ' ≥ 30 ✓ — jak trend' : ' < 30 ✗ — slab trend, nema ulaza');
 
   // 2. 6Sc: 4/6 multi-EMA parova poravnato (obavezan, WR potvrđen 43.6%)
-  //    Čitamo iz scan resulta — emaBias govori EMA9/21 smjer, ali 6Sc je u sigs
-  //    Koristimo ultraBull/Bear za aproksimaciju (nema direktnog scaleUp u scan result)
-  //    Alternativno: prikazujemo smjer kao bullish/bearish ovisno o ultraSig
-  const scaleOkLong  = sig === "LONG"  || sig === "SETUP↑";
-  const scaleOkShort = sig === "SHORT" || sig === "SETUP↓";
-  // Za NEUTRAL: provjeri emaBias kao proxy (6Sc i EMA9/21 su obično korelirani)
-  const emaBiasVal   = s.emaBias ?? "—";
-  const scaleOkProxy = sig === "LONG" || sig === "SETUP↑" ? true
-                     : sig === "SHORT" || sig === "SETUP↓" ? true
-                     : false; // NEUTRAL = ne znamo bez punog izračuna
-  const scaleCol = (scaleOkLong || scaleOkShort) ? '#00c48c' : '#8b949e';
-  const scaleBg  = (scaleOkLong || scaleOkShort) ? '#0d3d26' : '#1c2128';
-  const scaleDir = scaleOkLong ? '4/6↑' : scaleOkShort ? '4/6↓' : '?';
-  const scaleTip = '6-Scale: ' + scaleDir + ' multi-EMA parova poravnato' +
-    (scaleOkLong || scaleOkShort ? ' ✓' : ' — bot provjerava pri ulazu');
+  //    Direktno iz scaleUp/scaleDn koji se sada vraćaju iz scanSymbol()
+  const scUp = s.scaleUp ?? 0;
+  const scDn = s.scaleDn ?? 0;
+  const scaleOkLong  = scUp >= 4;
+  const scaleOkShort = scDn >= 4;
+  const scaleCol = scaleOkLong ? '#00c48c' : scaleOkShort ? '#00c48c' : '#ff4d4d';
+  const scaleBg  = scaleOkLong ? '#0d3d26' : scaleOkShort ? '#0d3d26' : '#3d0d0d';
+  const scaleDir = scaleOkLong ? scUp + '/6↑' : scaleOkShort ? scDn + '/6↓' : scUp + '/6';
+  const scaleTip = '6-Scale: ' + scUp + '↑ / ' + scDn + '↓ od 6 EMA parova (treba ≥4)' +
+    (scaleOkLong ? ' — LONG smjer ✓' : scaleOkShort ? ' — SHORT smjer ✓' : ' ✗ — nedovoljan smjer');
 
   // 3. RSI asimetričan — LONG: RSI<72, SHORT: RSI>30
   const rsiLongOk  = rsiNum < 72;

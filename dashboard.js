@@ -480,7 +480,22 @@ async function runScan(rules) {
           srOk = await check5mSRTest(sym, side).catch(() => null);
         }
 
-        results.push({ symbol: sym, ...s, pending, slPct, tpPct, srOk });
+        // 1H trend (EMA20)
+        let trend1h = 'UNKNOWN';
+        try {
+          const url1h = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=1H&limit=25`;
+          const r1h   = await fetch(url1h);
+          const d1h   = await r1h.json();
+          if (d1h.code === "00000" && d1h.data?.length >= 21) {
+            const closes1h = d1h.data.map(k => parseFloat(k[4]));
+            const mult = 2 / 21;
+            let ema = closes1h.slice(0, 20).reduce((a,b) => a+b, 0) / 20;
+            for (let j = 20; j < closes1h.length; j++) ema = closes1h[j] * mult + ema * (1 - mult);
+            trend1h = closes1h[closes1h.length - 1] > ema ? 'BULL' : 'BEAR';
+          }
+        } catch { /* ignoriraj */ }
+
+        results.push({ symbol: sym, ...s, pending, slPct, tpPct, srOk, trend1h });
       } catch (e) {
         results.push({ symbol: sym, error: e.message });
       }
@@ -701,11 +716,18 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <div id="pnl-${def.id}-${p.symbol}" style="font-size:14px;font-weight:700;color:#9ca3af">—</div>
             <div style="flex:1;min-width:0">
               <div class="range-bar"><div id="bar-${def.id}-${p.symbol}" class="range-fill"></div></div>
-              <div class="range-labels"><small>SL ${fmtP(p.sl)}${p.slPct ? ' ('+p.slPct+'%)' : ''}</small><small>TP ${fmtP(p.tp)}${p.tpPct ? ' ('+p.tpPct+'%)' : ''}</small></div>
+              <div class="range-labels">
+                <small>SL ${fmtP(p.sl)}${p.slPct ? ' ('+p.slPct+'%)' : ''}</small>
+                <small>TP ${fmtP(p.tp)}${p.tpPct ? ' ('+p.tpPct+'%)' : ''}</small>
+              </div>
             </div>
           </div>
-          <div style="margin-top:8px;text-align:right">
-            <button onclick="closePosition('${def.id}','${p.symbol}',this)" style="background:#ff4d4d;color:#fff;border:none;border-radius:6px;padding:5px 14px;font-size:12px;font-weight:700;cursor:pointer">✕ Zatvori</button>
+          <div style="margin-top:10px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              ${p.beMoved ? '<span style="background:rgba(16,185,129,0.12);border:1px solid #10b981;border-radius:20px;padding:2px 8px;font-size:10px;color:#10b981;font-weight:600">🔒 BE-STOP</span>' : ''}
+              ${p.trailPeak ? '<span style="background:rgba(251,191,36,0.12);border:1px solid #fbbf24;border-radius:20px;padding:2px 8px;font-size:10px;color:#fbbf24;font-weight:600">📈 TRAIL ' + fmtP(p.trailPeak) + '</span>' : ''}
+            </div>
+            <button onclick="closePosition('${def.id}','${p.symbol}',this)" style="background:#ef4444;color:#fff;border:none;border-radius:6px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.02em">✕ Zatvori</button>
           </div>
           <script>
           (function(){
@@ -924,7 +946,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="logo">🎯</div>
       <div>
         <div class="title">ULTRA Trading Bot</div>
-        <div class="subtitle">ADX≥30 (din.) · 6Sc · RSI · LONG_ONLY · min 7/13 · BTC regime · 4h cooldown · blacklist · ${tf} · 50x · rizik 1%</div>
+        <div class="subtitle">ADX≥30 (din.·daily) · 6Sc · RSI · LONG+SHORT · 1H trend · min 7/13 · BTC regime · econ·4h cooldown · blacklist · ${tf} · 50x · rizik 1%</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -1248,6 +1270,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <th>Cijena</th>
             <th style="color:#9ca3af">RSI</th>
             <th style="color:#9ca3af">ADX</th>
+            <th style="color:#fbbf24;text-align:center">1H</th>
             <th style="color:#f7b731;text-align:center;white-space:nowrap">Obavezni <span style="font-weight:400;font-size:10px;color:#666">ADX≥30 · 6Sc · RSI</span> <span style="font-weight:400;font-size:10px;color:#555">· 5mSR(info)</span></th>
             <th style="color:#e85d9a;text-align:center">13 Signala &nbsp;<span style="font-weight:400;font-size:10px;color:#666">E50 · RSI · E55 · CHP · CVD · R⟳ · MCD · E145 · VOL · MCC · RSI↗ · SRS · SRB</span></th>
             <th style="color:#e85d9a;text-align:center">Score</th>
@@ -1255,7 +1278,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
           </tr>
         </thead>
         <tbody id="scan-tbody">
-          <tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-muted)">Klikni "Skeniraj" za prikaz ULTRA signala</td></tr>
+          <tr><td colspan="10" style="text-align:center;padding:24px;color:var(--text-muted)">Klikni "Skeniraj" za prikaz ULTRA signala</td></tr>
         </tbody>
       </table>
     </div>
@@ -1764,7 +1787,7 @@ async function doScan() {
   const tbody = document.getElementById("scan-tbody");
   btn.disabled = true;
   btn.innerHTML = '<span class="spin">⟳</span> Skenira...';
-  tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:32px;color:#9ca3af"><span class="spin" style="font-size:20px">⟳</span><br>Fetcham ${ALL_SYMBOLS.length} simbola na 15m TF...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:32px;color:#9ca3af"><span class="spin" style="font-size:20px">⟳</span><br>Fetcham ${ALL_SYMBOLS.length} simbola na 15m+1H TF...</td></tr>';
 
   try {
     const r = await fetch("/api/scan");
@@ -1792,7 +1815,7 @@ async function doScan() {
     document.getElementById("scan-ts").textContent = ts + " (UTC+2) | ▲ " + longs + " LONG · ▼ " + shorts + " SHORT · ⏳ " + pending + " čeka · ◈ " + setups + " setup";
 
     tbody.innerHTML = results.map((s, i) => {
-      if (s.error) return '<tr><td colspan="9" style="color:#ff4d4d;padding:6px 10px">' + s.symbol + ': ' + s.error + '</td></tr>';
+      if (s.error) return '<tr><td colspan="10" style="color:#ff4d4d;padding:6px 10px">' + s.symbol + ': ' + s.error + '</td></tr>';
 
       const rsiNum = parseFloat(s.rsi);
       const rsiCol = isNaN(rsiNum) ? "#8b949e" : rsiNum > 70 ? "#ff4d4d" : rsiNum < 30 ? "#00c48c" : rsiNum > 60 ? "#ff8c42" : rsiNum < 40 ? "#42c8ff" : "#e6edf3";
@@ -1807,6 +1830,10 @@ async function doScan() {
       const slTp    = s.slPct && s.tpPct ? 'SL ' + s.slPct + '% / TP ' + s.tpPct + '%' : 'SL 1.5% / TP 2.5%';
       const slTpCol = (s.slPct >= 2.5) ? '#f7b731' : (s.slPct >= 2.0) ? '#ff8c42' : '#8b949e';
 
+      const t1h = s.trend1h || 'UNKNOWN';
+      const t1hCol  = t1h === 'BULL' ? '#10b981' : t1h === 'BEAR' ? '#ef4444' : '#6b7280';
+      const t1hIcon = t1h === 'BULL' ? '▲' : t1h === 'BEAR' ? '▼' : '·';
+
       return '<tr style="' + rowBg + '">' +
         '<td style="color:#555;font-size:11px;text-align:center">' + (i+1) + '</td>' +
         '<td style="font-weight:800;font-size:14px;white-space:nowrap">' + s.symbol.replace("USDT","") + '<span style="color:#555;font-size:10px;font-weight:400">USDT</span>' +
@@ -1814,6 +1841,7 @@ async function doScan() {
         '<td style="font-weight:600;white-space:nowrap">' + fmtLive(s.price) + '</td>' +
         '<td style="color:' + rsiCol + ';font-weight:700">' + (s.rsi || "—") + '</td>' +
         '<td style="color:' + adxCol + '">' + (s.adx || "—") + '</td>' +
+        '<td style="text-align:center;font-weight:800;color:' + t1hCol + ';font-size:13px" title="1H EMA20 trend: ' + t1h + '">' + t1hIcon + '</td>' +
         '<td style="padding:4px 6px;border-right:1px solid #f7b73133">' + mandatoryBoxes(s) + '</td>' +
         '<td style="padding:4px 6px">' + sigBoxes(s.ultraSigs16) + '</td>' +
         '<td style="padding:4px 8px">' + scoreBox(s.ultraBull||0, s.ultraBear||0, s.ultraSig, s.ultraMinSig) + '</td>' +
@@ -1822,7 +1850,7 @@ async function doScan() {
     }).join("");
 
   } catch(e) {
-    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#ff4d4d;padding:24px">Greška: ' + e.message + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#ff4d4d;padding:24px">Greška: ' + e.message + '</td></tr>';
   }
 
   btn.disabled = false;

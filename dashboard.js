@@ -9,7 +9,7 @@ import { readFileSync, writeFileSync, existsSync } from "fs";
 import { run as botRun, checkBreakouts, syncPositionsFromBitget, check5mSRTest, checkBeStopAll,
   getAllFundingRates, getDailyPnlExport, getSymbolStats, getOIForSymbols,
   getFearGreed, getBtcDominance, getDxyData, getConsecutiveLossCount,
-  getSessionInfo, calcAtrTrend } from "./bot.js";
+  getSessionInfo, calcAtrTrend, getSp500Data, calcSymbolCorrelation } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -1120,6 +1120,20 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div style="font-size:16px;font-weight:800" id="atr-trend-val">…</div>
         <div style="font-size:11px;color:#8b949e;margin-top:4px" id="atr-trend-sub">EXPANDING = size ×0.7</div>
       </div>
+
+      <!-- SP500 -->
+      <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#8b949e;margin-bottom:6px;text-transform:uppercase">📉 S&P500 (4H)</div>
+        <div style="font-size:18px;font-weight:800" id="sp500-val">…</div>
+        <div style="font-size:11px;color:#8b949e;margin-top:4px" id="sp500-sub">&lt;-1% = RISK OFF → blokira LONG</div>
+      </div>
+
+      <!-- Korelacijska matrica -->
+      <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#8b949e;margin-bottom:6px;text-transform:uppercase">🔗 Korelacija (1H)</div>
+        <div style="font-size:18px;font-weight:800" id="corr-val">…</div>
+        <div style="font-size:11px;color:#8b949e;margin-top:4px" id="corr-sub">&gt;0.85 = visok zajednički rizik</div>
+      </div>
     </div>
 
     <!-- Per-Symbol WR Table -->
@@ -1849,6 +1863,30 @@ async function loadMarketContext() {
       }
     }
 
+    // SP500
+    if (d.sp500 && d.sp500.change4h !== null) {
+      const sp = d.sp500;
+      const spColor = sp.regime === 'RISK_OFF' ? '#ff4d4d' : sp.regime === 'RISK_ON' ? '#00c48c' : '#8b949e';
+      const spIcon  = sp.regime === 'RISK_OFF' ? '🚨' : sp.regime === 'RISK_ON' ? '🟢' : '➡️';
+      document.getElementById('sp500-val').textContent = (sp.change4h > 0 ? '+' : '') + sp.change4h + '%';
+      document.getElementById('sp500-val').style.color = spColor;
+      document.getElementById('sp500-sub').textContent =
+        spIcon + ' ' + sp.regime + (sp.regime === 'RISK_OFF' ? ' — LONG ulazi blokirani!' : ' | ES=F @ ' + (sp.last || ''));
+    }
+
+    // Korelacijska matrica
+    if (d.corr && d.corr.avgCorr !== null) {
+      const c = d.corr;
+      const corrColor = c.avgCorr > 0.85 ? '#ff4d4d' : c.avgCorr > 0.65 ? '#f7b731' : '#00c48c';
+      const corrIcon  = c.avgCorr > 0.85 ? '⚠️' : c.avgCorr > 0.65 ? '🟡' : '🟢';
+      document.getElementById('corr-val').textContent = corrIcon + ' ' + c.avgCorr;
+      document.getElementById('corr-val').style.color = corrColor;
+      document.getElementById('corr-sub').textContent =
+        c.avgCorr > 0.85 ? '🚨 Visoka korelacija — sve pozicije kreću zajedno!' :
+        c.avgCorr > 0.65 ? 'Srednja korelacija — pazi na koncentraciju' :
+        'Niska korelacija — dobra diversifikacija (' + (c.syms?.length || 0) + ' simbola)';
+    }
+
     // Per-Symbol WR
     const symStats = d.symStats || {};
     const symEntries = Object.entries(symStats)
@@ -2148,7 +2186,7 @@ const server = http.createServer(async (req, res) => {
       const rules = JSON.parse(readFileSync("rules.json","utf8"));
       const symbols = rules.watchlist_synapse_t || [];
 
-      const [fg, dom, dxy, fr, dailyPnl, consecLosses, symStats] = await Promise.all([
+      const [fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, sp500, corr] = await Promise.all([
         getFearGreed(),
         getBtcDominance(),
         getDxyData(),
@@ -2156,6 +2194,8 @@ const server = http.createServer(async (req, res) => {
         Promise.resolve(getDailyPnlExport(pid)),
         Promise.resolve(getConsecutiveLossCount(pid)),
         Promise.resolve(getSymbolStats()),
+        getSp500Data(),
+        calcSymbolCorrelation(symbols.slice(0, 12)),  // prvih 12 simbola (API limit)
       ]);
 
       // Session info — sinhrono, ne zahtijeva fetch
@@ -2176,7 +2216,7 @@ const server = http.createServer(async (req, res) => {
       } catch { /* ignoriraj */ }
 
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, dailyLimit: 20, cbLosses: 7, session, atrTrend }));
+      res.end(JSON.stringify({ fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, dailyLimit: 20, cbLosses: 7, session, atrTrend, sp500, corr }));
     } catch(e) {
       res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
     }

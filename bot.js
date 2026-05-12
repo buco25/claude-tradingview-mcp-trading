@@ -225,6 +225,95 @@ function checkVolumeAnomaly(candles) {
   };
 }
 
+// ─── SP500 / Risk-Off gate ────────────────────────────────────────────────────
+// Yahoo Finance (ES=F futures) — blokira LONG ako S&P500 padne > 1% u zadnjem 4H
+let _sp500Cache = { change4h: null, regime: 'UNKNOWN', ts: 0 };
+const SP500_TTL        = 15 * 60 * 1000;  // 15 min cache
+const SP500_BLOCK_DROP = -1.0;             // % pada u 4H → RISK_OFF → blokira LONG
+
+export async function getSp500Data() {
+  if (_sp500Cache.change4h !== null && Date.now() - _sp500Cache.ts < SP500_TTL) {
+    return _sp500Cache;
+  }
+  try {
+    const url = 'https://query1.finance.yahoo.com/v8/finance/chart/ES=F?interval=4h&range=3d';
+    const r   = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const d   = await r.json();
+    const closes = d?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? [];
+    const valid  = closes.filter(c => c != null);
+    if (valid.length < 2) throw new Error('Nema dovoljno podataka');
+    const last = valid[valid.length - 1];
+    const prev = valid[valid.length - 2];
+    const change4h = parseFloat(((last - prev) / prev * 100).toFixed(3));
+    const regime   = change4h < SP500_BLOCK_DROP ? 'RISK_OFF'
+                   : change4h >  0.5             ? 'RISK_ON'
+                   : 'NEUTRAL';
+    _sp500Cache = { change4h, regime, last: parseFloat(last.toFixed(2)), ts: Date.now() };
+    return _sp500Cache;
+  } catch(e) {
+    console.log(`  ⚠️  [SP500] ${e.message}`);
+    return { ..._sp500Cache, ts: Date.now() };  // vrati stari cache
+  }
+}
+
+// ─── Korelacijska matrica ─────────────────────────────────────────────────────
+// Pearson korelacija 1H returna između svih simbola
+// avgCorr > 0.85 = visoka korelacija = koncentrirani rizik
+let _corrCache = { avgCorr: null, matrix: {}, syms: [], ts: 0 };
+const CORR_TTL = 20 * 60 * 1000;  // 20 min cache
+
+function _pearson(a, b) {
+  const n = Math.min(a.length, b.length);
+  if (n < 5) return 0;
+  const ax = a.slice(-n), bx = b.slice(-n);
+  const ma = ax.reduce((s, v) => s + v, 0) / n;
+  const mb = bx.reduce((s, v) => s + v, 0) / n;
+  let num = 0, da2 = 0, db2 = 0;
+  for (let i = 0; i < n; i++) {
+    const da = ax[i] - ma, db = bx[i] - mb;
+    num += da * db; da2 += da * da; db2 += db * db;
+  }
+  return (da2 && db2) ? num / Math.sqrt(da2 * db2) : 0;
+}
+
+export async function calcSymbolCorrelation(symbols) {
+  if (_corrCache.avgCorr !== null && Date.now() - _corrCache.ts < CORR_TTL) {
+    return _corrCache;
+  }
+  const returnsMap = {};
+  await Promise.all(symbols.map(async sym => {
+    try {
+      const url = `${BITGET.baseUrl}/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=1H&limit=25`;
+      const d   = await fetch(url).then(r => r.json());
+      if (d.code !== '00000' || !d.data?.length) return;
+      const closes  = d.data.map(k => parseFloat(k[4]));
+      const returns = [];
+      for (let i = 1; i < closes.length; i++) {
+        returns.push((closes[i] - closes[i-1]) / closes[i-1]);
+      }
+      returnsMap[sym] = returns;
+    } catch { }
+  }));
+
+  const syms = Object.keys(returnsMap);
+  if (syms.length < 2) return { avgCorr: null, matrix: {}, syms, ts: Date.now() };
+
+  let total = 0, count = 0;
+  const matrix = {};
+  for (let i = 0; i < syms.length; i++) {
+    matrix[syms[i]] = {};
+    for (let j = 0; j < syms.length; j++) {
+      if (i === j) { matrix[syms[i]][syms[j]] = 1; continue; }
+      const r = parseFloat(_pearson(returnsMap[syms[i]], returnsMap[syms[j]]).toFixed(2));
+      matrix[syms[i]][syms[j]] = r;
+      if (j > i) { total += r; count++; }
+    }
+  }
+  const avgCorr = count > 0 ? parseFloat((total / count).toFixed(2)) : null;
+  _corrCache = { avgCorr, matrix, syms, ts: Date.now() };
+  return _corrCache;
+}
+
 // ─── Session Filter ───────────────────────────────────────────────────────────
 // Crypto dead zone: 01:00–06:00 UTC = azijska mirna sesija, niski volumen, choppy
 // NY sesija (13-21 UTC) i London (08-16 UTC) = visoki volumen, bolji trendovi
@@ -2716,6 +2805,16 @@ export async function run() {
       if (regime === "UNKNOWN") {
         console.log(`  ⚠️  [${pDef.name}] BTC regime: UNKNOWN — nastavljamo oprezno`);
       }
+    }
+
+    // ── SP500 Risk-Off gate ────────────────────────────────────────────────
+    if (pDef.strategy === "synapse_t") {
+      const sp = await getSp500Data();
+      if (sp.regime === 'RISK_OFF') {
+        console.log(`  🚨 [SP500] RISK_OFF — S&P500 ${sp.change4h}% (4H) < ${SP500_BLOCK_DROP}% → LONG ulazi suspendirani`);
+        continue;
+      }
+      if (sp.change4h !== null) console.log(`  📈 [SP500] ${sp.change4h}% (4H) — ${sp.regime}`);
     }
 
     // ── 1. Dinamički ADX + pauza ako WR loš ───────────────────────────────

@@ -1133,10 +1133,14 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       </div>
 
       <!-- Korelacijska matrica -->
-      <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#8b949e;margin-bottom:6px;text-transform:uppercase">🔗 Korelacija (1H)</div>
+      <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px;grid-column:span 2">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div style="font-size:10px;color:#8b949e;text-transform:uppercase">🔗 Korelacijska matrica (1H)</div>
+          <button onclick="document.getElementById('corr-heatmap').style.display=document.getElementById('corr-heatmap').style.display==='none'?'block':'none'" style="background:none;border:1px solid #30363d;color:#8b949e;border-radius:4px;padding:2px 8px;font-size:10px;cursor:pointer">toggle</button>
+        </div>
         <div style="font-size:18px;font-weight:800" id="corr-val">…</div>
         <div style="font-size:11px;color:#8b949e;margin-top:4px" id="corr-sub">&gt;0.85 = visok zajednički rizik</div>
+        <div id="corr-heatmap" style="display:none;margin-top:10px;overflow-x:auto"></div>
       </div>
 
       <!-- Deribit Put/Call -->
@@ -1943,12 +1947,58 @@ async function loadMarketContext() {
       const c = d.corr;
       const corrColor = c.avgCorr > 0.85 ? '#ff4d4d' : c.avgCorr > 0.65 ? '#f7b731' : '#00c48c';
       const corrIcon  = c.avgCorr > 0.85 ? '⚠️' : c.avgCorr > 0.65 ? '🟡' : '🟢';
-      document.getElementById('corr-val').textContent = corrIcon + ' ' + c.avgCorr;
+      document.getElementById('corr-val').textContent = corrIcon + ' avg ' + c.avgCorr;
       document.getElementById('corr-val').style.color = corrColor;
       document.getElementById('corr-sub').textContent =
         c.avgCorr > 0.85 ? '🚨 Visoka korelacija — sve pozicije kreću zajedno!' :
         c.avgCorr > 0.65 ? 'Srednja korelacija — pazi na koncentraciju' :
-        'Niska korelacija — dobra diversifikacija (' + (c.syms?.length || 0) + ' simbola)';
+        'Niska korelacija — dobra diversifikacija (' + (c.syms ? c.syms.length : 0) + ' simbola)';
+
+      // Heatmap grid
+      const hm = document.getElementById('corr-heatmap');
+      if (hm && c.matrix && c.syms) {
+        const syms = c.syms.map(function(s){ return s.replace('USDT',''); });
+        const n = syms.length;
+        const cell = 28;
+        function corrColor2(v) {
+          if (v >= 0.9)  return '#ff4d4d';
+          if (v >= 0.75) return '#f7913a';
+          if (v >= 0.5)  return '#f7b731';
+          if (v >= 0.25) return '#8b949e';
+          if (v >= 0)    return '#21262d';
+          return '#388bfd';
+        }
+        let html = '<div style="display:inline-block;font-size:9px">';
+        // Header row
+        html += '<div style="display:flex;margin-left:' + (cell+2) + 'px">';
+        for (var j=0; j<n; j++) {
+          html += '<div style="width:' + cell + 'px;text-align:center;color:#8b949e;overflow:hidden;white-space:nowrap;font-size:8px">' + syms[j] + '</div>';
+        }
+        html += '</div>';
+        // Data rows
+        for (var i=0; i<n; i++) {
+          html += '<div style="display:flex;align-items:center">';
+          html += '<div style="width:' + cell + 'px;text-align:right;padding-right:4px;color:#8b949e;font-size:8px;white-space:nowrap">' + syms[i] + '</div>';
+          for (var j2=0; j2<n; j2++) {
+            var v = c.matrix[i] ? (c.matrix[i][j2] !== undefined ? c.matrix[i][j2] : 0) : 0;
+            var bg = corrColor2(v);
+            var txt = i===j2 ? '—' : (v >= 0 ? '+' : '') + v.toFixed(2);
+            var txtColor = (v > 0.5 || v < 0) ? '#fff' : '#8b949e';
+            html += '<div title="' + syms[i] + '/' + syms[j2] + ': ' + v.toFixed(3) + '" style="width:' + cell + 'px;height:' + cell + 'px;background:' + bg + ';display:flex;align-items:center;justify-content:center;color:' + txtColor + ';font-size:7px;border:1px solid #0d1117;border-radius:2px">' + txt + '</div>';
+          }
+          html += '</div>';
+        }
+        // Legend
+        html += '<div style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:9px;color:#8b949e">';
+        html += '<span>Korelacija:</span>';
+        var legend = [['#388bfd','<0'],['#21262d','0–0.25'],['#8b949e','0.25–0.5'],['#f7b731','0.5–0.75'],['#f7913a','0.75–0.9'],['#ff4d4d','>0.9']];
+        for (var l=0; l<legend.length; l++) {
+          html += '<span style="display:inline-flex;align-items:center;gap:2px"><span style="display:inline-block;width:10px;height:10px;background:' + legend[l][0] + ';border-radius:2px"></span>' + legend[l][1] + '</span>';
+        }
+        html += '</div></div>';
+        hm.innerHTML = html;
+        hm.style.display = 'block';
+      }
     }
 
     // Deribit Put/Call Ratio

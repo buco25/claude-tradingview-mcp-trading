@@ -8,7 +8,8 @@ import http from "http";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { run as botRun, checkBreakouts, syncPositionsFromBitget, check5mSRTest, checkBeStopAll,
   getAllFundingRates, getDailyPnlExport, getSymbolStats, getOIForSymbols,
-  getFearGreed, getBtcDominance, getDxyData, getConsecutiveLossCount } from "./bot.js";
+  getFearGreed, getBtcDominance, getDxyData, getConsecutiveLossCount,
+  getSessionInfo, calcAtrTrend } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -1105,6 +1106,20 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div style="font-size:22px;font-weight:800" id="dxy-val">…</div>
         <div style="font-size:11px;color:#8b949e;margin-top:2px" id="dxy-sub">&gt;+0.3% = LONG risk</div>
       </div>
+
+      <!-- Session Filter -->
+      <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#8b949e;margin-bottom:6px;text-transform:uppercase">🕐 Trading Sesija</div>
+        <div style="font-size:16px;font-weight:800" id="session-val">…</div>
+        <div style="font-size:11px;color:#8b949e;margin-top:4px" id="session-sub">01-06 UTC = dead zone blokiran</div>
+      </div>
+
+      <!-- ATR Trend -->
+      <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#8b949e;margin-bottom:6px;text-transform:uppercase">📊 ATR Volatilnost (BTC 15m)</div>
+        <div style="font-size:16px;font-weight:800" id="atr-trend-val">…</div>
+        <div style="font-size:11px;color:#8b949e;margin-top:4px" id="atr-trend-sub">EXPANDING = size ×0.7</div>
+      </div>
     </div>
 
     <!-- Per-Symbol WR Table -->
@@ -1801,6 +1816,39 @@ async function loadMarketContext() {
       document.getElementById('dxy-sub').textContent = d.dxy.direction + ' | >+0.3% = LONG risk';
     }
 
+    // Session Info
+    if (d.session) {
+      const s = d.session;
+      const sessColor = s.dead ? '#ff4d4d' : s.quality === 'PRIME' ? '#00c48c' : s.quality === 'GOOD' ? '#f7b731' : '#8b949e';
+      const sessIcon  = s.dead ? '🌙' : s.quality === 'PRIME' ? '🟢' : s.quality === 'GOOD' ? '🟡' : '🔵';
+      const sessEl = document.getElementById('session-val');
+      if (sessEl) {
+        sessEl.textContent = sessIcon + ' ' + s.session + ' sesija';
+        sessEl.style.color = sessColor;
+        document.getElementById('session-sub').textContent =
+          s.dead ? '01-06 UTC blokiran — nizak volumen' :
+          s.quality === 'PRIME' ? '13-21 UTC — NY, vrhunska likvidnost' :
+          s.quality === 'GOOD'  ? '08-16 UTC — London, dobra likvidnost' :
+          'Srednja likvidnost';
+      }
+    }
+
+    // ATR Trend
+    if (d.atrTrend) {
+      const at = d.atrTrend;
+      const atColor = at.trend === 'EXPANDING' ? '#ff4d4d' : at.trend === 'CONTRACTING' ? '#388bfd' : '#00c48c';
+      const atIcon  = at.trend === 'EXPANDING' ? '📈' : at.trend === 'CONTRACTING' ? '📉' : '➡️';
+      const atEl = document.getElementById('atr-trend-val');
+      if (atEl) {
+        atEl.textContent = atIcon + ' ' + at.trend;
+        atEl.style.color = atColor;
+        document.getElementById('atr-trend-sub').textContent =
+          'Volatilnost ' + at.ratio + 'x prosjeka' +
+          (at.trend === 'EXPANDING' ? ' — size ×0.7 (zaštita)' :
+           at.trend === 'CONTRACTING' ? ' — čekaj breakout' : ' — normalno');
+      }
+    }
+
     // Per-Symbol WR
     const symStats = d.symStats || {};
     const symEntries = Object.entries(symStats)
@@ -2110,8 +2158,25 @@ const server = http.createServer(async (req, res) => {
         Promise.resolve(getSymbolStats()),
       ]);
 
+      // Session info — sinhrono, ne zahtijeva fetch
+      const session = getSessionInfo();
+
+      // ATR trend — dohvati BTC 15m svjećice kao proxy za tržišnu volatilnost
+      let atrTrend = { trend: 'N/A', ratio: 1, sizeMult: 1 };
+      try {
+        const btcUrl = `https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=15m&limit=100`;
+        const btcD   = await fetch(btcUrl).then(r => r.json());
+        if (btcD.code === "00000" && btcD.data?.length) {
+          const btcCandles = btcD.data.map(k => ({
+            time: parseInt(k[0]), open: parseFloat(k[1]),
+            high: parseFloat(k[2]), low: parseFloat(k[3]), close: parseFloat(k[4]),
+          }));
+          atrTrend = calcAtrTrend(btcCandles);
+        }
+      } catch { /* ignoriraj */ }
+
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, dailyLimit: 20, cbLosses: 7 }));
+      res.end(JSON.stringify({ fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, dailyLimit: 20, cbLosses: 7, session, atrTrend }));
     } catch(e) {
       res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
     }

@@ -225,6 +225,62 @@ function checkVolumeAnomaly(candles) {
   };
 }
 
+// ─── Session Filter ───────────────────────────────────────────────────────────
+// Crypto dead zone: 01:00–06:00 UTC = azijska mirna sesija, niski volumen, choppy
+// NY sesija (13-21 UTC) i London (08-16 UTC) = visoki volumen, bolji trendovi
+const SESSION_DEAD_START = 1;   // UTC sat (inclusive)
+const SESSION_DEAD_END   = 6;   // UTC sat (exclusive) — 01:00-05:59 UTC blokiran
+
+export function getSessionInfo() {
+  const h = new Date().getUTCHours();
+  const dead = h >= SESSION_DEAD_START && h < SESSION_DEAD_END;
+  const session = h >= 13 && h < 21 ? 'NY'
+    : h >= 8  && h < 16 ? 'London'
+    : h >= 0  && h < 8  ? 'Asia'
+    : 'Post-NY';
+  const quality = dead ? 'DEAD' : (h >= 13 && h < 21) ? 'PRIME' : (h >= 8 && h < 16) ? 'GOOD' : 'LOW';
+  return { dead, session, quality, utcHour: h };
+}
+
+// ─── ATR Trend ────────────────────────────────────────────────────────────────
+// Mjeri je li volatilnost RASTE, PADA ili NORMALNA
+// Uspoređuje zadnji ATR14 s prosjekom ATR-a u prethodnih 14 perioda
+export function calcAtrTrend(candles, atrLen = 14, lookback = 14) {
+  if (candles.length < atrLen + lookback + 5) return { trend: 'N/A', ratio: 1, sizeMult: 1 };
+
+  function atrOf(slice) {
+    const trs = [];
+    for (let i = 1; i < slice.length; i++) {
+      const h = slice[i].high, l = slice[i].low, pc = slice[i-1].close;
+      trs.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+    }
+    const vals = trs.slice(-atrLen);
+    return vals.reduce((a, b) => a + b, 0) / vals.length;
+  }
+
+  const currentAtr = atrOf(candles.slice(-(atrLen + 2)));
+  const pastAtrs = [];
+  for (let i = lookback; i >= 1; i--) {
+    const sl = candles.slice(-(atrLen + i + 2), -i);
+    if (sl.length >= atrLen + 1) pastAtrs.push(atrOf(sl));
+  }
+  if (!pastAtrs.length) return { trend: 'N/A', ratio: 1, sizeMult: 1 };
+
+  const avgAtr  = pastAtrs.reduce((a, b) => a + b, 0) / pastAtrs.length;
+  const ratio   = avgAtr > 0 ? currentAtr / avgAtr : 1;
+  const trend   = ratio > 1.6 ? 'EXPANDING' : ratio < 0.65 ? 'CONTRACTING' : 'NORMAL';
+  // Veća volatilnost → manji size (štiti od wide stops)
+  const sizeMult = trend === 'EXPANDING' ? 0.7 : 1.0;
+
+  return {
+    trend,
+    ratio: parseFloat(ratio.toFixed(2)),
+    sizeMult,
+    currentAtr: parseFloat(currentAtr.toFixed(8)),
+    avgAtr: parseFloat(avgAtr.toFixed(8)),
+  };
+}
+
 // ─── Daily P&L Budget ─────────────────────────────────────────────────────────
 const DAILY_LOSS_LIMIT = 20;
 const DAILY_WARN_PCT   = 80;
@@ -2696,8 +2752,21 @@ export async function run() {
       if (isBlacklisted(symbol)) continue;
 
       try {
+        // ── Session Filter gate ─────────────────────────────────────────────
+        const sess = getSessionInfo();
+        if (sess.dead) {
+          console.log(`  🌙 [SESSION] ${symbol} — dead zone (${sess.utcHour}:00 UTC, 01-06 UTC blokiran) → preskačem`);
+          continue;
+        }
+
         const candles = await fetchCandles(symbol, pDef.timeframe, 250);
         const price   = candles[candles.length - 1].close;
+
+        // ── ATR Trend — prilagodi size ──────────────────────────────────────
+        const atrTrend = calcAtrTrend(candles);
+        if (atrTrend.trend === 'EXPANDING') {
+          console.log(`  📊 [ATR] ${symbol} — volatilnost RASTE (${atrTrend.ratio}x prosjeka) → size ×${atrTrend.sizeMult}`);
+        }
 
         // ── Volume Anomaly gate ─────────────────────────────────────────────
         const volAnomaly = checkVolumeAnomaly(candles);
@@ -2764,7 +2833,7 @@ export async function run() {
         const equity     = getPortfolioEquity(pid, startCap);
 
         const riskAmount = equity * (RISK_PCT / 100);
-        const tradeSize  = riskAmount / (slPct / 100);
+        const tradeSize  = (riskAmount / (slPct / 100)) * (atrTrend?.sizeMult ?? 1);
         const margin     = tradeSize / LEVERAGE;  // preliminarno — ažurira se nakon setupSymbol
 
         if (!checkDailyLimit(pid)) {

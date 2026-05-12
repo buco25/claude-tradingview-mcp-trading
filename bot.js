@@ -176,6 +176,187 @@ async function getBtcRegime() {
   }
 }
 
+// ─── Funding Rate gate ────────────────────────────────────────────────────────
+const _frCache = {};
+const FR_TTL   = 15 * 60 * 1000;
+const FR_LONG_BLOCK = 0.05;  // % — blokira LONG ako funding > ovo
+const FR_WARN       = 0.02;  // % — samo log
+
+async function getFundingRate(symbol) {
+  const cached = _frCache[symbol];
+  if (cached && Date.now() - cached.ts < FR_TTL) return cached.rate;
+  try {
+    const url = `${BITGET.baseUrl}/api/v2/mix/market/current-fund-rate?symbol=${symbol}&productType=USDT-FUTURES`;
+    const r = await fetch(url);
+    const d = await r.json();
+    const rate = parseFloat(d?.data?.[0]?.fundingRate || 0) * 100;
+    _frCache[symbol] = { rate, ts: Date.now() };
+    return rate;
+  } catch { return 0; }
+}
+
+export async function getAllFundingRates(symbols) {
+  const result = {};
+  await Promise.all(symbols.map(async sym => {
+    result[sym] = await getFundingRate(sym);
+  }));
+  return result;
+}
+
+// ─── Volume Anomaly gate ──────────────────────────────────────────────────────
+const VOL_LOOKBACK = 20;
+const VOL_LOW_MULT = 0.5;
+const VOL_HIGH_MULT = 2.0;
+
+function checkVolumeAnomaly(candles) {
+  const vols = candles.slice(-VOL_LOOKBACK - 1, -1).map(c => c.volume);
+  if (vols.length < 5) return { ok: true, ratio: 1, label: 'N/A' };
+  const avg = vols.reduce((a, b) => a + b, 0) / vols.length;
+  const cur = candles[candles.length - 1].volume;
+  const ratio = avg > 0 ? cur / avg : 1;
+  return {
+    ok: ratio >= VOL_LOW_MULT,
+    high: ratio >= VOL_HIGH_MULT,
+    ratio: parseFloat(ratio.toFixed(2)),
+    label: ratio < VOL_LOW_MULT ? 'NIZAK' : ratio > VOL_HIGH_MULT ? 'VISOK' : 'NORMALAN',
+  };
+}
+
+// ─── Daily P&L Budget ─────────────────────────────────────────────────────────
+const DAILY_LOSS_LIMIT = 20;
+const DAILY_WARN_PCT   = 80;
+
+function getDailyPnl(pid) {
+  const f = csvFilePath(pid);
+  if (!existsSync(f)) return 0;
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const lines = readFileSync(f, "utf8").trim().split("\n");
+    return lines.slice(1)
+      .filter(l => (l.includes("CLOSE_LONG") || l.includes("CLOSE_SHORT")) && l.startsWith(today))
+      .reduce((sum, l) => sum + parseFloat(l.split(",")[9] || 0), 0);
+  } catch { return 0; }
+}
+
+export function getDailyPnlExport(pid) { return getDailyPnl(pid); }
+
+// ─── Per-Symbol WR tracking ───────────────────────────────────────────────────
+const getSymStatsFile = () => `${DATA_DIR}/symbol_stats.json`;
+
+function loadSymStats() {
+  try { return existsSync(getSymStatsFile()) ? JSON.parse(readFileSync(getSymStatsFile(), "utf8")) : {}; }
+  catch { return {}; }
+}
+function saveSymStats(st) {
+  try { writeFileSync(getSymStatsFile(), JSON.stringify(st, null, 2)); } catch {}
+}
+function recordSymbolOutcome(symbol, won) {
+  const st = loadSymStats();
+  if (!st[symbol]) st[symbol] = { wins: 0, total: 0 };
+  st[symbol].total++;
+  if (won) st[symbol].wins++;
+  saveSymStats(st);
+}
+export function getSymbolStats() { return loadSymStats(); }
+
+// ─── Open Interest trend ──────────────────────────────────────────────────────
+const _oiCache = {};
+const OI_TTL   = 5 * 60 * 1000;
+
+async function getOpenInterest(symbol) {
+  const cached = _oiCache[symbol];
+  if (cached && Date.now() - cached.ts < OI_TTL) return cached;
+  try {
+    const url = `${BITGET.baseUrl}/api/v2/mix/market/open-interest?symbol=${symbol}&productType=USDT-FUTURES`;
+    const r = await fetch(url);
+    const d = await r.json();
+    const oi = parseFloat(d?.data?.openInterestList?.[0]?.size || d?.data?.size || 0);
+    const prev = cached?.oi || oi;
+    const trend = oi > prev * 1.02 ? 'RASTE' : oi < prev * 0.98 ? 'PADA' : 'FLAT';
+    const result = { oi, prev, trend, ts: Date.now() };
+    _oiCache[symbol] = { ...result, oi };
+    return result;
+  } catch { return { oi: 0, trend: 'N/A', ts: Date.now() }; }
+}
+
+export async function getOIForSymbols(symbols) {
+  const result = {};
+  await Promise.all(symbols.map(async sym => { result[sym] = await getOpenInterest(sym); }));
+  return result;
+}
+
+// ─── Fear & Greed Index ───────────────────────────────────────────────────────
+let _fgCache = { value: null, label: '', ts: 0 };
+const FG_TTL = 30 * 60 * 1000;
+
+async function getFearGreed() {
+  if (Date.now() - _fgCache.ts < FG_TTL && _fgCache.value !== null) return _fgCache;
+  try {
+    const r = await fetch("https://api.alternative.me/fng/?limit=1");
+    const d = await r.json();
+    const v = parseInt(d?.data?.[0]?.value || 50);
+    const label = d?.data?.[0]?.value_classification || '';
+    _fgCache = { value: v, label, ts: Date.now() };
+    return _fgCache;
+  } catch { return { value: null, label: 'N/A', ts: Date.now() }; }
+}
+export { getFearGreed };
+
+// ─── BTC Dominance ────────────────────────────────────────────────────────────
+let _domCache = { btc: null, change: null, ts: 0 };
+const DOM_TTL = 15 * 60 * 1000;
+
+async function getBtcDominance() {
+  if (Date.now() - _domCache.ts < DOM_TTL && _domCache.btc !== null) return _domCache;
+  try {
+    const r = await fetch("https://api.coingecko.com/api/v3/global");
+    const d = await r.json();
+    const btc = d?.data?.market_cap_percentage?.btc;
+    _domCache = { btc: btc ? parseFloat(btc.toFixed(1)) : null, ts: Date.now() };
+    return _domCache;
+  } catch { return { btc: null, ts: Date.now() }; }
+}
+export { getBtcDominance };
+
+// ─── DXY Cross-asset korelacija ───────────────────────────────────────────────
+let _dxyCache = { change4h: null, direction: '', ts: 0 };
+const DXY_TTL = 15 * 60 * 1000;
+
+async function getDxyData() {
+  if (Date.now() - _dxyCache.ts < DXY_TTL && _dxyCache.change4h !== null) return _dxyCache;
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/DX-Y.NYB?interval=4h&range=1d&includePrePost=false`;
+    const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+    const d = await r.json();
+    const closes = d?.chart?.result?.[0]?.indicators?.quote?.[0]?.close?.filter(Boolean) || [];
+    if (closes.length < 2) return _dxyCache;
+    const first = closes[0], last = closes[closes.length - 1];
+    const change4h = parseFloat(((last - first) / first * 100).toFixed(3));
+    const direction = change4h > 0.3 ? '↑ jača' : change4h < -0.3 ? '↓ slabi' : '→ flat';
+    _dxyCache = { change4h, direction, ts: Date.now() };
+    return _dxyCache;
+  } catch { return { change4h: null, direction: 'N/A', ts: Date.now() }; }
+}
+export { getDxyData };
+
+// ─── Consecutive loss counter (za dashboard CB progress bar) ──────────────────
+export function getConsecutiveLossCount(pid) {
+  const f = csvFilePath(pid);
+  if (!existsSync(f)) return 0;
+  try {
+    const lines = readFileSync(f, "utf8").trim().split("\n");
+    const exits = lines.slice(1)
+      .filter(l => l.includes("CLOSE_LONG") || l.includes("CLOSE_SHORT"))
+      .reverse();
+    let count = 0;
+    for (const l of exits) {
+      if (parseFloat(l.split(",")[9] || 0) < 0) count++;
+      else break;
+    }
+    return count;
+  } catch { return 0; }
+}
+
 // ─── 4. SIGNAL ANALIZA — prati koje signale bilježe pobjedu ──────────────────
 // Svaki ulaz bilježi fingerprint aktivnih signala (bitmask)
 // Čitamo nakon izlaza koji signal je bio aktivan i označavamo win/loss
@@ -1558,6 +1739,7 @@ async function checkPortfolioPositions(pid) {
           await tg(`${pnl >= 0 ? "✅ WIN" : "❌ LOSS"} [ULTRA] ${pos.symbol} ${pos.side}\nP&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)} | ${exitReason}\nUlaz: ${fmtPrice(pos.entryPrice)} → Izlaz: ${fmtPrice(exitPrice)}`);
           // 4. Signal analiza — bilježi outcome po signalima
           if (pos.sigMask != null) recordSignalOutcome(pos.sigMask, pnl >= 0);
+          recordSymbolOutcome(pos.symbol, pnl >= 0);
 
           if (pnl < 0) {
             // Cooldown 4h — ne ulazi ponovo u ovaj simbol
@@ -2217,6 +2399,9 @@ function checkDailyLimit(pid) {
 // Ako portfolio ima 5 uzastopnih gubitaka → pauza 8 sati.
 // Stanje se čuva na disku (preživi restart).
 
+const CB_LOSSES   = 7;                     // uzastopnih gubitaka → circuit breaker
+const CB_COOLDOWN = 8 * 60 * 60 * 1000;   // 8h pauza
+
 const CB_DRAWDOWN_MIN = 200;      // minimalni equity ($) — ispod = stop trading
 const CB_DRAWDOWN_PCT = 25;       // % gubitak od stvarnog BitGet stanja → stop (backup)
 const SYM_CONSEC_LOSSES = 5;      // uzastopni gubici po simbolu → suspendiraj sa liste
@@ -2456,6 +2641,16 @@ export async function run() {
       console.log(`  🔒 [${pDef.name}] Max ${MAX_OPEN_PER_PORTFOLIO} dostignut — skeniranje samo BTC (specijalni slot)`);
     }
 
+    // ── Daily P&L Budget gate ──────────────────────────────────────────────
+    const dailyPnl = getDailyPnl(pid);
+    if (dailyPnl < -DAILY_LOSS_LIMIT) {
+      console.log(`  🛑 [${pDef.name}] DNEVNI LIMIT — P&L danas: $${dailyPnl.toFixed(2)} < -$${DAILY_LOSS_LIMIT} → trading suspendiran`);
+      await tg(`🛑 Dnevni gubitak limit: $${dailyPnl.toFixed(2)} — trading pauziran do ponoći`);
+      continue;
+    }
+    const dailyWarnActive = dailyPnl < -(DAILY_LOSS_LIMIT * DAILY_WARN_PCT / 100);
+    if (dailyWarnActive) console.log(`  ⚠️  [${pDef.name}] Dnevni P&L upozorenje: $${dailyPnl.toFixed(2)} (${(Math.abs(dailyPnl)/DAILY_LOSS_LIMIT*100).toFixed(0)}% limita)`);
+
     // ── 3. Market Regime: BTC 4H mora biti BULL ────────────────────────────
     if (pDef.strategy === "synapse_t") {
       const regime = await getBtcRegime();
@@ -2505,6 +2700,14 @@ export async function run() {
         const candles = await fetchCandles(symbol, pDef.timeframe, 250);
         const price   = candles[candles.length - 1].close;
 
+        // ── Volume Anomaly gate ─────────────────────────────────────────────
+        const volAnomaly = checkVolumeAnomaly(candles);
+        if (!volAnomaly.ok) {
+          console.log(`  📉 [VOL] ${symbol} — nizak volumen ${volAnomaly.ratio}x prosjeka → preskačem`);
+          continue;
+        }
+        if (volAnomaly.high) console.log(`  📈 [VOL] ${symbol} — visok volumen ${volAnomaly.ratio}x! (breakout signal)`);
+
         let result;
         switch (pDef.strategy) {
           case "mega":        result = analyzeMega(candles, pDef.params);                              break;
@@ -2518,6 +2721,16 @@ export async function run() {
         if (signal === "NEUTRAL") {
           console.log(`  🚫 [${pDef.name}] ${symbol} — ${reason}`);
           continue;
+        }
+
+        // ── Funding rate gate — blokira LONG ako tržište preokomjerno long ──
+        if (signal === "LONG" && pDef.strategy === "synapse_t") {
+          const fr = await getFundingRate(symbol);
+          if (fr > FR_LONG_BLOCK) {
+            console.log(`  🚫 [FR] ${symbol} — funding ${fr.toFixed(4)}% > ${FR_LONG_BLOCK}% → LONG blokiran`);
+            continue;
+          }
+          if (fr > FR_WARN) console.log(`  ⚠️  [FR] ${symbol} — funding ${fr.toFixed(4)}% (upozorenje)`);
         }
 
         // ── Cooldown provjera: 4h pauza po simbolu nakon SL-a ──────────────

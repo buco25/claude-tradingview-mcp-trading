@@ -6,7 +6,9 @@
 import "dotenv/config";
 import http from "http";
 import { readFileSync, writeFileSync, existsSync } from "fs";
-import { run as botRun, checkBreakouts, syncPositionsFromBitget, check5mSRTest, checkBeStopAll } from "./bot.js";
+import { run as botRun, checkBreakouts, syncPositionsFromBitget, check5mSRTest, checkBeStopAll,
+  getAllFundingRates, getDailyPnlExport, getSymbolStats, getOIForSymbols,
+  getFearGreed, getBtcDominance, getDxyData, getConsecutiveLossCount } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -1048,6 +1050,67 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   </div>`;
   })()}
 
+  <!-- Market Intelligence Panel -->
+  <div style="background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:16px 20px;margin-bottom:20px" id="market-intel-panel">
+    <div style="font-size:11px;color:#8b949e;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">🧠 Market Intelligence</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px" id="intel-grid">
+      <!-- Circuit Breaker -->
+      <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#8b949e;margin-bottom:6px;text-transform:uppercase">🛑 Circuit Breaker</div>
+        <div style="font-size:18px;font-weight:800;color:#f7b731" id="cb-count">…/7</div>
+        <div style="background:#21262d;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
+          <div id="cb-bar" style="height:100%;border-radius:4px;background:#00c48c;transition:width .5s,background .5s;width:0%"></div>
+        </div>
+        <div style="font-size:11px;color:#8b949e" id="cb-sub">učitavam…</div>
+      </div>
+
+      <!-- Daily P&L Budget -->
+      <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#8b949e;margin-bottom:6px;text-transform:uppercase">💰 Dnevni P&L Budget</div>
+        <div style="font-size:18px;font-weight:800" id="daily-pnl-val">…</div>
+        <div style="background:#21262d;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
+          <div id="daily-pnl-bar" style="height:100%;border-radius:4px;background:#00c48c;transition:width .5s,background .5s;width:0%"></div>
+        </div>
+        <div style="font-size:11px;color:#8b949e" id="daily-pnl-sub">Max: $20 dnevni gubitak</div>
+      </div>
+
+      <!-- Funding Rate -->
+      <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#8b949e;margin-bottom:6px;text-transform:uppercase">💸 Funding Rate</div>
+        <div style="font-size:14px;font-weight:700" id="fr-val">…</div>
+        <div style="font-size:11px;color:#8b949e;margin-top:4px" id="fr-sub">&gt;0.05% = LONG blokiran</div>
+      </div>
+
+      <!-- Fear & Greed -->
+      <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#8b949e;margin-bottom:6px;text-transform:uppercase">😱 Fear & Greed</div>
+        <div style="font-size:22px;font-weight:800" id="fg-val">…</div>
+        <div style="font-size:11px;margin-top:2px" id="fg-label">…</div>
+        <div style="font-size:10px;color:#8b949e;margin-top:4px">&lt;20=Extreme Fear, &gt;80=Greed</div>
+      </div>
+
+      <!-- BTC Dominance -->
+      <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#8b949e;margin-bottom:6px;text-transform:uppercase">₿ BTC Dominance</div>
+        <div style="font-size:22px;font-weight:800;color:#f7b731" id="dom-val">…</div>
+        <div style="font-size:11px;color:#8b949e;margin-top:2px" id="dom-sub">Raste = altovi slabe</div>
+      </div>
+
+      <!-- DXY -->
+      <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#8b949e;margin-bottom:6px;text-transform:uppercase">💵 DXY (4H promjena)</div>
+        <div style="font-size:22px;font-weight:800" id="dxy-val">…</div>
+        <div style="font-size:11px;color:#8b949e;margin-top:2px" id="dxy-sub">&gt;+0.3% = LONG risk</div>
+      </div>
+    </div>
+
+    <!-- Per-Symbol WR Table -->
+    <div style="margin-top:16px">
+      <div style="font-size:11px;color:#8b949e;font-weight:700;text-transform:uppercase;margin-bottom:8px">📊 Per-Simbol Win Rate</div>
+      <div id="sym-wr-table" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px"></div>
+    </div>
+  </div>
+
   <!-- Period P&L -->
   ${(() => {
     const periods = [
@@ -1668,6 +1731,100 @@ setInterval(loadBitgetBalance, 30000);
 setTimeout(doScan, 2000);
 // Re-scan every 5 minutes
 setInterval(doScan, 1 * 60 * 1000);
+
+async function loadMarketContext() {
+  try {
+    const r = await fetch('/api/market-context');
+    const d = await r.json();
+
+    // Circuit Breaker
+    const cbCount = d.consecLosses || 0;
+    const cbMax = d.cbLosses || 7;
+    const cbPct = Math.min(cbCount / cbMax * 100, 100);
+    const cbColor = cbPct >= 85 ? '#ff4d4d' : cbPct >= 57 ? '#f7b731' : '#00c48c';
+    document.getElementById('cb-count').textContent = cbCount + '/' + cbMax + ' gubitaka';
+    document.getElementById('cb-count').style.color = cbColor;
+    document.getElementById('cb-bar').style.width = cbPct + '%';
+    document.getElementById('cb-bar').style.background = cbColor;
+    document.getElementById('cb-sub').textContent = cbPct >= 85 ? '🚨 OPASNO! Blizu pauze' : cbCount === 0 ? 'Sve OK' : 'Još ' + (cbMax - cbCount) + ' do pauze';
+
+    // Daily P&L Budget
+    const dp = d.dailyPnl || 0;
+    const dlim = d.dailyLimit || 20;
+    const dpPct = Math.min(Math.abs(dp) / dlim * 100, 100);
+    const dpColor = dpPct >= 80 ? '#ff4d4d' : dpPct >= 60 ? '#f7b731' : '#00c48c';
+    document.getElementById('daily-pnl-val').textContent = (dp >= 0 ? '+' : '') + '$' + dp.toFixed(2);
+    document.getElementById('daily-pnl-val').style.color = dp < 0 ? '#ff4d4d' : '#00c48c';
+    document.getElementById('daily-pnl-bar').style.width = dpPct + '%';
+    document.getElementById('daily-pnl-bar').style.background = dpColor;
+    document.getElementById('daily-pnl-sub').textContent = 'Iskorišteno: ' + dpPct.toFixed(0) + '% limita ($' + dlim + ')';
+
+    // Funding Rates
+    if (d.fr && Object.keys(d.fr).length > 0) {
+      const sorted = Object.entries(d.fr).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 4);
+      const frHtml = sorted.map(([sym, rate]) => {
+        const color = rate > 0.05 ? '#ff4d4d' : rate > 0.02 ? '#f7b731' : '#00c48c';
+        const blocked = rate > 0.05 ? ' 🚫' : '';
+        return '<span style="color:' + color + ';font-size:12px">' + sym.replace('USDT','') + ': ' + rate.toFixed(3) + '%' + blocked + '</span>';
+      }).join('<br>');
+      document.getElementById('fr-val').innerHTML = frHtml;
+    }
+
+    // Fear & Greed
+    if (d.fg && d.fg.value !== null) {
+      const fgV = d.fg.value;
+      const fgColor = fgV < 25 ? '#388bfd' : fgV < 45 ? '#00c48c' : fgV < 55 ? '#8b949e' : fgV < 75 ? '#f7b731' : '#ff4d4d';
+      document.getElementById('fg-val').textContent = fgV;
+      document.getElementById('fg-val').style.color = fgColor;
+      document.getElementById('fg-label').textContent = d.fg.label || '';
+      document.getElementById('fg-label').style.color = fgColor;
+    }
+
+    // BTC Dominance
+    if (d.dom && d.dom.btc !== null) {
+      document.getElementById('dom-val').textContent = d.dom.btc + '%';
+    }
+
+    // DXY
+    if (d.dxy && d.dxy.change4h !== null) {
+      const dxyV = d.dxy.change4h;
+      const dxyColor = dxyV > 0.3 ? '#ff4d4d' : dxyV < -0.3 ? '#00c48c' : '#8b949e';
+      document.getElementById('dxy-val').textContent = (dxyV > 0 ? '+' : '') + dxyV + '%';
+      document.getElementById('dxy-val').style.color = dxyColor;
+      document.getElementById('dxy-sub').textContent = d.dxy.direction + ' | >+0.3% = LONG risk';
+    }
+
+    // Per-Symbol WR
+    const symStats = d.symStats || {};
+    const symEntries = Object.entries(symStats)
+      .filter(([,v]) => v.total >= 2)
+      .map(([k,v]) => ({ sym: k, wr: v.wins/v.total*100, total: v.total }))
+      .sort((a, b) => b.total - a.total);
+
+    if (symEntries.length > 0) {
+      document.getElementById('sym-wr-table').innerHTML = symEntries.map(function(e) {
+        const color = e.wr >= 50 ? '#00c48c' : e.wr >= 35 ? '#f7b731' : '#ff4d4d';
+        const bar = Math.round(e.wr);
+        return '<div style="background:#21262d;border-radius:6px;padding:8px 10px">' +
+          '<div style="display:flex;justify-content:space-between;margin-bottom:4px">' +
+          '<span style="font-size:12px;font-weight:700">' + e.sym.replace('USDT','') + '</span>' +
+          '<span style="font-size:12px;color:' + color + ';font-weight:700">' + e.wr.toFixed(0) + '%</span>' +
+          '</div>' +
+          '<div style="background:#30363d;border-radius:2px;height:4px;overflow:hidden">' +
+          '<div style="width:' + bar + '%;height:100%;background:' + color + ';border-radius:2px"></div>' +
+          '</div>' +
+          '<div style="font-size:10px;color:#8b949e;margin-top:3px">N=' + e.total + '</div>' +
+          '</div>';
+      }).join('');
+    } else {
+      document.getElementById('sym-wr-table').innerHTML = '<div style="font-size:12px;color:#8b949e">Nema dovoljno podataka (treba 2+ tradova po simbolu)</div>';
+    }
+
+  } catch(e) { console.error('market-context error:', e); }
+}
+
+loadMarketContext();
+setInterval(loadMarketContext, 2 * 60 * 1000);
 </script>
 
 
@@ -1926,6 +2083,31 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
       }
     });
+    return;
+  }
+
+  // Market context — agregira sve market intelligence podatke
+  if (url.pathname === "/api/market-context") {
+    try {
+      const pid = "synapse_t";
+      const rules = JSON.parse(readFileSync("rules.json","utf8"));
+      const symbols = rules.watchlist_synapse_t || [];
+
+      const [fg, dom, dxy, fr, dailyPnl, consecLosses, symStats] = await Promise.all([
+        getFearGreed(),
+        getBtcDominance(),
+        getDxyData(),
+        getAllFundingRates(symbols.slice(0, 8)),
+        Promise.resolve(getDailyPnlExport(pid)),
+        Promise.resolve(getConsecutiveLossCount(pid)),
+        Promise.resolve(getSymbolStats()),
+      ]);
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, dailyLimit: 20, cbLosses: 7 }));
+    } catch(e) {
+      res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
+    }
     return;
   }
 

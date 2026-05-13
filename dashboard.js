@@ -1278,20 +1278,18 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <table class="scan-table" id="scan-table">
         <thead>
           <tr>
-            <th style="width:28px">#</th>
+            <th style="width:24px">#</th>
             <th>Symbol</th>
             <th>Cijena</th>
-            <th style="color:#9ca3af">RSI</th>
-            <th style="color:#9ca3af">ADX</th>
             <th style="color:#d97706;text-align:center">1H</th>
-            <th style="color:#d97706;text-align:center;white-space:nowrap">Obavezni <span style="font-weight:400;font-size:10px;color:#94a3b8">ADX≥30 · 6Sc · RSI</span> <span style="font-weight:400;font-size:10px;color:#94a3b8">· 5mSR(info)</span></th>
-            <th style="color:#db2777;text-align:center">13 Signala &nbsp;<span style="font-weight:400;font-size:10px;color:#94a3b8">E50 · RSI · E55 · CHP · CVD · R⟳ · MCD · E145 · VOL · MCC · RSI↗ · SRS · SRB</span></th>
-            <th style="color:#db2777;text-align:center">Score</th>
-            <th style="min-width:260px">Status / Breakout</th>
+            <th style="color:#d97706;text-align:center">4OB <span style="font-weight:400;font-size:10px;color:#94a3b8">ADX·6Sc·RSI·SR</span></th>
+            <th style="color:#db2777;text-align:center">13 Signala</th>
+            <th style="color:#db2777;text-align:center;width:60px">↑↓</th>
+            <th style="min-width:160px">Status</th>
           </tr>
         </thead>
         <tbody id="scan-tbody">
-          <tr><td colspan="10" style="text-align:center;padding:24px;color:var(--text-muted)">Klikni "Skeniraj" za prikaz ULTRA signala</td></tr>
+          <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted)">Klikni "Skeniraj" za prikaz ULTRA signala</td></tr>
         </tbody>
       </table>
     </div>
@@ -1828,7 +1826,7 @@ async function doScan() {
     document.getElementById("scan-ts").textContent = ts + " (UTC+2) | ▲ " + longs + " LONG · ▼ " + shorts + " SHORT · ⏳ " + pending + " čeka · ◈ " + setups + " setup";
 
     tbody.innerHTML = results.map((s, i) => {
-      if (s.error) return '<tr><td colspan="10" style="color:#dc2626;padding:6px 10px">' + s.symbol + ': ' + s.error + '</td></tr>';
+      if (s.error) return '<tr><td colspan="8" style="color:#dc2626;padding:6px 10px">' + s.symbol + ': ' + s.error + '</td></tr>';
 
       const rsiNum = parseFloat(s.rsi);
       const rsiCol = isNaN(rsiNum) ? "#94a3b8" : rsiNum > 70 ? "#dc2626" : rsiNum < 30 ? "#059669" : rsiNum > 60 ? "#ea580c" : rsiNum < 40 ? "#0284c7" : "#475569";
@@ -1852,18 +1850,17 @@ async function doScan() {
       const t1hCol  = t1h === 'BULL' ? '#10b981' : t1h === 'BEAR' ? '#ef4444' : '#6b7280';
       const t1hIcon = t1h === 'BULL' ? '▲' : t1h === 'BEAR' ? '▼' : '·';
 
+      const rsiAdxInfo = '<div style="font-size:10px;color:#6b7280;margin-top:2px">RSI <span style="color:' + rsiCol + '">' + (s.rsi||'—') + '</span> · ADX <span style="color:' + adxCol + '">' + (s.adx||'—') + '</span></div>';
       return '<tr style="' + rowBg + '">' +
-        '<td style="color:#94a3b8;font-size:11px;text-align:center">' + (i+1) + '</td>' +
-        '<td style="font-weight:800;font-size:14px;white-space:nowrap">' + s.symbol.replace("USDT","") + '<span style="color:#94a3b8;font-size:10px;font-weight:400">USDT</span>' +
-          '<div style="font-size:10px;color:' + slTpCol + ';font-weight:500;margin-top:1px">' + slTp + '</div></td>' +
-        '<td style="font-weight:600;white-space:nowrap">' + fmtLive(s.price) + '</td>' +
-        '<td style="color:' + rsiCol + ';font-weight:700">' + (s.rsi || "—") + '</td>' +
-        '<td style="color:' + adxCol + '">' + (s.adx || "—") + '</td>' +
-        '<td style="text-align:center;font-weight:800;color:' + t1hCol + ';font-size:13px" title="1H EMA20 trend: ' + t1h + '">' + t1hIcon + '</td>' +
+        '<td style="color:#94a3b8;font-size:11px;text-align:center;padding:6px 4px">' + (i+1) + '</td>' +
+        '<td style="font-weight:800;font-size:13px;white-space:nowrap;padding:6px 8px">' + s.symbol.replace("USDT","") + '<span style="color:#94a3b8;font-size:10px;font-weight:400">USDT</span>' +
+          '<div style="font-size:9px;color:' + slTpCol + ';font-weight:500;margin-top:1px">' + slTp + '</div>' + rsiAdxInfo + '</td>' +
+        '<td style="font-weight:600;white-space:nowrap;font-size:12px;padding:6px 8px">' + fmtLive(s.price) + '</td>' +
+        '<td style="text-align:center;font-weight:800;color:' + t1hCol + ';font-size:13px;padding:6px 4px" title="1H EMA20: ' + t1h + '">' + t1hIcon + '</td>' +
         '<td style="padding:4px 6px;border-right:1px solid #d9770633">' + mandatoryBoxes(s) + '</td>' +
-        '<td style="padding:4px 6px">' + sigBoxes(s.ultraSigs16) + '</td>' +
-        '<td style="padding:4px 8px">' + scoreBox(s.ultraBull||0, s.ultraBear||0, s.ultraSig, s.ultraMinSig) + '</td>' +
-        '<td style="padding:4px 8px">' + statusBox(s) + '</td>' +
+        '<td style="padding:4px 4px">' + sigBoxes(s.ultraSigs16) + '</td>' +
+        '<td style="padding:4px 6px;text-align:center">' + scoreBox(s.ultraBull||0, s.ultraBear||0, s.ultraSig, s.ultraMinSig) + '</td>' +
+        '<td style="padding:4px 6px">' + statusBox(s) + '</td>' +
         '</tr>';
     }).join("");
 
@@ -1893,7 +1890,7 @@ async function doScan() {
     }
 
   } catch(e) {
-    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#dc2626;padding:24px">Greška: ' + e.message + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#dc2626;padding:24px">Greška: ' + e.message + '</td></tr>';
   }
 
   btn.disabled = false;

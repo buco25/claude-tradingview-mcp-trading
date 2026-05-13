@@ -3246,9 +3246,9 @@ export async function run() {
 
         // ── Regime + SP500 + 1H trend filter — po smjeru signala ─────────────
         if (pDef.strategy === "synapse_t") {
-          // BTC BEAR/NEUTRAL → blokira LONG
-          if (signal === "LONG" && (_btcRegime === "BEAR" || _btcRegime === "NEUTRAL")) {
-            console.log(`  🌧️  [REGIME] ${symbol} — BTC ${_btcRegime} → LONG blokiran`);
+          // BTC BEAR → blokira LONG (NEUTRAL prolazi)
+          if (signal === "LONG" && _btcRegime === "BEAR") {
+            console.log(`  🌧️  [REGIME] ${symbol} — BTC BEAR → LONG blokiran`);
             continue;
           }
           // BTC BULL → blokira SHORT (trend suprotan shortu)

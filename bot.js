@@ -291,7 +291,7 @@ export async function getAllFundingRates(symbols) {
 
 // ─── Volume Anomaly gate ──────────────────────────────────────────────────────
 const VOL_LOOKBACK = 20;
-const VOL_LOW_MULT = 0.5;
+const VOL_LOW_MULT = 0.3;
 const VOL_HIGH_MULT = 2.0;
 
 function checkVolumeAnomaly(candles) {

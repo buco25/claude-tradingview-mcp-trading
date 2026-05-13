@@ -477,7 +477,7 @@ async function runScan(rules) {
           const vols = candles.slice(-22, -2).map(c => c.volume);
           const avg  = vols.reduce((a, b) => a + b, 0) / vols.length;
           volRatio   = avg > 0 ? candles[candles.length - 2].volume / avg : 1;
-          volLow     = volRatio < 0.5;
+          volLow     = volRatio < 0.3;
         }
 
         // 5m S/R test — samo za simbole koji imaju aktivan LONG/SHORT signal

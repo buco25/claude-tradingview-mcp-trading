@@ -184,11 +184,95 @@ async function getBtcRegime() {
   }
 }
 
-// ─── Funding Rate gate ────────────────────────────────────────────────────────
+// ─── Funding Rate gate + Trend tracking ──────────────────────────────────────
 const _frCache = {};
 const FR_TTL   = 15 * 60 * 1000;
 const FR_LONG_BLOCK = 0.05;  // % — blokira LONG ako funding > ovo
 const FR_WARN       = 0.02;  // % — samo log
+
+// Prati zadnja 3 očitanja funding ratea po simbolu
+const _frHistory = new Map();
+function recordFundingTrend(symbol, rate) {
+  const hist = _frHistory.get(symbol) || [];
+  hist.push(rate);
+  if (hist.length > 3) hist.shift();
+  _frHistory.set(symbol, hist);
+  return hist;
+}
+function isFundingTrendRising(symbol) {
+  const hist = _frHistory.get(symbol) || [];
+  if (hist.length < 3) return false;
+  // Svaka nova vrijednost viša od prethodne I zadnja > 0.02%
+  return hist[0] < hist[1] && hist[1] < hist[2] && hist[2] > 0.02;
+}
+
+// ─── VWAP (Volume Weighted Average Price) ────────────────────────────────────
+function calcVWAP(candles, periods = 96) {
+  const slice = candles.slice(-periods);
+  let sumPV = 0, sumV = 0;
+  for (const c of slice) {
+    const typical = (c.high + c.low + c.close) / 3;
+    const vol = c.volume || 1;
+    sumPV += typical * vol;
+    sumV  += vol;
+  }
+  return sumV > 0 ? sumPV / sumV : null;
+}
+
+// ─── Open Interest promjena ───────────────────────────────────────────────────
+const _oiCache = {};
+async function getOiChange(symbol) {
+  try {
+    const url = `${BITGET.baseUrl}/api/v2/mix/market/open-interest?symbol=${symbol}&productType=USDT-FUTURES`;
+    const d   = await fetch(url).then(r => r.json());
+    const current = parseFloat(d?.data?.openInterest || d?.data?.[0]?.openInterest || 0);
+    if (!current) return { changePct: 0, rising: false, falling: false, confirmed: true };
+    const prev = _oiCache[symbol]?.oi || current;
+    _oiCache[symbol] = { oi: current, ts: Date.now() };
+    const changePct = prev > 0 ? (current - prev) / prev * 100 : 0;
+    return {
+      current, changePct: parseFloat(changePct.toFixed(2)),
+      rising:    changePct >  1.0,   // OI raste >1% = novi novac ulazi
+      falling:   changePct < -1.0,   // OI pada >1% = zatvaranje pozicija
+      confirmed: changePct >= 0,     // OI ne pada = signal potvrđen
+    };
+  } catch { return { changePct: 0, rising: false, falling: false, confirmed: true }; }
+}
+
+// ─── BTC/ETH Divergencija ─────────────────────────────────────────────────────
+let _btcEthDivCache = { diverging: false, corr: 1, ts: 0 };
+const BTCETH_DIV_TTL = 5 * 60 * 1000;
+async function checkBtcEthDivergence() {
+  if (Date.now() - _btcEthDivCache.ts < BTCETH_DIV_TTL) return _btcEthDivCache;
+  try {
+    const [btcC, ethC] = await Promise.all([
+      fetchCandles("BTCUSDT", "15m", 25),
+      fetchCandles("ETHUSDT", "15m", 25),
+    ]);
+    const n = Math.min(btcC.length, ethC.length, 20);
+    const btcR = [], ethR = [];
+    for (let i = 1; i <= n; i++) {
+      const bi = btcC.length - n + i - 1, bj = btcC.length - n + i - 2;
+      const ei = ethC.length - n + i - 1, ej = ethC.length - n + i - 2;
+      if (bj >= 0 && ej >= 0 && btcC[bj].close > 0 && ethC[ej].close > 0) {
+        btcR.push((btcC[bi].close - btcC[bj].close) / btcC[bj].close);
+        ethR.push((ethC[ei].close - ethC[ej].close) / ethC[ej].close);
+      }
+    }
+    if (btcR.length < 5) return _btcEthDivCache;
+    const mean = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
+    const mB = mean(btcR), mE = mean(ethR);
+    const num = btcR.reduce((s, v, i) => s + (v - mB) * (ethR[i] - mE), 0);
+    const den = Math.sqrt(
+      btcR.reduce((s, v) => s + (v - mB) ** 2, 0) *
+      ethR.reduce((s, v) => s + (v - mE) ** 2, 0)
+    );
+    const corr = den > 0 ? num / den : 1;
+    _btcEthDivCache = { diverging: corr < 0.4, corr: parseFloat(corr.toFixed(2)), ts: Date.now() };
+    if (_btcEthDivCache.diverging) console.log(`  ⚡ [DIV] BTC/ETH korelacija: ${corr.toFixed(2)} < 0.4 — tržište divergira`);
+    return _btcEthDivCache;
+  } catch { return { diverging: false, corr: 1, ts: Date.now() }; }
+}
 
 async function getFundingRate(symbol) {
   const cached = _frCache[symbol];
@@ -3046,6 +3130,12 @@ export async function run() {
       if (sp.change4h !== null) console.log(`  📈 [SP500] ${sp.change4h}% (4H) — ${sp.regime}`);
     }
 
+    // ── BTC/ETH divergencija — jednom po ciklusu ─────────────────────────────
+    let _btcEthDiv = { diverging: false, corr: 1 };
+    if (pDef.strategy === "synapse_t") {
+      _btcEthDiv = await checkBtcEthDivergence();
+    }
+
     // ── Fear & Greed gate ─────────────────────────────────────────────────────
     let _fearGreed = null;
     if (pDef.strategy === "synapse_t") {
@@ -3209,13 +3299,57 @@ export async function run() {
         }
 
         // ── Funding rate gate — blokira LONG ako tržište preokomjerno long ──
-        if (signal === "LONG" && pDef.strategy === "synapse_t") {
+        if (pDef.strategy === "synapse_t") {
           const fr = await getFundingRate(symbol);
-          if (fr > FR_LONG_BLOCK) {
-            console.log(`  🚫 [FR] ${symbol} — funding ${fr.toFixed(4)}% > ${FR_LONG_BLOCK}% → LONG blokiran`);
-            continue;
+          const frHist = recordFundingTrend(symbol, fr);
+          if (signal === "LONG") {
+            if (isFundingTrendRising(symbol)) {
+              console.log(`  📈 [FR-TREND] ${symbol} — funding RASTE (${frHist.map(v=>v.toFixed(3)).join('→')}%) → LONG blokiran (trap)`);
+              continue;
+            }
+            if (fr > FR_LONG_BLOCK) {
+              console.log(`  🚫 [FR] ${symbol} — funding ${fr.toFixed(4)}% > ${FR_LONG_BLOCK}% → LONG blokiran`);
+              continue;
+            }
+            if (fr > FR_WARN) console.log(`  ⚠️  [FR] ${symbol} — funding ${fr.toFixed(4)}% (upozorenje)`);
           }
-          if (fr > FR_WARN) console.log(`  ⚠️  [FR] ${symbol} — funding ${fr.toFixed(4)}% (upozorenje)`);
+        }
+
+        // ── VWAP filter — ne ulazimo ako je cijena predaleko od VWAP-a ────────
+        if (pDef.strategy === "synapse_t") {
+          const vwap = calcVWAP(candles);
+          if (vwap) {
+            const vwapDistPct = (price - vwap) / vwap * 100;
+            if (signal === "LONG" && vwapDistPct > 2.5) {
+              console.log(`  📊 [VWAP] ${symbol} — +${vwapDistPct.toFixed(1)}% iznad VWAP ${fmtPrice(vwap)} → LONG blokiran (overextended)`);
+              continue;
+            }
+            if (signal === "SHORT" && vwapDistPct < -2.5) {
+              console.log(`  📊 [VWAP] ${symbol} — ${vwapDistPct.toFixed(1)}% ispod VWAP ${fmtPrice(vwap)} → SHORT blokiran (overextended)`);
+              continue;
+            }
+          }
+        }
+
+        // ── Open Interest — potvrda signala ────────────────────────────────────
+        let _oiSizeMult = 1.0;
+        if (pDef.strategy === "synapse_t") {
+          const oi = await getOiChange(symbol);
+          if (oi.falling && signal === "LONG") {
+            console.log(`  📉 [OI] ${symbol} — OI pada ${oi.changePct.toFixed(1)}% → slabi reli, size ×0.7`);
+            _oiSizeMult = 0.7;
+          } else if (oi.falling && signal === "SHORT") {
+            console.log(`  📉 [OI] ${symbol} — OI pada ${oi.changePct.toFixed(1)}% → short covering, size ×0.7`);
+            _oiSizeMult = 0.7;
+          } else if (oi.rising) {
+            console.log(`  📈 [OI] ${symbol} — OI raste ${oi.changePct.toFixed(1)}% → novi novac potvrđuje signal`);
+          }
+        }
+
+        // ── BTC/ETH divergencija — market uncertainty → preskoči ──────────────
+        if (pDef.strategy === "synapse_t" && _btcEthDiv.diverging) {
+          console.log(`  ⚡ [DIV] ${symbol} — BTC/ETH divergiraju (corr=${_btcEthDiv.corr}) → preskačem`);
+          continue;
         }
 
         // ── Cooldown provjera: 4h pauza po simbolu nakon SL-a ──────────────
@@ -3234,23 +3368,32 @@ export async function run() {
           console.log(`  🔄 INVERT: ${orig} → ${signal} ${symbol}`);
         }
 
-        // SL/TP — per-symbol > per-portfolio > globalna konstanta
+        // SL/TP — ATR-based za synapse_t, inače per-symbol > per-portfolio > globalna konstanta
         const symSltp = rules.symbol_sltp?.[symbol] || {};
-        const slPct  = symSltp.slPct ?? pDef.slPct ?? SL_PCT;
-        const tpPct  = symSltp.tpPct ?? pDef.tpPct ?? TP_PCT;
+        let slPct, tpPct;
+        if (pDef.strategy === "synapse_t" && atrTrend?.currentAtr > 0) {
+          const ATR_SL_MULT = 1.5;  // SL = 1.5× ATR od entry
+          const ATR_TP_MULT = 3.0;  // TP = 3.0× ATR od entry (RR 1:2)
+          const rawSlPct = (atrTrend.currentAtr * ATR_SL_MULT / price) * 100;
+          const rawTpPct = (atrTrend.currentAtr * ATR_TP_MULT / price) * 100;
+          slPct = Math.min(Math.max(rawSlPct, 0.8), 3.5);
+          tpPct = Math.min(Math.max(rawTpPct, 1.5), 7.0);
+          console.log(`  📐 [ATR-SL] ${symbol} ATR=${atrTrend.currentAtr.toFixed(4)} → SL ${slPct.toFixed(2)}% TP ${tpPct.toFixed(2)}% (RR ${(tpPct/slPct).toFixed(1)}x)`);
+        } else {
+          slPct = symSltp.slPct ?? pDef.slPct ?? SL_PCT;
+          tpPct = symSltp.tpPct ?? pDef.tpPct ?? TP_PCT;
+        }
         const slDist = price * (slPct / 100);
         const tpDist = price * (tpPct / 100);
         const sl = signal === "LONG" ? price - slDist : price + slDist;
         const tp = signal === "LONG" ? price + tpDist : price - tpDist;
 
         // Risk-based position sizing: SL gubitak = točno RISK_PCT% trenutne equity
-        // notional = riskAmount / slPct  →  SL hit = -riskAmount, TP hit = +riskAmount*(tpPct/slPct)
-        // margin = notional / actualLeverage — prilagođava se ako simbol ne podržava 100x
         const startCap   = pDef.startCapital ?? START_CAPITAL;
         const equity     = getPortfolioEquity(pid, startCap);
 
         const riskAmount = equity * (RISK_PCT / 100);
-        const tradeSize  = (riskAmount / (slPct / 100)) * (atrTrend?.sizeMult ?? 1);
+        const tradeSize  = (riskAmount / (slPct / 100)) * (atrTrend?.sizeMult ?? 1) * (_oiSizeMult ?? 1);
         const margin     = tradeSize / LEVERAGE;  // preliminarno — ažurira se nakon setupSymbol
 
         if (!checkDailyLimit(pid)) {

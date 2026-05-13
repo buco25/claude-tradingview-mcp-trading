@@ -10,7 +10,7 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, check5mSRTest, 
   getAllFundingRates, getDailyPnlExport, getSymbolStats, getOIForSymbols,
   getFearGreed, getBtcDominance, getDxyData, getConsecutiveLossCount,
   getSessionInfo, calcAtrTrend, getSp500Data, calcSymbolCorrelation,
-  getDeribitPutCall, getLiquidationRisk, getEconEvents, isEconBlocked } from "./bot.js";
+  getDeribitPutCall, getLiquidationRisk, getEconEvents, isEconBlocked, calcVWAP } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -495,7 +495,9 @@ async function runScan(rules) {
           }
         } catch { /* ignoriraj */ }
 
-        results.push({ symbol: sym, ...s, pending, slPct, tpPct, srOk, trend1h });
+        const vwap = calcVWAP(candles);
+        const vwapDistPct = vwap ? parseFloat(((candles[candles.length-1].close - vwap) / vwap * 100).toFixed(2)) : null;
+        results.push({ symbol: sym, ...s, pending, slPct, tpPct, srOk, trend1h, vwap: vwap ? parseFloat(vwap.toFixed(6)) : null, vwapDistPct });
       } catch (e) {
         results.push({ symbol: sym, error: e.message });
       }
@@ -1197,6 +1199,17 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div style="font-size:11px;color:#9ca3af" id="liq-sub">Funding + OI analiza</div>
       </div>
 
+      <!-- VWAP Status -->
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">📊 VWAP Status</div>
+        <div style="font-size:16px;font-weight:800" id="vwap-val">…</div>
+        <div style="background:#374151;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
+          <div id="vwap-bar" style="height:100%;border-radius:4px;background:#00c48c;transition:width .5s,background .5s;width:0%"></div>
+        </div>
+        <div style="font-size:11px;color:#9ca3af" id="vwap-sub">Simboli unutar ±2.5% VWAP</div>
+        <div id="vwap-list" style="margin-top:6px;font-size:10px;color:#ef4444"></div>
+      </div>
+
       <!-- Ekonomski kalendar -->
       <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px;grid-column:span 2">
         <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">📅 Ekonomski kalendar (HIGH impact USD)</div>
@@ -1826,9 +1839,14 @@ async function doScan() {
       const hasSignal  = s.ultraSig === "LONG" || s.ultraSig === "SHORT";
       const rowBg = hasPending ? "background:rgba(247,183,49,0.04)" : hasSignal ? "background:rgba(5,150,105,0.04)" : "";
 
-      // Per-symbol SL/TP tier boja
-      const slTp    = s.slPct && s.tpPct ? 'SL ' + s.slPct + '% / TP ' + s.tpPct + '%' : 'SL 1.5% / TP 2.5%';
+      // SL/TP — ATR-based u tradeu, prikazujemo tier kao referencu
       const slTpCol = (s.slPct >= 2.5) ? '#d97706' : (s.slPct >= 2.0) ? '#ff8c42' : '#94a3b8';
+      const slTpTier = s.slPct && s.tpPct ? '(tier ' + s.slPct + '/' + s.tpPct + '%)' : '';
+      const slTp = 'ATR-based <span style="font-size:9px;color:#6b7280">' + slTpTier + '</span>';
+
+      // VWAP distanca
+      const vwapDist = s.vwapDistPct;
+      const vwapAbove25 = vwapDist !== null && Math.abs(vwapDist) > 2.5;
 
       const t1h = s.trend1h || 'UNKNOWN';
       const t1hCol  = t1h === 'BULL' ? '#10b981' : t1h === 'BEAR' ? '#ef4444' : '#6b7280';
@@ -1848,6 +1866,31 @@ async function doScan() {
         '<td style="padding:4px 8px">' + statusBox(s) + '</td>' +
         '</tr>';
     }).join("");
+
+    // ── Ažuriraj VWAP karticu ────────────────────────────────────────────────
+    const withVwap = results.filter(s => s.vwapDistPct !== null && s.vwapDistPct !== undefined);
+    if (withVwap.length > 0) {
+      const inRange   = withVwap.filter(s => Math.abs(s.vwapDistPct) <= 2.5).length;
+      const overextended = withVwap.filter(s => Math.abs(s.vwapDistPct) > 2.5);
+      const pct = Math.round(inRange / withVwap.length * 100);
+      const vwapCol = pct >= 70 ? '#10b981' : pct >= 50 ? '#d97706' : '#ef4444';
+      const vEl = document.getElementById('vwap-val');
+      const vBar = document.getElementById('vwap-bar');
+      const vSub = document.getElementById('vwap-sub');
+      const vList = document.getElementById('vwap-list');
+      if (vEl)  { vEl.textContent = inRange + '/' + withVwap.length + ' unutar ranga'; vEl.style.color = vwapCol; }
+      if (vBar) { vBar.style.width = pct + '%'; vBar.style.background = vwapCol; }
+      if (vSub) vSub.textContent = 'Simboli unutar ±2.5% od VWAP-a';
+      if (vList && overextended.length > 0) {
+        vList.innerHTML = overextended.map(s => {
+          const d = s.vwapDistPct > 0 ? '+' + s.vwapDistPct : s.vwapDistPct;
+          const col = s.vwapDistPct > 0 ? '#f59e0b' : '#60a5fa';
+          return '<span style="color:' + col + ';margin-right:8px">' + s.symbol.replace('USDT','') + ' ' + d + '%</span>';
+        }).join('');
+      } else if (vList) {
+        vList.innerHTML = '<span style="color:#10b981">Svi unutar ranga ✓</span>';
+      }
+    }
 
   } catch(e) {
     tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#dc2626;padding:24px">Greška: ' + e.message + '</td></tr>';

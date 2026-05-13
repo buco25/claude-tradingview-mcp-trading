@@ -207,7 +207,7 @@ function isFundingTrendRising(symbol) {
 }
 
 // ─── VWAP (Volume Weighted Average Price) ────────────────────────────────────
-function calcVWAP(candles, periods = 96) {
+export function calcVWAP(candles, periods = 96) {
   const slice = candles.slice(-periods);
   let sumPV = 0, sumV = 0;
   for (const c of slice) {

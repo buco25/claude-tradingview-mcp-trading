@@ -219,22 +219,16 @@ function calcVWAP(candles, periods = 96) {
   return sumV > 0 ? sumPV / sumV : null;
 }
 
-// ─── Open Interest promjena ───────────────────────────────────────────────────
-const _oiCache = {};
+// ─── Open Interest promjena — wrapper koji koristi postojeći getOpenInterest ──
 async function getOiChange(symbol) {
   try {
-    const url = `${BITGET.baseUrl}/api/v2/mix/market/open-interest?symbol=${symbol}&productType=USDT-FUTURES`;
-    const d   = await fetch(url).then(r => r.json());
-    const current = parseFloat(d?.data?.openInterest || d?.data?.[0]?.openInterest || 0);
-    if (!current) return { changePct: 0, rising: false, falling: false, confirmed: true };
-    const prev = _oiCache[symbol]?.oi || current;
-    _oiCache[symbol] = { oi: current, ts: Date.now() };
-    const changePct = prev > 0 ? (current - prev) / prev * 100 : 0;
+    const r = await getOpenInterest(symbol);
+    const changePct = r.oi > 0 && r.prev > 0 ? (r.oi - r.prev) / r.prev * 100 : 0;
     return {
-      current, changePct: parseFloat(changePct.toFixed(2)),
-      rising:    changePct >  1.0,   // OI raste >1% = novi novac ulazi
-      falling:   changePct < -1.0,   // OI pada >1% = zatvaranje pozicija
-      confirmed: changePct >= 0,     // OI ne pada = signal potvrđen
+      changePct:  parseFloat(changePct.toFixed(2)),
+      rising:     r.trend === 'RASTE',
+      falling:    r.trend === 'PADA',
+      confirmed:  r.trend !== 'PADA',
     };
   } catch { return { changePct: 0, rising: false, falling: false, confirmed: true }; }
 }

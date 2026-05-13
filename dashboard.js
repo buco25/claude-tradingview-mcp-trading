@@ -471,6 +471,15 @@ async function runScan(rules) {
         const slPct   = symSltp.slPct ?? 1.5;
         const tpPct   = symSltp.tpPct ?? 2.5;
 
+        // Volume anomaly check (isti algoritam kao bot.js)
+        let volRatio = 1, volLow = false;
+        if (candles.length >= 22) {
+          const vols = candles.slice(-22, -2).map(c => c.volume);
+          const avg  = vols.reduce((a, b) => a + b, 0) / vols.length;
+          volRatio   = avg > 0 ? candles[candles.length - 2].volume / avg : 1;
+          volLow     = volRatio < 0.5;
+        }
+
         // 5m S/R test — samo za simbole koji imaju aktivan LONG/SHORT signal
         let srOk = null;  // null = nije primjenjivo / nije provjeravano
         const activeSig = s.ultraSig === "LONG" || s.ultraSig === "SHORT"
@@ -497,7 +506,7 @@ async function runScan(rules) {
 
         const vwap = calcVWAP(candles);
         const vwapDistPct = vwap ? parseFloat(((candles[candles.length-1].close - vwap) / vwap * 100).toFixed(2)) : null;
-        results.push({ symbol: sym, ...s, pending, slPct, tpPct, srOk, trend1h, vwap: vwap ? parseFloat(vwap.toFixed(6)) : null, vwapDistPct });
+        results.push({ symbol: sym, ...s, pending, slPct, tpPct, srOk, trend1h, vwap: vwap ? parseFloat(vwap.toFixed(6)) : null, vwapDistPct, volRatio: parseFloat(volRatio.toFixed(2)), volLow });
       } catch (e) {
         results.push({ symbol: sym, error: e.message });
       }
@@ -1676,23 +1685,30 @@ function scoreBox(bull, bear, sig, minSig) {
 function statusBox(s) {
   const sig = s.ultraSig;
 
+  // Nizak volumen — bot bi preskočio ovaj signal
+  const volWarning = s.volLow
+    ? '<div style="font-size:10px;color:#f59e0b;margin-top:3px">⚠️ VOL nizak ' + s.volRatio + 'x · bot preskoči</div>'
+    : '';
+
   // Aktivan signal — bot ulazi odmah na close svjećice
   if (sig === "LONG") {
-    return '<div style="background:rgba(5,150,105,0.1);border:1px solid #059669;border-radius:8px;padding:8px 10px">' +
-      '<div style="font-size:11px;color:#059669;font-weight:700;margin-bottom:4px">✅ SIGNAL AKTIVIRAN</div>' +
+    return '<div style="background:rgba(5,150,105,0.1);border:1px solid ' + (s.volLow ? '#f59e0b' : '#059669') + ';border-radius:8px;padding:8px 10px">' +
+      '<div style="font-size:11px;color:#059669;font-weight:700;margin-bottom:4px">' + (s.volLow ? '⚠️ SIGNAL (vol nizak)' : '✅ SIGNAL AKTIVIRAN') + '</div>' +
       '<div style="font-size:13px;font-weight:700;color:#059669">▲ LONG</div>' +
       '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Ulaz odmah @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBull||0) + '/13</b></div>' +
+      volWarning +
       '</div>';
   }
   if (sig === "SHORT") {
-    return '<div style="background:rgba(220,38,38,0.1);border:1px solid #dc2626;border-radius:8px;padding:8px 10px">' +
-      '<div style="font-size:11px;color:#dc2626;font-weight:700;margin-bottom:4px">✅ SIGNAL AKTIVIRAN</div>' +
+    return '<div style="background:rgba(220,38,38,0.1);border:1px solid ' + (s.volLow ? '#f59e0b' : '#dc2626') + ';border-radius:8px;padding:8px 10px">' +
+      '<div style="font-size:11px;color:#dc2626;font-weight:700;margin-bottom:4px">' + (s.volLow ? '⚠️ SIGNAL (vol nizak)' : '✅ SIGNAL AKTIVIRAN') + '</div>' +
       '<div style="font-size:13px;font-weight:700;color:#dc2626">▼ SHORT</div>' +
       '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Ulaz odmah @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBear||0) + '/13</b></div>' +
+      volWarning +
       '</div>';
   }
-  if (sig === "SETUP↑") return '<span style="color:#d97706;font-size:12px">◈ SETUP ↑ &nbsp;<span style="color:#94a3b8;font-size:11px">(' + (s.ultraBull||0) + '/13)</span></span>';
-  if (sig === "SETUP↓") return '<span style="color:#d97706;font-size:12px">◈ SETUP ↓ &nbsp;<span style="color:#94a3b8;font-size:11px">(' + (s.ultraBear||0) + '/13)</span></span>';
+  if (sig === "SETUP↑") return '<span style="color:#d97706;font-size:12px">◈ SETUP ↑ &nbsp;<span style="color:#94a3b8;font-size:11px">(' + (s.ultraBull||0) + '/13)</span></span>' + (s.volLow ? '<br><span style="color:#f59e0b;font-size:10px">⚠️ VOL ' + s.volRatio + 'x</span>' : '');
+  if (sig === "SETUP↓") return '<span style="color:#d97706;font-size:12px">◈ SETUP ↓ &nbsp;<span style="color:#94a3b8;font-size:11px">(' + (s.ultraBear||0) + '/13)</span></span>' + (s.volLow ? '<br><span style="color:#f59e0b;font-size:10px">⚠️ VOL ' + s.volRatio + 'x</span>' : '');
 
   // ── RSI + ADX Watch alert — oba moraju biti overextended ──────────────────
   const rsiNum = parseFloat(s.rsi);

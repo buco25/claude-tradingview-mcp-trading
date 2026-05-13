@@ -3340,14 +3340,15 @@ export async function run() {
           }
         }
 
-        // ── BTC/ETH divergencija — market uncertainty → traži 7/13 signala ────
+        // ── BTC/ETH divergencija — market uncertainty → traži minSig+1 signala ──
         if (pDef.strategy === "synapse_t" && _btcEthDiv.diverging) {
           const score = signal === "LONG" ? result.bullScore : result.bearScore;
-          if (score < 7) {
-            console.log(`  ⚡ [DIV] ${symbol} — BTC/ETH divergiraju (corr=${_btcEthDiv.corr}), signal ${score}/13 < 7 → preskačem`);
+          const divThresh = (cfg?.minSig ?? 6) + 1;
+          if (score < divThresh) {
+            console.log(`  ⚡ [DIV] ${symbol} — BTC/ETH divergiraju (corr=${_btcEthDiv.corr}), signal ${score}/13 < ${divThresh} → preskačem`);
             continue;
           }
-          console.log(`  ⚡ [DIV] ${symbol} — BTC/ETH divergiraju ali signal jak (${score}/13 ≥ 7) → nastavljam`);
+          console.log(`  ⚡ [DIV] ${symbol} — BTC/ETH divergiraju ali signal jak (${score}/13 ≥ ${divThresh}) → nastavljam`);
         }
 
         // ── Cooldown provjera: 4h pauza po simbolu nakon SL-a ──────────────

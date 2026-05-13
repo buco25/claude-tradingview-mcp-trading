@@ -3309,18 +3309,18 @@ export async function run() {
           }
         }
 
-        // ── VWAP filter — ne ulazimo ako je cijena predaleko od VWAP-a ────────
+        // ── VWAP filter — overextended = manji size, ne blokada ─────────────
+        let _vwapSizeMult = 1.0;
         if (pDef.strategy === "synapse_t") {
           const vwap = calcVWAP(candles);
           if (vwap) {
             const vwapDistPct = (price - vwap) / vwap * 100;
             if (signal === "LONG" && vwapDistPct > 2.5) {
-              console.log(`  📊 [VWAP] ${symbol} — +${vwapDistPct.toFixed(1)}% iznad VWAP ${fmtPrice(vwap)} → LONG blokiran (overextended)`);
-              continue;
-            }
-            if (signal === "SHORT" && vwapDistPct < -2.5) {
-              console.log(`  📊 [VWAP] ${symbol} — ${vwapDistPct.toFixed(1)}% ispod VWAP ${fmtPrice(vwap)} → SHORT blokiran (overextended)`);
-              continue;
+              _vwapSizeMult = 0.6;
+              console.log(`  📊 [VWAP] ${symbol} — +${vwapDistPct.toFixed(1)}% iznad VWAP → size ×0.6 (overextended)`);
+            } else if (signal === "SHORT" && vwapDistPct < -2.5) {
+              _vwapSizeMult = 0.6;
+              console.log(`  📊 [VWAP] ${symbol} — ${vwapDistPct.toFixed(1)}% ispod VWAP → size ×0.6 (overextended)`);
             }
           }
         }
@@ -3340,10 +3340,14 @@ export async function run() {
           }
         }
 
-        // ── BTC/ETH divergencija — market uncertainty → preskoči ──────────────
+        // ── BTC/ETH divergencija — market uncertainty → traži 7/13 signala ────
         if (pDef.strategy === "synapse_t" && _btcEthDiv.diverging) {
-          console.log(`  ⚡ [DIV] ${symbol} — BTC/ETH divergiraju (corr=${_btcEthDiv.corr}) → preskačem`);
-          continue;
+          const score = signal === "LONG" ? result.bullScore : result.bearScore;
+          if (score < 7) {
+            console.log(`  ⚡ [DIV] ${symbol} — BTC/ETH divergiraju (corr=${_btcEthDiv.corr}), signal ${score}/13 < 7 → preskačem`);
+            continue;
+          }
+          console.log(`  ⚡ [DIV] ${symbol} — BTC/ETH divergiraju ali signal jak (${score}/13 ≥ 7) → nastavljam`);
         }
 
         // ── Cooldown provjera: 4h pauza po simbolu nakon SL-a ──────────────
@@ -3387,7 +3391,7 @@ export async function run() {
         const equity     = getPortfolioEquity(pid, startCap);
 
         const riskAmount = equity * (RISK_PCT / 100);
-        const tradeSize  = (riskAmount / (slPct / 100)) * (atrTrend?.sizeMult ?? 1) * (_oiSizeMult ?? 1);
+        const tradeSize  = (riskAmount / (slPct / 100)) * (atrTrend?.sizeMult ?? 1) * (_oiSizeMult ?? 1) * (_vwapSizeMult ?? 1);
         const margin     = tradeSize / LEVERAGE;  // preliminarno — ažurira se nakon setupSymbol
 
         if (!checkDailyLimit(pid)) {

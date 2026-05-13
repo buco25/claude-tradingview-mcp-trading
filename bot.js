@@ -603,8 +603,9 @@ export function isEconBlocked(events) {
 }
 
 // ─── Daily P&L Budget ─────────────────────────────────────────────────────────
-const DAILY_LOSS_LIMIT = 20;
-const DAILY_WARN_PCT   = 80;
+const DAILY_LOSS_LIMIT_PCT = 3;   // 3% od stvarnog Bitget equityja
+const DAILY_LOSS_LIMIT_MIN = 20;  // minimalni floor ($20) ako equity nije dostupan
+const DAILY_WARN_PCT       = 80;
 
 function getDailyPnl(pid) {
   const f = csvFilePath(pid);
@@ -3098,15 +3099,16 @@ export async function run() {
       console.log(`  🔒 [${pDef.name}] Max ${MAX_OPEN_PER_PORTFOLIO} dostignut — skeniranje samo BTC (specijalni slot)`);
     }
 
-    // ── Daily P&L Budget gate ──────────────────────────────────────────────
+    // ── Daily P&L Budget gate — 3% od stvarnog equityja ──────────────────
+    const DAILY_LOSS_LIMIT = Math.max(equityNow * DAILY_LOSS_LIMIT_PCT / 100, DAILY_LOSS_LIMIT_MIN);
     const dailyPnl = getDailyPnl(pid);
     if (dailyPnl < -DAILY_LOSS_LIMIT) {
-      console.log(`  🛑 [${pDef.name}] DNEVNI LIMIT — P&L danas: $${dailyPnl.toFixed(2)} < -$${DAILY_LOSS_LIMIT} → trading suspendiran`);
-      await tg(`🛑 Dnevni gubitak limit: $${dailyPnl.toFixed(2)} — trading pauziran do ponoći`);
+      console.log(`  🛑 [${pDef.name}] DNEVNI LIMIT — P&L danas: $${dailyPnl.toFixed(2)} < -$${DAILY_LOSS_LIMIT.toFixed(0)} (3% od $${equityNow.toFixed(0)}) → trading suspendiran`);
+      await tg(`🛑 Dnevni gubitak limit: $${dailyPnl.toFixed(2)} (3% od $${equityNow.toFixed(0)}) — trading pauziran do ponoći`);
       continue;
     }
     const dailyWarnActive = dailyPnl < -(DAILY_LOSS_LIMIT * DAILY_WARN_PCT / 100);
-    if (dailyWarnActive) console.log(`  ⚠️  [${pDef.name}] Dnevni P&L upozorenje: $${dailyPnl.toFixed(2)} (${(Math.abs(dailyPnl)/DAILY_LOSS_LIMIT*100).toFixed(0)}% limita)`);
+    if (dailyWarnActive) console.log(`  ⚠️  [${pDef.name}] Dnevni P&L upozorenje: $${dailyPnl.toFixed(2)} (${(Math.abs(dailyPnl)/DAILY_LOSS_LIMIT*100).toFixed(0)}% od $${DAILY_LOSS_LIMIT.toFixed(0)} limita)`);
 
     // ── 3. Market Regime: BTC 4H — LONG samo kad BULL, SHORT samo kad BEAR/NEUTRAL ─
     let _btcRegime = "UNKNOWN";

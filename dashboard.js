@@ -1127,7 +1127,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div style="background:#374151;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
           <div id="daily-pnl-bar" style="height:100%;border-radius:4px;background:#00c48c;transition:width .5s,background .5s;width:0%"></div>
         </div>
-        <div style="font-size:11px;color:#9ca3af" id="daily-pnl-sub">Max: $20 dnevni gubitak</div>
+        <div style="font-size:11px;color:#9ca3af" id="daily-pnl-sub">Iskorišteno: 0% limita</div>
       </div>
 
       <!-- Funding Rate -->
@@ -1968,7 +1968,7 @@ async function loadMarketContext() {
     document.getElementById('daily-pnl-val').style.color = dp < 0 ? '#dc2626' : '#059669';
     document.getElementById('daily-pnl-bar').style.width = dpPct + '%';
     document.getElementById('daily-pnl-bar').style.background = dpColor;
-    document.getElementById('daily-pnl-sub').textContent = 'Iskorišteno: ' + dpPct.toFixed(0) + '% limita ($' + dlim + ')';
+    document.getElementById('daily-pnl-sub').textContent = 'Iskorišteno: ' + dpPct.toFixed(0) + '% limita ($' + dlim.toFixed(0) + ' = 3% equityja)';
 
     // Funding Rates
     if (d.fr && Object.keys(d.fr).length > 0) {
@@ -2591,8 +2591,16 @@ const server = http.createServer(async (req, res) => {
         }
       } catch { /* ignoriraj */ }
 
+      // Dinamički daily limit: 3% od Bitget equityja (min $20)
+      let dailyLimit = 20;
+      try {
+        const balR = await fetch(`http://localhost:${PORT}/api/bitget-balance`).then(r => r.json());
+        const eq   = parseFloat(balR?.balance?.equity || 0);
+        if (eq > 0) dailyLimit = Math.max(eq * 0.03, 20);
+      } catch { /* fallback na $20 */ }
+
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, dailyLimit: 20, cbLosses: 7, session, atrTrend, sp500, corr, pc, liq, econ }));
+      res.end(JSON.stringify({ fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, dailyLimit, cbLosses: 7, session, atrTrend, sp500, corr, pc, liq, econ }));
     } catch(e) {
       res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
     }

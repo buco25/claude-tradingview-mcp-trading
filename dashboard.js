@@ -1690,8 +1690,9 @@ function mandatoryBoxes(s) {
   const scDn = s.scaleDn ?? 0;
   const scaleOkLong  = scUp >= 4;
   const scaleOkShort = scDn >= 4;
-  const scaleCol = scaleOkLong ? '#059669' : scaleOkShort ? '#059669' : '#dc2626';
-  const scaleBg  = scaleOkLong ? '#0d3d26' : scaleOkShort ? '#0d3d26' : '#3d0d0d';
+  // Zeleno=LONG smjer, narančasto=SHORT smjer, crveno=nema jasnog smjera
+  const scaleCol = scaleOkLong ? '#059669' : scaleOkShort ? '#d97706' : '#dc2626';
+  const scaleBg  = scaleOkLong ? '#0d3d26' : scaleOkShort ? '#3d2200' : '#3d0d0d';
   const scaleDir = scaleOkLong ? scUp + '/6↑' : scaleOkShort ? scDn + '/6↓' : scUp + '/6';
   const scaleTip = '6-Scale: ' + scUp + '↑ / ' + scDn + '↓ od 6 EMA parova (treba ≥4)' +
     (scaleOkLong ? ' — LONG smjer ✓' : scaleOkShort ? ' — SHORT smjer ✓' : ' ✗ — nedovoljan smjer');

@@ -291,8 +291,8 @@
     }
   },
   "risk_rules": [
-    "Risk-based sizing: margin = equity × 1% | notional = margin × 50x (BTC: 75x) | Per-simbol SL/TP iz symbol_sltp",
-    "ULTRA: Tier1(SL1.5%/TP4%) Tier2(SL2%/TP4.5%) Tier3(SL2.5%/TP5.5%) / 50x leverage (BTC 75x) / rizik 1% banke po tradeu",
+    "Risk-based sizing: margin = equity × 1.5% | notional = margin × 50x (BTC: 75x) | Per-simbol SL/TP iz symbol_sltp",
+    "ULTRA: Tier1(SL1.5%/TP4%) Tier2(SL2%/TP4.5%) Tier3(SL2.5%/TP5.5%) / 50x leverage (BTC 75x) / rizik 1.5% banke po tradeu",
     "Samo jedna pozicija po simbolu istovremeno",
     "Max 8 otvorenih pozicija istovremeno + BTC bonus slot",
     "Dnevni limit: 100 tradova",

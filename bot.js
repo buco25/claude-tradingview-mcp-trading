@@ -3519,12 +3519,13 @@ export async function run() {
           continue;
         }
 
-        // ── 5m S/R Gate — blokira ulaz ako cijena nije kod ključne razine ────
-        if (pDef.strategy === "synapse_t") {
+        // ── 5m S/R Gate — blokira pullback ulaz ako cijena nije kod ključne razine ────
+        // Momentum ulazi preskaču 5mSR (cijena se odmiče od S/R, ne testira ga)
+        if (pDef.strategy === "synapse_t" && !result.isMomentum) {
           try {
             const srOk = await check5mSRTest(symbol, signal);
             if (srOk === false) {
-              console.log(`  🧱 [5mSR] ${symbol} — cijena nije kod S/R razine → ${signal} preskočen`);
+              console.log(`  🧱 [5mSR] ${symbol} — cijena nije kod S/R razine → pullback ${signal} preskočen`);
               continue;
             }
           } catch { /* ignoriramo grešku, ne blokiramo */ }

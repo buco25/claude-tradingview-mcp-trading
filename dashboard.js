@@ -2019,12 +2019,16 @@ async function loadMarketContext() {
     }
 
     // ── BTC Regime ────────────────────────────────────────────────────────
-    if (d.regime) {
-      const regCol = d.regime === 'BULL' ? '#059669' : d.regime === 'BEAR' ? '#dc2626' : '#d97706';
-      const regIcon = d.regime === 'BULL' ? '🐂 BULL' : d.regime === 'BEAR' ? '🐻 BEAR' : '😐 NEUTRAL';
-      document.getElementById('regime-val').textContent = regIcon;
-      document.getElementById('regime-val').style.color = regCol;
-      document.getElementById('regime-sub').textContent = d.regime === 'BULL' ? 'LONG dozvoljen' : d.regime === 'BEAR' ? 'LONG blokiran' : 'LONG dozvoljen · SHORT ok';
+    {
+      const reg = d.regime || 'N/A';
+      const regCol = reg === 'BULL' ? '#059669' : reg === 'BEAR' ? '#dc2626' : '#d97706';
+      const regIcon = reg === 'BULL' ? '🐂 BULL' : reg === 'BEAR' ? '🐻 BEAR' : reg === 'NEUTRAL' ? '😐 NEUTRAL' : '❓ ' + reg;
+      const regEl = document.getElementById('regime-val');
+      if (regEl) {
+        regEl.textContent = regIcon;
+        regEl.style.color = regCol;
+        document.getElementById('regime-sub').textContent = reg === 'BULL' ? 'LONG dozvoljen' : reg === 'BEAR' ? 'LONG blokiran' : reg === 'NEUTRAL' ? 'LONG dozvoljen · SHORT ok' : 'Nije moguće odrediti';
+      }
     }
 
     // ── Active Gates ──────────────────────────────────────────────────────

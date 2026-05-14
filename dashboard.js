@@ -2090,9 +2090,9 @@ async function loadMarketContext() {
       const frTrendEl = document.getElementById('fr-trend-val');
       if (frTrendEl) {
         const trendColor = highFr > 2 ? '#dc2626' : midFr > 3 ? '#d97706' : '#059669';
-        const trendText  = highFr > 2 ? `⚠️ ${highFr} simbola s visokim FR — overheated` :
-                           midFr  > 3 ? `🟡 ${midFr} simbola s povišenim FR` :
-                           `✅ ${okFr}/${rates.length} simbola s normalnim FR`;
+        const trendText  = highFr > 2 ? ('⚠️ ' + highFr + ' simbola s visokim FR — overheated') :
+                           midFr  > 3 ? ('🟡 ' + midFr + ' simbola s povišenim FR') :
+                           ('✅ ' + okFr + '/' + rates.length + ' simbola s normalnim FR');
         frTrendEl.textContent = trendText;
         frTrendEl.style.color = trendColor;
       }
@@ -2270,7 +2270,7 @@ async function loadMarketContext() {
         const rising  = d.liq.oiTrend.filter(x => x.trend === 'RASTE').length;
         const falling = d.liq.oiTrend.filter(x => x.trend === 'PADA').length;
         const oiCol   = rising > falling ? '#059669' : falling > rising ? '#dc2626' : '#9ca3af';
-        oiEl.textContent = `OI: ▲${rising} raste · ▼${falling} pada`;
+        oiEl.textContent = 'OI: ▲' + rising + ' raste · ▼' + falling + ' pada';
         oiEl.style.color = oiCol;
       } else if (oiEl) {
         // Fallback: iz liq score procijeni

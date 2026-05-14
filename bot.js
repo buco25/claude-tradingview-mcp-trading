@@ -648,6 +648,49 @@ export async function getLongShortRatio(symbol = "BTCUSDT") {
   }
 }
 
+// ─── BTC Perp Basis (Futures premium vs Spot) ────────────────────────────────
+let _basisCache = { data: null, ts: 0 };
+const BASIS_TTL = 5 * 60 * 1000;
+export async function getBtcPerpBasis() {
+  if (Date.now() - _basisCache.ts < BASIS_TTL && _basisCache.data) return _basisCache.data;
+  try {
+    const [spotR, futR] = await Promise.all([
+      fetch('https://api.bitget.com/api/v2/spot/market/tickers?symbol=BTCUSDT').then(r => r.json()),
+      fetch('https://api.bitget.com/api/v2/mix/market/tickers?symbol=BTCUSDT&productType=USDT-FUTURES').then(r => r.json()),
+    ]);
+    const spot = parseFloat(spotR?.data?.[0]?.lastPr || 0);
+    const fut  = parseFloat(futR?.data?.[0]?.lastPr || 0);
+    if (!spot || !fut) return null;
+    const basis    = ((fut - spot) / spot) * 100;
+    const annualized = basis * (365 / 1) * (1 / 8); // rough annualized (8h funding cycle proxy)
+    const sentiment = basis > 0.05 ? 'CONTANGO' : basis < -0.05 ? 'BACKWARDATION' : 'FLAT';
+    const data = { spot: spot.toFixed(2), futures: fut.toFixed(2), basis: basis.toFixed(4), sentiment };
+    _basisCache = { data, ts: Date.now() };
+    return data;
+  } catch { return null; }
+}
+
+// ─── Altcoin Season Index (CoinGecko — free, no auth) ─────────────────────────
+let _altSeasonCache = { data: null, ts: 0 };
+const ALT_SEASON_TTL = 60 * 60 * 1000; // 1h — CoinGecko rate limit
+export async function getAltcoinSeason() {
+  if (Date.now() - _altSeasonCache.ts < ALT_SEASON_TTL && _altSeasonCache.data) return _altSeasonCache.data;
+  try {
+    const url = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false&price_change_percentage=90d';
+    const coins = await fetch(url, { signal: AbortSignal.timeout(10000) }).then(r => r.json());
+    if (!Array.isArray(coins) || coins.length < 10) return null;
+    const btc = coins.find(c => c.id === 'bitcoin');
+    const btcReturn = btc?.price_change_percentage_90d_in_currency ?? 0;
+    const others = coins.filter(c => c.id !== 'bitcoin' && c.price_change_percentage_90d_in_currency != null);
+    const outperforming = others.filter(c => c.price_change_percentage_90d_in_currency > btcReturn).length;
+    const score = Math.round(outperforming / others.length * 100);
+    const season = score >= 75 ? 'ALT SEASON' : score >= 50 ? 'ALT FAVORED' : score >= 25 ? 'BTC FAVORED' : 'BTC SEASON';
+    const data = { score, season, btcReturn: btcReturn.toFixed(1), outperforming, total: others.length };
+    _altSeasonCache = { data, ts: Date.now() };
+    return data;
+  } catch { return null; }
+}
+
 // ─── Stablecoin Inflow (DefiLlama — public, no auth) ─────────────────────────
 let _stableCache = { data: null, ts: 0 };
 const STABLE_TTL = 30 * 60 * 1000; // 30 min

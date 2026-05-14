@@ -11,7 +11,7 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, check5mSRTest, 
   getFearGreed, getBtcDominance, getDxyData, getConsecutiveLossCount,
   getSessionInfo, calcAtrTrend, getSp500Data, calcSymbolCorrelation,
   getDeribitPutCall, getLiquidationRisk, getEconEvents, isEconBlocked, calcVWAP,
-  getLongShortRatio, getStablecoinInflow } from "./bot.js";
+  getLongShortRatio, getStablecoinInflow, getBtcPerpBasis, getAltcoinSeason } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -1271,6 +1271,32 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div style="font-size:11px;margin-top:4px" id="stable-change"></div>
       </div>
 
+      <!-- BTC Perp Basis -->
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">📐 BTC Perp Basis</div>
+        <div style="font-size:20px;font-weight:800" id="basis-val">…</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="basis-sub">Futures premium vs Spot</div>
+        <div style="font-size:11px;margin-top:4px" id="basis-detail"></div>
+      </div>
+
+      <!-- Altcoin Season Index -->
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">🌊 Altcoin Season Index</div>
+        <div style="font-size:20px;font-weight:800" id="altseason-val">…</div>
+        <div style="background:#374151;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
+          <div id="altseason-bar" style="height:100%;border-radius:4px;background:#3b82f6;transition:width .5s;width:0%"></div>
+        </div>
+        <div style="font-size:11px;color:#9ca3af" id="altseason-sub">CoinGecko top 50 · 90d vs BTC</div>
+      </div>
+
+      <!-- Countdown do sljedećeg eventa -->
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">⏱️ Sljedeći Econ Event</div>
+        <div style="font-size:20px;font-weight:800;font-variant-numeric:tabular-nums" id="countdown-val">…</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="countdown-event">učitavam…</div>
+        <div style="font-size:10px;color:#6b7280;margin-top:2px" id="countdown-time"></div>
+      </div>
+
       <!-- Ekonomski kalendar -->
       <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px;grid-column:span 2">
         <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">📅 Ekonomski kalendar (HIGH impact USD)</div>
@@ -2037,6 +2063,34 @@ async function loadMarketContext() {
       document.getElementById('stable-change').style.color = siCol;
     }
 
+    // ── BTC Perp Basis ────────────────────────────────────────────────────
+    if (d.perpBasis) {
+      var pb = d.perpBasis;
+      var pbVal = parseFloat(pb.basis);
+      var pbCol = pbVal > 0.05 ? '#059669' : pbVal < -0.05 ? '#dc2626' : '#9ca3af';
+      var pbIcon = pb.sentiment === 'CONTANGO' ? '📈 CONTANGO' : pb.sentiment === 'BACKWARDATION' ? '📉 BACKWARDATION' : '➡️ FLAT';
+      var pbNote = pb.sentiment === 'CONTANGO' ? 'Bullish — tržište očekuje rast' : pb.sentiment === 'BACKWARDATION' ? 'Bearish — tržište očekuje pad' : 'Neutralno';
+      document.getElementById('basis-val').textContent = (pbVal > 0 ? '+' : '') + pbVal.toFixed(4) + '%';
+      document.getElementById('basis-val').style.color = pbCol;
+      document.getElementById('basis-sub').textContent = pbIcon + ' · ' + pbNote;
+      document.getElementById('basis-detail').textContent = 'Spot: $' + pb.spot + ' · Futures: $' + pb.futures;
+      document.getElementById('basis-detail').style.color = '#6b7280';
+    }
+
+    // ── Altcoin Season Index ──────────────────────────────────────────────
+    if (d.altSeason) {
+      var as = d.altSeason;
+      var asCol = as.score >= 75 ? '#f59e0b' : as.score >= 50 ? '#10b981' : as.score >= 25 ? '#3b82f6' : '#f97316';
+      var asBar = document.getElementById('altseason-bar');
+      document.getElementById('altseason-val').textContent = as.score + '/100 · ' + as.season;
+      document.getElementById('altseason-val').style.color = asCol;
+      if (asBar) { asBar.style.width = as.score + '%'; asBar.style.background = asCol; }
+      document.getElementById('altseason-sub').textContent = as.outperforming + '/' + as.total + ' altova bije BTC (90d) · BTC: ' + (as.btcReturn > 0 ? '+' : '') + as.btcReturn + '%';
+    }
+
+    // ── Countdown — spremi econ evente za timer ───────────────────────────
+    if (d.econ && d.econ.events) { window._econEventsForCountdown = d.econ.events; }
+
     // Circuit Breaker
     const cbCount = d.consecLosses || 0;
     const cbMax = d.cbLosses || 7;
@@ -2342,6 +2396,47 @@ async function loadMarketContext() {
 
 loadMarketContext();
 setInterval(loadMarketContext, 2 * 60 * 1000);
+
+// ── Countdown timer do sljedećeg HIGH impact econ eventa ─────────────────────
+window._econEventsForCountdown = [];
+function updateCountdown() {
+  var events = window._econEventsForCountdown || [];
+  var now = Date.now();
+  var upcoming = events
+    .map(function(e) { return { title: e.title || e.name || '?', ts: new Date(e.date).getTime() }; })
+    .filter(function(e) { return e.ts > now; })
+    .sort(function(a, b) { return a.ts - b.ts; });
+
+  var valEl   = document.getElementById('countdown-val');
+  var evtEl   = document.getElementById('countdown-event');
+  var timeEl  = document.getElementById('countdown-time');
+  if (!valEl) return;
+
+  if (upcoming.length === 0) {
+    valEl.textContent  = 'Nema';
+    evtEl.textContent  = 'Nema nadolazećih eventa ovaj tjedan';
+    if (timeEl) timeEl.textContent = '';
+    return;
+  }
+
+  var next = upcoming[0];
+  var diff = next.ts - now;
+  var h = Math.floor(diff / 3600000);
+  var m = Math.floor((diff % 3600000) / 60000);
+  var s = Math.floor((diff % 60000) / 1000);
+  var col = h < 1 ? '#dc2626' : h < 4 ? '#d97706' : '#9ca3af';
+
+  valEl.textContent = (h > 0 ? h + 'h ' : '') + m + 'm ' + s + 's';
+  valEl.style.color = col;
+  evtEl.textContent = next.title;
+  evtEl.style.color = col;
+  if (timeEl) {
+    var d = new Date(next.ts);
+    timeEl.textContent = d.toLocaleString('hr-HR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+  }
+}
+updateCountdown();
+setInterval(updateCountdown, 1000);
 </script>
 
 
@@ -2706,7 +2801,7 @@ const server = http.createServer(async (req, res) => {
       const rules = JSON.parse(readFileSync("rules.json","utf8"));
       const symbols = rules.watchlist_synapse_t || [];
 
-      const [fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, sp500, corr, pc, liq, econRaw, ls, stableInflow] = await Promise.all([
+      const [fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, sp500, corr, pc, liq, econRaw, ls, stableInflow, perpBasis, altSeason] = await Promise.all([
         getFearGreed(),
         getBtcDominance(),
         getDxyData(),
@@ -2721,6 +2816,8 @@ const server = http.createServer(async (req, res) => {
         getEconEvents(),
         getLongShortRatio("BTCUSDT"),
         getStablecoinInflow(),
+        getBtcPerpBasis(),
+        getAltcoinSeason(),
       ]);
 
       // BTC Regime — direktni fetch (4H candles)
@@ -2797,7 +2894,7 @@ const server = http.createServer(async (req, res) => {
       const readiness = { score: readinessScore, gates };
 
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, dailyLimit, cbLosses: 7, session, atrTrend, sp500, corr, pc, liq, econ, regime, ls, stableInflow, readiness }));
+      res.end(JSON.stringify({ fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, dailyLimit, cbLosses: 7, session, atrTrend, sp500, corr, pc, liq, econ, regime, ls, stableInflow, perpBasis, altSeason, readiness }));
     } catch(e) {
       res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
     }

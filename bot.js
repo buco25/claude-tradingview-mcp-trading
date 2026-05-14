@@ -1750,7 +1750,7 @@ function analyzeUltra(candles, cfg) {
   // Ako pullback signal nije dostigao prag, provjeri momentum/breakout logiku:
   // Isti 13 signala ali 6 reversanih vraćamo u originalnu (trend-following) logiku.
   // Viši prag (MOM_MIN) jer su momentum ulazi rizičniji od pullback ulaza.
-  const MOM_MIN = 10;
+  const MOM_MIN = 9;  // sniženo s 10 — breakouti rijetko dosežu 10/13
   const momSigs = [
     price > ema50  ?  1 : -1,                          //  1. E50  MOM: >EMA50 = trend gore = +1
     rsi > 55 ? 1 : rsi < 45 ? -1 : 0,                 //  2. RSI  MOM: >55 = momentum = +1
@@ -1770,20 +1770,18 @@ function analyzeUltra(candles, cfg) {
   const momBull = momSigs.filter(s => s === 1).length;
   const momBear = momSigs.filter(s => s === -1).length;
 
-  // Za momentum: 6SC relaksiran na 3/6, ADX relaksiran na 20 (breakout počinje PRIJE rasta ADX-a)
+  // Za momentum: bez 6SC gate (breakout sam potvrđuje smjer), ADX ≥ 20
   const MOM_ADX_MIN = 20;
-  const momScaleOkLong  = scaleUp >= 3;
-  const momScaleOkShort = scaleDn >= 3;
 
-  if (momBull >= MOM_MIN && momScaleOkLong && rsiLongOk && adx >= MOM_ADX_MIN) {
+  if (momBull >= MOM_MIN && rsiLongOk && adx >= MOM_ADX_MIN) {
     return { price, signal: "LONG", bullScore: momBull, bearScore: momBear,
       nearSup, nearRes, isMomentum: true,
-      reason: `MOMENTUM LONG ↑${momBull}/13 | ADX:${adx.toFixed(0)}≥${MOM_ADX_MIN}✓ 6Sc:${scaleUp}/6≥3✓ RSI:${rsi.toFixed(0)}<72✓` };
+      reason: `MOMENTUM LONG ↑${momBull}/13 | ADX:${adx.toFixed(0)}≥${MOM_ADX_MIN}✓ RSI:${rsi.toFixed(0)}<72✓ [bez 6SC]` };
   }
-  if (!LONG_ONLY && momBear >= MOM_MIN && momScaleOkShort && rsiShortOk && adx >= MOM_ADX_MIN) {
+  if (!LONG_ONLY && momBear >= MOM_MIN && rsiShortOk && adx >= MOM_ADX_MIN) {
     return { price, signal: "SHORT", bullScore: momBull, bearScore: momBear,
       nearSup, nearRes, isMomentum: true,
-      reason: `MOMENTUM SHORT ↓${momBear}/13 | ADX:${adx.toFixed(0)}≥${MOM_ADX_MIN}✓ 6Sc:${scaleDn}/6≥3✓ RSI:${rsi.toFixed(0)}>30✓` };
+      reason: `MOMENTUM SHORT ↓${momBear}/13 | ADX:${adx.toFixed(0)}≥${MOM_ADX_MIN}✓ RSI:${rsi.toFixed(0)}>30✓ [bez 6SC]` };
   }
 
   // Dijagnoza zašto nema signala
@@ -3358,7 +3356,10 @@ export async function run() {
         // ── 1H Trend Filter ─────────────────────────────────────────────────
         const trend1h = pDef.strategy === "synapse_t" ? await calcTrend1H(symbol) : { trend: 'UNKNOWN' };
 
-        const candles = await fetchCandles(symbol, pDef.timeframe, 250);
+        // synapse_t uvijek skenira 1H candles za pullback logiku (bez obzira na portfolio TF)
+        // portfolio TF je "15m" samo da shouldRunNow okida svakih 15 min
+        const candleTf = pDef.strategy === "synapse_t" ? "1H" : pDef.timeframe;
+        const candles = await fetchCandles(symbol, candleTf, 250);
         const price   = candles[candles.length - 1].close;
 
         // ── ATR Trend — prilagodi size ──────────────────────────────────────
@@ -3383,7 +3384,20 @@ export async function run() {
           default:            result = analyzeEmaRsi(candles, pDef.params);                           break;
         }
 
-        const { signal, reason } = result;
+        let { signal, reason } = result;
+
+        // ── 15m Momentum fallback — ako je 1H pullback NEUTRAL, provjeri 15m momentum ──
+        if (signal === "NEUTRAL" && pDef.strategy === "synapse_t") {
+          try {
+            const candles15m = await fetchCandles(symbol, "15m", 250);
+            const result15m  = await analyzeUltraPullback(symbol, candles15m, pDef.params);
+            if (result15m.signal !== "NEUTRAL" && result15m.isMomentum) {
+              Object.assign(result, result15m);
+              ({ signal } = result);
+              console.log(`  🚀 [15m MOM] ${symbol} — ${result15m.reason}`);
+            }
+          } catch(e) { console.log(`  ⚠️  [15m MOM] ${symbol} fetch error: ${e.message}`); }
+        }
 
         if (signal === "NEUTRAL") {
           console.log(`  🚫 [${pDef.name}] ${symbol} — ${reason}`);

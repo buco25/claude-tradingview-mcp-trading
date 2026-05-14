@@ -431,12 +431,10 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
         ];
         var momBullD = momSigsD.filter(function(s){return s===1;}).length;
         var momBearD = momSigsD.filter(function(s){return s===-1;}).length;
-        // Momentum: 6SC relaksiran na 3/6, ADX relaksiran na 20 (breakout pocinje prije rasta ADX-a)
-        var momAdxOk     = adxV >= 20;
-        var momScOkLong  = scaleUp >= 3;
-        var momScOkShort = scaleDn >= 3;
-        if (momAdxOk && momScOkLong  && rsiLongOk  && momBullD >= 10) { ultraSig = "MOM↑"; ultraBull = momBullD; }
-        else if (momAdxOk && momScOkShort && rsiShortOk && momBearD >= 10) { ultraSig = "MOM↓"; ultraBear = momBearD; }
+        // Momentum: bez 6SC gate, ADX >= 20, prag 9/13
+        var momAdxOk = adxV >= 20;
+        if (momAdxOk && rsiLongOk  && momBullD >= 9) { ultraSig = "MOM↑"; ultraBull = momBullD; }
+        else if (momAdxOk && rsiShortOk && momBearD >= 9) { ultraSig = "MOM↓"; ultraBear = momBearD; }
       }
     }
   }
@@ -986,7 +984,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="logo">🎯</div>
       <div>
         <div class="title">ULTRA Trading Bot</div>
-        <div class="subtitle">ADX≥30 (din.·daily) · 6Sc · RSI · LONG+SHORT · 1H trend · min 7/13 · BTC regime · econ·4h cooldown · blacklist · ${tf} · 50x · rizik 1%</div>
+        <div class="subtitle">Pullback: ADX≥30·6Sc·RSI·SR min 6/13 (1H) · Momentum: ADX≥20·RSI min 9/13 (15m) · LONG+SHORT · BTC regime · 50x · rizik 1.5%</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">

@@ -3481,21 +3481,12 @@ export async function run() {
           console.log(`  🔄 INVERT: ${orig} → ${signal} ${symbol}`);
         }
 
-        // SL/TP — ATR-based za synapse_t, inače per-symbol > per-portfolio > globalna konstanta
+        // SL/TP — per-simbol tier vrijednosti iz rules.json (kalibrirane 30d ATR analizom)
+        // ATR-based SL maknuti jer koristi BTC 15m ATR proxy koji nije validan za altove
         const symSltp = rules.symbol_sltp?.[symbol] || {};
-        let slPct, tpPct;
-        if (pDef.strategy === "synapse_t" && atrTrend?.currentAtr > 0) {
-          const ATR_SL_MULT = 1.5;  // SL = 1.5× ATR od entry
-          const ATR_TP_MULT = 3.0;  // TP = 3.0× ATR od entry (RR 1:2)
-          const rawSlPct = (atrTrend.currentAtr * ATR_SL_MULT / price) * 100;
-          const rawTpPct = (atrTrend.currentAtr * ATR_TP_MULT / price) * 100;
-          slPct = Math.min(Math.max(rawSlPct, 0.8), 3.5);
-          tpPct = Math.min(Math.max(rawTpPct, 1.5), 7.0);
-          console.log(`  📐 [ATR-SL] ${symbol} ATR=${atrTrend.currentAtr.toFixed(4)} → SL ${slPct.toFixed(2)}% TP ${tpPct.toFixed(2)}% (RR ${(tpPct/slPct).toFixed(1)}x)`);
-        } else {
-          slPct = symSltp.slPct ?? pDef.slPct ?? SL_PCT;
-          tpPct = symSltp.tpPct ?? pDef.tpPct ?? TP_PCT;
-        }
+        const slPct = symSltp.slPct ?? pDef.slPct ?? SL_PCT;
+        const tpPct = symSltp.tpPct ?? pDef.tpPct ?? TP_PCT;
+        console.log(`  📐 [SL/TP] ${symbol} Tier${symSltp.tier??'?'}: SL ${slPct}% / TP ${tpPct}% (RR ${(tpPct/slPct).toFixed(1)}x)`);
         const slDist = price * (slPct / 100);
         const tpDist = price * (tpPct / 100);
         const sl = signal === "LONG" ? price - slDist : price + slDist;

@@ -664,10 +664,10 @@ async function fetchLivePrices(symbols) {
 
 function fmtP(v) {
   if (!v && v !== 0) return "—";
-  if (v >= 1000) return "$" + v.toFixed(2);
-  if (v >= 1)    return "$" + v.toFixed(4);
-  if (v >= 0.001) return "$" + v.toFixed(6);
-  return "$" + v.toFixed(10);
+  if (v >= 1)      return "$" + v.toFixed(2);
+  if (v >= 0.01)   return "$" + v.toFixed(4);
+  if (v >= 0.0001) return "$" + v.toFixed(6);
+  return "$" + v.toFixed(8);
 }
 
 function pnlHtml(pnl) {

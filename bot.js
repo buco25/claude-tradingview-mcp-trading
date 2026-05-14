@@ -623,21 +623,22 @@ function getDailyPnl(pid) {
 
 export function getDailyPnlExport(pid) { return getDailyPnl(pid); }
 
-// ─── Long/Short Ratio (Bitget) ────────────────────────────────────────────────
+// ─── Long/Short Ratio (Binance Futures — public endpoint, no auth) ────────────
 let _lsCache = { data: null, ts: 0 };
 const LS_TTL = 5 * 60 * 1000;
 export async function getLongShortRatio(symbol = "BTCUSDT") {
   if (Date.now() - _lsCache.ts < LS_TTL && _lsCache.data) return _lsCache.data;
   try {
-    const url = `https://api.bitget.com/api/v2/mix/market/account-long-short-ratio?symbol=${symbol}&productType=USDT-FUTURES&period=1H&limit=2`;
+    // Binance public futures L/S ratio — global accounts, 1h period
+    const url = `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=1h&limit=2`;
     const r = await fetch(url);
     const d = await r.json();
-    if (d.code !== "00000" || !d.data?.length) return null;
-    const latest = d.data[0];
-    const prev   = d.data[1];
-    const longRatio  = parseFloat(latest.longAccountRatio) * 100;
-    const shortRatio = parseFloat(latest.shortAccountRatio) * 100;
-    const prevLong   = prev ? parseFloat(prev.longAccountRatio) * 100 : longRatio;
+    if (!Array.isArray(d) || d.length === 0) return null;
+    const latest = d[d.length - 1];
+    const prev   = d.length > 1 ? d[d.length - 2] : null;
+    const longRatio  = parseFloat(latest.longAccount) * 100;
+    const shortRatio = parseFloat(latest.shortAccount) * 100;
+    const prevLong   = prev ? parseFloat(prev.longAccount) * 100 : longRatio;
     const trend = longRatio > prevLong + 1 ? "RASTE" : longRatio < prevLong - 1 ? "PADA" : "STABILAN";
     const data = { longRatio: longRatio.toFixed(1), shortRatio: shortRatio.toFixed(1), trend };
     _lsCache = { data, ts: Date.now() };

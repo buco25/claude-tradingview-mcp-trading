@@ -1125,8 +1125,8 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <!-- BTC Regime -->
       <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
         <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">📊 BTC Regime (4H)</div>
-        <div style="font-size:22px;font-weight:800" id="regime-val">…</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="regime-sub">BULL=LONG ok · BEAR=LONG blokiran</div>
+        <div style="font-size:22px;font-weight:800" id="mi-regime-val">…</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="mi-regime-sub">BULL=LONG ok · BEAR=LONG blokiran</div>
       </div>
 
       <!-- Active Gates -->
@@ -1779,65 +1779,27 @@ function statusBox(s) {
   return '<span style="color:#444;font-size:12px">—</span>';
 }
 
-// ── Market Regime — BTC 4H detekcija (client-side) ───────────────────────────
-let _lastRegime = null;  // čuva zadnju poznatu vrijednost
-
-async function fetchRegimeOnce() {
-  const url = "https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=4H&limit=100";
-  const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
-  const d = await r.json();
-  if (d.code !== "00000" || !d.data?.length) throw new Error("API err: " + d.msg);
-  const closes = d.data.map(k => parseFloat(k[4])).reverse();
-  const n = closes.length - 1;
-  const k55 = 2/56; let e55 = closes.slice(0,55).reduce((a,b)=>a+b,0)/55;
-  for (let i=55;i<=n;i++) e55 = closes[i]*k55+e55*(1-k55);
-  const pairs = [[3,11],[7,15],[13,21],[19,29],[29,47],[45,55]];
-  let up = 0;
-  for (const [a,b] of pairs) {
-    const ka=2/(a+1),kb=2/(b+1);
-    let ea=closes.slice(0,a).reduce((s,v)=>s+v,0)/a;
-    let eb=closes.slice(0,b).reduce((s,v)=>s+v,0)/b;
-    for (let i=Math.max(a,b);i<=n;i++){ea=closes[i]*ka+ea*(1-ka);eb=closes[i]*kb+eb*(1-kb);}
-    if(ea>eb) up++;
-  }
-  const price = closes[n];
-  const regime = (up>=4 && price>e55) ? "BULL" : (up<=2 && price<e55) ? "BEAR" : "NEUTRAL";
-  return { regime, up, price, e55 };
+// ── Market Regime — via /api/regime endpoint (server-side, no CORS issues) ────
+function applyRegime(regime) {
+  var col  = regime === "BULL" ? "#059669" : regime === "BEAR" ? "#dc2626" : "#d97706";
+  var icon = regime === "BULL" ? "📈" : regime === "BEAR" ? "📉" : "➡️";
+  var sub  = regime === "BULL" ? "LONG ulazi aktivni" : regime === "BEAR" ? "LONG suspendiran" : "Čekamo trend";
+  // Adaptivni Status section
+  var el1 = document.getElementById("regime-val");
+  var sb1 = document.getElementById("regime-sub");
+  if (el1) { el1.textContent = icon + " " + regime; el1.style.color = col; }
+  if (sb1) { sb1.textContent = sub; sb1.style.color = col; }
+  // Market Intelligence section
+  var el2 = document.getElementById("mi-regime-val");
+  var sb2 = document.getElementById("mi-regime-sub");
+  if (el2) { el2.textContent = icon + " " + regime; el2.style.color = col; }
+  if (sb2) { sb2.textContent = sub; sb2.style.color = col; }
 }
 
-async function loadBtcRegime() {
-  let result = null;
-  // Pokušaj do 3 puta s pauzom
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      result = await fetchRegimeOnce();
-      break;
-    } catch(e) {
-      if (attempt < 3) await new Promise(r => setTimeout(r, 2000 * attempt));
-    }
-  }
-
-  if (!result) {
-    // Sve 3 greška — prikaži zadnju poznatu vrijednost s oznakom
-    if (_lastRegime) {
-      document.getElementById("regime-sub").textContent = "API nedostupan — zadnja poznata vrijednost";
-    } else {
-      document.getElementById("regime-val").textContent = "—";
-      document.getElementById("regime-sub").textContent = "API nedostupan, pokušavam ponovo...";
-    }
-    return;
-  }
-
-  // Uspjeh — ažuriraj prikaz
-  const { regime, up, price, e55 } = result;
-  _lastRegime = result;
-  const col  = regime==="BULL"?"#059669":regime==="BEAR"?"#dc2626":"#d97706";
-  const icon = regime==="BULL"?"📈":regime==="BEAR"?"📉":"➡️";
-  const sub  = regime==="BULL"?"LONG ulazi aktivni":regime==="BEAR"?"LONG suspendiran":"Čekamo trend";
-  document.getElementById("regime-val").textContent = icon + " " + regime;
-  document.getElementById("regime-val").style.color = col;
-  document.getElementById("regime-sub").textContent = "6Sc " + up + "/6 | BTC " + (price>e55?"iznad":"ispod") + " EMA55 | " + sub;
-  document.getElementById("regime-sub").style.color = col;
+function loadBtcRegime() {
+  fetch('/api/regime').then(function(r) { return r.json(); }).then(function(d) {
+    if (d && d.regime) applyRegime(d.regime);
+  }).catch(function(e) { console.warn('regime fetch err:', e); });
 }
 
 // Učitaj regime na startu i svako 5 min
@@ -2018,18 +1980,7 @@ async function loadMarketContext() {
       document.getElementById('readiness-card').style.borderColor = col;
     }
 
-    // ── BTC Regime ────────────────────────────────────────────────────────
-    {
-      const reg = d.regime || 'N/A';
-      const regCol = reg === 'BULL' ? '#059669' : reg === 'BEAR' ? '#dc2626' : '#d97706';
-      const regIcon = reg === 'BULL' ? '🐂 BULL' : reg === 'BEAR' ? '🐻 BEAR' : reg === 'NEUTRAL' ? '😐 NEUTRAL' : '❓ ' + reg;
-      const regEl = document.getElementById('regime-val');
-      if (regEl) {
-        regEl.textContent = regIcon;
-        regEl.style.color = regCol;
-        document.getElementById('regime-sub').textContent = reg === 'BULL' ? 'LONG dozvoljen' : reg === 'BEAR' ? 'LONG blokiran' : reg === 'NEUTRAL' ? 'LONG dozvoljen · SHORT ok' : 'Nije moguće odrediti';
-      }
-    }
+    // ── BTC Regime — loadBtcRegime() handles this via /api/regime ────────
 
     // ── Active Gates ──────────────────────────────────────────────────────
     if (d.readiness?.gates) {
@@ -2379,6 +2330,36 @@ const server = http.createServer(async (req, res) => {
     const ok     = ageSec !== null && ageSec < 600;
     res.writeHead(ok ? 200 : 503, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: ok ? "ok" : "stale", bot: hb, ageSec, dashboard: "ok" }));
+    return;
+  }
+
+  // BTC Regime — bez auth, za debug
+  if (url.pathname === "/api/regime") {
+    try {
+      const rUrl = "https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=4H&limit=60";
+      const rD   = await fetch(rUrl).then(r => r.json());
+      let regime = "UNKNOWN";
+      if (rD.code === "00000" && rD.data?.length >= 20) {
+        const closes = rD.data.map(k => parseFloat(k[4]));
+        const price  = closes[closes.length - 1];
+        let e55 = closes.slice(0, Math.min(55, closes.length)).reduce((a,b)=>a+b,0) / Math.min(55, closes.length);
+        const m = 2/56;
+        for (let i = 55; i < closes.length; i++) e55 = closes[i]*m + e55*(1-m);
+        const e9  = closes.slice(-9).reduce((a,b)=>a+b,0)/9;
+        const e21 = closes.slice(-21).reduce((a,b)=>a+b,0)/21;
+        let up = 0;
+        if (e9 > e21) up++;
+        if (price > e9) up++;
+        if (price > e21) up++;
+        if (price > e55) up++;
+        regime = up >= 3 ? "BULL" : up <= 1 ? "BEAR" : "NEUTRAL";
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ regime, raw: rD.code }));
+    } catch(e) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ regime: "ERROR", error: e.message }));
+    }
     return;
   }
 

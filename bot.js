@@ -4,7 +4,7 @@
  * Portfolio 1 — EMA+RSI    → 1H  | SL 2%  / TP 4%
  * Portfolio 2 — MEGA       → 15m | SL 2%  / TP 4%
  * Portfolio 3 — SYNAPSE-7  → 15m | SL 2%  / TP 4%
- * Portfolio 4 — ULTRA      → 15m | Per-simbol SL/TP (ATR tier) | 50x (BTC 75x) | rizik 1% banke po tradeu
+ * Portfolio 4 — ULTRA      → 1H  | Per-simbol SL/TP (ATR tier) | 50x (BTC 75x) | rizik 1% banke po tradeu
  *
  * Risk-based sizing: margin = equity × 1% | notional = margin × 50x (BTC 75x)
  *   Tier 1 (BTC/ETH/SOL/LINK/XRP): SL 1.5% / TP 4.0% (RR 1:2.67)

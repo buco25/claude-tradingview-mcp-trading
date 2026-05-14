@@ -456,7 +456,7 @@ async function runScan(rules) {
     const batch = ALL_SYMBOLS.slice(i, i + BATCH);
     await Promise.all(batch.map(async sym => {
       try {
-        const url = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=15m&limit=250`;
+        const url = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=1H&limit=250`;
         const r   = await fetch(url);
         const d   = await r.json();
         if (d.code !== "00000" || !d.data?.length) { results.push({ symbol: sym, error: "no data" }); return; }

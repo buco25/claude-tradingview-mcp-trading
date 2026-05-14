@@ -43,7 +43,7 @@
     "ema_rsi": "1H",
     "mega": "15m",
     "synapse7": "15m",
-    "synapse_t": "15m"
+    "synapse_t": "1H"
   },
   "symbol_timeframes": {},
   "mega_timeframes": {},

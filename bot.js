@@ -1638,7 +1638,7 @@ function analyzeUltra(candles, cfg) {
   }
 
   // ── 13 signala: +1 = bullish, -1 = bearish, 0 = neutral ──
-  // OBAVEZNI GATING (ne broje se u signale): ADX≥dynamic, 6Sc≥4, RSI asimetričan | 5mSR informativan
+  // OBAVEZNI GATING (ne broje se u signale): ADX≥dynamic, 6Sc≥4, RSI asimetričan | 5mSR blokira u run()
   // Maknuti: CRS (WR 14%), ADXsn (obavezan), 6Sc (obavezan)
   // REVERSANI (WR<31.5% kada ▲ → logika invertirana):
   //   E50, RSI zona, E55, CVD, VOL, MCC — contrarian/pullback interpretacija
@@ -1662,7 +1662,7 @@ function analyzeUltra(candles, cfg) {
   const bullCnt = sigs.filter(s => s === 1).length;
   const bearCnt = sigs.filter(s => s === -1).length;
 
-  // ══ 3 OBAVEZNA UVJETA — sva 3 moraju biti zadovoljena (5mSR je informativan) ══
+  // ══ 3 OBAVEZNA UVJETA u signalu — sva 3 moraju biti zadovoljena (4. gate: 5mSR blokira u run()) ══
 
   // 1. ADX ≥ effectiveAdx — tržište mora biti u jasnom trendu (dinamički prag)
   if (adx < effectiveAdx) {
@@ -3417,6 +3417,17 @@ export async function run() {
           const remainMin = Math.ceil((SL_COOLDOWN_MS - (Date.now() - lastSl)) / 60000);
           console.log(`  🕐 [${pDef.name}] ${symbol} — cooldown aktivan, još ${remainMin}min (SL bio ${Math.round((Date.now()-lastSl)/60000)}min nazad)`);
           continue;
+        }
+
+        // ── 5m S/R Gate — blokira ulaz ako cijena nije kod ključne razine ────
+        if (pDef.strategy === "synapse_t") {
+          try {
+            const srOk = await check5mSRTest(symbol, signal);
+            if (srOk === false) {
+              console.log(`  🧱 [5mSR] ${symbol} — cijena nije kod S/R razine → ${signal} preskočen`);
+              continue;
+            }
+          } catch { /* ignoriramo grešku, ne blokiramo */ }
         }
 
         // 🔄 INVERTED MODE — trgujemo suprotno od signala (long→short, short→long)

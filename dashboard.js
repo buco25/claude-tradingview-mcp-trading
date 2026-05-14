@@ -11,7 +11,7 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, check5mSRTest, 
   getFearGreed, getBtcDominance, getDxyData, getConsecutiveLossCount,
   getSessionInfo, calcAtrTrend, getSp500Data, calcSymbolCorrelation,
   getDeribitPutCall, getLiquidationRisk, getEconEvents, isEconBlocked, calcVWAP,
-  getBtcRegimeExport, getLongShortRatio } from "./bot.js";
+  getLongShortRatio } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -2689,7 +2689,7 @@ const server = http.createServer(async (req, res) => {
       const rules = JSON.parse(readFileSync("rules.json","utf8"));
       const symbols = rules.watchlist_synapse_t || [];
 
-      const [fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, sp500, corr, pc, liq, econRaw, regime, ls] = await Promise.all([
+      const [fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, sp500, corr, pc, liq, econRaw, ls] = await Promise.all([
         getFearGreed(),
         getBtcDominance(),
         getDxyData(),
@@ -2702,9 +2702,36 @@ const server = http.createServer(async (req, res) => {
         getDeribitPutCall(),
         getLiquidationRisk(symbols),
         getEconEvents(),
-        getBtcRegimeExport(),
         getLongShortRatio("BTCUSDT"),
       ]);
+
+      // BTC Regime — direktni fetch (4H candles)
+      let regime = "UNKNOWN";
+      try {
+        const rUrl = "https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=4H&limit=60";
+        const rD   = await fetch(rUrl).then(r => r.json());
+        if (rD.code === "00000" && rD.data?.length >= 56) {
+          const closes = rD.data.map(k => parseFloat(k[4]));
+          const highs  = rD.data.map(k => parseFloat(k[2]));
+          const lows   = rD.data.map(k => parseFloat(k[3]));
+          // EMA55
+          let e55 = closes.slice(0, 55).reduce((a,b) => a+b,0) / 55;
+          const m = 2/56;
+          for (let i = 55; i < closes.length; i++) e55 = closes[i]*m + e55*(1-m);
+          const price = closes[closes.length-1];
+          // 6-Scale: 6 parova EMA
+          const pairs = [[9,21],[21,55],[55,200]].filter(([f,s]) => closes.length > s);
+          let upPairs = 0;
+          for (const [fast,slow] of [[9,21],[21,55]]) {
+            const eFast = closes.slice(-fast).reduce((a,b)=>a+b,0)/fast;
+            const eSlow = closes.slice(-slow).reduce((a,b)=>a+b,0)/slow;
+            if (eFast > eSlow) upPairs++;
+            if (price > eFast) upPairs++;
+            if (price > eSlow) upPairs++;
+          }
+          regime = (upPairs >= 4 && price > e55) ? "BULL" : (upPairs <= 2 && price < e55) ? "BEAR" : "NEUTRAL";
+        }
+      } catch(e) { /* ostaje UNKNOWN */ }
       const econ = { events: econRaw, status: isEconBlocked(econRaw) };
 
       // Session info — sinhrono, ne zahtijeva fetch

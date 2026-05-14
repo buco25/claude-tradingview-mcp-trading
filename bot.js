@@ -137,6 +137,8 @@ async function recordSymbolSl(pid, symbol) {
 let _regimeCache = { regime: "UNKNOWN", ts: 0 };
 const REGIME_TTL = 15 * 60 * 1000;  // osvježi svakih 15min
 
+export async function getBtcRegimeExport() { return getBtcRegime(); }
+
 async function getBtcRegime() {
   if (Date.now() - _regimeCache.ts < REGIME_TTL) return _regimeCache.regime;
   try {
@@ -620,6 +622,30 @@ function getDailyPnl(pid) {
 }
 
 export function getDailyPnlExport(pid) { return getDailyPnl(pid); }
+
+// ─── Long/Short Ratio (Bitget) ────────────────────────────────────────────────
+let _lsCache = { data: null, ts: 0 };
+const LS_TTL = 5 * 60 * 1000;
+export async function getLongShortRatio(symbol = "BTCUSDT") {
+  if (Date.now() - _lsCache.ts < LS_TTL && _lsCache.data) return _lsCache.data;
+  try {
+    const url = `https://api.bitget.com/api/v2/mix/market/account-long-short-ratio?symbol=${symbol}&productType=USDT-FUTURES&period=1H&limit=2`;
+    const r = await fetch(url);
+    const d = await r.json();
+    if (d.code !== "00000" || !d.data?.length) return null;
+    const latest = d.data[0];
+    const prev   = d.data[1];
+    const longRatio  = parseFloat(latest.longAccountRatio) * 100;
+    const shortRatio = parseFloat(latest.shortAccountRatio) * 100;
+    const prevLong   = prev ? parseFloat(prev.longAccountRatio) * 100 : longRatio;
+    const trend = longRatio > prevLong + 1 ? "RASTE" : longRatio < prevLong - 1 ? "PADA" : "STABILAN";
+    const data = { longRatio: longRatio.toFixed(1), shortRatio: shortRatio.toFixed(1), trend };
+    _lsCache = { data, ts: Date.now() };
+    return data;
+  } catch (e) {
+    return null;
+  }
+}
 
 // ─── Per-Symbol WR tracking ───────────────────────────────────────────────────
 const getSymStatsFile = () => `${DATA_DIR}/symbol_stats.json`;

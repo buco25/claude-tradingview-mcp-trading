@@ -10,7 +10,8 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, check5mSRTest, 
   getAllFundingRates, getDailyPnlExport, getSymbolStats, getOIForSymbols,
   getFearGreed, getBtcDominance, getDxyData, getConsecutiveLossCount,
   getSessionInfo, calcAtrTrend, getSp500Data, calcSymbolCorrelation,
-  getDeribitPutCall, getLiquidationRisk, getEconEvents, isEconBlocked, calcVWAP } from "./bot.js";
+  getDeribitPutCall, getLiquidationRisk, getEconEvents, isEconBlocked, calcVWAP,
+  getBtcRegimeExport, getLongShortRatio } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -1110,6 +1111,30 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <div style="background:#1f2937;border:1px solid #374151;border-radius:12px;padding:16px 20px;margin-bottom:20px" id="market-intel-panel">
     <div style="font-size:11px;color:#9ca3af;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">🧠 Market Intelligence</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px" id="intel-grid">
+
+      <!-- Trade Readiness Score -->
+      <div style="background:#2d3748;border:2px solid #374151;border-radius:8px;padding:12px" id="readiness-card">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">🎯 Trade Readiness</div>
+        <div style="font-size:28px;font-weight:800" id="readiness-val">…</div>
+        <div style="background:#374151;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
+          <div id="readiness-bar" style="height:100%;border-radius:4px;background:#059669;transition:width .5s,background .5s;width:0%"></div>
+        </div>
+        <div style="font-size:11px;color:#9ca3af" id="readiness-sub">Učitavam…</div>
+      </div>
+
+      <!-- BTC Regime -->
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">📊 BTC Regime (4H)</div>
+        <div style="font-size:22px;font-weight:800" id="regime-val">…</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="regime-sub">BULL=LONG ok · BEAR=LONG blokiran</div>
+      </div>
+
+      <!-- Active Gates -->
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px;grid-column:span 2">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:8px;text-transform:uppercase">🚦 Aktivni Gateovi</div>
+        <div id="gates-grid" style="display:flex;flex-wrap:wrap;gap:6px">…</div>
+      </div>
+
       <!-- Circuit Breaker -->
       <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
         <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">🛑 Circuit Breaker</div>
@@ -1196,6 +1221,23 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">🎯 Put/Call Ratio (Deribit)</div>
         <div style="font-size:16px;font-weight:800" id="pc-val">…</div>
         <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="pc-sub">&gt;1.5=Fear · &lt;0.5=Greed</div>
+      </div>
+
+      <!-- Long/Short Ratio -->
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">⚖️ Long/Short Ratio (BTC)</div>
+        <div style="font-size:18px;font-weight:800" id="ls-val">…</div>
+        <div style="background:#374151;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
+          <div id="ls-bar" style="height:100%;border-radius:4px;background:#3b82f6;transition:width .5s;width:50%"></div>
+        </div>
+        <div style="font-size:11px;color:#9ca3af" id="ls-sub">&gt;70% long = contrarian SHORT signal</div>
+      </div>
+
+      <!-- Market Breadth -->
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">🌊 Market Breadth</div>
+        <div style="font-size:22px;font-weight:800" id="breadth-val">…</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="breadth-sub">simbola s ADX≥30 u trendu</div>
       </div>
 
       <!-- Liquidation Risk -->
@@ -1841,6 +1883,19 @@ async function doScan() {
     const setups  = results.filter(s => (s.ultraSig||"").startsWith("SETUP")).length;
     document.getElementById("scan-ts").textContent = ts + " (UTC+2) | ▲ " + longs + " LONG · ▼ " + shorts + " SHORT · ⏳ " + pending + " čeka · ◈ " + setups + " setup";
 
+    // ── Market Breadth — iz scan rezultata ───────────────────────────────
+    const total     = results.filter(s => !s.error).length;
+    const bullish   = results.filter(s => !s.error && parseFloat(s.adx||0) >= 30 && (s.ultraBull||0) > (s.ultraBear||0)).length;
+    const bearish   = results.filter(s => !s.error && parseFloat(s.adx||0) >= 30 && (s.ultraBear||0) > (s.ultraBull||0)).length;
+    const breadthEl = document.getElementById('breadth-val');
+    const breadthSb = document.getElementById('breadth-sub');
+    if (breadthEl) {
+      const bCol = bullish > bearish ? '#059669' : bearish > bullish ? '#dc2626' : '#9ca3af';
+      breadthEl.textContent = '▲' + bullish + ' / ▼' + bearish + ' / —' + (total - bullish - bearish);
+      breadthEl.style.color = bCol;
+      breadthSb.textContent = 'od ' + total + ' simbola s ADX≥30 u trendu';
+    }
+
     tbody.innerHTML = results.map((s, i) => {
       if (s.error) return '<tr><td colspan="8" style="color:#dc2626;padding:6px 10px">' + s.symbol + ': ' + s.error + '</td></tr>';
 
@@ -1947,6 +2002,51 @@ async function loadMarketContext() {
   try {
     const r = await fetch('/api/market-context');
     const d = await r.json();
+
+    // ── Trade Readiness Score ─────────────────────────────────────────────
+    if (d.readiness) {
+      const sc  = d.readiness.score || 0;
+      const col = sc >= 70 ? '#059669' : sc >= 45 ? '#d97706' : '#dc2626';
+      const lbl = sc >= 70 ? '🟢 Spreman za trading' : sc >= 45 ? '🟡 Djelomično blokiran' : '🔴 Većina uvjeta blokirana';
+      document.getElementById('readiness-val').textContent = sc + '%';
+      document.getElementById('readiness-val').style.color = col;
+      document.getElementById('readiness-bar').style.width = sc + '%';
+      document.getElementById('readiness-bar').style.background = col;
+      document.getElementById('readiness-sub').textContent = lbl;
+      document.getElementById('readiness-card').style.borderColor = col;
+    }
+
+    // ── BTC Regime ────────────────────────────────────────────────────────
+    if (d.regime) {
+      const regCol = d.regime === 'BULL' ? '#059669' : d.regime === 'BEAR' ? '#dc2626' : '#d97706';
+      const regIcon = d.regime === 'BULL' ? '🐂 BULL' : d.regime === 'BEAR' ? '🐻 BEAR' : '😐 NEUTRAL';
+      document.getElementById('regime-val').textContent = regIcon;
+      document.getElementById('regime-val').style.color = regCol;
+      document.getElementById('regime-sub').textContent = d.regime === 'BULL' ? 'LONG dozvoljen' : d.regime === 'BEAR' ? 'LONG blokiran' : 'LONG dozvoljen · SHORT ok';
+    }
+
+    // ── Active Gates ──────────────────────────────────────────────────────
+    if (d.readiness?.gates) {
+      const html = d.readiness.gates.map(g => {
+        const bg  = g.ok ? 'rgba(5,150,105,0.15)' : 'rgba(220,38,38,0.15)';
+        const col = g.ok ? '#059669' : '#dc2626';
+        const ic  = g.ok ? '✓' : '✗';
+        return `<span style="background:${bg};color:${col};border:1px solid ${col}50;border-radius:4px;padding:3px 8px;font-size:11px;font-weight:600">${ic} ${g.name}</span>`;
+      }).join('');
+      document.getElementById('gates-grid').innerHTML = html;
+    }
+
+    // ── Long/Short Ratio ──────────────────────────────────────────────────
+    if (d.ls) {
+      const lr = parseFloat(d.ls.longRatio);
+      const lsCol = lr > 70 ? '#dc2626' : lr < 40 ? '#059669' : '#9ca3af';
+      const lsWarn = lr > 70 ? ' ⚠️ Contrarian SHORT' : lr < 40 ? ' 💡 Contrarian LONG' : '';
+      document.getElementById('ls-val').textContent = '⬆ ' + d.ls.longRatio + '% / ⬇ ' + d.ls.shortRatio + '%';
+      document.getElementById('ls-val').style.color = lsCol;
+      document.getElementById('ls-bar').style.width = d.ls.longRatio + '%';
+      document.getElementById('ls-bar').style.background = lr > 70 ? '#dc2626' : lr < 40 ? '#059669' : '#3b82f6';
+      document.getElementById('ls-sub').textContent = 'Trend: ' + (d.ls.trend || '—') + lsWarn;
+    }
 
     // Circuit Breaker
     const cbCount = d.consecLosses || 0;
@@ -2558,7 +2658,7 @@ const server = http.createServer(async (req, res) => {
       const rules = JSON.parse(readFileSync("rules.json","utf8"));
       const symbols = rules.watchlist_synapse_t || [];
 
-      const [fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, sp500, corr, pc, liq, econRaw] = await Promise.all([
+      const [fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, sp500, corr, pc, liq, econRaw, regime, ls] = await Promise.all([
         getFearGreed(),
         getBtcDominance(),
         getDxyData(),
@@ -2571,6 +2671,8 @@ const server = http.createServer(async (req, res) => {
         getDeribitPutCall(),
         getLiquidationRisk(symbols),
         getEconEvents(),
+        getBtcRegimeExport(),
+        getLongShortRatio("BTCUSDT"),
       ]);
       const econ = { events: econRaw, status: isEconBlocked(econRaw) };
 
@@ -2599,8 +2701,27 @@ const server = http.createServer(async (req, res) => {
         if (eq > 0) dailyLimit = Math.max(eq * 0.03, 20);
       } catch { /* fallback na $20 */ }
 
+      // ── Trade Readiness Score (0–100%) ─────────────────────────────────────
+      // Svaki uvjet donosi bodove; agregat = readiness
+      const fgNum   = typeof fg === "number" ? fg : 50;
+      const dxyNum  = dxy?.change4h ?? 0;
+      const liqNum  = liq?.score ?? 0;
+      const cbCount = consecLosses ?? 0;
+      const gates = [
+        { name: "BTC Regime",   ok: regime === "BULL" || regime === "NEUTRAL", weight: 20 },
+        { name: "F&G",          ok: fgNum > 20 && fgNum < 80,                  weight: 15 },
+        { name: "DXY",          ok: dxyNum <= 0.3,                             weight: 10 },
+        { name: "Liq Risk",     ok: liqNum <= 75,                              weight: 15 },
+        { name: "Circuit Bkr",  ok: cbCount < 7,                               weight: 15 },
+        { name: "SP500",        ok: (sp500?.change4h ?? 0) > -1,               weight: 10 },
+        { name: "Sesija",       ok: session?.active !== false,                 weight: 10 },
+        { name: "Econ Event",   ok: !econ?.status?.blocked,                   weight: 5  },
+      ];
+      const readinessScore = gates.reduce((sum, g) => sum + (g.ok ? g.weight : 0), 0);
+      const readiness = { score: readinessScore, gates };
+
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, dailyLimit, cbLosses: 7, session, atrTrend, sp500, corr, pc, liq, econ }));
+      res.end(JSON.stringify({ fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, dailyLimit, cbLosses: 7, session, atrTrend, sp500, corr, pc, liq, econ, regime, ls, readiness }));
     } catch(e) {
       res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
     }

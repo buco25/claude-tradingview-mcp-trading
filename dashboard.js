@@ -1155,11 +1155,12 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div style="font-size:11px;color:#9ca3af" id="daily-pnl-sub">Iskorišteno: 0% limita</div>
       </div>
 
-      <!-- Funding Rate -->
+      <!-- Funding Rate + 24h trend -->
       <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">💸 Funding Rate</div>
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">💸 Funding Rate + Trend</div>
         <div style="font-size:14px;font-weight:700" id="fr-val">…</div>
         <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="fr-sub">&gt;0.05% = LONG blokiran</div>
+        <div style="font-size:11px;margin-top:5px" id="fr-trend-val"></div>
       </div>
 
       <!-- Fear & Greed -->
@@ -1240,14 +1241,15 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="breadth-sub">simbola s ADX≥30 u trendu</div>
       </div>
 
-      <!-- Liquidation Risk -->
+      <!-- Liquidation Risk + OI trend -->
       <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">💥 Liquidation Risk</div>
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">💥 Liquidation Risk + OI</div>
         <div style="font-size:16px;font-weight:800" id="liq-val">…</div>
         <div style="background:#374151;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
           <div id="liq-bar" style="height:100%;border-radius:4px;background:#00c48c;transition:width .5s,background .5s;width:0%"></div>
         </div>
         <div style="font-size:11px;color:#9ca3af" id="liq-sub">Funding + OI analiza</div>
+        <div style="font-size:11px;margin-top:6px" id="oi-trend-val"></div>
       </div>
 
       <!-- VWAP Status -->
@@ -2070,7 +2072,7 @@ async function loadMarketContext() {
     document.getElementById('daily-pnl-bar').style.background = dpColor;
     document.getElementById('daily-pnl-sub').textContent = 'Iskorišteno: ' + dpPct.toFixed(0) + '% limita ($' + dlim.toFixed(0) + ' = 3% equityja)';
 
-    // Funding Rates
+    // Funding Rates + trend
     if (d.fr && Object.keys(d.fr).length > 0) {
       const sorted = Object.entries(d.fr).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 4);
       const frHtml = sorted.map(([sym, rate]) => {
@@ -2079,6 +2081,21 @@ async function loadMarketContext() {
         return '<span style="color:' + color + ';font-size:12px">' + sym.replace('USDT','') + ': ' + rate.toFixed(3) + '%' + blocked + '</span>';
       }).join('<br>');
       document.getElementById('fr-val').innerHTML = frHtml;
+
+      // Trend: koliko simbola ima pozitivan (bullish perp premium) vs negativan funding
+      const rates = Object.values(d.fr);
+      const highFr  = rates.filter(r => r > 0.05).length;
+      const midFr   = rates.filter(r => r > 0.02 && r <= 0.05).length;
+      const okFr    = rates.filter(r => r <= 0.02).length;
+      const frTrendEl = document.getElementById('fr-trend-val');
+      if (frTrendEl) {
+        const trendColor = highFr > 2 ? '#dc2626' : midFr > 3 ? '#d97706' : '#059669';
+        const trendText  = highFr > 2 ? `⚠️ ${highFr} simbola s visokim FR — overheated` :
+                           midFr  > 3 ? `🟡 ${midFr} simbola s povišenim FR` :
+                           `✅ ${okFr}/${rates.length} simbola s normalnim FR`;
+        frTrendEl.textContent = trendText;
+        frTrendEl.style.color = trendColor;
+      }
     }
 
     // Fear & Greed
@@ -2230,7 +2247,7 @@ async function loadMarketContext() {
       }
     }
 
-    // Liquidation Risk
+    // Liquidation Risk + OI trend
     if (d.liq && d.liq.overall !== null) {
       const liq = d.liq;
       const liqColor = liq.risk === 'HIGH'   ? '#dc2626'
@@ -2246,6 +2263,20 @@ async function loadMarketContext() {
           liq.risk === 'HIGH'   ? 'Visok funding — previše longova, kaskadni pad moguć' :
           liq.risk === 'MEDIUM' ? 'Srednji rizik — prati funding rate' :
           'Nizak rizik — balansiran leverage u tržištu';
+      }
+      // OI trend iz liq podataka
+      const oiEl = document.getElementById('oi-trend-val');
+      if (oiEl && d.liq.oiTrend) {
+        const rising  = d.liq.oiTrend.filter(x => x.trend === 'RASTE').length;
+        const falling = d.liq.oiTrend.filter(x => x.trend === 'PADA').length;
+        const oiCol   = rising > falling ? '#059669' : falling > rising ? '#dc2626' : '#9ca3af';
+        oiEl.textContent = `OI: ▲${rising} raste · ▼${falling} pada`;
+        oiEl.style.color = oiCol;
+      } else if (oiEl) {
+        // Fallback: iz liq score procijeni
+        const oiMsg = liq.overall > 60 ? '📈 OI visok — overlevered' : liq.overall < 30 ? '📉 OI nizak — malo leveragea' : '➡️ OI neutralan';
+        oiEl.textContent = oiMsg;
+        oiEl.style.color = liqColor;
       }
     }
 

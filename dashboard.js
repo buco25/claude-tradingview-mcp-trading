@@ -2033,7 +2033,7 @@ async function loadMarketContext() {
         const bg  = g.ok ? 'rgba(5,150,105,0.15)' : 'rgba(220,38,38,0.15)';
         const col = g.ok ? '#059669' : '#dc2626';
         const ic  = g.ok ? '✓' : '✗';
-        return `<span style="background:${bg};color:${col};border:1px solid ${col}50;border-radius:4px;padding:3px 8px;font-size:11px;font-weight:600">${ic} ${g.name}</span>`;
+        return '<span style="background:' + bg + ';color:' + col + ';border:1px solid ' + col + '50;border-radius:4px;padding:3px 8px;font-size:11px;font-weight:600">' + ic + ' ' + g.name + '</span>';
       }).join('');
       document.getElementById('gates-grid').innerHTML = html;
     }

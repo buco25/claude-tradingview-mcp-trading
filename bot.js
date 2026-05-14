@@ -648,6 +648,37 @@ export async function getLongShortRatio(symbol = "BTCUSDT") {
   }
 }
 
+// ─── Stablecoin Inflow (DefiLlama — public, no auth) ─────────────────────────
+let _stableCache = { data: null, ts: 0 };
+const STABLE_TTL = 30 * 60 * 1000; // 30 min
+export async function getStablecoinInflow() {
+  if (Date.now() - _stableCache.ts < STABLE_TTL && _stableCache.data) return _stableCache.data;
+  try {
+    const url = "https://stablecoins.llama.fi/stablecoincharts/all";
+    const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    const d = await r.json();
+    if (!Array.isArray(d) || d.length < 8) return null;
+    const latest = d[d.length - 1];
+    const week   = d[d.length - 8];  // ~7 dana
+    const today7 = parseFloat(latest?.totalCirculatingUSD?.peggedUSD || 0);
+    const prev7  = parseFloat(week?.totalCirculatingUSD?.peggedUSD || 0);
+    if (!today7 || !prev7) return null;
+    const changePct = ((today7 - prev7) / prev7) * 100;
+    const changeAbs = ((today7 - prev7) / 1e9).toFixed(2); // u milijardama
+    const direction = changePct > 0.3 ? "INFLOW" : changePct < -0.3 ? "OUTFLOW" : "NEUTRAL";
+    const data = {
+      totalB: (today7 / 1e9).toFixed(1),   // ukupno u mlrd $
+      changePct: changePct.toFixed(2),
+      changeAbs,
+      direction,
+    };
+    _stableCache = { data, ts: Date.now() };
+    return data;
+  } catch (e) {
+    return null;
+  }
+}
+
 // ─── Per-Symbol WR tracking ───────────────────────────────────────────────────
 const getSymStatsFile = () => `${DATA_DIR}/symbol_stats.json`;
 

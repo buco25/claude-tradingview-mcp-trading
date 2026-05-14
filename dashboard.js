@@ -11,7 +11,7 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, check5mSRTest, 
   getFearGreed, getBtcDominance, getDxyData, getConsecutiveLossCount,
   getSessionInfo, calcAtrTrend, getSp500Data, calcSymbolCorrelation,
   getDeribitPutCall, getLiquidationRisk, getEconEvents, isEconBlocked, calcVWAP,
-  getLongShortRatio } from "./bot.js";
+  getLongShortRatio, getStablecoinInflow } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -1263,6 +1263,14 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div id="vwap-list" style="margin-top:6px;font-size:10px;color:#ef4444"></div>
       </div>
 
+      <!-- Stablecoin Inflow -->
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">💵 Stablecoin Inflow (7d)</div>
+        <div style="font-size:20px;font-weight:800" id="stable-val">…</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="stable-sub">DefiLlama · USDT+USDC supply</div>
+        <div style="font-size:11px;margin-top:4px" id="stable-change"></div>
+      </div>
+
       <!-- Ekonomski kalendar -->
       <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px;grid-column:span 2">
         <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">📅 Ekonomski kalendar (HIGH impact USD)</div>
@@ -2005,6 +2013,21 @@ async function loadMarketContext() {
       document.getElementById('ls-sub').textContent = 'Trend: ' + (d.ls.trend || '—') + lsWarn;
     }
 
+    // ── Stablecoin Inflow ─────────────────────────────────────────────────
+    if (d.stableInflow) {
+      var si = d.stableInflow;
+      var siDir  = si.direction;
+      var siCol  = siDir === 'INFLOW' ? '#059669' : siDir === 'OUTFLOW' ? '#dc2626' : '#9ca3af';
+      var siIcon = siDir === 'INFLOW' ? '📈 INFLOW' : siDir === 'OUTFLOW' ? '📉 OUTFLOW' : '➡️ NEUTRAL';
+      var siChg  = (si.changePct > 0 ? '+' : '') + si.changePct + '% · ' + (si.changeAbs > 0 ? '+' : '') + si.changeAbs + 'B $';
+      var siNote = siDir === 'INFLOW' ? '🟢 Bullish — novac ulazi' : siDir === 'OUTFLOW' ? '🔴 Bearish — novac izlazi' : '⚪ Stabilan supply';
+      document.getElementById('stable-val').textContent = siIcon;
+      document.getElementById('stable-val').style.color = siCol;
+      document.getElementById('stable-sub').textContent = 'Ukupno: $' + si.totalB + 'B · 7d promjena';
+      document.getElementById('stable-change').textContent = siChg + ' · ' + siNote;
+      document.getElementById('stable-change').style.color = siCol;
+    }
+
     // Circuit Breaker
     const cbCount = d.consecLosses || 0;
     const cbMax = d.cbLosses || 7;
@@ -2674,7 +2697,7 @@ const server = http.createServer(async (req, res) => {
       const rules = JSON.parse(readFileSync("rules.json","utf8"));
       const symbols = rules.watchlist_synapse_t || [];
 
-      const [fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, sp500, corr, pc, liq, econRaw, ls] = await Promise.all([
+      const [fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, sp500, corr, pc, liq, econRaw, ls, stableInflow] = await Promise.all([
         getFearGreed(),
         getBtcDominance(),
         getDxyData(),
@@ -2688,6 +2711,7 @@ const server = http.createServer(async (req, res) => {
         getLiquidationRisk(symbols),
         getEconEvents(),
         getLongShortRatio("BTCUSDT"),
+        getStablecoinInflow(),
       ]);
 
       // BTC Regime — direktni fetch (4H candles)
@@ -2764,7 +2788,7 @@ const server = http.createServer(async (req, res) => {
       const readiness = { score: readinessScore, gates };
 
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, dailyLimit, cbLosses: 7, session, atrTrend, sp500, corr, pc, liq, econ, regime, ls, readiness }));
+      res.end(JSON.stringify({ fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, dailyLimit, cbLosses: 7, session, atrTrend, sp500, corr, pc, liq, econ, regime, ls, stableInflow, readiness }));
     } catch(e) {
       res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
     }

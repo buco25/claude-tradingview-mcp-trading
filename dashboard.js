@@ -2085,7 +2085,7 @@ async function loadMarketContext() {
       document.getElementById('altseason-val').textContent = as.score + '/100 · ' + as.season;
       document.getElementById('altseason-val').style.color = asCol;
       if (asBar) { asBar.style.width = as.score + '%'; asBar.style.background = asCol; }
-      document.getElementById('altseason-sub').textContent = as.outperforming + '/' + as.total + ' altova bije BTC (90d) · BTC: ' + (as.btcReturn > 0 ? '+' : '') + as.btcReturn + '%';
+      document.getElementById('altseason-sub').textContent = as.outperforming + '/' + as.total + ' altova bije BTC (' + (as.period || '90d') + ') · BTC: ' + (as.btcReturn > 0 ? '+' : '') + as.btcReturn + '%';
     }
 
     // ── Countdown — spremi econ evente za timer ───────────────────────────

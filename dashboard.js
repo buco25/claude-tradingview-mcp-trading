@@ -1967,8 +1967,17 @@ setInterval(loadBitgetBalance, 30000);
 
 // Auto-scan on load after 2s delay
 setTimeout(doScan, 2000);
-// Re-scan every 5 minutes
-setInterval(doScan, 1 * 60 * 1000);
+
+// Adaptivni auto-scan:
+//  :55–:05 (5 min oko zatvaranja svjećice) → svake 30s  — bot uskoro skenira
+//  ostalo                                  → svakih 5min — svjećica se polako gradi
+function scheduleNextScan() {
+  var min = new Date().getMinutes();
+  var nearClose = min >= 55 || min < 5;
+  var delay = nearClose ? 30 * 1000 : 5 * 60 * 1000;
+  setTimeout(function() { doScan(); scheduleNextScan(); }, delay);
+}
+scheduleNextScan();
 
 async function loadMarketContext() {
   try {

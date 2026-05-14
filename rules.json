@@ -16,7 +16,9 @@
     "XRPUSDT",
     "APTUSDT",
     "SEIUSDT",
-    "ENAUSDT"
+    "ENAUSDT",
+    "INJUSDT",
+    "JUPUSDT"
   ],
   "watchlist_ema_rsi": [],
   "watchlist_3layer": [],
@@ -37,7 +39,9 @@
     "XRPUSDT",
     "APTUSDT",
     "SEIUSDT",
-    "ENAUSDT"
+    "ENAUSDT",
+    "INJUSDT",
+    "JUPUSDT"
   ],
   "portfolio_timeframes": {
     "ema_rsi": "1H",
@@ -179,6 +183,18 @@
       "tpPct": 5.5,
       "tier": 3,
       "avgRange": "7.67%"
+    },
+    "INJUSDT": {
+      "slPct": 2.0,
+      "tpPct": 4.5,
+      "tier": 2,
+      "avgRange": "5.50%"
+    },
+    "JUPUSDT": {
+      "slPct": 2.5,
+      "tpPct": 5.5,
+      "tier": 3,
+      "avgRange": "6.80%"
     }
   },
   "strategies": {
@@ -298,7 +314,7 @@
     "Dnevni limit: 100 tradova",
     "Circuit breaker: 7 uzastopnih gubitaka → 8h pauza",
     "Uklonjeni simboli (loš WR): ORDIUSDT, WLDUSDT, TRUMPUSDT, AAVEUSDT, RIVERUSDT, ZECUSDT",
-    "Uklonjeni simboli (mali volumen <10M USD/dan): INJUSDT, ARBUSDT, WIFUSDT, TIAUSDT, FETUSDT",
+    "Uklonjeni simboli (mali volumen <10M USD/dan): ARBUSDT, WIFUSDT, TIAUSDT, FETUSDT",
     "Uklonjeni simboli (WR 0% analiza): XAUUSDT, XAGUSDT, BNBUSDT, AVAXUSDT, DOTUSDT"
   ]
 }

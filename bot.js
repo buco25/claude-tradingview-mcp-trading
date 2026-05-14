@@ -3481,12 +3481,26 @@ export async function run() {
           console.log(`  🔄 INVERT: ${orig} → ${signal} ${symbol}`);
         }
 
-        // SL/TP — per-simbol tier vrijednosti iz rules.json (kalibrirane 30d ATR analizom)
-        // ATR-based SL maknuti jer koristi BTC 15m ATR proxy koji nije validan za altove
+        // SL/TP — ATR-based (dinamičan) s tier floor/cap iz rules.json
         const symSltp = rules.symbol_sltp?.[symbol] || {};
-        const slPct = symSltp.slPct ?? pDef.slPct ?? SL_PCT;
-        const tpPct = symSltp.tpPct ?? pDef.tpPct ?? TP_PCT;
-        console.log(`  📐 [SL/TP] ${symbol} Tier${symSltp.tier??'?'}: SL ${slPct}% / TP ${tpPct}% (RR ${(tpPct/slPct).toFixed(1)}x)`);
+        let slPct, tpPct;
+        if (pDef.strategy === "synapse_t" && atrTrend?.currentAtr > 0) {
+          const ATR_SL_MULT = 1.5;
+          const ATR_TP_MULT = 3.0;
+          const tierSlMin = symSltp.slPct ?? 1.0;  // floor = tier SL (ne ispod)
+          const tierSlMax = (symSltp.slPct ?? SL_PCT) + 1.0;  // cap = tier SL + 1%
+          const tierTpMin = symSltp.tpPct ?? 1.5;
+          const tierTpMax = (symSltp.tpPct ?? TP_PCT) + 2.0;
+          const rawSlPct = (atrTrend.currentAtr * ATR_SL_MULT / price) * 100;
+          const rawTpPct = (atrTrend.currentAtr * ATR_TP_MULT / price) * 100;
+          slPct = Math.min(Math.max(rawSlPct, tierSlMin), tierSlMax);
+          tpPct = Math.min(Math.max(rawTpPct, tierTpMin), tierTpMax);
+          console.log(`  📐 [ATR-SL] ${symbol} ATR=${atrTrend.currentAtr.toFixed(4)} → SL ${slPct.toFixed(2)}% TP ${tpPct.toFixed(2)}% (floor: ${tierSlMin}% cap: ${tierSlMax}%)`);
+        } else {
+          slPct = symSltp.slPct ?? pDef.slPct ?? SL_PCT;
+          tpPct = symSltp.tpPct ?? pDef.tpPct ?? TP_PCT;
+          console.log(`  📐 [SL/TP] ${symbol} Tier${symSltp.tier??'?'}: SL ${slPct}% / TP ${tpPct}%`);
+        }
         const slDist = price * (slPct / 100);
         const tpDist = price * (tpPct / 100);
         const sl = signal === "LONG" ? price - slDist : price + slDist;

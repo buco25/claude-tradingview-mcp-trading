@@ -1286,7 +1286,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div style="background:#374151;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
           <div id="altseason-bar" style="height:100%;border-radius:4px;background:#3b82f6;transition:width .5s;width:0%"></div>
         </div>
-        <div style="font-size:11px;color:#9ca3af" id="altseason-sub">CoinGecko top 50 · 90d vs BTC</div>
+        <div style="font-size:11px;color:#9ca3af" id="altseason-sub">BTC dominance · CoinGecko global</div>
       </div>
 
       <!-- Countdown do sljedećeg eventa -->
@@ -2085,7 +2085,7 @@ async function loadMarketContext() {
       document.getElementById('altseason-val').textContent = as.score + '/100 · ' + as.season;
       document.getElementById('altseason-val').style.color = asCol;
       if (asBar) { asBar.style.width = as.score + '%'; asBar.style.background = asCol; }
-      document.getElementById('altseason-sub').textContent = as.outperforming + '/' + as.total + ' altova bije BTC (' + (as.period || '90d') + ') · BTC: ' + (as.btcReturn > 0 ? '+' : '') + as.btcReturn + '%';
+      document.getElementById('altseason-sub').textContent = 'BTC dominance: ' + as.btcDom + '% · score ' + as.score + '/100';
     }
 
     // ── Countdown — spremi econ evente za timer ───────────────────────────

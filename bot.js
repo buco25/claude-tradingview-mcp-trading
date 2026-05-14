@@ -676,25 +676,16 @@ const ALT_SEASON_TTL = 60 * 60 * 1000; // 1h — CoinGecko rate limit
 export async function getAltcoinSeason() {
   if (Date.now() - _altSeasonCache.ts < ALT_SEASON_TTL && _altSeasonCache.data) return _altSeasonCache.data;
   try {
-    // Traži i 90d i 30d — koristimo koji god je dostupan (CoinGecko free tier ponekad nema 90d)
-    const url = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false&price_change_percentage=30d,90d';
-    const coins = await fetch(url, { signal: AbortSignal.timeout(10000) }).then(r => r.json());
-    if (!Array.isArray(coins) || coins.length < 10) return null;
+    // BTC dominance iz CoinGecko /global — pouzdan, bez rate-limit problema
+    // BTC dom < 48% = altcoin sezona, > 58% = BTC sezona
+    const g = await fetch('https://api.coingecko.com/api/v3/global', { signal: AbortSignal.timeout(10000) }).then(r => r.json());
+    const btcDom = g?.data?.market_cap_percentage?.btc;
+    if (btcDom == null) return null;
 
-    // Odaberi period: preferiramo 90d, fallback na 30d
-    const use90d = coins.filter(c => c.price_change_percentage_90d_in_currency != null).length >= 10;
-    const field  = use90d ? 'price_change_percentage_90d_in_currency' : 'price_change_percentage_30d_in_currency';
-    const period = use90d ? '90d' : '30d';
-
-    const btc = coins.find(c => c.id === 'bitcoin');
-    const btcReturn = btc?.[field] ?? 0;
-    const others = coins.filter(c => c.id !== 'bitcoin' && c[field] != null);
-    if (others.length < 5) return null;  // nedovoljno podataka — ne prikazuj
-
-    const outperforming = others.filter(c => c[field] > btcReturn).length;
-    const score = Math.round(outperforming / others.length * 100);
+    // Score: dom 40% → 100, dom 65% → 0 (linearna interpolacija)
+    const score = Math.round(Math.max(0, Math.min(100, (65 - btcDom) / 25 * 100)));
     const season = score >= 75 ? 'ALT SEASON' : score >= 50 ? 'ALT FAVORED' : score >= 25 ? 'BTC FAVORED' : 'BTC SEASON';
-    const data = { score, season, btcReturn: btcReturn.toFixed(1), outperforming, total: others.length, period };
+    const data = { score, season, btcDom: btcDom.toFixed(1) };
     _altSeasonCache = { data, ts: Date.now() };
     return data;
   } catch { return null; }

@@ -406,10 +406,34 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
       const rsiLongOk   = rsiV < 72;
       const rsiShortOk  = rsiV > 30;
 
+      // Pullback signali (reversed logika)
       if      (adxOk && scaleOkLong  && rsiLongOk  && ultraBull >= minSig) ultraSig = "LONG";
       else if (adxOk && scaleOkShort && rsiShortOk && ultraBear >= minSig) ultraSig = "SHORT";
       else if (adxOk && scaleOkLong  && rsiLongOk  && ultraBull === minSig - 1) ultraSig = "SETUP↑";
       else if (adxOk && scaleOkShort && rsiShortOk && ultraBear === minSig - 1) ultraSig = "SETUP↓";
+
+      // Momentum signali (non-reversed, hibrid fallback) — viši prag 10/13
+      if (ultraSig === "—") {
+        var momSigsD = [
+          ema50  ? (price > ema50  ?  1 : -1) : 0,       //  1. E50  MOM: >EMA50=+1
+          rsiV > 55 ? 1 : rsiV < 45 ? -1 : 0,            //  2. RSI  MOM: >55=+1
+          ema55  ? (price > ema55  ?  1 : -1) : 0,       //  3. E55  MOM: >EMA55=+1
+          chopV < 61.8 ? 1 : -1,                          //  4. CHP: isti
+          cvdSum > 0 ?  1 : -1,                           //  5. CVD  MOM: kupni vol=+1
+          ultraSigs16[5],                                  //  6. R⟳: isti
+          macdH !== null ? (macdH > 0 ? 1 : -1) : 0,    //  7. MCD: isti
+          ema145 ? (price > ema145 ?  1 : -1) : 0,       //  8. E145: isti
+          vols[n-1] > volAvg20 ?  1 : 0,                 //  9. VOL  MOM: visoki vol=+1
+          macdCrossV > 0 ? 1 : macdCrossV < 0 ? -1 : 0, // 10. MCC  MOM: cross gore=+1
+          ultraSigs16[10],                                 // 11. RSI↗: isti
+          ultraSigs16[11],                                 // 12. SRS: isti
+          ultraSigs16[12],                                 // 13. SRB: isti
+        ];
+        var momBullD = momSigsD.filter(function(s){return s===1;}).length;
+        var momBearD = momSigsD.filter(function(s){return s===-1;}).length;
+        if (adxOk && scaleOkLong  && rsiLongOk  && momBullD >= 10) { ultraSig = "MOM↑"; ultraBull = momBullD; }
+        else if (adxOk && scaleOkShort && rsiShortOk && momBearD >= 10) { ultraSig = "MOM↓"; ultraBear = momBearD; }
+      }
     }
   }
 
@@ -1788,6 +1812,20 @@ function statusBox(s) {
   }
   if (sig === "SETUP↑") return '<span style="color:#d97706;font-size:12px">◈ SETUP ↑ &nbsp;<span style="color:#94a3b8;font-size:11px">(' + (s.ultraBull||0) + '/13)</span></span>' + (s.volLow ? '<br><span style="color:#f59e0b;font-size:10px">⚠️ VOL ' + s.volRatio + 'x</span>' : '');
   if (sig === "SETUP↓") return '<span style="color:#d97706;font-size:12px">◈ SETUP ↓ &nbsp;<span style="color:#94a3b8;font-size:11px">(' + (s.ultraBear||0) + '/13)</span></span>' + (s.volLow ? '<br><span style="color:#f59e0b;font-size:10px">⚠️ VOL ' + s.volRatio + 'x</span>' : '');
+  if (sig === "MOM↑") {
+    return '<div style="background:rgba(59,130,246,0.1);border:1px solid #3b82f6;border-radius:8px;padding:8px 10px">' +
+      '<div style="font-size:11px;color:#3b82f6;font-weight:700;margin-bottom:4px">🚀 MOMENTUM LONG</div>' +
+      '<div style="font-size:13px;font-weight:700;color:#3b82f6">▲ LONG</div>' +
+      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Breakout ulaz @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBull||0) + '/13</b></div>' +
+      '</div>';
+  }
+  if (sig === "MOM↓") {
+    return '<div style="background:rgba(139,92,246,0.1);border:1px solid #8b5cf6;border-radius:8px;padding:8px 10px">' +
+      '<div style="font-size:11px;color:#8b5cf6;font-weight:700;margin-bottom:4px">🚀 MOMENTUM SHORT</div>' +
+      '<div style="font-size:13px;font-weight:700;color:#8b5cf6">▼ SHORT</div>' +
+      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Breakdown ulaz @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBear||0) + '/13</b></div>' +
+      '</div>';
+  }
 
   // ── RSI + ADX Watch alert — oba moraju biti overextended ──────────────────
   const rsiNum = parseFloat(s.rsi);
@@ -1870,6 +1908,7 @@ async function doScan() {
       function rank(s) {
         if (s.pending) return 0;
         if (s.ultraSig === "LONG" || s.ultraSig === "SHORT") return 1;
+        if (s.ultraSig === "MOM↑" || s.ultraSig === "MOM↓") return 1;
         if ((s.ultraSig||"").startsWith("SETUP")) return 2;
         return 3 + (16 - Math.max(s.ultraBull||0, s.ultraBear||0));
       }

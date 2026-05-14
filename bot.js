@@ -1746,13 +1746,49 @@ function analyzeUltra(candles, cfg) {
       reason: `SHORT↓${bearCnt}/13 blokiran — LONG_ONLY mod aktivan` };
   }
 
+  // ── MOMENTUM fallback (hibrid) ──────────────────────────────────────────────
+  // Ako pullback signal nije dostigao prag, provjeri momentum/breakout logiku:
+  // Isti 13 signala ali 6 reversanih vraćamo u originalnu (trend-following) logiku.
+  // Viši prag (MOM_MIN) jer su momentum ulazi rizičniji od pullback ulaza.
+  const MOM_MIN = 10;
+  const momSigs = [
+    price > ema50  ?  1 : -1,                          //  1. E50  MOM: >EMA50 = trend gore = +1
+    rsi > 55 ? 1 : rsi < 45 ? -1 : 0,                 //  2. RSI  MOM: >55 = momentum = +1
+    price > ema55  ?  1 : -1,                          //  3. E55  MOM: >EMA55 = trend gore = +1
+    chop < 61.8 ? 1 : -1,                              //  4. CHP: isti
+    cvdSum > 0 ?  1 : -1,                              //  5. CVD  MOM: kupni vol = potvrda pumpa = +1
+    (rsiMin5 < 35 && rsi > 35 && rsiRising) ? 1
+      : (rsiMax5 > 65 && rsi < 65 && rsiFalling) ? -1 : 0, //  6. R⟳: isti
+    macdHist !== null ? (macdHist > 0 ? 1 : -1) : 0,  //  7. MCD: isti
+    price > ema145 ?  1 : -1,                          //  8. E145: isti
+    volLast > volAvg20 ?  1 : 0,                       //  9. VOL  MOM: visoki vol = breakout potvrda = +1
+    macdCrossUp ?  1 : macdCrossDn ? -1 : 0,           // 10. MCC  MOM: cross gore = momentum = +1
+    rsiRising ? 1 : rsiFalling ? -1 : 0,               // 11. RSI↗: isti
+    sig17sr,                                            // 12. SRS: isti
+    sig18bk,                                            // 13. SRB: isti
+  ];
+  const momBull = momSigs.filter(s => s === 1).length;
+  const momBear = momSigs.filter(s => s === -1).length;
+
+  if (momBull >= MOM_MIN && scaleOkLong && rsiLongOk && adx >= ADX_MIN) {
+    return { price, signal: "LONG", bullScore: momBull, bearScore: momBear,
+      nearSup, nearRes, isMomentum: true,
+      reason: `MOMENTUM LONG ↑${momBull}/13 | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ 6Sc:${scaleUp}/6✓ RSI:${rsi.toFixed(0)}<72✓` };
+  }
+  if (!LONG_ONLY && momBear >= MOM_MIN && scaleOkShort && rsiShortOk && adx >= ADX_MIN) {
+    return { price, signal: "SHORT", bullScore: momBull, bearScore: momBear,
+      nearSup, nearRes, isMomentum: true,
+      reason: `MOMENTUM SHORT ↓${momBear}/13 | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ 6Sc:${scaleDn}/6✓ RSI:${rsi.toFixed(0)}>30✓` };
+  }
+
   // Dijagnoza zašto nema signala
   const dirStr = scaleOkLong ? `LONG(${scaleUp}/6)` : scaleOkShort ? `SHORT(${scaleDn}/6)` : `6Sc✗`;
   const whyNot = bullCnt >= bearCnt
-    ? `↑${bullCnt}/13 ${dirStr}${!rsiLongOk ? ` RSI${rsi.toFixed(0)}≥72✗` : ""}`
-    : `↓${bearCnt}/13 ${dirStr}${!rsiShortOk ? ` RSI${rsi.toFixed(0)}≤30✗` : ""}`;
+    ? `↑${bullCnt}/13 ${dirStr}${!rsiLongOk ? ` RSI${rsi.toFixed(0)}≥72✗` : ""} | MOM:${momBull}/13`
+    : `↓${bearCnt}/13 ${dirStr}${!rsiShortOk ? ` RSI${rsi.toFixed(0)}≤30✗` : ""} | MOM:${momBear}/13`;
   return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
-    reason: `ULTRA: ${whyNot} (treba 4ob+${MIN_CONFIRM}/13)` };
+    momBull, momBear,
+    reason: `ULTRA: ${whyNot} (treba 4ob+${MIN_CONFIRM}/13 pullback ili ${MOM_MIN}/13 momentum)` };
 }
 
 // ─── ULTRA Immediate Entry ─────────────────────────────────────────────────────
@@ -3495,8 +3531,20 @@ export async function run() {
         let slMethod = "tier";
 
         if (pDef.strategy === "synapse_t") {
-          // 1. Pokušaj S/R-based SL
-          const srLevel = signal === "LONG" ? result.nearSup : result.nearRes;
+          // Momentum ulaz → preskoči S/R SL, koristi ATR direktno (breakout nema smisla ispod prethodnog S/R-a)
+          if (result.isMomentum && atrTrend?.currentAtr > 0) {
+            const rawSlPct = (atrTrend.currentAtr * 1.2 / price) * 100;  // tijesan ATR SL za momentum
+            const rawTpPct = (atrTrend.currentAtr * 3.5 / price) * 100;  // veći TP — ride the trend
+            slPct = Math.min(Math.max(rawSlPct, tierSlMin), tierSlMax);
+            tpPct = Math.min(Math.max(rawTpPct, tierTpMin), tierTpMax);
+            sl = signal === "LONG" ? price * (1 - slPct / 100) : price * (1 + slPct / 100);
+            tp = signal === "LONG" ? price * (1 + tpPct / 100) : price * (1 - tpPct / 100);
+            slMethod = "MOM-ATR";
+            console.log(`  🚀 [MOM-SL] ${symbol} MOMENTUM: SL ${slPct.toFixed(2)}% TP ${tpPct.toFixed(2)}% RR=${( tpPct/slPct).toFixed(1)}x`);
+          }
+
+          // 1. Pokušaj S/R-based SL (za pullback signale)
+          const srLevel = slMethod === "tier" ? (signal === "LONG" ? result.nearSup : result.nearRes) : null;
           if (srLevel != null) {
             const srSlPrice = signal === "LONG"
               ? srLevel * (1 - SR_BUFFER)   // malo ispod zadnjeg supporta

@@ -1733,10 +1733,12 @@ function analyzeUltra(candles, cfg) {
     // Bitmask aktivnih BULL signala za signal analizu
     const sigMask = sigs.reduce((mask, v, i) => v === 1 ? mask | (1 << i) : mask, 0);
     return { price, signal: "LONG",  bullScore: bullCnt, bearScore: bearCnt, sigMask,
+      nearSup, nearRes,
       reason: `ULTRA LONG ↑${bullCnt}/13 | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ 6Sc:${scaleUp}/6✓ RSI:${rsi.toFixed(0)}<72✓ [3ob+${MIN_CONFIRM}]` };
   }
   if (!LONG_ONLY && bearCnt >= MIN_CONFIRM && scaleOkShort && rsiShortOk) {
     return { price, signal: "SHORT", bullScore: bullCnt, bearScore: bearCnt,
+      nearSup, nearRes,
       reason: `ULTRA SHORT ↓${bearCnt}/13 | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ 6Sc:${scaleDn}/6✓ RSI:${rsi.toFixed(0)}>30✓ [3ob+${MIN_CONFIRM}]` };
   }
   if (LONG_ONLY && bearCnt >= MIN_CONFIRM && scaleOkShort && rsiShortOk) {
@@ -3481,30 +3483,59 @@ export async function run() {
           console.log(`  🔄 INVERT: ${orig} → ${signal} ${symbol}`);
         }
 
-        // SL/TP — ATR-based (dinamičan) s tier floor/cap iz rules.json
+        // SL/TP — S/R-based (zadnji pivot ispod/iznad cijene) + ATR fallback + tier guardrails
         const symSltp = rules.symbol_sltp?.[symbol] || {};
-        let slPct, tpPct;
-        if (pDef.strategy === "synapse_t" && atrTrend?.currentAtr > 0) {
-          const ATR_SL_MULT = 1.5;
-          const ATR_TP_MULT = 3.0;
-          const tierSlMin = symSltp.slPct ?? 1.0;  // floor = tier SL (ne ispod)
-          const tierSlMax = (symSltp.slPct ?? SL_PCT) + 1.0;  // cap = tier SL + 1%
-          const tierTpMin = symSltp.tpPct ?? 1.5;
-          const tierTpMax = (symSltp.tpPct ?? TP_PCT) + 2.0;
-          const rawSlPct = (atrTrend.currentAtr * ATR_SL_MULT / price) * 100;
-          const rawTpPct = (atrTrend.currentAtr * ATR_TP_MULT / price) * 100;
-          slPct = Math.min(Math.max(rawSlPct, tierSlMin), tierSlMax);
-          tpPct = Math.min(Math.max(rawTpPct, tierTpMin), tierTpMax);
-          console.log(`  📐 [ATR-SL] ${symbol} ATR=${atrTrend.currentAtr.toFixed(4)} → SL ${slPct.toFixed(2)}% TP ${tpPct.toFixed(2)}% (floor: ${tierSlMin}% cap: ${tierSlMax}%)`);
-        } else {
+        const tierSlMin = symSltp.slPct ?? 1.0;        // floor: ne smije biti manji od tier SL
+        const tierSlMax = (symSltp.slPct ?? SL_PCT) + 1.0;  // cap: ne smije biti veći od tier SL + 1%
+        const tierTpMin = symSltp.tpPct ?? 1.5;
+        const tierTpMax = (symSltp.tpPct ?? TP_PCT) + 2.0;
+        const SR_BUFFER = 0.003;  // 0.3% buffer ispod supporta / iznad resistancea
+
+        let slPct, tpPct, sl, tp;
+        let slMethod = "tier";
+
+        if (pDef.strategy === "synapse_t") {
+          // 1. Pokušaj S/R-based SL
+          const srLevel = signal === "LONG" ? result.nearSup : result.nearRes;
+          if (srLevel != null) {
+            const srSlPrice = signal === "LONG"
+              ? srLevel * (1 - SR_BUFFER)   // malo ispod zadnjeg supporta
+              : srLevel * (1 + SR_BUFFER);  // malo iznad zadnjeg resistancea
+            const srSlPct = Math.abs(price - srSlPrice) / price * 100;
+            if (srSlPct >= tierSlMin && srSlPct <= tierSlMax) {
+              // S/R razina je u prihvatljivom tier rangu — koristi je
+              slPct = srSlPct;
+              tpPct = Math.min(Math.max(slPct * 2.5, tierTpMin), tierTpMax);
+              sl = srSlPrice;
+              tp = signal === "LONG" ? price * (1 + tpPct / 100) : price * (1 - tpPct / 100);
+              slMethod = "S/R";
+              console.log(`  📐 [SR-SL] ${symbol} ${signal}: ${signal === "LONG" ? "Sup" : "Res"} @ ${fmtPrice(srLevel)} → SL ${fmtPrice(sl)} (${slPct.toFixed(2)}%) | TP ${fmtPrice(tp)} (${tpPct.toFixed(2)}%) RR=${( tpPct/slPct).toFixed(1)}x`);
+            } else {
+              console.log(`  📐 [SR-SL] ${symbol} S/R @ ${fmtPrice(srLevel)} predaleko (${srSlPct.toFixed(2)}% — van range ${tierSlMin}%-${tierSlMax}%) → ATR fallback`);
+            }
+          }
+
+          // 2. ATR fallback ako S/R nije pronašao prikladan level
+          if (slMethod === "tier" && atrTrend?.currentAtr > 0) {
+            const rawSlPct = (atrTrend.currentAtr * 1.5 / price) * 100;
+            const rawTpPct = (atrTrend.currentAtr * 3.0 / price) * 100;
+            slPct = Math.min(Math.max(rawSlPct, tierSlMin), tierSlMax);
+            tpPct = Math.min(Math.max(rawTpPct, tierTpMin), tierTpMax);
+            sl = signal === "LONG" ? price * (1 - slPct / 100) : price * (1 + slPct / 100);
+            tp = signal === "LONG" ? price * (1 + tpPct / 100) : price * (1 - tpPct / 100);
+            slMethod = "ATR";
+            console.log(`  📐 [ATR-SL] ${symbol} ATR=${atrTrend.currentAtr.toFixed(4)} → SL ${slPct.toFixed(2)}% TP ${tpPct.toFixed(2)}% (floor: ${tierSlMin}% cap: ${tierSlMax}%)`);
+          }
+        }
+
+        // 3. Tier fallback (ostale strategije ili ako ATR = 0)
+        if (slMethod === "tier") {
           slPct = symSltp.slPct ?? pDef.slPct ?? SL_PCT;
           tpPct = symSltp.tpPct ?? pDef.tpPct ?? TP_PCT;
-          console.log(`  📐 [SL/TP] ${symbol} Tier${symSltp.tier??'?'}: SL ${slPct}% / TP ${tpPct}%`);
+          sl = signal === "LONG" ? price * (1 - slPct / 100) : price * (1 + slPct / 100);
+          tp = signal === "LONG" ? price * (1 + tpPct / 100) : price * (1 - tpPct / 100);
+          console.log(`  📐 [Tier-SL] ${symbol} Tier${symSltp.tier??'?'}: SL ${slPct}% / TP ${tpPct}%`);
         }
-        const slDist = price * (slPct / 100);
-        const tpDist = price * (tpPct / 100);
-        const sl = signal === "LONG" ? price - slDist : price + slDist;
-        const tp = signal === "LONG" ? price + tpDist : price - tpDist;
 
         // Risk-based position sizing: SL gubitak = točno RISK_PCT% trenutne equity
         const startCap   = pDef.startCapital ?? START_CAPITAL;

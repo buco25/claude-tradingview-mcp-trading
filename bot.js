@@ -1770,19 +1770,20 @@ function analyzeUltra(candles, cfg) {
   const momBull = momSigs.filter(s => s === 1).length;
   const momBear = momSigs.filter(s => s === -1).length;
 
-  // Za momentum: 6SC relaksiran na 3/6 (breakout još nije okrenuo EMA145)
+  // Za momentum: 6SC relaksiran na 3/6, ADX relaksiran na 20 (breakout počinje PRIJE rasta ADX-a)
+  const MOM_ADX_MIN = 20;
   const momScaleOkLong  = scaleUp >= 3;
   const momScaleOkShort = scaleDn >= 3;
 
-  if (momBull >= MOM_MIN && momScaleOkLong && rsiLongOk && adx >= ADX_MIN) {
+  if (momBull >= MOM_MIN && momScaleOkLong && rsiLongOk && adx >= MOM_ADX_MIN) {
     return { price, signal: "LONG", bullScore: momBull, bearScore: momBear,
       nearSup, nearRes, isMomentum: true,
-      reason: `MOMENTUM LONG ↑${momBull}/13 | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ 6Sc:${scaleUp}/6≥3✓ RSI:${rsi.toFixed(0)}<72✓` };
+      reason: `MOMENTUM LONG ↑${momBull}/13 | ADX:${adx.toFixed(0)}≥${MOM_ADX_MIN}✓ 6Sc:${scaleUp}/6≥3✓ RSI:${rsi.toFixed(0)}<72✓` };
   }
-  if (!LONG_ONLY && momBear >= MOM_MIN && momScaleOkShort && rsiShortOk && adx >= ADX_MIN) {
+  if (!LONG_ONLY && momBear >= MOM_MIN && momScaleOkShort && rsiShortOk && adx >= MOM_ADX_MIN) {
     return { price, signal: "SHORT", bullScore: momBull, bearScore: momBear,
       nearSup, nearRes, isMomentum: true,
-      reason: `MOMENTUM SHORT ↓${momBear}/13 | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ 6Sc:${scaleDn}/6✓ RSI:${rsi.toFixed(0)}>30✓` };
+      reason: `MOMENTUM SHORT ↓${momBear}/13 | ADX:${adx.toFixed(0)}≥${MOM_ADX_MIN}✓ 6Sc:${scaleDn}/6≥3✓ RSI:${rsi.toFixed(0)}>30✓` };
   }
 
   // Dijagnoza zašto nema signala

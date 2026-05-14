@@ -431,11 +431,12 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
         ];
         var momBullD = momSigsD.filter(function(s){return s===1;}).length;
         var momBearD = momSigsD.filter(function(s){return s===-1;}).length;
-        // Momentum: 6SC relaksiran na 3/6 (breakout u toku, EMA145 još nije okrenuo)
+        // Momentum: 6SC relaksiran na 3/6, ADX relaksiran na 20 (breakout pocinje prije rasta ADX-a)
+        var momAdxOk     = adxV >= 20;
         var momScOkLong  = scaleUp >= 3;
         var momScOkShort = scaleDn >= 3;
-        if (adxOk && momScOkLong  && rsiLongOk  && momBullD >= 10) { ultraSig = "MOM↑"; ultraBull = momBullD; }
-        else if (adxOk && momScOkShort && rsiShortOk && momBearD >= 10) { ultraSig = "MOM↓"; ultraBear = momBearD; }
+        if (momAdxOk && momScOkLong  && rsiLongOk  && momBullD >= 10) { ultraSig = "MOM↑"; ultraBull = momBullD; }
+        else if (momAdxOk && momScOkShort && rsiShortOk && momBearD >= 10) { ultraSig = "MOM↓"; ultraBear = momBearD; }
       }
     }
   }

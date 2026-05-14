@@ -1194,7 +1194,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
 
       <!-- ATR Trend -->
       <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">📊 ATR Volatilnost (BTC 15m)</div>
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">📊 ATR Volatilnost (BTC 1H)</div>
         <div style="font-size:16px;font-weight:800" id="atr-trend-val">…</div>
         <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="atr-trend-sub">EXPANDING = size ×0.7</div>
       </div>
@@ -2852,10 +2852,10 @@ const server = http.createServer(async (req, res) => {
       // Session info — sinhrono, ne zahtijeva fetch
       const session = getSessionInfo();
 
-      // ATR trend — dohvati BTC 15m svjećice kao proxy za tržišnu volatilnost
+      // ATR trend — dohvati BTC 1H svjećice kao proxy za tržišnu volatilnost
       let atrTrend = { trend: 'N/A', ratio: 1, sizeMult: 1 };
       try {
-        const btcUrl = `https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=15m&limit=100`;
+        const btcUrl = `https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1H&limit=100`;
         const btcD   = await fetch(btcUrl).then(r => r.json());
         if (btcD.code === "00000" && btcD.data?.length) {
           const btcCandles = btcD.data.map(k => ({

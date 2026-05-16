@@ -2537,6 +2537,42 @@ setInterval(updateCountdown, 1000);
       <div style="font-size:11px;color:#9ca3af;margin-top:2px" id="amc-float">float / outstanding</div>
     </div>
 
+    <!-- Borrow Fee -->
+    <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px">
+      <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">💸 Cost to Borrow</div>
+      <div style="font-size:18px;font-weight:800;color:#fbbf24" id="amc-ctb">…</div>
+      <div style="font-size:11px;color:#9ca3af;margin-top:2px" id="amc-ctb-sub">godišnja stopa</div>
+    </div>
+
+  </div>
+
+  <!-- Short Squeeze Score -->
+  <div style="background:linear-gradient(135deg,#1e1b4b,#111827);border:1px solid #4f46e5;border-radius:10px;padding:16px;margin-bottom:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="font-size:12px;color:#a5b4fc;font-weight:700;text-transform:uppercase;letter-spacing:1px">🧨 Short Squeeze Potencijal</div>
+      <div style="font-size:11px;color:#6b7280" id="amc-squeeze-updated"></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:14px">
+      <!-- Score krug -->
+      <div style="position:relative;width:72px;height:72px;flex-shrink:0">
+        <svg width="72" height="72" viewBox="0 0 72 72">
+          <circle cx="36" cy="36" r="30" fill="none" stroke="#374151" stroke-width="6"/>
+          <circle cx="36" cy="36" r="30" fill="none" stroke="#4f46e5" stroke-width="6"
+            stroke-dasharray="188.5" id="amc-squeeze-arc"
+            stroke-dashoffset="188.5" stroke-linecap="round"
+            transform="rotate(-90 36 36)" style="transition:stroke-dashoffset 1s,stroke 1s"/>
+        </svg>
+        <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center">
+          <div style="font-size:20px;font-weight:900;color:#fff" id="amc-squeeze-score">—</div>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:22px;font-weight:800;color:#e5e7eb" id="amc-squeeze-label">…</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px">Skor 0–100 · ChartExchange + Finviz</div>
+      </div>
+    </div>
+    <!-- Faktori -->
+    <div id="amc-squeeze-factors" style="display:grid;gap:6px"></div>
   </div>
 
   <!-- Institucionalni vlasnici -->
@@ -2634,6 +2670,48 @@ setInterval(updateCountdown, 1000);
       document.getElementById('amc-cap').textContent = f(d.marketCap);
       document.getElementById('amc-float').textContent =
         f(d.sharesFloat) + ' / ' + f(d.sharesOutstand);
+
+      // Cost to Borrow
+      if (d.borrowFee) {
+        const ctbEl = document.getElementById('amc-ctb');
+        const ctbSub = document.getElementById('amc-ctb-sub');
+        ctbEl.textContent = d.borrowFee.fee.toFixed(2) + '%';
+        // Boja prema visini CTB-a
+        ctbEl.style.color = d.borrowFee.fee >= 20 ? '#f87171' : d.borrowFee.fee >= 5 ? '#fb923c' : d.borrowFee.fee >= 1 ? '#fbbf24' : '#4ade80';
+        const avail = d.borrowFee.available;
+        const availStr = avail >= 1e6 ? (avail/1e6).toFixed(1)+'M' : avail >= 1e3 ? (avail/1e3).toFixed(0)+'K' : String(avail);
+        ctbSub.textContent = 'Dostupno za borrow: ' + availStr + ' dionica';
+      }
+
+      // Short Squeeze Score
+      if (d.squeeze) {
+        const sq = d.squeeze;
+        document.getElementById('amc-squeeze-score').textContent = sq.score;
+        document.getElementById('amc-squeeze-label').textContent = sq.label;
+        document.getElementById('amc-squeeze-updated').textContent = new Date(d.ts).toLocaleTimeString('hr-HR', {hour:'2-digit',minute:'2-digit'});
+
+        // Animirani krug — stroke-dashoffset od 188.5 (0%) do 0 (100%)
+        const arc = document.getElementById('amc-squeeze-arc');
+        const offset = 188.5 * (1 - sq.score / 100);
+        arc.style.strokeDashoffset = offset;
+        // Boja luka
+        const arcCol = sq.score >= 75 ? '#ef4444' : sq.score >= 55 ? '#f97316' : sq.score >= 35 ? '#eab308' : '#22c55e';
+        arc.style.stroke = arcCol;
+        document.getElementById('amc-squeeze-score').style.color = arcCol;
+
+        // Faktori — progress bar za svaki
+        const fDiv = document.getElementById('amc-squeeze-factors');
+        fDiv.innerHTML = sq.factors.map(f => {
+          const pct = Math.round(f.score / f.max * 100);
+          const barCol = pct >= 70 ? '#ef4444' : pct >= 40 ? '#f97316' : '#60a5fa';
+          return '<div style="display:grid;grid-template-columns:110px 1fr 50px 30px;align-items:center;gap:8px">' +
+            '<div style="font-size:11px;color:#9ca3af">' + f.name + '</div>' +
+            '<div style="background:#374151;border-radius:3px;height:6px"><div style="background:' + barCol + ';height:100%;border-radius:3px;width:' + pct + '%;transition:width 1s"></div></div>' +
+            '<div style="font-size:11px;color:#e5e7eb;text-align:right">' + f.val + '</div>' +
+            '<div style="font-size:10px;color:#6b7280;text-align:right">' + f.score + '/' + f.max + '</div>' +
+            '</div>';
+        }).join('');
+      }
 
       // Institucionalni vlasnici — tablica
       const tbody = document.getElementById('amc-inst-body');
@@ -3247,7 +3325,112 @@ const server = http.createServer(async (req, res) => {
         }
       } catch {}
 
-      // ── 3. Rezultat ──────────────────────────────────────────────────────
+      // ── 3. Borrow Fee + Short Interest — ChartExchange ───────────────────
+      let borrowFee = null;
+      let shortInterestCE = null;
+      try {
+        // Helper: dohvati v-key za određeni adapter
+        const getCeVKey = async (pagePath, adapterName) => {
+          const html = await fetch(`https://chartexchange.com${pagePath}`,
+            { headers: { ...FH, "Referer": "https://chartexchange.com/" }, signal: AbortSignal.timeout(10000) }
+          ).then(r => r.text());
+          const escaped = adapterName.replace(".", "\\.");
+          const m = html.match(new RegExp(`"r"\\s*:\\s*"${escaped}"[^}]*?"v"\\s*:\\s*"([^"]+)"`));
+          return m ? m[1] : null;
+        };
+        const dlCe = async (r, v) => {
+          const url = `https://chartexchange.com/download/?r=${encodeURIComponent(r)}&k=symboldata&v=${encodeURIComponent(v)}`;
+          return fetch(url, { headers: { ...FH, "Referer": "https://chartexchange.com/" }, signal: AbortSignal.timeout(10000) }).then(r => r.text());
+        };
+
+        // Borrow fee — format: updated,fee,available,rebate
+        const [bfV, siV] = await Promise.all([
+          getCeVKey("/symbol/nyse-amc/borrow-fee/",     "nyse-amc.borrow_fee"),
+          getCeVKey("/symbol/nyse-amc/short-interest/", "nyse-amc.short_interest")
+        ]);
+        const [bfCsv, siCsv] = await Promise.all([
+          bfV ? dlCe("nyse-amc.borrow_fee",     bfV) : Promise.resolve(""),
+          siV ? dlCe("nyse-amc.short_interest", siV) : Promise.resolve("")
+        ]);
+
+        if (bfCsv) {
+          const bfRow = bfCsv.trim().split("\n")[1]?.split(",");
+          if (bfRow) {
+            borrowFee = {
+              updated:   bfRow[0]?.trim(),
+              fee:       parseFloat(bfRow[1] || "0"),   // CTB % godišnje
+              available: parseInt(bfRow[2] || "0"),     // dionica dostupno za borrowing
+              rebate:    parseFloat(bfRow[3] || "0")
+            };
+          }
+        }
+        if (siCsv) {
+          // format: date,short_interest,short_position,days_to_cover
+          const siRow = siCsv.trim().split("\n")[1]?.split(",");
+          if (siRow) {
+            shortInterestCE = {
+              date:         siRow[0]?.trim(),
+              pct:          parseFloat(siRow[1] || "0"),   // % of float
+              shares:       parseInt(siRow[2] || "0"),     // broj dionica
+              daysToCover:  parseFloat(siRow[3] || "0")
+            };
+          }
+        }
+      } catch {}
+
+      // ── 4. Short Squeeze Score (0–100) ───────────────────────────────────
+      let squeezeScore = null;
+      let squeezeLabel = null;
+      let squeezeFactors = [];
+      try {
+        // Ulazni podaci (prioritet: ChartExchange > Finviz)
+        const siPct       = shortInterestCE?.pct       ?? parseFloat(snap["Short Float"]  ?? "0");
+        const dtc         = shortInterestCE?.daysToCover ?? parseFloat(snap["Short Ratio"] ?? "0");
+        const ctb         = borrowFee?.fee ?? 0;              // Cost to Borrow %
+        const avail       = borrowFee?.available ?? Infinity; // dostupnih za short
+
+        // Relativni volumen (Finviz)
+        const parseVol = s => {
+          if (!s) return 0;
+          s = String(s).replace(/,/g, "");
+          if (s.endsWith("M")) return parseFloat(s)*1e6;
+          if (s.endsWith("B")) return parseFloat(s)*1e9;
+          if (s.endsWith("K")) return parseFloat(s)*1e3;
+          return parseFloat(s) || 0;
+        };
+        const vol    = parseVol(snap["Volume"]);
+        const avgVol = parseVol(snap["Avg Volume"]);
+        const relVol = avgVol > 0 ? vol / avgVol : 1;
+
+        // Bodovi (ukupno 100)
+        // Short Interest % of Float (0–35)
+        let siScore = siPct >= 25 ? 35 : siPct >= 20 ? 28 : siPct >= 15 ? 20 : siPct >= 10 ? 12 : siPct >= 5 ? 6 : 0;
+        // Days to Cover (0–25)
+        let dtcScore = dtc >= 7 ? 25 : dtc >= 5 ? 20 : dtc >= 3 ? 14 : dtc >= 2 ? 8 : dtc >= 1 ? 4 : 0;
+        // Cost to Borrow — visoki CTB = teško shortati = pritisak na shorte (0–20)
+        let ctbScore = ctb >= 50 ? 20 : ctb >= 20 ? 15 : ctb >= 5 ? 10 : ctb >= 2 ? 6 : ctb >= 1 ? 3 : 0;
+        // Dostupnost za borrow — malo dostupnih = nema novih shorta (0–12)
+        let availScore = avail < 100000 ? 12 : avail < 500000 ? 9 : avail < 2000000 ? 6 : avail < 5000000 ? 3 : 0;
+        // Relativni volumen — spike znači da se nešto događa (0–8)
+        let volScore = relVol >= 3 ? 8 : relVol >= 2 ? 5 : relVol >= 1.5 ? 3 : relVol >= 1 ? 1 : 0;
+
+        squeezeScore = Math.min(100, siScore + dtcScore + ctbScore + availScore + volScore);
+
+        if      (squeezeScore >= 75) { squeezeLabel = "🔴 Eksplozivan"; }
+        else if (squeezeScore >= 55) { squeezeLabel = "🟠 Visok"; }
+        else if (squeezeScore >= 35) { squeezeLabel = "🟡 Umjeren"; }
+        else                         { squeezeLabel = "🟢 Nizak"; }
+
+        squeezeFactors = [
+          { name: "Short Interest",    val: siPct.toFixed(1)+"%",             score: siScore,    max: 35 },
+          { name: "Days to Cover",     val: dtc.toFixed(1)+"d",               score: dtcScore,   max: 25 },
+          { name: "Cost to Borrow",    val: ctb.toFixed(2)+"%",               score: ctbScore,   max: 20 },
+          { name: "Shares Available",  val: avail < 1e6 ? (avail/1e3).toFixed(0)+"K" : (avail/1e6).toFixed(1)+"M", score: availScore, max: 12 },
+          { name: "Rel. Volume",       val: relVol.toFixed(2)+"x",            score: volScore,   max: 8  },
+        ];
+      } catch {}
+
+      // ── 5. Rezultat ──────────────────────────────────────────────────────
       const g = (k) => snap[k] ?? null;  // getter iz snapshot mape
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({
@@ -3280,6 +3463,11 @@ const server = http.createServer(async (req, res) => {
         // FTD iz ChartExchange
         ftd: ftdAmc,
         ftdHistory,
+        // Borrow & Short Interest (ChartExchange)
+        borrowFee,
+        shortInterestCE,
+        // Short Squeeze Score
+        squeeze: squeezeScore !== null ? { score: squeezeScore, label: squeezeLabel, factors: squeezeFactors } : null,
         source: "finviz.com + chartexchange.com",
         ts: new Date().toISOString()
       }));

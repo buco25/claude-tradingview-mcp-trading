@@ -3380,17 +3380,15 @@ async function fetchAmcData() {
         // Zadnja vrijednost = najnoviji CTB (v/100 = %)
         ctbPct = vVals[vVals.length - 1] / 100;
       }
-      // Pokušaj naći "available to borrow" broj (tipično 4000000 = 4M)
-      // Pronalaženje drugog data niza (data2 ili 7d_available chart podaci)
-      const availM = cmcHtml.match(/available_to_borrow[^{]{0,200}"v":([0-9]+)/);
-      if (!availM) {
-        // Fallback: potraži broj u rasponima 100K-50M koji se pojavljuje blizu 'available'
-        const bigNums = [...cmcHtml.matchAll(/(?:available[^<]{0,100}?)([1-9]\d{4,7})(?:[^%])/gi)];
-        if (bigNums.length > 0) ctbAvail = parseInt(bigNums[0][1]);
-      } else {
-        ctbAvail = parseInt(availM[1]);
+      // data3 = shares available to borrow — format: "v":"4000000" (quoted string)
+      // Ovo je intraday high-freq niz, zadnja non-zero vrijednost = trenutno dostupno
+      const data3M = cmcHtml.match(/\bdata3\s*=\s*\[([^\]]*)\]/);
+      if (data3M) {
+        const d3Vals = [...data3M[1].matchAll(/"v":"([0-9]+)"/g)].map(m => parseInt(m[1]));
+        const nonZeroAvail = d3Vals.filter(v => v > 0);
+        if (nonZeroAvail.length > 0) ctbAvail = nonZeroAvail[nonZeroAvail.length - 1];
       }
-      console.log("AMC CTB: " + (ctbPct !== null ? ctbPct.toFixed(4)+"%" : "N/A") + " avail: " + ctbAvail);
+      console.log("AMC CTB: " + (ctbPct !== null ? ctbPct.toFixed(4)+"%" : "N/A") + " avail: " + (ctbAvail != null ? (ctbAvail/1e6).toFixed(2)+"M" : "N/A"));
     } catch(e) { console.error("AMC CTB fetch greška:", e.message); }
 
     // ── 3. FTD — companiesmarketcap.com ──────────────────────────────────────

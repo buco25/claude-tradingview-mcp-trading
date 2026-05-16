@@ -2604,8 +2604,14 @@ setInterval(updateCountdown, 1000);
     try {
       const d = await fetch('/api/amc').then(r => r.json());
       if (d.error) { document.getElementById('amc-ts').textContent = 'Greška: ' + d.error; return; }
+      if (d.loading) {
+        document.getElementById('amc-ts').textContent = 'Podaci se učitavaju… (osvježavam za 30s)';
+        setTimeout(loadAmc, 30000);
+        return;
+      }
 
       const f = v => v != null ? v : '—';
+      const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
 
       // Cijena + promjena
       if (d.price != null) {
@@ -2651,22 +2657,21 @@ setInterval(updateCountdown, 1000);
         const fmtQty = q => q >= 1e6 ? (q/1e6).toFixed(2)+'M'
                           : q >= 1e3 ? (q/1e3).toFixed(0)+'K'
                           : String(q);
-        document.getElementById('amc-ftd').textContent = fmtQty(d.ftd.qty);
-        document.getElementById('amc-ftd-sub').textContent =
-          d.ftd.date + (d.ftd.price != null ? ' · $' + d.ftd.price.toFixed(2) : ' · companiesmarketcap');
+        setEl('amc-ftd', fmtQty(d.ftd.qty));
+        setEl('amc-ftd-sub', d.ftd.date + (d.ftd.price != null ? ' · $' + d.ftd.price.toFixed(2) : ' · companiesmarketcap'));
         // Prikaži promjenu od prethodnog dana
         const chgEl = document.getElementById('amc-ftd-chg');
-        if (chgEl && d.ftd.change != null) {
-          const chg = d.ftd.change;
-          const chgStr = (chg >= 0 ? '▲ +' : '▼ ') + fmtQty(Math.abs(chg)) + ' vs preth.';
-          chgEl.textContent = chgStr;
-          chgEl.style.color = chg > 0 ? '#f87171' : chg < 0 ? '#4ade80' : '#9ca3af';
+        if (chgEl) {
+          if (d.ftd.change != null) {
+            const chg = d.ftd.change;
+            chgEl.textContent = (chg >= 0 ? '▲ +' : '▼ ') + fmtQty(Math.abs(chg)) + ' vs preth.';
+            chgEl.style.color = chg > 0 ? '#f87171' : chg < 0 ? '#4ade80' : '#9ca3af';
+          } else { chgEl.textContent = ''; }
         }
       } else {
-        document.getElementById('amc-ftd').textContent = 'N/A';
-        document.getElementById('amc-ftd-sub').textContent = 'nema dostupnih podataka';
-        const chgEl = document.getElementById('amc-ftd-chg');
-        if (chgEl) chgEl.textContent = '';
+        setEl('amc-ftd', 'N/A');
+        setEl('amc-ftd-sub', 'nema dostupnih podataka');
+        setEl('amc-ftd-chg', '');
       }
 
       // Market Cap + Float

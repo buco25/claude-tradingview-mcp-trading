@@ -28,6 +28,7 @@ const SL_PCT        = 1.5;    // fallback SL % (Tier 1) — override per-simbol 
 const TP_PCT        = 4.0;    // fallback TP % (Tier 1) — override per-simbol u symbol_sltp
 const MAX_TRADES_PER_DAY = 100;
 const MAX_OPEN_PER_PORTFOLIO = 8;  // max otvorenih pozicija po portfoliju (+ BTC bonus slot)
+const MAX_NEW_ENTRIES_PER_SCAN = 3; // max NOVIH ulaza po scan ciklusu (sprječava 8 simultanih gubitaka)
 
 // ─── ULTRA strategija — zaštitni parametri ────────────────────────────────────
 const LONG_ONLY      = false;         // SHORT dozvoljeni kada BTC regime BEAR/NEUTRAL
@@ -41,8 +42,31 @@ const TRAIL_SL_PCT       = 0.8;  // trail SL X% ispod/iznad peak-a
 // ─── Ekonomski kalendar ───────────────────────────────────────────────────────
 const ECON_BLOCK_MIN = 15;  // blokiraj ±15min oko HIGH impact USD eventa
 
-// In-memory mapa: symbol → timestamp zadnjeg SL-a
+// Persistan cooldown: symbol → timestamp zadnjeg SL-a (preživi restart!)
+// Čita se lazy (nakon DATA_DIR inicijalizacije) — vidi loadSlCooldown() ispod.
 const symbolSlCooldown = new Map();
+const getSlCooldownFile = () => `${DATA_DIR}/sl_cooldown.json`;
+
+function loadSlCooldown() {
+  try {
+    const f = getSlCooldownFile();
+    if (!existsSync(f)) return;
+    const raw = JSON.parse(readFileSync(f, "utf8"));
+    const now = Date.now();
+    for (const [sym, ts] of Object.entries(raw)) {
+      if (now - ts < SL_COOLDOWN_MS) symbolSlCooldown.set(sym, ts);  // učitaj samo aktivne
+    }
+    if (symbolSlCooldown.size > 0)
+      console.log(`  🕐 [COOLDOWN] Učitano ${symbolSlCooldown.size} aktivnih SL cooldowna s diska`);
+  } catch {}
+}
+
+function saveSlCooldown() {
+  try {
+    const obj = Object.fromEntries(symbolSlCooldown);
+    writeFileSync(getSlCooldownFile(), JSON.stringify(obj, null, 2));
+  } catch {}
+}
 
 // ─── 1. DINAMIČKI ADX — raste kad je WR loš ──────────────────────────────────
 // Čita zadnjih 10 trejdova iz CSV-a i računa trenutni WR.
@@ -926,6 +950,9 @@ const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" 
 if (DATA_DIR !== "." && !existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
 
 const HEARTBEAT_FILE = `${DATA_DIR}/heartbeat.json`;
+
+// Učitaj SL cooldown s diska (preživi restart) — pozvan ovdje jer DATA_DIR sad postoji
+loadSlCooldown();
 
 // ─── Portfolio definicije ──────────────────────────────────────────────────────
 
@@ -2261,8 +2288,9 @@ async function checkPortfolioPositions(pid) {
           recordSymbolOutcome(pos.symbol, pnl >= 0);
 
           if (pnl < 0) {
-            // Cooldown 4h — ne ulazi ponovo u ovaj simbol
+            // Cooldown 4h — ne ulazi ponovo u ovaj simbol (persistan na disku, preživi restart)
             symbolSlCooldown.set(pos.symbol, Date.now());
+            saveSlCooldown();
             console.log(`  🕐 [${pid}] ${pos.symbol} — cooldown 4h aktivan (SL hit)`);
             // 2. Blacklist — 3 uzastopna SL → 24h ban
             await recordSymbolSl(pid, pos.symbol);
@@ -3327,6 +3355,7 @@ export async function run() {
       pDef.params._dynAdx = dynAdx;
     }
 
+    let _newEntriesThisScan = 0;  // Reset po portfoliju, ne dopuštamo simultano previše ulaza
     for (const symbol of pDef.symbols) {
       const existingPos = openPositions.find(p => p.symbol === symbol);
       if (existingPos) {
@@ -3339,6 +3368,13 @@ export async function run() {
       const currentOpen = loadPositions(pid).length;
       if (currentOpen >= MAX_OPEN_PER_PORTFOLIO && symbol !== BTC_EXCEPTION) {
         console.log(`  🔒 [${pDef.name}] Max ${MAX_OPEN_PER_PORTFOLIO} dostignut — preskačem ${symbol}`);
+        continue;
+      }
+
+      // ── Max novih ulaza po scan ciklusu ────────────────────────────────
+      // Sprječava 8 simultanih LONG/SHORT ulaza kad svi simboli signaliziraju odjednom
+      if (_newEntriesThisScan >= MAX_NEW_ENTRIES_PER_SCAN && symbol !== BTC_EXCEPTION) {
+        console.log(`  🚦 [${pDef.name}] Max ${MAX_NEW_ENTRIES_PER_SCAN} novih ulaza ovaj scan — preskačem ${symbol}`);
         continue;
       }
 
@@ -3629,6 +3665,7 @@ export async function run() {
         if (!isLive) {
           addPosition(pid, entry);
           writeEntryCsv(pid, entry);
+          _newEntriesThisScan++;
           await tg(`📋 PAPER [${pDef.name}/${pDef.timeframe}] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b>\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}\nEquity: $${equity.toFixed(2)} | Risk: $${riskAmount.toFixed(2)} | Notional: $${tradeSize.toFixed(0)} | Margin: $${margin.toFixed(2)} | ${LEVERAGE}x`);
         } else {
           try {
@@ -3639,6 +3676,7 @@ export async function run() {
             entry.margin  = usedMargin;
             addPosition(pid, entry);
             writeEntryCsv(pid, entry);
+            _newEntriesThisScan++;
             console.log(`  ✅ LIVE NALOG [${pDef.name}] — ${entry.orderId}`);
             await tg(`🔴 LIVE [${pDef.name}/${pDef.timeframe}] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b>\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}\nEquity: $${equity.toFixed(2)} | Risk: $${riskAmount.toFixed(2)} | Notional: $${tradeSize.toFixed(0)} | Margin: $${usedMargin.toFixed(2)} | ${usedLev}x${usedLev < LEVERAGE ? " ⚠️ max lev" : ""}`);
           } catch (err) {

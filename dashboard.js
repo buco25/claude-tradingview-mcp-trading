@@ -2490,31 +2490,38 @@ setInterval(updateCountdown, 1000);
     <div style="font-size:10px;color:#6b7280" id="amc-ts">Učitavam…</div>
   </div>
 
-  <!-- Gornji red: cijena + kratki interes -->
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:16px">
+  <!-- Gornji red: cijene + kratki interes -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px">
 
     <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px">
       <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">💵 Cijena</div>
       <div style="font-size:24px;font-weight:800;color:#f3f4f6" id="amc-price">…</div>
       <div style="font-size:12px;margin-top:2px" id="amc-change">…</div>
+      <div style="font-size:10px;color:#6b7280;margin-top:2px" id="amc-vol-sub">…</div>
     </div>
 
     <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px">
-      <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">📉 Short Interest</div>
+      <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">📉 Short Float</div>
       <div style="font-size:24px;font-weight:800;color:#ef4444" id="amc-si">…</div>
-      <div style="font-size:11px;color:#9ca3af;margin-top:2px" id="amc-si-sub">% free floata</div>
+      <div style="font-size:11px;color:#9ca3af;margin-top:2px" id="amc-si-sub">dionica short</div>
     </div>
 
     <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px">
-      <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">⏱️ Days to Cover</div>
+      <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">⏱️ Short Ratio</div>
       <div style="font-size:24px;font-weight:800;color:#f59e0b" id="amc-dtc">…</div>
-      <div style="font-size:11px;color:#9ca3af;margin-top:2px">dana za pokriće</div>
+      <div style="font-size:11px;color:#9ca3af;margin-top:2px" id="amc-si-total">dana za pokriće</div>
     </div>
 
     <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px">
-      <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">🏛️ Institucije</div>
+      <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">🏛️ Inst Own</div>
       <div style="font-size:24px;font-weight:800;color:#60a5fa" id="amc-inst">…</div>
-      <div style="font-size:11px;color:#9ca3af;margin-top:2px">% vlasništva</div>
+      <div style="font-size:11px;margin-top:2px" id="amc-inst-trans">kvartal promjena</div>
+    </div>
+
+    <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px">
+      <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">👤 Insider Own</div>
+      <div style="font-size:24px;font-weight:800;color:#34d399" id="amc-insider">…</div>
+      <div style="font-size:11px;color:#9ca3af;margin-top:2px" id="amc-insider-sub">% vlasništva</div>
     </div>
 
     <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px">
@@ -2524,30 +2531,28 @@ setInterval(updateCountdown, 1000);
     </div>
 
     <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px">
-      <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">📊 Volume</div>
-      <div style="font-size:18px;font-weight:800;color:#34d399" id="amc-vol">…</div>
-      <div style="font-size:11px;color:#9ca3af;margin-top:2px" id="amc-shares">dionice / market cap</div>
+      <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">📊 Market Cap</div>
+      <div style="font-size:18px;font-weight:800;color:#e5e7eb" id="amc-cap">…</div>
+      <div style="font-size:11px;color:#9ca3af;margin-top:2px" id="amc-float">float / outstanding</div>
     </div>
 
   </div>
 
   <!-- Institucionalni vlasnici -->
   <div style="font-size:10px;color:#9ca3af;text-transform:uppercase;font-weight:700;letter-spacing:1px;margin-bottom:8px">
-    🏦 Promjene institucionalnih vlasnika (zadnji 13F)
+    🏦 Top institucionalni vlasnici (Finviz 13F)
   </div>
   <div style="overflow-x:auto">
-    <table style="width:100%;border-collapse:collapse;font-size:12px" id="amc-inst-table">
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
       <thead>
         <tr style="border-bottom:1px solid #374151">
+          <th style="text-align:left;padding:6px 8px;color:#6b7280;font-weight:600">#</th>
           <th style="text-align:left;padding:6px 8px;color:#6b7280;font-weight:600">Institucija</th>
-          <th style="text-align:right;padding:6px 8px;color:#6b7280;font-weight:600">Dionice</th>
-          <th style="text-align:right;padding:6px 8px;color:#6b7280;font-weight:600">% Floata</th>
-          <th style="text-align:right;padding:6px 8px;color:#6b7280;font-weight:600">Promjena</th>
-          <th style="text-align:right;padding:6px 8px;color:#6b7280;font-weight:600">Datum</th>
+          <th style="text-align:right;padding:6px 8px;color:#6b7280;font-weight:600">% vlasništva</th>
         </tr>
       </thead>
       <tbody id="amc-inst-body">
-        <tr><td colspan="5" style="text-align:center;padding:16px;color:#6b7280">Učitavam 13F podatke…</td></tr>
+        <tr><td colspan="3" style="text-align:center;padding:16px;color:#6b7280">Učitavam…</td></tr>
       </tbody>
     </table>
   </div>
@@ -2555,78 +2560,88 @@ setInterval(updateCountdown, 1000);
 
 <script>
 (function amcPanel() {
-  function fmt(n) { return n != null ? n : '—'; }
-
   async function loadAmc() {
     try {
       const d = await fetch('/api/amc').then(r => r.json());
       if (d.error) { document.getElementById('amc-ts').textContent = 'Greška: ' + d.error; return; }
 
-      // Cijena
-      const priceEl = document.getElementById('amc-price');
-      const changeEl = document.getElementById('amc-change');
+      const f = v => v != null ? v : '—';
+
+      // Cijena + promjena
       if (d.price != null) {
-        priceEl.textContent = '$' + d.price.toFixed(2);
-        if (d.changePct != null) {
-          const up = parseFloat(d.changePct) >= 0;
-          changeEl.textContent = (up ? '▲ +' : '▼ ') + d.changePct + '%';
-          changeEl.style.color = up ? '#34d399' : '#ef4444';
-        }
+        document.getElementById('amc-price').textContent = '$' + d.price.toFixed(2);
       }
+      if (d.changePct != null) {
+        const up = !String(d.changePct).startsWith('-');
+        const el = document.getElementById('amc-change');
+        el.textContent = (up ? '▲ ' : '▼ ') + d.changePct;
+        el.style.color = up ? '#34d399' : '#ef4444';
+      }
+      document.getElementById('amc-vol-sub').textContent =
+        'Vol: ' + f(d.volume) + ' · Avg: ' + f(d.avgVolume);
 
       // Short Interest
-      document.getElementById('amc-si').textContent = fmt(d.shortPctFloat);
-      document.getElementById('amc-si-sub').textContent =
-        (d.sharesShort ? d.sharesShort + ' dionica kratko' : '% free floata');
+      document.getElementById('amc-si').textContent = f(d.shortPctFloat);
+      document.getElementById('amc-si-sub').textContent = f(d.shortInterest) + ' dionica short';
+      document.getElementById('amc-dtc').textContent = f(d.shortRatio);
+      document.getElementById('amc-si-total').textContent = 'dana za pokriće';
 
-      // Days to Cover
-      document.getElementById('amc-dtc').textContent = fmt(d.shortRatio);
+      // Institucije
+      document.getElementById('amc-inst').textContent = f(d.instOwn);
+      const trans = d.instTrans;
+      const transEl = document.getElementById('amc-inst-trans');
+      if (trans) {
+        const transUp = !trans.startsWith('-');
+        transEl.textContent = (transUp ? '▲ ' : '▼ ') + trans + ' zadnji kvartal';
+        transEl.style.color = transUp ? '#34d399' : '#ef4444';
+      } else {
+        transEl.textContent = 'kvartal promjena';
+        transEl.style.color = '#9ca3af';
+      }
 
-      // Institucionalni %
-      document.getElementById('amc-inst').textContent = fmt(d.instPctHeld);
+      // Insider
+      document.getElementById('amc-insider').textContent = f(d.insiderOwn);
+      const ia = d.insiderActivity;
+      document.getElementById('amc-insider-sub').textContent = ia
+        ? 'Buy: $' + (ia.totalBuy/1e6).toFixed(1) + 'M · Sell: $' + (ia.totalSell/1e6).toFixed(1) + 'M'
+        : '% vlasništva';
 
       // FTD
       if (d.ftd) {
         const k = d.ftd.qty >= 1e6 ? (d.ftd.qty/1e6).toFixed(1)+'M'
                 : d.ftd.qty >= 1e3 ? (d.ftd.qty/1e3).toFixed(0)+'K'
-                : d.ftd.qty.toString();
+                : String(d.ftd.qty);
         document.getElementById('amc-ftd').textContent = k;
         document.getElementById('amc-ftd-sub').textContent =
-          'Datum: ' + (d.ftd.date || d.ftd.period) + ' · cijena $' + (d.ftd.price?.toFixed(2) ?? '?');
+          (d.ftd.date || d.ftd.period) + ' · $' + (d.ftd.price?.toFixed(2) ?? '?');
       } else {
         document.getElementById('amc-ftd').textContent = 'N/A';
-        document.getElementById('amc-ftd-sub').textContent = 'SEC podatak nije dostupan';
+        document.getElementById('amc-ftd-sub').textContent = 'SEC: nema dostupnih podataka';
       }
 
-      // Volume + Market Cap
-      document.getElementById('amc-vol').textContent = fmt(d.volume);
-      document.getElementById('amc-shares').textContent =
-        (d.sharesOutstanding ? d.sharesOutstanding + ' dionica · ' : '') +
-        (d.marketCap ? 'Cap: ' + d.marketCap : '');
+      // Market Cap + Float
+      document.getElementById('amc-cap').textContent = f(d.marketCap);
+      document.getElementById('amc-float').textContent =
+        f(d.sharesFloat) + ' / ' + f(d.sharesOutstand);
 
-      // Institucionalni vlasnici
+      // Institucionalni vlasnici — tablica
       const tbody = document.getElementById('amc-inst-body');
       if (d.institutions && d.institutions.length > 0) {
-        tbody.innerHTML = d.institutions.map(inst => {
-          const chg = inst.pctChange;
-          const chgColor = !chg ? '#9ca3af'
-            : chg.startsWith('-') ? '#ef4444' : '#34d399';
-          const chgIcon = !chg ? '' : chg.startsWith('-') ? '▼ ' : '▲ ';
+        tbody.innerHTML = d.institutions.map((inst, i) => {
+          const pct = parseFloat(inst.pctOwn);
+          const bar = !isNaN(pct) ? '<div style="background:#374151;border-radius:2px;height:4px;margin-top:4px"><div style="background:#60a5fa;height:100%;border-radius:2px;width:' + Math.min(pct * 10, 100) + '%"></div></div>' : '';
           return '<tr style="border-bottom:1px solid #1f2937">' +
+            '<td style="padding:6px 8px;color:#6b7280;font-size:11px">' + (i+1) + '</td>' +
             '<td style="padding:6px 8px;color:#f3f4f6">' + inst.name + '</td>' +
-            '<td style="padding:6px 8px;text-align:right;color:#9ca3af">' + inst.shares + '</td>' +
-            '<td style="padding:6px 8px;text-align:right;color:#60a5fa">' + inst.pctHeld + '</td>' +
-            '<td style="padding:6px 8px;text-align:right;color:' + chgColor + '">' + chgIcon + (chg||'—') + '</td>' +
-            '<td style="padding:6px 8px;text-align:right;color:#6b7280">' + inst.date + '</td>' +
+            '<td style="padding:6px 8px;text-align:right;color:#60a5fa">' + inst.pctOwn + bar + '</td>' +
             '</tr>';
         }).join('');
       } else {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:16px;color:#6b7280">Nema 13F podataka</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;padding:16px;color:#6b7280">Nema podataka</td></tr>';
       }
 
-      // Timestamp
       document.getElementById('amc-ts').textContent =
-        'Zadnji update: ' + new Date(d.ts).toLocaleTimeString('hr-HR');
+        'finviz.com · ' + new Date(d.ts).toLocaleTimeString('hr-HR');
 
     } catch(e) {
       document.getElementById('amc-ts').textContent = 'Greška: ' + e.message;
@@ -2634,7 +2649,7 @@ setInterval(updateCountdown, 1000);
   }
 
   loadAmc();
-  setInterval(loadAmc, 5 * 60 * 1000);  // refresh svakih 5 min
+  setInterval(loadAmc, 10 * 60 * 1000);  // refresh svakih 10 min
 })();
 </script>
 
@@ -3128,94 +3143,52 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // ── AMC Stock Data endpoint ──────────────────────────────────────────────────
+  // ── AMC Stock Data endpoint — izvor: Finviz scrape ──────────────────────────
   if (url.pathname === "/api/amc") {
     try {
       const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
-      const H  = { "User-Agent": UA, "Accept": "application/json, */*" };
+      const FH = { "User-Agent": UA, "Accept": "text/html,application/xhtml+xml,*/*", "Accept-Language": "en-US,en;q=0.9", "Referer": "https://finviz.com/" };
 
-      // ── 1. Cijena iz chart endpointa (uvijek radi, ne treba auth) ───────
-      const chartUrl = "https://query1.finance.yahoo.com/v8/finance/chart/AMC?interval=1d&range=5d";
-      const chartJ   = await fetch(chartUrl, { headers: H }).then(r => r.json());
-      const chartMeta = chartJ?.chart?.result?.[0]?.meta ?? {};
-      const chartClose = chartJ?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? [];
-      const chartVol   = chartJ?.chart?.result?.[0]?.indicators?.quote?.[0]?.volume ?? [];
-      const price     = chartMeta.regularMarketPrice ?? chartClose[chartClose.length - 1] ?? null;
-      const prevClose = chartMeta.chartPreviousClose ?? chartClose[chartClose.length - 2] ?? null;
-      const changePct = (price && prevClose) ? ((price - prevClose) / prevClose * 100).toFixed(2) : null;
-      const rawVol    = chartVol[chartVol.length - 1] ?? chartMeta.regularMarketVolume ?? null;
-      const volFmt    = rawVol ? (rawVol >= 1e6 ? (rawVol/1e6).toFixed(1)+"M" : (rawVol/1e3).toFixed(0)+"K") : null;
+      // ── 1. Finviz scrape — sve statistike + institucije + insideri ───────
+      const fvHtml = await fetch("https://finviz.com/quote?t=AMC&p=d", { headers: FH }).then(r => r.text());
 
-      // ── 2. Short Interest — Yahoo v7/finance/quote (sadrži SI polja) ────
-      // v7 vraća quoteResponse.result[0] sa svim poljem direktno (ne treba crumb često)
-      let q = {};
-      try {
-        const fields = "shortPercentOfFloat,sharesShort,shortRatio,sharesOutstanding,marketCap,floatShares,regularMarketVolume,averageVolume";
-        const v7Url  = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=AMC&fields=${fields}&formatted=false`;
-        const v7J    = await fetch(v7Url, { headers: H }).then(r => r.json());
-        q = v7J?.quoteResponse?.result?.[0] ?? {};
-      } catch {}
+      // Izvuci snapshot key-value parove (label → vrijednost)
+      const snap = {};
+      const snapRe = /snapshot-td-label\"[^>]*>(?:<[^>]+>)*([^<]+?)(?:<\/[^>]+>)*<\/div><\/td>\s*<td[^>]*snapshot-td2[^>]*>[^<]*<div[^>]*snapshot-td-content[^>]*>(?:<[^>]+>)*([^<]+)/g;
+      let sm;
+      while ((sm = snapRe.exec(fvHtml)) !== null) snap[sm[1].trim()] = sm[2].trim();
 
-      // Ako v7 nije vratio SI, probaj s crumbom
-      if (q.shortPercentOfFloat == null) {
-        try {
-          const crRes  = await fetch("https://query1.finance.yahoo.com/v1/test/getcrumb", { headers: H });
-          const crumb  = (await crRes.text()).trim();
-          const cookie = (crRes.headers.get("set-cookie") || "").split(";")[0];
-          if (crumb && !crumb.includes("<")) {
-            const v7c = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=AMC&fields=shortPercentOfFloat,sharesShort,shortRatio,sharesOutstanding,marketCap,floatShares&crumb=${encodeURIComponent(crumb)}&formatted=false`;
-            const v7J = await fetch(v7c, { headers: { ...H, "Cookie": cookie } }).then(r => r.json());
-            q = v7J?.quoteResponse?.result?.[0] ?? q;
-          }
-        } catch {}
-      }
-
-      // Format helpers
-      const fmtNum = (n, dec=2) => n == null ? null : n >= 1e9 ? (n/1e9).toFixed(1)+"B" : n >= 1e6 ? (n/1e6).toFixed(1)+"M" : n >= 1e3 ? (n/1e3).toFixed(0)+"K" : String(n);
-      const fmtPct = (n, dec=1) => n == null ? null : (n * 100).toFixed(dec) + "%";
-
-      // ── 3. SEC EDGAR — 13F institucionalni vlasnici AMC ─────────────────
-      // AMC Entertainment Holdings CIK: 0001411579
-      // Tražimo 13F-HR filings koji spominju AMC dionice
+      // Izvuci institucionalne vlasnike iz ugrađenog JSON-a
       let institutions = [];
       try {
-        // Pretraži nedavne 13F-HR filings koji sadrže AMC u EDGAR full-text searchu
-        const edgarUrl = "https://efts.sec.gov/LATEST/search-index?q=%22AMC+Entertainment%22&forms=13F-HR&dateRange=custom&startdt=2024-06-01&_source=period_of_report%2CentityName%2Cfile_date%2Cperiod_of_report&sort=file_date&order=desc&hits.hits._source=entityName,file_date,period_of_report&hits.hits.total=true";
-        const edgarJ = await fetch(edgarUrl, { headers: { "User-Agent": UA } }).then(r => r.json());
-        const hits = edgarJ?.hits?.hits ?? [];
-        // Uzmi top 10 unique filers
-        const seen = new Set();
-        for (const h of hits) {
-          const name = h._source?.entityName;
-          if (name && !seen.has(name)) {
-            seen.add(name);
-            institutions.push({
-              name,
-              date: h._source?.period_of_report ?? h._source?.file_date ?? "?",
-              pctHeld: null, pctChange: null, shares: null
-            });
-          }
-          if (institutions.length >= 10) break;
+        const instMatch = fvHtml.match(/institutional-ownership-init-data-0"[^>]*type="application\/json">(\{[^<]+\})/);
+        if (instMatch) {
+          const instJ = JSON.parse(instMatch[1]);
+          const managers = instJ.managersOwnership ?? [];
+          institutions = managers.slice(0, 12).map(m => ({
+            name: m.name,
+            pctOwn: m.percOwnership != null ? m.percOwnership.toFixed(2) + "%" : "?",
+            shares: null,
+            change: null
+          }));
         }
       } catch {}
 
-      // Ako EDGAR nema podataka, probaj Yahoo quoteSummary za institucije
-      if (institutions.length === 0) {
-        try {
-          const ioUrl = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/AMC?modules=institutionOwnership&formatted=true`;
-          const ioJ   = await fetch(ioUrl, { headers: H }).then(r => r.json());
-          const ioList = ioJ?.quoteSummary?.result?.[0]?.institutionOwnership?.ownershipList ?? [];
-          institutions = ioList.slice(0, 10).map(h => ({
-            name: h.organization?.longName ?? h.organization?.raw ?? "?",
-            pctHeld: h.pctHeld?.fmt ?? null,
-            pctChange: h.pctChange?.fmt ?? null,
-            shares: h.position?.fmt ?? null,
-            date: h.reportDate?.fmt ?? "?"
-          }));
-        } catch {}
-      }
+      // Izvuci insider trading iz ugrađenog JSON-a
+      let insiderActivity = null;
+      try {
+        const insMatch = fvHtml.match(/insider-init-data-0"[^>]*type="application\/json">\[([^\]]+)\]/);
+        if (insMatch) {
+          const insArr = JSON.parse("[" + insMatch[1] + "]");
+          // Zadnjih 6 perioda — suma buy/sell
+          const recent = insArr.filter(d => d.buyAggregated > 0 || d.saleAggregated > 0).slice(-6);
+          const totalBuy  = recent.reduce((s, d) => s + (d.buyAggregated || 0), 0);
+          const totalSell = recent.reduce((s, d) => s + (d.saleAggregated || 0), 0);
+          insiderActivity = { totalBuy, totalSell, periods: recent.length };
+        }
+      } catch {}
 
-      // ── 4. FTD — SEC.gov ZIP datoteke ────────────────────────────────────
+      // ── 2. FTD — SEC.gov ZIP datoteke ────────────────────────────────────
       let ftdAmc = null;
       try {
         const now = new Date();
@@ -3228,7 +3201,7 @@ const server = http.createServer(async (req, res) => {
         for (const period of tryPeriods) {
           try {
             const ftdUrl = `https://www.sec.gov/data/foiadocuments/fails/cnsfails${period}.zip`;
-            const ftdRes = await fetch(ftdUrl, { headers: H, signal: AbortSignal.timeout(12000) });
+            const ftdRes = await fetch(ftdUrl, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(12000) });
             if (!ftdRes.ok) continue;
             const buf = Buffer.from(await ftdRes.arrayBuffer());
             if (buf[0] !== 0x50 || buf[1] !== 0x4B) continue;
@@ -3237,9 +3210,9 @@ const server = http.createServer(async (req, res) => {
             const offset   = 30 + fnLen + exLen;
             const method   = buf.readUInt16LE(8);
             const compSize = buf.readUInt32LE(18);
-            const raw = buf.slice(offset, offset + compSize);
+            const raw      = buf.slice(offset, offset + compSize);
             const { inflateRawSync } = await import("zlib");
-            const txt = method === 8 ? inflateRawSync(raw).toString("utf8") : raw.toString("utf8");
+            const txt      = method === 8 ? inflateRawSync(raw).toString("utf8") : raw.toString("utf8");
             const amcLines = txt.split("\n").filter(l => l.split("|")[2]?.trim() === "AMC");
             if (amcLines.length > 0) {
               const cols = amcLines[amcLines.length - 1].split("|");
@@ -3250,28 +3223,39 @@ const server = http.createServer(async (req, res) => {
         }
       } catch {}
 
-      // ── 5. Rezultat ──────────────────────────────────────────────────────
-      const capRaw = q.marketCap ?? chartMeta.marketCap ?? null;
-      const capFmt = fmtNum(capRaw);
-      const siPct  = q.shortPercentOfFloat != null ? (q.shortPercentOfFloat * 100).toFixed(1) + "%" : null;
-      const siShr  = fmtNum(q.sharesShort);
-      const outShr = fmtNum(q.sharesOutstanding);
-
+      // ── 3. Rezultat ──────────────────────────────────────────────────────
+      const g = (k) => snap[k] ?? null;  // getter iz snapshot mape
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({
-        price,
-        changePct,
-        volume: volFmt,
-        marketCap: capFmt,
-        sharesShort: siShr,
-        shortPctFloat: siPct,
-        shortRatio: q.shortRatio != null ? q.shortRatio.toFixed(1) : null,
-        sharesOutstanding: outShr,
-        floatShares: fmtNum(q.floatShares),
-        instPctHeld: null,
-        instCount: null,
-        ftd: ftdAmc,
+        // Cijena
+        price:            parseFloat(g("Price") ?? "0") || null,
+        changePct:        g("Change"),
+        volume:           g("Volume"),
+        avgVolume:        g("Avg Volume"),
+        marketCap:        g("Market Cap"),
+        // Short Interest
+        shortPctFloat:    g("Short Float"),      // "17.51%"
+        shortRatio:       g("Short Ratio"),      // "3.53"
+        shortInterest:    g("Short Interest"),   // "106.23M" — broj dionica short
+        // Dionice
+        sharesFloat:      g("Shs Float"),        // "606.60M"
+        sharesOutstand:   g("Shs Outstand"),     // "612.07M"
+        // Institucije & insideri (agregatni %)
+        instOwn:          g("Inst Own"),         // "39.92%"
+        instTrans:        g("Inst Trans"),       // "-9.59%" (promjena od zadnjeg kvartala)
+        insiderOwn:       g("Insider Own"),      // "0.93%"
+        // Osnove
+        pe:               g("P/E"),
+        epsNextY:         g("EPS next Y"),
+        high52w:          g("52W High"),
+        low52w:           g("52W Low"),
+        // Detaljni vlasnici (JSON ugrađen u Finviz stranicu)
         institutions,
+        // Insider buy/sell aktivnost
+        insiderActivity,
+        // FTD iz SEC-a
+        ftd: ftdAmc,
+        source: "finviz.com",
         ts: new Date().toISOString()
       }));
     } catch(e) {

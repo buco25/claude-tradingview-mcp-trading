@@ -2734,7 +2734,7 @@ setInterval(updateCountdown, 1000);
       }
 
       // Timestamp + cache info
-      const cacheStr = d.cached ? ` · cache ${d.cacheAge}` : ' · svježe';
+      const cacheStr = d.cached ? ' · cache ' + d.cacheAge : ' · svježe';
       document.getElementById('amc-ts').textContent =
         new Date(d.ts).toLocaleString('hr-HR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) + cacheStr;
 

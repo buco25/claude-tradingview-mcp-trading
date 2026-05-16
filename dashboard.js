@@ -2487,7 +2487,11 @@ setInterval(updateCountdown, 1000);
     <div style="font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:#f59e0b">
       🍿 AMC Entertainment Holdings (NYSE: AMC)
     </div>
-    <div style="font-size:10px;color:#6b7280" id="amc-ts">Učitavam…</div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <div style="font-size:10px;color:#6b7280" id="amc-ts">Učitavam…</div>
+      <button onclick="amcForceRefresh()" title="Forsiraj osvježavanje podataka (ignoriraj cache)"
+        style="background:#1f2937;border:1px solid #374151;border-radius:4px;color:#9ca3af;font-size:10px;padding:2px 7px;cursor:pointer">↻</button>
+    </div>
   </div>
 
   <!-- Gornji red: cijene + kratki interes -->
@@ -2729,16 +2733,37 @@ setInterval(updateCountdown, 1000);
         tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;padding:16px;color:#6b7280">Nema podataka</td></tr>';
       }
 
+      // Timestamp + cache info
+      const cacheStr = d.cached ? ` · cache ${d.cacheAge}` : ' · svježe';
       document.getElementById('amc-ts').textContent =
-        'finviz.com · ' + new Date(d.ts).toLocaleTimeString('hr-HR');
+        new Date(d.ts).toLocaleString('hr-HR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) + cacheStr;
 
     } catch(e) {
       document.getElementById('amc-ts').textContent = 'Greška: ' + e.message;
     }
   }
 
+  window.amcForceRefresh = async function() {
+    document.getElementById('amc-ts').textContent = 'Osvježavam… (može trajati 15-20s)';
+    try {
+      const d = await fetch('/api/amc?force=1').then(r => r.json());
+      await renderAmc(d);
+    } catch(e) {
+      document.getElementById('amc-ts').textContent = 'Greška: ' + e.message;
+    }
+  };
+
+  async function renderAmc(d) {
+    // isti kod kao u loadAmc — premještamo u zajednički helper
+    if (d.error) { document.getElementById('amc-ts').textContent = 'Greška: ' + d.error; return; }
+    loadAmc._lastData = d;
+    // Pozovi loadAmc koji će automatski koristiti cache s novim podacima
+    await loadAmc();
+  }
+
   loadAmc();
-  setInterval(loadAmc, 10 * 60 * 1000);  // refresh svakih 10 min
+  // Server cachira 4h — nema smisla češće. Refresh svakih 4h ili na F5.
+  setInterval(loadAmc, 4 * 60 * 60 * 1000);
 })();
 </script>
 
@@ -3232,8 +3257,16 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // ── AMC Stock Data endpoint — izvor: Finviz scrape ──────────────────────────
+  // ── AMC Stock Data endpoint — server-side cache 4h ───────────────────────────
   if (url.pathname === "/api/amc") {
+    // Vrati cached podatke ako su mlađi od 4 sata (podaci se ne mijenjaju češće)
+    const AMC_CACHE_TTL = 4 * 60 * 60 * 1000; // 4 sata
+    const forceRefresh  = url.searchParams?.get("force") === "1";
+    if (!forceRefresh && _amcCache.data && (Date.now() - _amcCache.ts) < AMC_CACHE_TTL) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ..._amcCache.data, cached: true, cacheAge: Math.round((Date.now()-_amcCache.ts)/60000)+"min" }));
+      return;
+    }
     try {
       const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
       const FH = { "User-Agent": UA, "Accept": "text/html,application/xhtml+xml,*/*", "Accept-Language": "en-US,en;q=0.9", "Referer": "https://finviz.com/" };
@@ -3325,58 +3358,72 @@ const server = http.createServer(async (req, res) => {
         }
       } catch {}
 
-      // ── 3. Borrow Fee + Short Interest — ChartExchange ───────────────────
+      // ── 3. Borrow Fee + Short Interest — ChartExchange (sekvencijalno) ──────
+      // Sekvencijalno (ne parallel) da izbjegnemo rate-limit na chartexchange.com
       let borrowFee = null;
       let shortInterestCE = null;
+      const sleep = ms => new Promise(r => setTimeout(r, ms));
+      const ceGet = async (path) => {
+        const html = await fetch(`https://chartexchange.com${path}`,
+          { headers: { ...FH, "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124",
+                       "Referer": "https://chartexchange.com/", "Accept": "text/html" },
+            signal: AbortSignal.timeout(12000) }
+        ).then(r => r.text());
+        return html;
+      };
+      const ceDl = async (r, v) => {
+        const url = `https://chartexchange.com/download/?r=${encodeURIComponent(r)}&k=symboldata&v=${encodeURIComponent(v)}`;
+        return fetch(url, { headers: { "User-Agent": "Mozilla/5.0 Chrome/124", "Referer": `https://chartexchange.com/symbol/nyse-amc/` },
+          signal: AbortSignal.timeout(10000) }).then(r => r.text());
+      };
+      const extractVKey = (html, adapterName) => {
+        // Tražimo download_data blok koji sadrži točan adapter name
+        const idx = html.indexOf(`"r":"${adapterName}"`);
+        if (idx < 0) return null;
+        const chunk = html.slice(idx, idx + 300);
+        const m = chunk.match(/"v":"([^"]+)"/);
+        return m ? m[1] : null;
+      };
+
       try {
-        // Helper: dohvati v-key za određeni adapter
-        const getCeVKey = async (pagePath, adapterName) => {
-          const html = await fetch(`https://chartexchange.com${pagePath}`,
-            { headers: { ...FH, "Referer": "https://chartexchange.com/" }, signal: AbortSignal.timeout(10000) }
-          ).then(r => r.text());
-          const escaped = adapterName.replace(".", "\\.");
-          const m = html.match(new RegExp(`"r"\\s*:\\s*"${escaped}"[^}]*?"v"\\s*:\\s*"([^"]+)"`));
-          return m ? m[1] : null;
-        };
-        const dlCe = async (r, v) => {
-          const url = `https://chartexchange.com/download/?r=${encodeURIComponent(r)}&k=symboldata&v=${encodeURIComponent(v)}`;
-          return fetch(url, { headers: { ...FH, "Referer": "https://chartexchange.com/" }, signal: AbortSignal.timeout(10000) }).then(r => r.text());
-        };
-
-        // Borrow fee — format: updated,fee,available,rebate
-        const [bfV, siV] = await Promise.all([
-          getCeVKey("/symbol/nyse-amc/borrow-fee/",     "nyse-amc.borrow_fee"),
-          getCeVKey("/symbol/nyse-amc/short-interest/", "nyse-amc.short_interest")
-        ]);
-        const [bfCsv, siCsv] = await Promise.all([
-          bfV ? dlCe("nyse-amc.borrow_fee",     bfV) : Promise.resolve(""),
-          siV ? dlCe("nyse-amc.short_interest", siV) : Promise.resolve("")
-        ]);
-
-        if (bfCsv) {
+        // Borrow fee — sekvencijalno
+        const bfHtml = await ceGet("/symbol/nyse-amc/borrow-fee/");
+        const bfV = extractVKey(bfHtml, "nyse-amc.borrow_fee");
+        if (bfV) {
+          await sleep(600); // pauza između zahtjeva
+          const bfCsv = await ceDl("nyse-amc.borrow_fee", bfV);
           const bfRow = bfCsv.trim().split("\n")[1]?.split(",");
-          if (bfRow) {
+          if (bfRow && bfRow.length >= 3) {
             borrowFee = {
               updated:   bfRow[0]?.trim(),
-              fee:       parseFloat(bfRow[1] || "0"),   // CTB % godišnje
-              available: parseInt(bfRow[2] || "0"),     // dionica dostupno za borrowing
+              fee:       parseFloat(bfRow[1] || "0"),
+              available: parseInt(bfRow[2] || "0"),
               rebate:    parseFloat(bfRow[3] || "0")
             };
           }
         }
-        if (siCsv) {
+      } catch (e) { console.error("BorrowFee fetch greška:", e.message); }
+
+      try {
+        await sleep(800); // pauza između zahtjeva
+        // Short interest — sekvencijalno
+        const siHtml = await ceGet("/symbol/nyse-amc/short-interest/");
+        const siV = extractVKey(siHtml, "nyse-amc.short_interest");
+        if (siV) {
+          await sleep(600);
+          const siCsv = await ceDl("nyse-amc.short_interest", siV);
           // format: date,short_interest,short_position,days_to_cover
           const siRow = siCsv.trim().split("\n")[1]?.split(",");
-          if (siRow) {
+          if (siRow && siRow.length >= 4) {
             shortInterestCE = {
-              date:         siRow[0]?.trim(),
-              pct:          parseFloat(siRow[1] || "0"),   // % of float
-              shares:       parseInt(siRow[2] || "0"),     // broj dionica
-              daysToCover:  parseFloat(siRow[3] || "0")
+              date:        siRow[0]?.trim(),
+              pct:         parseFloat(siRow[1] || "0"),
+              shares:      parseInt(siRow[2] || "0"),
+              daysToCover: parseFloat(siRow[3] || "0")
             };
           }
         }
-      } catch {}
+      } catch (e) { console.error("ShortInterest fetch greška:", e.message); }
 
       // ── 4. Short Squeeze Score (0–100) ───────────────────────────────────
       let squeezeScore = null;
@@ -3432,8 +3479,7 @@ const server = http.createServer(async (req, res) => {
 
       // ── 5. Rezultat ──────────────────────────────────────────────────────
       const g = (k) => snap[k] ?? null;  // getter iz snapshot mape
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({
+      const payload = {
         // Cijena
         price:            parseFloat(g("Price") ?? "0") || null,
         changePct:        g("Change"),
@@ -3470,7 +3516,12 @@ const server = http.createServer(async (req, res) => {
         squeeze: squeezeScore !== null ? { score: squeezeScore, label: squeezeLabel, factors: squeezeFactors } : null,
         source: "finviz.com + chartexchange.com",
         ts: new Date().toISOString()
-      }));
+      };
+      // Spremi u server-side cache
+      _amcCache.data = payload;
+      _amcCache.ts   = Date.now();
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(payload));
     } catch(e) {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: e.message }));
@@ -3692,6 +3743,7 @@ async function amcSqueezeMonitor() {
 // ─── Bot scheduler (svakih 5 min) ─────────────────────────────────────────────
 
 let botRunning = false;
+const _amcCache = { data: null, ts: 0 }; // server-side cache za AMC podatke (TTL 4h)
 async function scheduledRun() {
   if (botRunning) return;
   botRunning = true;

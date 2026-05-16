@@ -35,9 +35,11 @@ const LONG_ONLY      = false;         // SHORT dozvoljeni kada BTC regime BEAR/N
 const ADX_MIN        = 30;            // ADX prag — bazni (dinamički raste ako WR pada)
 const SL_COOLDOWN_MS = 4 * 60 * 60 * 1000;  // 4h cooldown po simbolu nakon SL-a
 
-// ─── Trailing stop — aktivira se nakon BE-STOP ───────────────────────────────
-const TRAIL_ACTIVATE_PCT = 1.5;  // % profita za aktivaciju traila (nakon BE)
-const TRAIL_SL_PCT       = 0.8;  // trail SL X% ispod/iznad peak-a
+// ─── Trailing stop — aktivira se nakon dovoljnog profita ─────────────────────
+// Problem: 1.5% aktivacija + 0.8% gap → exit na samo +0.7% kod prvog odskok (XRP +$0.88)
+// Fix: širi gap (1.5%) i kasnija aktivacija (2.5%) — preživljava normalne 1-2% skokove
+const TRAIL_ACTIVATE_PCT = 2.5;  // % profita za aktivaciju traila (bio 1.5 — prerano)
+const TRAIL_SL_PCT       = 1.5;  // trail SL X% ispod/iznad peak-a (bio 0.8 — pretijesan)
 
 // ─── Ekonomski kalendar ───────────────────────────────────────────────────────
 const ECON_BLOCK_MIN = 15;  // blokiraj ±15min oko HIGH impact USD eventa

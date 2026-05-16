@@ -3489,6 +3489,206 @@ const server = http.createServer(async (req, res) => {
   res.end(html);
 });
 
+// ─── Telegram helper (dashboard) ──────────────────────────────────────────────
+async function tgDash(msg) {
+  const token  = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: "HTML" }),
+    });
+  } catch { /* tiho */ }
+}
+
+// ─── Short Squeeze preporuka — logika ─────────────────────────────────────────
+function squeezeRecommendation(sq, borrow, si) {
+  const score   = sq.score;
+  const ctb     = borrow?.fee ?? 0;
+  const dtc     = si?.daysToCover ?? 0;
+  const avail   = borrow?.available ?? Infinity;
+  const siPct   = si?.pct ?? 0;
+
+  // Procjena hitnosti (koliko brzo može doći do squeeze-a)
+  const urgency = (dtc >= 5 ? 2 : dtc >= 3 ? 1 : 0)
+                + (ctb >= 10 ? 2 : ctb >= 3 ? 1 : 0)
+                + (avail < 500000 ? 2 : avail < 2000000 ? 1 : 0)
+                + (siPct >= 25 ? 1 : 0);
+  // urgency: 0-7 → 0-2 low, 3-4 medium, 5-7 high
+
+  let action = "", shares = "", options = "", risk = "";
+
+  if (score >= 75) {
+    // Eksplozivan
+    if (urgency >= 5) {
+      // Hitno — shorts teško pokriti, borrow skup
+      action  = "⚡ AGRESIVAN ULAZ — setup je zreo";
+      shares  = "60% u dionice (sigurna osnova, nema vremenskog ograničenja)";
+      options = "40% u call opcije — ATM ili blago OTM, expiry 2–4 tjedna\n"
+              + "   Npr. STRIKE najbliži tržišnoj cijeni, DTE 14-21 dana";
+      risk    = "⚠️ Opcije mogu isteći bezvrijedne ako squeeze ne dođe u tom roku.\n"
+              + "   Postavi stop na dionicama na -15% od ulaza.";
+    } else {
+      action  = "🔥 SNAŽAN SETUP — squeeze moguć uskoro";
+      shares  = "70% u dionice";
+      options = "30% u call opcije — malo OTM, expiry 3–6 tjedana";
+      risk    = "⚠️ Zaštiti se stop-lossom na dionicama (-12%). Opcije = lottery ticket.";
+    }
+  } else if (score >= 55) {
+    // Visok
+    if (urgency >= 4) {
+      action  = "📈 DOBAR SETUP — vrijedi pozicionirati se";
+      shares  = "80% u dionice (primarni vozilo)";
+      options = "20% u call opcije — ITM ili ATM, duži expiry 4–8 tjedana\n"
+              + "   ITM opcije skuplje ali manje gube na vremenu (theta)";
+      risk    = "⚠️ Squeeze može kasniti tjednima. Dionice = patiently hold.\n"
+              + "   Opcije ne čekaj do zadnjeg tjedna — izađi na -50%.";
+    } else {
+      action  = "👀 PRATI SITUACIJU — ne ulaziš još, ali kupi dionice";
+      shares  = "100% dionice ako ulazis — bez opcija dok se CTB ili DTC ne poboljša";
+      options = "Opcije NISU preporučene na ovom nivou urgencije (theta te ubija u čekanju)";
+      risk    = "⚠️ Postavi alert ako score poraste iznad 75 ili CTB skoči na 5%+.";
+    }
+  } else {
+    action  = "🟡 SETUP NIJE SPREMAN — bez akcije";
+    shares  = "Ne ulaziti u poziciju";
+    options = "Opcije definitivno NE — prerano, skupo čekanje";
+    risk    = "Prati daljnje promjene. Javi se kad score prijeđe 55.";
+  }
+
+  // Usporedba dionica vs opcija generalno
+  const compare = score >= 55
+    ? "\n\n<b>📊 Dionice vs Opcije:</b>\n"
+    + "• <b>Dionice</b> — sporiji rast, ali bez expiry. Squeeze od 50% = +50%.\n"
+    + "• <b>Call opcije</b> — leverage 5–10x, ali gube vrijednost svaki dan (theta).\n"
+    + "  Squeeze od 50% = opcije mogu dati +300–500%, ali i 0 ako zakasni.\n"
+    + "• <b>Kombinacija</b> (preporučena) — dionice kao baza, opcije kao katalizator."
+    : "";
+
+  return { action, shares, options, risk, compare };
+}
+
+// ─── AMC Squeeze Monitor — svakih 30 min ──────────────────────────────────────
+const _amcAlertState = { lastScore: 0, lastAlertTs: 0, lastLevel: "" };
+
+async function amcSqueezeMonitor() {
+  try {
+    const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36";
+    const FH = { "User-Agent": UA, "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                 "Accept-Language": "en-US,en;q=0.5", "Referer": "https://finviz.com/" };
+
+    // ── Borrow fee ──
+    const getCeVKey = async (pagePath, adapterName) => {
+      const html = await fetch(`https://chartexchange.com${pagePath}`,
+        { headers: { ...FH, "Referer": "https://chartexchange.com/" }, signal: AbortSignal.timeout(10000) }
+      ).then(r => r.text());
+      const escaped = adapterName.replace(".", "\\.");
+      const m = html.match(new RegExp(`"r"\\s*:\\s*"${escaped}"[^}]*?"v"\\s*:\\s*"([^"]+)"`));
+      return m ? m[1] : null;
+    };
+    const dlCe = async (r, v) => {
+      const url = `https://chartexchange.com/download/?r=${encodeURIComponent(r)}&k=symboldata&v=${encodeURIComponent(v)}`;
+      return fetch(url, { headers: { ...FH, "Referer": "https://chartexchange.com/" }, signal: AbortSignal.timeout(10000) }).then(r => r.text());
+    };
+
+    const [bfV, siV] = await Promise.all([
+      getCeVKey("/symbol/nyse-amc/borrow-fee/",     "nyse-amc.borrow_fee"),
+      getCeVKey("/symbol/nyse-amc/short-interest/", "nyse-amc.short_interest")
+    ]);
+    const [bfCsv, siCsv] = await Promise.all([
+      bfV ? dlCe("nyse-amc.borrow_fee", bfV) : Promise.resolve(""),
+      siV ? dlCe("nyse-amc.short_interest", siV) : Promise.resolve("")
+    ]);
+
+    let borrow = null, si = null;
+    if (bfCsv) {
+      const r = bfCsv.trim().split("\n")[1]?.split(",");
+      if (r) borrow = { fee: parseFloat(r[1]||"0"), available: parseInt(r[2]||"0") };
+    }
+    if (siCsv) {
+      const r = siCsv.trim().split("\n")[1]?.split(",");
+      if (r) si = { pct: parseFloat(r[1]||"0"), shares: parseInt(r[2]||"0"), daysToCover: parseFloat(r[3]||"0") };
+    }
+
+    // ── Finviz snap za volumen ──
+    let relVol = 1;
+    try {
+      const fvHtml = await fetch("https://finviz.com/quote?t=AMC&p=d", { headers: FH, signal: AbortSignal.timeout(10000) }).then(r => r.text());
+      const snap = {};
+      const re = /snapshot-td-label[^>]*>(?:<[^>]+>)*([^<]+?)(?:<\/[^>]+>)*<\/div><\/td>\s*<td[^>]*snapshot-td2[^>]*>[^<]*<div[^>]*snapshot-td-content[^>]*>(?:<[^>]+>)*([^<]+)/g;
+      let m2;
+      while ((m2 = re.exec(fvHtml)) !== null) snap[m2[1].trim()] = m2[2].trim();
+      const parseVol = s => {
+        if (!s) return 0; s = String(s).replace(/,/g,"");
+        if (s.endsWith("M")) return parseFloat(s)*1e6;
+        if (s.endsWith("B")) return parseFloat(s)*1e9;
+        if (s.endsWith("K")) return parseFloat(s)*1e3;
+        return parseFloat(s)||0;
+      };
+      const vol = parseVol(snap["Volume"]), avg = parseVol(snap["Avg Volume"]);
+      if (avg > 0) relVol = vol / avg;
+    } catch {}
+
+    // ── Izračun score-a (isti algoritam kao u /api/amc) ──
+    const siPct = si?.pct ?? 0, dtc = si?.daysToCover ?? 0, ctb = borrow?.fee ?? 0, avail = borrow?.available ?? Infinity;
+    const siScore    = siPct >= 25 ? 35 : siPct >= 20 ? 28 : siPct >= 15 ? 20 : siPct >= 10 ? 12 : siPct >= 5 ? 6 : 0;
+    const dtcScore   = dtc >= 7 ? 25 : dtc >= 5 ? 20 : dtc >= 3 ? 14 : dtc >= 2 ? 8 : dtc >= 1 ? 4 : 0;
+    const ctbScore   = ctb >= 50 ? 20 : ctb >= 20 ? 15 : ctb >= 5 ? 10 : ctb >= 2 ? 6 : ctb >= 1 ? 3 : 0;
+    const availScore = avail < 100000 ? 12 : avail < 500000 ? 9 : avail < 2000000 ? 6 : avail < 5000000 ? 3 : 0;
+    const volScore   = relVol >= 3 ? 8 : relVol >= 2 ? 5 : relVol >= 1.5 ? 3 : relVol >= 1 ? 1 : 0;
+    const score      = Math.min(100, siScore + dtcScore + ctbScore + availScore + volScore);
+
+    const level = score >= 75 ? "explosive" : score >= 55 ? "high" : score >= 35 ? "moderate" : "low";
+    const now   = Date.now();
+    const cooldownH = level === "explosive" ? 3 : 6; // sati između alerta iste razine
+    const cooldownMs = cooldownH * 3600 * 1000;
+
+    // Šalji alert samo ako:
+    // 1. Score >= 55 (High ili Explosive) I
+    // 2. Level se povisio ILI je prošlo dovoljno vremena od zadnjeg alerta iste razine
+    const levelRaised = (level === "explosive" && _amcAlertState.lastLevel !== "explosive")
+                     || (level === "high"      && _amcAlertState.lastLevel === "moderate")
+                     || (level === "high"      && _amcAlertState.lastLevel === "low");
+    const cooldownExpired = (now - _amcAlertState.lastAlertTs) >= cooldownMs;
+
+    if (score >= 55 && (levelRaised || cooldownExpired)) {
+      const sq = { score, label: score >= 75 ? "🔴 Eksplozivan" : "🟠 Visok", factors: [] };
+      const rec = squeezeRecommendation(sq, borrow, si);
+
+      const availStr = avail >= 1e6 ? (avail/1e6).toFixed(1)+"M" : avail >= 1e3 ? (avail/1e3).toFixed(0)+"K" : String(avail);
+
+      const msg = `🧨 <b>AMC Short Squeeze Alert</b>\n`
+        + `━━━━━━━━━━━━━━━━━━━━\n`
+        + `<b>Score: ${score}/100 — ${sq.label}</b>\n\n`
+        + `📊 <b>Ključni podaci:</b>\n`
+        + `• Short Interest: ${siPct.toFixed(1)}% float (${(si?.shares/1e6).toFixed(1)}M dionica)\n`
+        + `• Days to Cover: ${dtc.toFixed(1)} dana\n`
+        + `• Cost to Borrow: ${ctb.toFixed(2)}% godišnje\n`
+        + `• Dostupno za short: ${availStr} dionica\n`
+        + `• Rel. Volume: ${relVol.toFixed(2)}x prosjeka\n\n`
+        + `🎯 <b>Akcija: ${rec.action}</b>\n\n`
+        + `🏦 <b>Dionice:</b>\n${rec.shares}\n\n`
+        + `📈 <b>Opcije:</b>\n${rec.options}\n`
+        + rec.compare
+        + `\n\n⚠️ <b>Rizik:</b>\n${rec.risk}\n\n`
+        + `⏰ ${new Date().toLocaleString("hr-HR", { timeZone: "Europe/Zagreb" })}\n`
+        + `📡 Izvor: ChartExchange + Finviz`;
+
+      await tgDash(msg);
+      _amcAlertState.lastScore   = score;
+      _amcAlertState.lastAlertTs = now;
+      _amcAlertState.lastLevel   = level;
+      console.log(`🧨 AMC Squeeze alert poslan — score ${score}, level ${level}`);
+    } else {
+      console.log(`📊 AMC Squeeze check: score=${score} level=${level} (bez alerta — cooldown ili score nizak)`);
+    }
+  } catch (e) {
+    console.error("AMC Squeeze monitor greška:", e.message);
+  }
+}
+
 // ─── Bot scheduler (svakih 5 min) ─────────────────────────────────────────────
 
 let botRunning = false;
@@ -3519,5 +3719,12 @@ server.listen(PORT, () => {
     try { await checkBeStopAll(); }
     catch (e) { console.error("BE-STOP monitor greška:", e.message); }
   }, 30 * 1000);
+
+  // ─── AMC Squeeze Monitor — svakih 30 minuta ────────────────────────────────
+  // Šalje Telegram alert s preporukom ako Short Squeeze Score >= 55 (High/Explosive)
+  setTimeout(async () => {
+    await amcSqueezeMonitor(); // prvi run odmah po startu (s 2min kašnjenja)
+    setInterval(amcSqueezeMonitor, 30 * 60 * 1000); // pa svakih 30 min
+  }, 2 * 60 * 1000);
 
 });

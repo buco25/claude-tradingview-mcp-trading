@@ -2525,9 +2525,10 @@ setInterval(updateCountdown, 1000);
     </div>
 
     <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px">
-      <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">🚨 FTD (SEC)</div>
+      <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">🚨 FTD (ChartEx)</div>
       <div style="font-size:18px;font-weight:800;color:#a78bfa" id="amc-ftd">…</div>
       <div style="font-size:11px;color:#9ca3af;margin-top:2px" id="amc-ftd-sub">neisporučene dionice</div>
+      <div style="font-size:11px;margin-top:2px" id="amc-ftd-chg"></div>
     </div>
 
     <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px">
@@ -2608,15 +2609,25 @@ setInterval(updateCountdown, 1000);
 
       // FTD
       if (d.ftd) {
-        const k = d.ftd.qty >= 1e6 ? (d.ftd.qty/1e6).toFixed(1)+'M'
-                : d.ftd.qty >= 1e3 ? (d.ftd.qty/1e3).toFixed(0)+'K'
-                : String(d.ftd.qty);
-        document.getElementById('amc-ftd').textContent = k;
+        const fmtQty = q => q >= 1e6 ? (q/1e6).toFixed(2)+'M'
+                          : q >= 1e3 ? (q/1e3).toFixed(0)+'K'
+                          : String(q);
+        document.getElementById('amc-ftd').textContent = fmtQty(d.ftd.qty);
         document.getElementById('amc-ftd-sub').textContent =
-          (d.ftd.date || d.ftd.period) + ' · $' + (d.ftd.price?.toFixed(2) ?? '?');
+          d.ftd.date + ' · $' + (d.ftd.price?.toFixed(2) ?? '?');
+        // Prikaži promjenu od prethodnog dana
+        const chgEl = document.getElementById('amc-ftd-chg');
+        if (chgEl && d.ftd.change != null) {
+          const chg = d.ftd.change;
+          const chgStr = (chg >= 0 ? '▲ +' : '▼ ') + fmtQty(Math.abs(chg)) + ' vs preth.';
+          chgEl.textContent = chgStr;
+          chgEl.style.color = chg > 0 ? '#f87171' : chg < 0 ? '#4ade80' : '#9ca3af';
+        }
       } else {
         document.getElementById('amc-ftd').textContent = 'N/A';
-        document.getElementById('amc-ftd-sub').textContent = 'SEC: nema dostupnih podataka';
+        document.getElementById('amc-ftd-sub').textContent = 'nema dostupnih podataka';
+        const chgEl = document.getElementById('amc-ftd-chg');
+        if (chgEl) chgEl.textContent = '';
       }
 
       // Market Cap + Float
@@ -3188,38 +3199,51 @@ const server = http.createServer(async (req, res) => {
         }
       } catch {}
 
-      // ── 2. FTD — SEC.gov ZIP datoteke ────────────────────────────────────
+      // ── 2. FTD — ChartExchange (via dynamic v-key + CSV download) ───────────
       let ftdAmc = null;
+      let ftdHistory = [];
       try {
-        const now = new Date();
-        const tryPeriods = [];
-        for (let mo = 0; mo <= 3; mo++) {
-          const d  = new Date(now.getFullYear(), now.getMonth() - mo, 1);
-          const ym = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}`;
-          tryPeriods.push(`${ym}b`, `${ym}a`);
-        }
-        for (const period of tryPeriods) {
-          try {
-            const ftdUrl = `https://www.sec.gov/data/foiadocuments/fails/cnsfails${period}.zip`;
-            const ftdRes = await fetch(ftdUrl, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(12000) });
-            if (!ftdRes.ok) continue;
-            const buf = Buffer.from(await ftdRes.arrayBuffer());
-            if (buf[0] !== 0x50 || buf[1] !== 0x4B) continue;
-            const fnLen    = buf.readUInt16LE(26);
-            const exLen    = buf.readUInt16LE(28);
-            const offset   = 30 + fnLen + exLen;
-            const method   = buf.readUInt16LE(8);
-            const compSize = buf.readUInt32LE(18);
-            const raw      = buf.slice(offset, offset + compSize);
-            const { inflateRawSync } = await import("zlib");
-            const txt      = method === 8 ? inflateRawSync(raw).toString("utf8") : raw.toString("utf8");
-            const amcLines = txt.split("\n").filter(l => l.split("|")[2]?.trim() === "AMC");
-            if (amcLines.length > 0) {
-              const cols = amcLines[amcLines.length - 1].split("|");
-              ftdAmc = { date: cols[0]?.trim(), qty: parseInt(cols[3] || "0"), price: parseFloat(cols[5] || "0"), period, totalDays: amcLines.length };
-              break;
-            }
-          } catch { continue; }
+        // Korak 1: dohvati stranicu da izvučemo svježi v-key
+        const ceHtml = await fetch(
+          "https://chartexchange.com/symbol/nyse-amc/failure-to-deliver/",
+          { headers: { ...FH, "Referer": "https://chartexchange.com/" }, signal: AbortSignal.timeout(12000) }
+        ).then(r => r.text());
+
+        const vMatch = ceHtml.match(/"r"\s*:\s*"nyse-amc\.fails_to_deliver"[^}]*"v"\s*:\s*"([^"]+)"/);
+        if (vMatch) {
+          const vKey = vMatch[1];
+          const csvUrl = `https://chartexchange.com/download/?r=nyse-amc.fails_to_deliver&k=symboldata&v=${encodeURIComponent(vKey)}`;
+          const csvText = await fetch(csvUrl, {
+            headers: { ...FH, "Referer": "https://chartexchange.com/symbol/nyse-amc/failure-to-deliver/" },
+            signal: AbortSignal.timeout(10000)
+          }).then(r => r.text());
+
+          // Format: settlement,ftd,price,change,notional,t35,t,vol
+          const rows = csvText.trim().split("\n").slice(1) // skip header
+            .map(line => {
+              const [settlement, ftd, price, change, notional] = line.split(",");
+              return { date: settlement?.trim(), qty: parseInt(ftd || "0"), price: parseFloat(price || "0"), change: parseInt(change || "0"), notional: parseFloat(notional || "0") };
+            })
+            .filter(r => r.date && r.date.length === 8);
+
+          if (rows.length > 0) {
+            // Najnoviji zapis koji ima FTD > 0
+            const latestNonZero = rows.find(r => r.qty > 0) || rows[0];
+            const d = latestNonZero.date;
+            ftdAmc = {
+              date: `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`,
+              qty: latestNonZero.qty,
+              price: latestNonZero.price,
+              change: latestNonZero.change,
+              notional: latestNonZero.notional,
+              source: "chartexchange.com"
+            };
+            // Zadnjih 10 zapisa za grafikon (samo non-zero, silazno)
+            ftdHistory = rows.slice(0, 20)
+              .filter(r => r.qty > 0)
+              .slice(0, 10)
+              .map(r => ({ date: `${r.date.slice(0,4)}-${r.date.slice(4,6)}-${r.date.slice(6,8)}`, qty: r.qty, price: r.price }));
+          }
         }
       } catch {}
 
@@ -3253,9 +3277,10 @@ const server = http.createServer(async (req, res) => {
         institutions,
         // Insider buy/sell aktivnost
         insiderActivity,
-        // FTD iz SEC-a
+        // FTD iz ChartExchange
         ftd: ftdAmc,
-        source: "finviz.com",
+        ftdHistory,
+        source: "finviz.com + chartexchange.com",
         ts: new Date().toISOString()
       }));
     } catch(e) {

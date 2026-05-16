@@ -2534,10 +2534,10 @@ setInterval(updateCountdown, 1000);
       <div style="font-size:11px;color:#9ca3af;margin-top:2px" id="amc-float">float / outstanding</div>
     </div>
 
-    <div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:12px;opacity:0.5">
-      <div style="font-size:10px;color:#6b7280;margin-bottom:4px;text-transform:uppercase">🚨 FTD · 💸 CTB</div>
-      <div style="font-size:13px;font-weight:700;color:#4b5563">Nedostupno</div>
-      <div style="font-size:10px;color:#374151;margin-top:2px">Izvor blokiran s Railway IP-a</div>
+    <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px">
+      <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">💸 Cost to Borrow</div>
+      <div style="font-size:24px;font-weight:800;color:#fbbf24" id="amc-ctb">…</div>
+      <div style="font-size:11px;color:#9ca3af;margin-top:2px" id="amc-ctb-sub">godišnja stopa</div>
     </div>
 
   </div>
@@ -2564,7 +2564,7 @@ setInterval(updateCountdown, 1000);
       </div>
       <div>
         <div style="font-size:22px;font-weight:800;color:#e5e7eb" id="amc-squeeze-label">…</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px">Skor 0–100 · ChartExchange + Finviz</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px">Skor 0–100 · Finviz + companiesmarketcap</div>
       </div>
     </div>
     <!-- Faktori -->
@@ -2668,15 +2668,23 @@ setInterval(updateCountdown, 1000);
         f(d.sharesFloat) + ' / ' + f(d.sharesOutstand);
 
       // Cost to Borrow
-      if (d.borrowFee) {
-        const ctbEl = document.getElementById('amc-ctb');
-        const ctbSub = document.getElementById('amc-ctb-sub');
+      const ctbEl = document.getElementById('amc-ctb');
+      const ctbSub = document.getElementById('amc-ctb-sub');
+      if (d.borrowFee && d.borrowFee.fee != null) {
         ctbEl.textContent = d.borrowFee.fee.toFixed(2) + '%';
         // Boja prema visini CTB-a
         ctbEl.style.color = d.borrowFee.fee >= 20 ? '#f87171' : d.borrowFee.fee >= 5 ? '#fb923c' : d.borrowFee.fee >= 1 ? '#fbbf24' : '#4ade80';
         const avail = d.borrowFee.available;
-        const availStr = avail >= 1e6 ? (avail/1e6).toFixed(1)+'M' : avail >= 1e3 ? (avail/1e3).toFixed(0)+'K' : String(avail);
-        ctbSub.textContent = 'Dostupno za borrow: ' + availStr + ' dionica';
+        if (avail != null) {
+          const availStr = avail >= 1e6 ? (avail/1e6).toFixed(1)+'M' : avail >= 1e3 ? (avail/1e3).toFixed(0)+'K' : String(avail);
+          ctbSub.textContent = 'Dostupno za borrow: ' + availStr + ' dionica';
+        } else {
+          ctbSub.textContent = 'companiesmarketcap.com';
+        }
+      } else {
+        ctbEl.textContent = 'N/A';
+        ctbEl.style.color = '#4b5563';
+        ctbSub.textContent = 'podaci nedostupni';
       }
 
       // Short Squeeze Score
@@ -3339,9 +3347,38 @@ async function fetchAmcData() {
       }
     } catch {}
 
-    // ── 2. Squeeze Score — samo iz Finviz podataka ───────────────────────────
-    // Faktori koji su dostupni: SI% (35pt), DTC (25pt), RelVol (8pt) = max 68
-    // CTB (20pt) i Shares (12pt) nisu dostupni → score se normalizira na 68→100
+    // ── 2. Cost to Borrow — companiesmarketcap.com ───────────────────────────
+    // data=[{d:unixTs, v:rawVal}] gdje rawVal/100 = CTB%
+    // Npr: v=123.25 → CTB=1.2325%
+    let ctbPct = null;
+    let ctbAvail = null;
+    try {
+      const cmcHtml = await fetch(
+        "https://companiesmarketcap.com/amc-entertainment/cost-to-borrow/",
+        { headers: { "User-Agent": UA, "Accept": "text/html", "Referer": "https://companiesmarketcap.com/" },
+          signal: AbortSignal.timeout(12000) }
+      ).then(r => r.text());
+
+      // Izvuci sve v-vrijednosti iz chart podataka (array data=[{d:ts,v:val}...])
+      const vVals = [...cmcHtml.matchAll(/"v":([0-9.]+)/g)].map(m => parseFloat(m[1]));
+      if (vVals.length > 0) {
+        // Zadnja vrijednost = najnoviji CTB (v/100 = %)
+        ctbPct = vVals[vVals.length - 1] / 100;
+      }
+      // Pokušaj naći "available to borrow" broj (tipično 4000000 = 4M)
+      // Pronalaženje drugog data niza (data2 ili 7d_available chart podaci)
+      const availM = cmcHtml.match(/available_to_borrow[^{]{0,200}"v":([0-9]+)/);
+      if (!availM) {
+        // Fallback: potraži broj u rasponima 100K-50M koji se pojavljuje blizu 'available'
+        const bigNums = [...cmcHtml.matchAll(/(?:available[^<]{0,100}?)([1-9]\d{4,7})(?:[^%])/gi)];
+        if (bigNums.length > 0) ctbAvail = parseInt(bigNums[0][1]);
+      } else {
+        ctbAvail = parseInt(availM[1]);
+      }
+      console.log("AMC CTB: " + (ctbPct !== null ? ctbPct.toFixed(4)+"%" : "N/A") + " avail: " + ctbAvail);
+    } catch(e) { console.error("AMC CTB fetch greška:", e.message); }
+
+    // ── 3. Squeeze Score — Finviz + companiesmarketcap ───────────────────────
     const g = k => snap[k] ?? null;
     const parseVol = s => {
       if (!s) return 0; s = String(s).replace(/,/g,"");
@@ -3351,20 +3388,31 @@ async function fetchAmcData() {
     const dtc    = parseFloat(snap["Short Ratio"]  ?? "0");
     const relVol = (() => { const v=parseVol(snap["Volume"]), a=parseVol(snap["Avg Volume"]); return a>0?v/a:1; })();
 
-    const siScore  = siPct>=25?35:siPct>=20?28:siPct>=15?20:siPct>=10?12:siPct>=5?6:0;
-    const dtcScore = dtc>=7?25:dtc>=5?20:dtc>=3?14:dtc>=2?8:dtc>=1?4:0;
-    const volScore = relVol>=3?8:relVol>=2?5:relVol>=1.5?3:relVol>=1?1:0;
-    const rawScore = siScore + dtcScore + volScore;  // max 68
-    // Normalizacija: 68pt → 100, s blagim popustom (ne skaliramo punih 100 jer nedostaju podaci)
-    const squeezeScore = Math.min(100, Math.round(rawScore / 68 * 76));  // max ~76 bez CTB/Shares
+    const siScore    = siPct>=25?35:siPct>=20?28:siPct>=15?20:siPct>=10?12:siPct>=5?6:0;
+    const dtcScore   = dtc>=7?25:dtc>=5?20:dtc>=3?14:dtc>=2?8:dtc>=1?4:0;
+    const ctb        = ctbPct ?? 0;
+    const avail      = ctbAvail ?? Infinity;
+    const ctbScore   = ctb>=50?20:ctb>=20?15:ctb>=5?10:ctb>=2?6:ctb>=1?3:0;
+    const availScore = avail<100000?12:avail<500000?9:avail<2000000?6:avail<5000000?3:0;
+    const volScore   = relVol>=3?8:relVol>=2?5:relVol>=1.5?3:relVol>=1?1:0;
+
+    const hasCTB    = ctbPct !== null;
+    const hasAvail  = ctbAvail !== null;
+    const rawScore  = siScore + dtcScore + ctbScore + availScore + volScore;
+    const maxScore  = 35 + 25 + (hasCTB?20:0) + (hasAvail?12:0) + 8;
+    // Normalizacija: ako nedostaju podaci, skaliraj na dostupni max
+    const squeezeScore = maxScore >= 100
+      ? Math.min(100, rawScore)
+      : Math.min(100, Math.round(rawScore / maxScore * (maxScore < 68 ? 76 : 100)));
     const squeezeLabel = squeezeScore>=75?"🔴 Eksplozivan":squeezeScore>=55?"🟠 Visok":squeezeScore>=35?"🟡 Umjeren":"🟢 Nizak";
     const squeezeFactors = [
-      { name:"Short Interest",   val:siPct.toFixed(1)+"%",    score:siScore,  max:35, note:"" },
-      { name:"Days to Cover",    val:dtc.toFixed(1)+"d",      score:dtcScore, max:25, note:"" },
-      { name:"Cost to Borrow",   val:"N/A",                   score:null,     max:20, note:"nedostupan" },
-      { name:"Shares Available", val:"N/A",                   score:null,     max:12, note:"nedostupan" },
-      { name:"Rel. Volume",      val:relVol.toFixed(2)+"x",   score:volScore, max:8,  note:"" },
+      { name:"Short Interest",   val:siPct.toFixed(1)+"%",                                                                    score:siScore,              max:35 },
+      { name:"Days to Cover",    val:dtc.toFixed(1)+"d",                                                                      score:dtcScore,             max:25 },
+      { name:"Cost to Borrow",   val:hasCTB  ? ctb.toFixed(2)+"%" : "N/A",                                                   score:hasCTB  ?ctbScore:null,  max:20 },
+      { name:"Shares Available", val:hasAvail? (avail>=1e6?(avail/1e6).toFixed(1)+"M":(avail/1e3).toFixed(0)+"K") : "N/A",   score:hasAvail?availScore:null, max:12 },
+      { name:"Rel. Volume",      val:relVol.toFixed(2)+"x",                                                                   score:volScore,             max:8  },
     ];
+    const partial = !hasCTB || !hasAvail;
 
     const payload = {
       price: parseFloat(g("Price")??"0")||null, changePct:g("Change"), volume:g("Volume"), avgVolume:g("Avg Volume"), marketCap:g("Market Cap"),
@@ -3373,14 +3421,16 @@ async function fetchAmcData() {
       instOwn:g("Inst Own"), instTrans:g("Inst Trans"), insiderOwn:g("Insider Own"),
       pe:g("P/E"), epsNextY:g("EPS next Y"), high52w:g("52W High"), low52w:g("52W Low"),
       institutions, insiderActivity,
-      ftd: null, ftdHistory: [],          // CE blokiran na Railway
-      borrowFee: null, shortInterestCE: null,  // CE blokiran na Railway
-      squeeze: { score:squeezeScore, label:squeezeLabel, factors:squeezeFactors, partial:true },
-      source:"finviz.com", ts: new Date().toISOString()
+      ftd: null, ftdHistory: [],
+      borrowFee: hasCTB ? { fee: ctbPct, available: ctbAvail ?? null } : null,
+      shortInterestCE: null,
+      squeeze: { score:squeezeScore, label:squeezeLabel, factors:squeezeFactors, partial },
+      source: hasCTB ? "finviz.com + companiesmarketcap.com" : "finviz.com",
+      ts: new Date().toISOString()
     };
     _amcCache.data = payload;
     _amcCache.ts   = Date.now();
-    console.log("AMC data osvježen — squeeze=" + squeezeScore + " si=" + siPct + "% dtc=" + dtc + " relVol=" + relVol.toFixed(2));
+    console.log("AMC data osvježen — squeeze=" + squeezeScore + " si=" + siPct + "% ctb=" + (ctbPct?.toFixed(4)||"N/A") + "% dtc=" + dtc);
     return payload;
   } catch(e) {
     console.error("fetchAmcData greška:", e.message);

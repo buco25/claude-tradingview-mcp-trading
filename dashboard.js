@@ -2535,6 +2535,13 @@ setInterval(updateCountdown, 1000);
     </div>
 
     <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px">
+      <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">🚨 Failure to Deliver</div>
+      <div style="font-size:22px;font-weight:800;color:#f87171" id="amc-ftd">…</div>
+      <div style="font-size:11px;color:#9ca3af;margin-top:2px" id="amc-ftd-sub">dionica</div>
+      <div style="font-size:10px;margin-top:2px" id="amc-ftd-chg"></div>
+    </div>
+
+    <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px">
       <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">💸 Cost to Borrow</div>
       <div style="font-size:24px;font-weight:800;color:#fbbf24" id="amc-ctb">…</div>
       <div style="font-size:11px;color:#9ca3af;margin-top:2px" id="amc-ctb-sub">godišnja stopa</div>
@@ -2646,7 +2653,7 @@ setInterval(updateCountdown, 1000);
                           : String(q);
         document.getElementById('amc-ftd').textContent = fmtQty(d.ftd.qty);
         document.getElementById('amc-ftd-sub').textContent =
-          d.ftd.date + ' · $' + (d.ftd.price?.toFixed(2) ?? '?');
+          d.ftd.date + (d.ftd.price != null ? ' · $' + d.ftd.price.toFixed(2) : ' · companiesmarketcap');
         // Prikaži promjenu od prethodnog dana
         const chgEl = document.getElementById('amc-ftd-chg');
         if (chgEl && d.ftd.change != null) {
@@ -2664,8 +2671,11 @@ setInterval(updateCountdown, 1000);
 
       // Market Cap + Float
       document.getElementById('amc-cap').textContent = f(d.marketCap);
+      const outstandStr = d.sharesOutstandCMC != null
+        ? (d.sharesOutstandCMC / 1e6).toFixed(2) + 'M'
+        : f(d.sharesOutstand);
       document.getElementById('amc-float').textContent =
-        f(d.sharesFloat) + ' / ' + f(d.sharesOutstand);
+        f(d.sharesFloat) + ' / ' + outstandStr;
 
       // Cost to Borrow
       const ctbEl = document.getElementById('amc-ctb');
@@ -3304,9 +3314,9 @@ const server = http.createServer(async (req, res) => {
   res.end(html);
 });
 
-// ─── fetchAmcData() — Finviz-only (ChartExchange blokiran na Railway) ──────────
-// CE (borrow fee, short interest, FTD) ne radi s Railway IP-a → koristimo Finviz.
-// Score se normalizira na dostupne faktore (SI%, DTC, RelVol = max 68pt → scale 100).
+// ─── fetchAmcData() — Finviz + companiesmarketcap.com ─────────────────────────
+// ChartExchange blokiran na Railway → Finviz (SI%, DTC, price) + CMC (CTB, FTD, Shares).
+// Score se normalizira na dostupne faktore.
 let _amcFetchRunning = false;
 async function fetchAmcData() {
   if (_amcFetchRunning) return;
@@ -3378,7 +3388,56 @@ async function fetchAmcData() {
       console.log("AMC CTB: " + (ctbPct !== null ? ctbPct.toFixed(4)+"%" : "N/A") + " avail: " + ctbAvail);
     } catch(e) { console.error("AMC CTB fetch greška:", e.message); }
 
-    // ── 3. Squeeze Score — Finviz + companiesmarketcap ───────────────────────
+    // ── 3. FTD — companiesmarketcap.com ──────────────────────────────────────
+    // data=[{d:unixTs, v:ftdShares}] — raw share count, direktno (bez dijeljenja)
+    let ftdData = null;
+    let ftdHistory = [];
+    try {
+      const ftdHtml = await fetch(
+        "https://companiesmarketcap.com/amc-entertainment/failure-to-deliver/",
+        { headers: { "User-Agent": UA, "Accept": "text/html", "Referer": "https://companiesmarketcap.com/" },
+          signal: AbortSignal.timeout(12000) }
+      ).then(r => r.text());
+      const ftdPairs = [...ftdHtml.matchAll(/"d":(\d+),"v":([0-9.]+)/g)]
+        .map(m => ({ d: parseInt(m[1]), v: parseFloat(m[2]) }));
+      if (ftdPairs.length > 0) {
+        const nonZero = ftdPairs.filter(p => p.v > 0);
+        if (nonZero.length > 0) {
+          const latest = nonZero[nonZero.length - 1];
+          const prev   = nonZero.length > 1 ? nonZero[nonZero.length - 2] : null;
+          ftdData = {
+            qty:    Math.round(latest.v),
+            date:   new Date(latest.d * 1000).toISOString().slice(0, 10),
+            change: prev ? Math.round(latest.v - prev.v) : null,
+            price:  null
+          };
+          ftdHistory = nonZero.slice(-10).map(p => ({
+            date: new Date(p.d * 1000).toISOString().slice(0, 10),
+            qty:  Math.round(p.v)
+          }));
+        }
+      }
+      console.log("AMC FTD: " + (ftdData ? ftdData.qty.toLocaleString() + " @ " + ftdData.date : "N/A"));
+    } catch(e) { console.error("AMC FTD fetch greška:", e.message); }
+
+    // ── 4. Shares Outstanding — companiesmarketcap.com ───────────────────────
+    // data=[{d:unixTs, v:sharesCount}] — raw broj dionica
+    let sharesOutstandCMC = null;
+    try {
+      const sharesHtml = await fetch(
+        "https://companiesmarketcap.com/amc-entertainment/shares-outstanding/",
+        { headers: { "User-Agent": UA, "Accept": "text/html", "Referer": "https://companiesmarketcap.com/" },
+          signal: AbortSignal.timeout(12000) }
+      ).then(r => r.text());
+      const sPairs = [...sharesHtml.matchAll(/"d":(\d+),"v":([0-9.]+)/g)]
+        .map(m => ({ d: parseInt(m[1]), v: parseFloat(m[2]) }));
+      if (sPairs.length > 0) {
+        sharesOutstandCMC = Math.round(sPairs[sPairs.length - 1].v);
+      }
+      console.log("AMC Shares (CMC): " + (sharesOutstandCMC ? (sharesOutstandCMC/1e6).toFixed(2)+"M" : "N/A"));
+    } catch(e) { console.error("AMC Shares fetch greška:", e.message); }
+
+    // ── 5. Squeeze Score — Finviz + companiesmarketcap ───────────────────────
     const g = k => snap[k] ?? null;
     const parseVol = s => {
       if (!s) return 0; s = String(s).replace(/,/g,"");
@@ -3421,11 +3480,12 @@ async function fetchAmcData() {
       instOwn:g("Inst Own"), instTrans:g("Inst Trans"), insiderOwn:g("Insider Own"),
       pe:g("P/E"), epsNextY:g("EPS next Y"), high52w:g("52W High"), low52w:g("52W Low"),
       institutions, insiderActivity,
-      ftd: null, ftdHistory: [],
+      ftd: ftdData, ftdHistory,
+      sharesOutstandCMC,
       borrowFee: hasCTB ? { fee: ctbPct, available: ctbAvail ?? null } : null,
       shortInterestCE: null,
       squeeze: { score:squeezeScore, label:squeezeLabel, factors:squeezeFactors, partial },
-      source: hasCTB ? "finviz.com + companiesmarketcap.com" : "finviz.com",
+      source: "finviz.com + companiesmarketcap.com",
       ts: new Date().toISOString()
     };
     _amcCache.data = payload;

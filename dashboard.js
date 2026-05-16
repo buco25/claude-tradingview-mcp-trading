@@ -3132,139 +3132,146 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === "/api/amc") {
     try {
       const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+      const H  = { "User-Agent": UA, "Accept": "application/json, */*" };
 
-      // ── Korak 1: dohvati Yahoo crumb + cookie (potrebno za quoteSummary) ──
-      let crumb = null, cookieStr = "";
+      // ── 1. Cijena iz chart endpointa (uvijek radi, ne treba auth) ───────
+      const chartUrl = "https://query1.finance.yahoo.com/v8/finance/chart/AMC?interval=1d&range=5d";
+      const chartJ   = await fetch(chartUrl, { headers: H }).then(r => r.json());
+      const chartMeta = chartJ?.chart?.result?.[0]?.meta ?? {};
+      const chartClose = chartJ?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? [];
+      const chartVol   = chartJ?.chart?.result?.[0]?.indicators?.quote?.[0]?.volume ?? [];
+      const price     = chartMeta.regularMarketPrice ?? chartClose[chartClose.length - 1] ?? null;
+      const prevClose = chartMeta.chartPreviousClose ?? chartClose[chartClose.length - 2] ?? null;
+      const changePct = (price && prevClose) ? ((price - prevClose) / prevClose * 100).toFixed(2) : null;
+      const rawVol    = chartVol[chartVol.length - 1] ?? chartMeta.regularMarketVolume ?? null;
+      const volFmt    = rawVol ? (rawVol >= 1e6 ? (rawVol/1e6).toFixed(1)+"M" : (rawVol/1e3).toFixed(0)+"K") : null;
+
+      // ── 2. Short Interest — Yahoo v7/finance/quote (sadrži SI polja) ────
+      // v7 vraća quoteResponse.result[0] sa svim poljem direktno (ne treba crumb često)
+      let q = {};
       try {
-        // Noviji Yahoo crumb endpoint
-        const crumbRes = await fetch("https://query1.finance.yahoo.com/v1/test/getcrumb", {
-          headers: { "User-Agent": UA, "Accept": "*/*" }
-        });
-        cookieStr = (crumbRes.headers.get("set-cookie") || "").split(";")[0];
-        crumb = (await crumbRes.text()).trim();
-        if (!crumb || crumb.includes("<")) crumb = null;  // HTML response = nije ok
+        const fields = "shortPercentOfFloat,sharesShort,shortRatio,sharesOutstanding,marketCap,floatShares,regularMarketVolume,averageVolume";
+        const v7Url  = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=AMC&fields=${fields}&formatted=false`;
+        const v7J    = await fetch(v7Url, { headers: H }).then(r => r.json());
+        q = v7J?.quoteResponse?.result?.[0] ?? {};
       } catch {}
 
-      // Fallback crumb: probaj consent page metodu
-      if (!crumb) {
+      // Ako v7 nije vratio SI, probaj s crumbom
+      if (q.shortPercentOfFloat == null) {
         try {
-          const c1 = await fetch("https://fc.yahoo.com", { headers: { "User-Agent": UA }, redirect: "follow" });
-          const rawCookies = c1.headers.raw?.()["set-cookie"] ?? [];
-          cookieStr = rawCookies.map(c => c.split(";")[0]).join("; ");
-          const c2 = await fetch("https://query2.finance.yahoo.com/v1/test/getcrumb", {
-            headers: { "User-Agent": UA, "Cookie": cookieStr }
-          });
-          crumb = (await c2.text()).trim();
-          if (crumb.includes("<")) crumb = null;
+          const crRes  = await fetch("https://query1.finance.yahoo.com/v1/test/getcrumb", { headers: H });
+          const crumb  = (await crRes.text()).trim();
+          const cookie = (crRes.headers.get("set-cookie") || "").split(";")[0];
+          if (crumb && !crumb.includes("<")) {
+            const v7c = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=AMC&fields=shortPercentOfFloat,sharesShort,shortRatio,sharesOutstanding,marketCap,floatShares&crumb=${encodeURIComponent(crumb)}&formatted=false`;
+            const v7J = await fetch(v7c, { headers: { ...H, "Cookie": cookie } }).then(r => r.json());
+            q = v7J?.quoteResponse?.result?.[0] ?? q;
+          }
         } catch {}
       }
 
-      // ── Korak 2: chart endpoint (radi bez crumba) ────────────────────────
-      const chartHeaders = { "User-Agent": UA };
-      const qUrl = "https://query1.finance.yahoo.com/v8/finance/chart/AMC?interval=1d&range=10d&includePrePost=false";
-      const qRes = await fetch(qUrl, { headers: chartHeaders }).then(r => r.json());
-      const meta    = qRes?.chart?.result?.[0]?.meta ?? {};
-      const closes  = qRes?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? [];
-      const volumes = qRes?.chart?.result?.[0]?.indicators?.quote?.[0]?.volume ?? [];
-      const price      = meta.regularMarketPrice ?? closes[closes.length - 1] ?? null;
-      const prevClose  = meta.chartPreviousClose ?? meta.previousClose ?? closes[closes.length - 2] ?? null;
-      const changePct  = (price && prevClose) ? ((price - prevClose) / prevClose * 100).toFixed(2) : null;
-      const latestVol  = volumes[volumes.length - 1] ?? null;
-      const volFmt     = latestVol ? (latestVol >= 1e6 ? (latestVol/1e6).toFixed(1)+"M" : (latestVol/1e3).toFixed(0)+"K") : null;
+      // Format helpers
+      const fmtNum = (n, dec=2) => n == null ? null : n >= 1e9 ? (n/1e9).toFixed(1)+"B" : n >= 1e6 ? (n/1e6).toFixed(1)+"M" : n >= 1e3 ? (n/1e3).toFixed(0)+"K" : String(n);
+      const fmtPct = (n, dec=1) => n == null ? null : (n * 100).toFixed(dec) + "%";
 
-      // ── Korak 3: quoteSummary s crumbom (ili query2 bez crumba) ──────────
-      let ks = {}, pr = {}, io = [], mh = {};
-      const ySuffix = crumb ? `&crumb=${encodeURIComponent(crumb)}` : "";
-      const yCookies = crumb ? { "Cookie": cookieStr } : {};
-      const yHost = crumb ? "query1" : "query2";
-      const yUrl = `https://${yHost}.finance.yahoo.com/v10/finance/quoteSummary/AMC?formatted=true&lang=en-US&region=US&modules=defaultKeyStatistics%2Cprice%2CinstitutionOwnership%2CmajorHoldersBreakdown${ySuffix}`;
+      // ── 3. SEC EDGAR — 13F institucionalni vlasnici AMC ─────────────────
+      // AMC Entertainment Holdings CIK: 0001411579
+      // Tražimo 13F-HR filings koji spominju AMC dionice
+      let institutions = [];
       try {
-        const yRes = await fetch(yUrl, { headers: { "User-Agent": UA, ...yCookies } }).then(r => r.json());
-        const r0   = yRes?.quoteSummary?.result?.[0];
-        if (r0) {
-          ks = r0.defaultKeyStatistics ?? {};
-          pr = r0.price ?? {};
-          io = r0.institutionOwnership?.ownershipList ?? [];
-          mh = r0.majorHoldersBreakdown ?? {};
+        // Pretraži nedavne 13F-HR filings koji sadrže AMC u EDGAR full-text searchu
+        const edgarUrl = "https://efts.sec.gov/LATEST/search-index?q=%22AMC+Entertainment%22&forms=13F-HR&dateRange=custom&startdt=2024-06-01&_source=period_of_report%2CentityName%2Cfile_date%2Cperiod_of_report&sort=file_date&order=desc&hits.hits._source=entityName,file_date,period_of_report&hits.hits.total=true";
+        const edgarJ = await fetch(edgarUrl, { headers: { "User-Agent": UA } }).then(r => r.json());
+        const hits = edgarJ?.hits?.hits ?? [];
+        // Uzmi top 10 unique filers
+        const seen = new Set();
+        for (const h of hits) {
+          const name = h._source?.entityName;
+          if (name && !seen.has(name)) {
+            seen.add(name);
+            institutions.push({
+              name,
+              date: h._source?.period_of_report ?? h._source?.file_date ?? "?",
+              pctHeld: null, pctChange: null, shares: null
+            });
+          }
+          if (institutions.length >= 10) break;
         }
       } catch {}
 
-      // ── Korak 4: FTD — SEC.gov ZIP datoteke ─────────────────────────────
+      // Ako EDGAR nema podataka, probaj Yahoo quoteSummary za institucije
+      if (institutions.length === 0) {
+        try {
+          const ioUrl = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/AMC?modules=institutionOwnership&formatted=true`;
+          const ioJ   = await fetch(ioUrl, { headers: H }).then(r => r.json());
+          const ioList = ioJ?.quoteSummary?.result?.[0]?.institutionOwnership?.ownershipList ?? [];
+          institutions = ioList.slice(0, 10).map(h => ({
+            name: h.organization?.longName ?? h.organization?.raw ?? "?",
+            pctHeld: h.pctHeld?.fmt ?? null,
+            pctChange: h.pctChange?.fmt ?? null,
+            shares: h.position?.fmt ?? null,
+            date: h.reportDate?.fmt ?? "?"
+          }));
+        } catch {}
+      }
+
+      // ── 4. FTD — SEC.gov ZIP datoteke ────────────────────────────────────
       let ftdAmc = null;
       try {
         const now = new Date();
         const tryPeriods = [];
         for (let mo = 0; mo <= 3; mo++) {
-          const d = new Date(now.getFullYear(), now.getMonth() - mo, 1);
+          const d  = new Date(now.getFullYear(), now.getMonth() - mo, 1);
           const ym = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}`;
           tryPeriods.push(`${ym}b`, `${ym}a`);
         }
         for (const period of tryPeriods) {
           try {
             const ftdUrl = `https://www.sec.gov/data/foiadocuments/fails/cnsfails${period}.zip`;
-            const ftdRes = await fetch(ftdUrl, {
-              headers: { "User-Agent": UA },
-              signal: AbortSignal.timeout(10000)
-            });
+            const ftdRes = await fetch(ftdUrl, { headers: H, signal: AbortSignal.timeout(12000) });
             if (!ftdRes.ok) continue;
             const buf = Buffer.from(await ftdRes.arrayBuffer());
-            if (buf[0] !== 0x50 || buf[1] !== 0x4B) continue;  // not a ZIP
-            // Parse ZIP local file header
-            const fnLen  = buf.readUInt16LE(26);
-            const exLen  = buf.readUInt16LE(28);
-            const offset = 30 + fnLen + exLen;
-            const method = buf.readUInt16LE(8);
+            if (buf[0] !== 0x50 || buf[1] !== 0x4B) continue;
+            const fnLen    = buf.readUInt16LE(26);
+            const exLen    = buf.readUInt16LE(28);
+            const offset   = 30 + fnLen + exLen;
+            const method   = buf.readUInt16LE(8);
             const compSize = buf.readUInt32LE(18);
             const raw = buf.slice(offset, offset + compSize);
             const { inflateRawSync } = await import("zlib");
             const txt = method === 8 ? inflateRawSync(raw).toString("utf8") : raw.toString("utf8");
-            // Format: DATE|CUSIP|SYMBOL|QUANTITY (FAILS)|DESCRIPTION|PRICE
-            const lines = txt.split("\n");
-            const amcLines = lines.filter(l => {
-              const cols = l.split("|");
-              return cols[2]?.trim() === "AMC";
-            });
+            const amcLines = txt.split("\n").filter(l => l.split("|")[2]?.trim() === "AMC");
             if (amcLines.length > 0) {
-              // Uzmi zadnji entry (najnoviji datum u periodu)
               const cols = amcLines[amcLines.length - 1].split("|");
-              ftdAmc = {
-                date: cols[0]?.trim(),
-                qty: parseInt(cols[3]?.trim() || "0"),
-                price: parseFloat(cols[5]?.trim() || "0"),
-                period,
-                totalDays: amcLines.length
-              };
+              ftdAmc = { date: cols[0]?.trim(), qty: parseInt(cols[3] || "0"), price: parseFloat(cols[5] || "0"), period, totalDays: amcLines.length };
               break;
             }
           } catch { continue; }
         }
-      } catch { /* FTD nije kritičan */ }
+      } catch {}
 
-      // ── Korak 5: Formatiranje institucionalnih vlasnika ──────────────────
-      const institutions = io.slice(0, 10).map(h => ({
-        name: h.organization?.longName ?? h.organization?.raw ?? "Nepoznato",
-        pctHeld: h.pctHeld?.fmt ?? "?",
-        pctChange: h.pctChange?.fmt ?? null,
-        shares: h.position?.fmt ?? "?",
-        value: h.value?.fmt ?? null,
-        date: h.reportDate?.fmt ?? "?"
-      }));
+      // ── 5. Rezultat ──────────────────────────────────────────────────────
+      const capRaw = q.marketCap ?? chartMeta.marketCap ?? null;
+      const capFmt = fmtNum(capRaw);
+      const siPct  = q.shortPercentOfFloat != null ? (q.shortPercentOfFloat * 100).toFixed(1) + "%" : null;
+      const siShr  = fmtNum(q.sharesShort);
+      const outShr = fmtNum(q.sharesOutstanding);
 
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({
         price,
         changePct,
-        volume: volFmt ?? pr.regularMarketVolume?.fmt ?? null,
-        marketCap: pr.marketCap?.fmt ?? meta.marketCap ?? null,
-        sharesShort: ks.sharesShort?.fmt ?? null,
-        shortPctFloat: ks.shortPercentOfFloat?.fmt ?? null,
-        shortRatio: ks.shortRatio?.fmt ?? null,
-        sharesOutstanding: ks.sharesOutstanding?.fmt ?? null,
-        instPctHeld: mh.institutionsPercentHeld?.fmt ?? null,
-        instCount: mh.institutionsCount?.fmt ?? null,
+        volume: volFmt,
+        marketCap: capFmt,
+        sharesShort: siShr,
+        shortPctFloat: siPct,
+        shortRatio: q.shortRatio != null ? q.shortRatio.toFixed(1) : null,
+        sharesOutstanding: outShr,
+        floatShares: fmtNum(q.floatShares),
+        instPctHeld: null,
+        instCount: null,
         ftd: ftdAmc,
         institutions,
-        crumbOk: !!crumb,
         ts: new Date().toISOString()
       }));
     } catch(e) {

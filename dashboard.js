@@ -2529,23 +2529,15 @@ setInterval(updateCountdown, 1000);
     </div>
 
     <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px">
-      <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">🚨 FTD (ChartEx)</div>
-      <div style="font-size:18px;font-weight:800;color:#a78bfa" id="amc-ftd">…</div>
-      <div style="font-size:11px;color:#9ca3af;margin-top:2px" id="amc-ftd-sub">neisporučene dionice</div>
-      <div style="font-size:11px;margin-top:2px" id="amc-ftd-chg"></div>
-    </div>
-
-    <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px">
       <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">📊 Market Cap</div>
       <div style="font-size:18px;font-weight:800;color:#e5e7eb" id="amc-cap">…</div>
       <div style="font-size:11px;color:#9ca3af;margin-top:2px" id="amc-float">float / outstanding</div>
     </div>
 
-    <!-- Borrow Fee -->
-    <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px">
-      <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">💸 Cost to Borrow</div>
-      <div style="font-size:18px;font-weight:800;color:#fbbf24" id="amc-ctb">…</div>
-      <div style="font-size:11px;color:#9ca3af;margin-top:2px" id="amc-ctb-sub">godišnja stopa</div>
+    <div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:12px;opacity:0.5">
+      <div style="font-size:10px;color:#6b7280;margin-bottom:4px;text-transform:uppercase">🚨 FTD · 💸 CTB</div>
+      <div style="font-size:13px;font-weight:700;color:#4b5563">Nedostupno</div>
+      <div style="font-size:10px;color:#374151;margin-top:2px">Izvor blokiran s Railway IP-a</div>
     </div>
 
   </div>
@@ -2706,6 +2698,15 @@ setInterval(updateCountdown, 1000);
         // Faktori — progress bar za svaki
         const fDiv = document.getElementById('amc-squeeze-factors');
         fDiv.innerHTML = sq.factors.map(f => {
+          if (f.score === null) {
+            // Nedostupan faktor — prikaži sivo
+            return '<div style="display:grid;grid-template-columns:110px 1fr 50px 30px;align-items:center;gap:8px;opacity:0.4">' +
+              '<div style="font-size:11px;color:#9ca3af">' + f.name + '</div>' +
+              '<div style="background:#1f2937;border-radius:3px;height:6px;border:1px dashed #374151"></div>' +
+              '<div style="font-size:11px;color:#6b7280;text-align:right">N/A</div>' +
+              '<div style="font-size:10px;color:#4b5563;text-align:right">?/' + f.max + '</div>' +
+              '</div>';
+          }
           const pct = Math.round(f.score / f.max * 100);
           const barCol = pct >= 70 ? '#ef4444' : pct >= 40 ? '#f97316' : '#60a5fa';
           return '<div style="display:grid;grid-template-columns:110px 1fr 50px 30px;align-items:center;gap:8px">' +
@@ -2714,7 +2715,7 @@ setInterval(updateCountdown, 1000);
             '<div style="font-size:11px;color:#e5e7eb;text-align:right">' + f.val + '</div>' +
             '<div style="font-size:10px;color:#6b7280;text-align:right">' + f.score + '/' + f.max + '</div>' +
             '</div>';
-        }).join('');
+        }).join('') + (sq.partial ? '<div style="font-size:10px;color:#4b5563;margin-top:6px">⚠️ Score baziran na 3/5 faktora · CTB i Shares nedostupni (Finviz only)</div>' : '');
       }
 
       // Institucionalni vlasnici — tablica
@@ -3295,17 +3296,18 @@ const server = http.createServer(async (req, res) => {
   res.end(html);
 });
 
-// ─── fetchAmcData() — sve AMC fetche u jednoj funkciji (background) ───────────
+// ─── fetchAmcData() — Finviz-only (ChartExchange blokiran na Railway) ──────────
+// CE (borrow fee, short interest, FTD) ne radi s Railway IP-a → koristimo Finviz.
+// Score se normalizira na dostupne faktore (SI%, DTC, RelVol = max 68pt → scale 100).
 let _amcFetchRunning = false;
 async function fetchAmcData() {
-  if (_amcFetchRunning) return; // ne pokreći paralelno
+  if (_amcFetchRunning) return;
   _amcFetchRunning = true;
   try {
-    const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+    const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36";
     const FH = { "User-Agent": UA, "Accept": "text/html,application/xhtml+xml,*/*", "Accept-Language": "en-US,en;q=0.9", "Referer": "https://finviz.com/" };
-    const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-    // ── 1. Finviz ─────────────────────────────────────────────────────────
+    // ── 1. Finviz — jedini pouzdani izvor sa Railway ────────────────────────
     const fvHtml = await fetch("https://finviz.com/quote?t=AMC&p=d", { headers: FH, signal: AbortSignal.timeout(15000) }).then(r => r.text());
     const snap = {};
     const snapRe = /snapshot-td-label\"[^>]*>(?:<[^>]+>)*([^<]+?)(?:<\/[^>]+>)*<\/div><\/td>\s*<td[^>]*snapshot-td2[^>]*>[^<]*<div[^>]*snapshot-td-content[^>]*>(?:<[^>]+>)*([^<]+)/g;
@@ -3337,97 +3339,31 @@ async function fetchAmcData() {
       }
     } catch {}
 
-    // ── 2. ChartExchange helper ───────────────────────────────────────────
-    const ceHdr = { "User-Agent": UA, "Referer": "https://chartexchange.com/", "Accept": "text/html,application/xhtml+xml,*/*" };
-    const cePage = async path => fetch(`https://chartexchange.com${path}`, { headers: ceHdr, signal: AbortSignal.timeout(15000) }).then(r => r.text());
-    const ceCsv  = async (r, v) => fetch(
-      `https://chartexchange.com/download/?r=${encodeURIComponent(r)}&k=symboldata&v=${encodeURIComponent(v)}`,
-      { headers: { "User-Agent": UA, "Referer": "https://chartexchange.com/" }, signal: AbortSignal.timeout(12000) }
-    ).then(r => r.text());
-    const vKey = (html, adapter) => {
-      const idx = html.indexOf('"r":"' + adapter + '"');
-      if (idx < 0) return null;
-      const m = html.slice(idx, idx + 300).match(/"v":"([^"]+)"/);
-      return m ? m[1] : null;
-    };
-
-    // ── 3. FTD ───────────────────────────────────────────────────────────
-    let ftdAmc = null, ftdHistory = [];
-    try {
-      const ftdHtml = await cePage("/symbol/nyse-amc/failure-to-deliver/");
-      const fv = vKey(ftdHtml, "nyse-amc.fails_to_deliver");
-      if (fv) {
-        await sleep(500);
-        const csv = await ceCsv("nyse-amc.fails_to_deliver", fv);
-        const rows = csv.trim().split("\n").slice(1).map(l => {
-          const [dt, ftd, price, change, notional] = l.split(",");
-          return { date: dt?.trim(), qty: parseInt(ftd||"0"), price: parseFloat(price||"0"), change: parseInt(change||"0"), notional: parseFloat(notional||"0") };
-        }).filter(r => r.date?.length === 8);
-        if (rows.length > 0) {
-          const lat = rows.find(r => r.qty > 0) || rows[0];
-          const d = lat.date;
-          ftdAmc = { date: d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6,8), qty: lat.qty, price: lat.price, change: lat.change, notional: lat.notional };
-          ftdHistory = rows.slice(0,20).filter(r=>r.qty>0).slice(0,10).map(r=>({ date: r.date.slice(0,4)+"-"+r.date.slice(4,6)+"-"+r.date.slice(6,8), qty:r.qty, price:r.price }));
-        }
-      }
-    } catch(e) { console.error("AMC FTD greška:", e.message); }
-
-    // ── 4. Borrow Fee ────────────────────────────────────────────────────
-    let borrowFee = null;
-    try {
-      await sleep(700);
-      const bfHtml = await cePage("/symbol/nyse-amc/borrow-fee/");
-      const bv = vKey(bfHtml, "nyse-amc.borrow_fee");
-      if (bv) {
-        await sleep(500);
-        const csv = await ceCsv("nyse-amc.borrow_fee", bv);
-        const row = csv.trim().split("\n")[1]?.split(",");
-        if (row?.length >= 3) {
-          borrowFee = { updated: row[0]?.trim(), fee: parseFloat(row[1]||"0"), available: parseInt(row[2]||"0"), rebate: parseFloat(row[3]||"0") };
-        }
-      }
-    } catch(e) { console.error("AMC BorrowFee greška:", e.message); }
-
-    // ── 5. Short Interest ────────────────────────────────────────────────
-    let shortInterestCE = null;
-    try {
-      await sleep(700);
-      const siHtml = await cePage("/symbol/nyse-amc/short-interest/");
-      const sv = vKey(siHtml, "nyse-amc.short_interest");
-      if (sv) {
-        await sleep(500);
-        const csv = await ceCsv("nyse-amc.short_interest", sv);
-        const row = csv.trim().split("\n")[1]?.split(",");
-        if (row?.length >= 4) {
-          shortInterestCE = { date: row[0]?.trim(), pct: parseFloat(row[1]||"0"), shares: parseInt(row[2]||"0"), daysToCover: parseFloat(row[3]||"0") };
-        }
-      }
-    } catch(e) { console.error("AMC ShortInterest greška:", e.message); }
-
-    // ── 6. Squeeze Score ─────────────────────────────────────────────────
+    // ── 2. Squeeze Score — samo iz Finviz podataka ───────────────────────────
+    // Faktori koji su dostupni: SI% (35pt), DTC (25pt), RelVol (8pt) = max 68
+    // CTB (20pt) i Shares (12pt) nisu dostupni → score se normalizira na 68→100
     const g = k => snap[k] ?? null;
-    const siPct = shortInterestCE?.pct    ?? parseFloat(snap["Short Float"] ?? "0");
-    const dtc   = shortInterestCE?.daysToCover ?? parseFloat(snap["Short Ratio"] ?? "0");
-    const ctb   = borrowFee?.fee ?? 0;
-    const avail = borrowFee?.available ?? Infinity;
     const parseVol = s => {
       if (!s) return 0; s = String(s).replace(/,/g,"");
-      return s.endsWith("M") ? parseFloat(s)*1e6 : s.endsWith("B") ? parseFloat(s)*1e9 : s.endsWith("K") ? parseFloat(s)*1e3 : parseFloat(s)||0;
+      return s.endsWith("M")?parseFloat(s)*1e6 : s.endsWith("B")?parseFloat(s)*1e9 : s.endsWith("K")?parseFloat(s)*1e3 : parseFloat(s)||0;
     };
+    const siPct  = parseFloat(snap["Short Float"]  ?? "0");
+    const dtc    = parseFloat(snap["Short Ratio"]  ?? "0");
     const relVol = (() => { const v=parseVol(snap["Volume"]), a=parseVol(snap["Avg Volume"]); return a>0?v/a:1; })();
-    const siScore    = siPct>=25?35:siPct>=20?28:siPct>=15?20:siPct>=10?12:siPct>=5?6:0;
-    const dtcScore   = dtc>=7?25:dtc>=5?20:dtc>=3?14:dtc>=2?8:dtc>=1?4:0;
-    const ctbScore   = ctb>=50?20:ctb>=20?15:ctb>=5?10:ctb>=2?6:ctb>=1?3:0;
-    const availScore = avail<100000?12:avail<500000?9:avail<2000000?6:avail<5000000?3:0;
-    const volScore   = relVol>=3?8:relVol>=2?5:relVol>=1.5?3:relVol>=1?1:0;
-    const squeezeScore = Math.min(100, siScore+dtcScore+ctbScore+availScore+volScore);
+
+    const siScore  = siPct>=25?35:siPct>=20?28:siPct>=15?20:siPct>=10?12:siPct>=5?6:0;
+    const dtcScore = dtc>=7?25:dtc>=5?20:dtc>=3?14:dtc>=2?8:dtc>=1?4:0;
+    const volScore = relVol>=3?8:relVol>=2?5:relVol>=1.5?3:relVol>=1?1:0;
+    const rawScore = siScore + dtcScore + volScore;  // max 68
+    // Normalizacija: 68pt → 100, s blagim popustom (ne skaliramo punih 100 jer nedostaju podaci)
+    const squeezeScore = Math.min(100, Math.round(rawScore / 68 * 76));  // max ~76 bez CTB/Shares
     const squeezeLabel = squeezeScore>=75?"🔴 Eksplozivan":squeezeScore>=55?"🟠 Visok":squeezeScore>=35?"🟡 Umjeren":"🟢 Nizak";
     const squeezeFactors = [
-      { name:"Short Interest",   val:siPct.toFixed(1)+"%",                                                                score:siScore,    max:35 },
-      { name:"Days to Cover",    val:dtc.toFixed(1)+"d",                                                                  score:dtcScore,   max:25 },
-      { name:"Cost to Borrow",   val:ctb.toFixed(2)+"%",                                                                  score:ctbScore,   max:20 },
-      { name:"Shares Available", val:avail===Infinity?"N/A":avail<1e6?(avail/1e3).toFixed(0)+"K":(avail/1e6).toFixed(1)+"M", score:availScore, max:12 },
-      { name:"Rel. Volume",      val:relVol.toFixed(2)+"x",                                                               score:volScore,   max:8  },
+      { name:"Short Interest",   val:siPct.toFixed(1)+"%",    score:siScore,  max:35, note:"" },
+      { name:"Days to Cover",    val:dtc.toFixed(1)+"d",      score:dtcScore, max:25, note:"" },
+      { name:"Cost to Borrow",   val:"N/A",                   score:null,     max:20, note:"nedostupan" },
+      { name:"Shares Available", val:"N/A",                   score:null,     max:12, note:"nedostupan" },
+      { name:"Rel. Volume",      val:relVol.toFixed(2)+"x",   score:volScore, max:8,  note:"" },
     ];
 
     const payload = {
@@ -3437,14 +3373,14 @@ async function fetchAmcData() {
       instOwn:g("Inst Own"), instTrans:g("Inst Trans"), insiderOwn:g("Insider Own"),
       pe:g("P/E"), epsNextY:g("EPS next Y"), high52w:g("52W High"), low52w:g("52W Low"),
       institutions, insiderActivity,
-      ftd:ftdAmc, ftdHistory,
-      borrowFee, shortInterestCE,
-      squeeze: { score:squeezeScore, label:squeezeLabel, factors:squeezeFactors },
-      source:"finviz.com + chartexchange.com", ts: new Date().toISOString()
+      ftd: null, ftdHistory: [],          // CE blokiran na Railway
+      borrowFee: null, shortInterestCE: null,  // CE blokiran na Railway
+      squeeze: { score:squeezeScore, label:squeezeLabel, factors:squeezeFactors, partial:true },
+      source:"finviz.com", ts: new Date().toISOString()
     };
     _amcCache.data = payload;
     _amcCache.ts   = Date.now();
-    console.log(`📊 AMC data osvježen — squeeze=${squeezeScore} ctb=${ctb}% avail=${avail===Infinity?"N/A":avail}`);
+    console.log("AMC data osvježen — squeeze=" + squeezeScore + " si=" + siPct + "% dtc=" + dtc + " relVol=" + relVol.toFixed(2));
     return payload;
   } catch(e) {
     console.error("fetchAmcData greška:", e.message);

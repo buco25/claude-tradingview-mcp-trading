@@ -4379,6 +4379,88 @@ async function amcSqueezeMonitor() {
   }
 }
 
+// ─── Squeeze Stocks Monitor — šalje Telegram alert kad dođe setup ─────────────
+const _sqAlertState = {}; // keyed by ticker → { lastLevel, lastAlertTs }
+
+function _sqParseVol(s) {
+  if (!s) return 0;
+  s = String(s).replace(/,/g, "");
+  if (s.endsWith("B")) return parseFloat(s) * 1e9;
+  if (s.endsWith("M")) return parseFloat(s) * 1e6;
+  if (s.endsWith("K")) return parseFloat(s) * 1e3;
+  return parseFloat(s) || 0;
+}
+
+async function squeezeStocksMonitor() {
+  for (const cfg of SQUEEZE_STOCKS) {
+    try {
+      const cache = _squeezeCache[cfg.ticker];
+      if (!cache?.data || cache.data.error) continue;
+      const d = cache.data;
+      const sq = d.squeeze;
+      if (!sq) continue;
+
+      const score   = sq.score ?? 0;
+      const level   = score >= 75 ? "explosive" : score >= 60 ? "high" : score >= 45 ? "moderate" : "low";
+      const now     = Date.now();
+      const state   = _sqAlertState[cfg.ticker] || { lastLevel: "", lastAlertTs: 0 };
+      const cooldownMs = (level === "explosive" ? 4 : 8) * 3600 * 1000;
+      const levelRaised = (level === "explosive" && state.lastLevel !== "explosive")
+                       || (level === "high"      && ["moderate","low",""].includes(state.lastLevel));
+      const cooldownExpired = (now - state.lastAlertTs) >= cooldownMs;
+
+      // Relative volume
+      const relVol = (() => {
+        const v = _sqParseVol(d.volume), a = _sqParseVol(d.avgVolume);
+        return a > 0 ? v / a : 1;
+      })();
+
+      const ctb    = d.borrowFee?.fee ?? 0;
+      const siPct  = parseFloat(d.shortPctFloat ?? "0") || 0;
+      const dtc    = parseFloat(d.shortRatio ?? "0") || 0;
+      const avail  = d.borrowFee?.available ?? Infinity;
+      const availStr = avail === Infinity ? "N/A" : avail >= 1e6 ? (avail/1e6).toFixed(1)+"M" : (avail/1e3).toFixed(0)+"K";
+
+      // Trigger: score ≥ 60 + (visok volume ILI CTB raste)
+      const trigger = score >= 60 && (relVol >= 1.4 || ctb >= 3 || dtc >= 8);
+      if (!trigger) continue;
+      if (!levelRaised && !cooldownExpired) continue;
+
+      const borrow = d.borrowFee;
+      const si     = { pct: siPct, daysToCover: dtc, shares: 0 };
+      const rec    = squeezeRecommendation(sq, borrow, si);
+
+      const ftdStr = d.ftd ? `${_sqParseVol(d.ftd.qty) >= 1e6 ? (_sqParseVol(d.ftd.qty)/1e6).toFixed(2)+"M" : d.ftd.qty} (${d.ftd.date})` : "N/A";
+      const chgStr = d.changePct ? ` ${d.changePct}` : "";
+
+      const msg = `🧨 <b>${cfg.emoji} ${cfg.ticker} — Short Squeeze Alert!</b>\n`
+        + "━━━━━━━━━━━━━━━━━━━━\n"
+        + `<b>Score: ${score}/100 — ${sq.label}</b>\n`
+        + `💵 Cijena: $${d.price?.toFixed(2) ?? "?"} (${chgStr})\n\n`
+        + "📊 <b>Ključni podaci:</b>\n"
+        + `• Short Float: ${siPct.toFixed(1)}%\n`
+        + `• Days to Cover: ${dtc.toFixed(1)} dana\n`
+        + `• Cost to Borrow: ${ctb.toFixed(2)}% god.\n`
+        + `• Dostupno: ${availStr} dionica\n`
+        + `• Rel. Volume: ${relVol.toFixed(2)}x prosjeka\n`
+        + `• FTD: ${ftdStr}\n\n`
+        + `🎯 <b>${rec.action}</b>\n\n`
+        + `🏦 <b>Dionice:</b> ${rec.shares}\n\n`
+        + `📈 <b>Opcije:</b> ${rec.options}`
+        + rec.compare
+        + `\n\n⚠️ <b>Rizik:</b> ${rec.risk}\n\n`
+        + `⏰ ${new Date().toLocaleString("hr-HR", { timeZone: "Europe/Zagreb" })}`;
+
+      await tgDash(msg);
+      _sqAlertState[cfg.ticker] = { lastLevel: level, lastAlertTs: now };
+      console.log(`🧨 ${cfg.ticker} squeeze alert poslan — score ${score}, relVol ${relVol.toFixed(2)}x`);
+
+    } catch (e) {
+      console.error(`squeezeStocksMonitor(${cfg.ticker}) greška:`, e.message);
+    }
+  }
+}
+
 // ─── Bot scheduler (svakih 5 min) ─────────────────────────────────────────────
 
 let botRunning = false;
@@ -4422,18 +4504,20 @@ server.listen(PORT, () => {
     }, 30 * 60 * 1000);           // svakih 30 min
   }, 90 * 1000); // pričekaj 90s da se server stabilizira pri startu
 
-  // ─── Squeeze Stocks background fetch — svakih 60 min (GME, KOSS, BYND, UPST, BBAI, SMCI) ──
+  // ─── Squeeze Stocks background fetch + monitor — svakih 60 min ───────────────
   setTimeout(async () => {
     // Sekvencijalno da ne preopteretimo Finviz/CMC (svaki ~10s)
     for (const cfg of SQUEEZE_STOCKS) {
       try { await fetchSqueezeStock(cfg); } catch {}
       await new Promise(r => setTimeout(r, 10000));
     }
+    await squeezeStocksMonitor(); // provjeri triggere odmah nakon fetchanja
     setInterval(async () => {
       for (const cfg of SQUEEZE_STOCKS) {
         try { await fetchSqueezeStock(cfg); } catch {}
         await new Promise(r => setTimeout(r, 10000));
       }
+      await squeezeStocksMonitor(); // provjeri svaki sat
     }, 60 * 60 * 1000); // svakih 60 min
   }, 45 * 1000); // pričekaj 45s (nakon AMC fetcha)
 

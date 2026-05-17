@@ -35,7 +35,7 @@ function nowLocal() {
 }
 
 const PORTFOLIO_DEFS = [
-  { id: "synapse_t", name: "ULTRA", color: "#db2777", emoji: "🎯", startCapital: 296.99, live: true },
+  { id: "synapse_t", name: "ULTRA", color: "#db2777", emoji: "🎯", startCapital: 376.83, live: true },
 ];
 
 // ─── All symbols — čita iz rules.json (lazily, nakon što loadRules bude definiran) ─
@@ -3296,6 +3296,33 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ ok: true, added, skipped: newRows.length - added }));
       } catch(e) {
         res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
+  // CSV replace — POST /api/replace-csv  (body: { pid, csv: "header\nrow1\nrow2..." })
+  // Potpuno zamjenjuje CSV fajl s novim sadržajem. NE dira open_positions JSON.
+  if (url.pathname === "/api/replace-csv" && req.method === "POST") {
+    let body = "";
+    req.on("data", d => { body += d; });
+    req.on("end", () => {
+      try {
+        const payload = JSON.parse(body || "{}");
+        const pid = payload.pid || "synapse_t";
+        const csvContent = payload.csv || "";
+        if (!csvContent) throw new Error("csv field je obavezan");
+        const f = `${DATA_DIR}/trades_${pid}.csv`;
+        writeFileSync(f, csvContent);
+        // Count rows
+        const lines = csvContent.trim().split("\n");
+        const dataLines = lines.slice(1).filter(l => l.trim());
+        const closed = dataLines.filter(l => l.includes("CLOSE_")).length;
+        const opened = dataLines.filter(l => !l.includes("CLOSE_")).length;
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true, total: dataLines.length, openRows: opened, closeRows: closed, file: f }));
+      } catch(e) {
+        res.writeHead(500); res.end(JSON.stringify({ ok: false, error: e.message }));
       }
     });
     return;

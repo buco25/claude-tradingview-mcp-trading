@@ -2772,19 +2772,55 @@ export async function checkBeStopAll() {
   }
 }
 
-async function setupSymbol(symbol) {
+// ─── Izračunaj siguran leverage na osnovu SL% ─────────────────────────────────
+// Formula: liq_distance = 1/leverage - maintenance_margin
+// Osiguravamo da liq_distance > SL + buffer
+//   Tier1 SL=1.5% → 40x (liq 2.00%)  ✅
+//   Tier2 SL=2.0% → 35x (liq 2.36%)  ✅
+//   Tier3 SL=2.5% → 30x (liq 2.83%)  ✅
+//   BTC   SL=1.5% → 40x (liq 2.00%)  ✅ (BTC_LEVERAGE 75x je PREVIŠE za 1.5% SL)
+function getSafeLeverage(slPct) {
+  const MAINT  = 0.005;  // 0.5% Bitget maintenance margin (konzervativno za sve symbolove)
+  const BUFFER = 0.003;  // 0.3% sigurnosni buffer između SL i liq
+  // max_lev pri kojima liq_distance > slPct + buffer
+  const maxLev = 1 / (slPct / 100 + BUFFER + MAINT);
+  // Zaokruži na najbliži niži višekratnik od 5, između 10 i 50
+  return Math.max(10, Math.min(50, Math.floor(maxLev / 5) * 5));
+}
+
+async function setupSymbol(symbol, slPct) {
   // 1) Isolated margin mode
   const mm = await bitgetPost("/api/v2/mix/account/set-margin-mode", {
     symbol, productType: "USDT-FUTURES", marginCoin: "USDT", marginMode: "isolated",
   });
   if (mm.code !== "00000") console.log(`  ⚠️  marginMode ${symbol}: ${mm.msg}`);
 
-  // 2) Leverage — BTC dobiva BTC_LEVERAGE (100x), ostali LEVERAGE (50x)
-  const targetLev = symbol === "BTCUSDT" ? BTC_LEVERAGE : LEVERAGE;
+  // 2) Tier-based leverage — sprječava likvidaciju PRIJE SL-a
+  //    getSafeLeverage(slPct) → max leverage pri kojem liq_distance > SL + buffer
+  //    Ako slPct nije dan → fallback na LEVERAGE (50x) za non-BTC, BTC_LEVERAGE za BTC
+  let targetLev;
+  if (slPct != null) {
+    targetLev = getSafeLeverage(slPct);
+    const liqDist = ((1 / targetLev - 0.005) * 100).toFixed(2);
+    console.log(`  🛡️  ${symbol} SL=${slPct}% → siguran leverage ${targetLev}x (liq @ ~${liqDist}% > SL)`);
+  } else {
+    targetLev = symbol === "BTCUSDT" ? BTC_LEVERAGE : LEVERAGE;
+    const liqDist = ((1 / targetLev - 0.005) * 100).toFixed(2);
+    if (liqDist < 2.0) {
+      console.log(`  ⚠️  ${symbol}: leverage ${targetLev}x → liq @ ~${liqDist}% — pazi, blizu liq!`);
+    }
+  }
+
+  // Generiraj listu fallback leveragea u silaznom redoslijedu (uvijek niži, nikad viši)
+  const levFallbacks = [targetLev];
+  for (const f of [50, 45, 40, 35, 30, 25, 20, 15, 10]) {
+    if (f < targetLev) levFallbacks.push(f);
+  }
+
   let actualLeverage = targetLev;
   for (const holdSide of ["long", "short"]) {
     let set = false;
-    for (const lev of [targetLev, 75, 50, 20, 10]) {
+    for (const lev of levFallbacks) {
       const lv = await bitgetPost("/api/v2/mix/account/set-leverage", {
         symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
         leverage: String(lev), holdSide,
@@ -2792,7 +2828,7 @@ async function setupSymbol(symbol) {
       if (lv.code === "00000") {
         if (lev !== targetLev) {
           console.log(`  ℹ️  ${symbol} ${holdSide}: max leverage je ${lev}x (ne ${targetLev}x) — sizing prilagođen`);
-          if (holdSide === "long") actualLeverage = lev;  // koristi long leverage kao referentni
+          if (holdSide === "long") actualLeverage = lev;
         }
         set = true;
         break;
@@ -2836,8 +2872,9 @@ async function closeBitgetPosition(symbol, side, quantity) {
 }
 
 async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp, slPct, tpPct) {
-  // Postavi isolated margin + leverage prije svakog naloga; vrati stvarni leverage
-  const actualLeverage = await setupSymbol(symbol);
+  // Postavi isolated margin + tier-based leverage prije svakog naloga
+  // slPct → getSafeLeverage → liq distance > SL (sprječava likvidaciju umjesto SL-a)
+  const actualLeverage = await setupSymbol(symbol, slPct);
   const quantity  = (sizeUSD / price).toFixed(4);
   const holdSide  = side === "LONG" ? "long" : "short";
 

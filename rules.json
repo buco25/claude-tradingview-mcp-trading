@@ -305,8 +305,9 @@
     }
   },
   "risk_rules": [
-    "Risk-based sizing: margin = equity × 1.5% | notional = margin × 50x (BTC: 75x) | Per-simbol SL/TP iz symbol_sltp",
-    "ULTRA: Tier1(SL1.5%/TP4%) Tier2(SL2%/TP4.5%) Tier3(SL2.5%/TP5.5%) / 50x leverage (BTC 75x) / rizik 1.5% banke po tradeu",
+    "Risk-based sizing: margin = equity × 1.5% | notional = margin × tier-based leverage | Per-simbol SL/TP iz symbol_sltp",
+    "ULTRA: Tier1(SL1.5%→40x/liq2%) Tier2(SL2%→30x/liq2.8%) Tier3(SL2.5%→25x/liq3.5%) / BTC 75x / rizik 1.5% banke po tradeu",
+    "KRITIČNO: getSafeLeverage() računa max_lev = 1/(slPct+0.3%buffer+0.5%maint) — liq distance uvijek > SL → nema likvidacije umjesto SL-a",
     "Samo jedna pozicija po simbolu istovremeno",
     "Max 8 otvorenih pozicija istovremeno + BTC bonus slot",
     "Max 3 novih ulaza po scan ciklusu (sprječava 8 simultanih gubitaka u lošem marketu)",

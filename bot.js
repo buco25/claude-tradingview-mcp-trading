@@ -2128,6 +2128,7 @@ function addPosition(pid, entry) {
     slPct:      entry.slPct ?? null,    // za BE-STOP i log
     tpPct:      entry.tpPct ?? null,    // za BE-STOP threshold
     sigMask:    entry.sigMask ?? null,  // za signal analitiku
+    entryMode:  entry.entryMode || "PBK",  // "MOM" ili "PBK"
     orderId:    entry.orderId,
     mode:       entry.mode || (PAPER_TRADING ? "PAPER" : BITGET_DEMO ? "DEMO" : "LIVE"),
     openedAt:   entry.timestamp,

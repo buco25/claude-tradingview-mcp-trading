@@ -2665,8 +2665,8 @@ setInterval(updateCountdown, 1000);
       style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">⚛️ IONQ</button>
     <button onclick="squeezeShowTab('SOUN')" id="squeeze-tab-SOUN"
       style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🔊 SOUN</button>
-    <button onclick="squeezeShowTab('CVNA')" id="squeeze-tab-CVNA"
-      style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🚗 CVNA</button>
+    <button onclick="squeezeShowTab('HIMS')" id="squeeze-tab-HIMS"
+      style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">💊 HIMS</button>
   </div>
 
   <!-- Compact grid: sve dionice odjednom -->
@@ -2705,8 +2705,8 @@ setInterval(updateCountdown, 1000);
 // ── Squeeze panel — flat global functions (no IIFE, no closure issues) ──────
 var _sqData   = {};
 var _sqActive = null;
-var _sqTickers = ['AMC','GME','KOSS','BYND','UPST','BBAI','SMCI','RIVN','IONQ','SOUN','CVNA'];
-var _sqEmojis  = { AMC:'🍿', GME:'🎮', KOSS:'🎧', BYND:'🌱', UPST:'🤖', BBAI:'🐻', SMCI:'🖥️', RIVN:'⚡', IONQ:'⚛️', SOUN:'🔊', CVNA:'🚗' };
+var _sqTickers = ['AMC','GME','KOSS','BYND','UPST','BBAI','SMCI','RIVN','IONQ','SOUN','HIMS'];
+var _sqEmojis  = { AMC:'🍿', GME:'🎮', KOSS:'🎧', BYND:'🌱', UPST:'🤖', BBAI:'🐻', SMCI:'🖥️', RIVN:'⚡', IONQ:'⚛️', SOUN:'🔊', HIMS:'💊' };
 
 function _sqScoreColor(s) { return s>=75?'#ef4444':s>=55?'#f97316':s>=35?'#eab308':'#22c55e'; }
 function _sqFmt(v)  { return v != null ? v : '—'; }
@@ -4114,7 +4114,7 @@ const SQUEEZE_STOCKS = [
   { ticker: "RIVN", name: "Rivian Automotive",      cmcSlug: "rivian",               emoji: "⚡" },
   { ticker: "IONQ", name: "IonQ Inc.",               cmcSlug: "ionq",                 emoji: "⚛️" },
   { ticker: "SOUN", name: "SoundHound AI Inc.",      cmcSlug: "soundhound-ai",        emoji: "🔊" },
-  { ticker: "CVNA", name: "Carvana Co.",             cmcSlug: "carvana",              emoji: "🚗" },
+  { ticker: "HIMS", name: "Hims & Hers Health Inc.", cmcSlug: "hims-hers-health",     emoji: "💊" },
 ];
 
 const _squeezeCache = {};          // keyed by ticker → { data, ts }

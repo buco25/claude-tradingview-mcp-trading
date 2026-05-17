@@ -922,7 +922,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="30">
+<meta http-equiv="refresh" content="60">
 <title>🎯 ULTRA Trading Bot</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
@@ -1090,6 +1090,9 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="stat-sub">SL 1.5–2.5% / TP 2.5–3.5% · per-simbol · rizik 1%</div>
     </div>
   </div>
+
+  <!-- Open positions — na vrhu za brzi pregled -->
+  ${positionsSections}
 
   <!-- ── Phase 2 Stats Panel (od 15.5 = stabilna strategija) ──────────────── -->
   ${(() => {
@@ -1583,9 +1586,6 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     </div>
   </div>
 
-  <!-- Open positions -->
-  ${positionsSections}
-
   <!-- Closed trades -->
   <div style="margin-top:40px">
     ${tradesSections}
@@ -1594,7 +1594,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
 </div>
 
 <div class="footer">
-  Auto-refresh svakih 30s &nbsp;|&nbsp; ${nowLocal()} (UTC+2)
+  Auto-refresh svakih 60s &nbsp;|&nbsp; ${nowLocal()} (UTC+2)
 </div>
 
 <script>
@@ -2691,250 +2691,274 @@ setInterval(updateCountdown, 1000);
 </div>
 
 <script>
-(function squeezePanel() {
-  var _allData = {};
-  var _activeTab = null;
+// ── Squeeze panel — flat global functions (no IIFE, no closure issues) ──────
+var _sqData   = {};
+var _sqActive = null;
+var _sqTickers = ['AMC','GME','KOSS','BYND','UPST','BBAI','SMCI'];
+var _sqEmojis  = { AMC:'🍿', GME:'🎮', KOSS:'🎧', BYND:'🌱', UPST:'🤖', BBAI:'🐻', SMCI:'🖥️' };
 
-  function scoreColor(s) { return s>=75?'#ef4444':s>=55?'#f97316':s>=35?'#eab308':'#22c55e'; }
-  function setEl(id, v) { var e = document.getElementById(id); if (e) e.textContent = v; }
-  function fmt(v) { return v != null ? v : '—'; }
-  function fmtQty(q) { return q>=1e6?(q/1e6).toFixed(2)+'M':q>=1e3?(q/1e3).toFixed(0)+'K':String(q); }
+function _sqScoreColor(s) { return s>=75?'#ef4444':s>=55?'#f97316':s>=35?'#eab308':'#22c55e'; }
+function _sqFmt(v)  { return v != null ? v : '—'; }
+function _sqFmtQ(q) { return q>=1e6?(q/1e6).toFixed(2)+'M':q>=1e3?(q/1e3).toFixed(0)+'K':String(q); }
+// Legacy aliases kept in case referenced elsewhere — remove if unused
+function scoreColor(s) { return _sqScoreColor(s); }
+function fmt(v)        { return _sqFmt(v); }
+function fmtQty(q)     { return _sqFmtQ(q); }
 
-  function renderGrid() {
-    var grid = document.getElementById('squeeze-grid');
-    if (!grid) return;
-    var tickers = ['AMC','GME','KOSS','BYND','UPST','BBAI','SMCI'];
-    var emojis  = { AMC:'🍿', GME:'🎮', KOSS:'🎧', BYND:'🌱', UPST:'🤖', BBAI:'🐻', SMCI:'🖥️' };
-    var html = '';
-    for (var ti=0; ti<tickers.length; ti++) {
-      var t = tickers[ti];
-      var d = _allData[t];
-      var em = emojis[t] || '';
-      if (!d || d.loading) {
-        html += '<div onclick="squeezeShowTab(\'' + t + '\')" style="background:#1f2937;border:1px solid #374151;border-radius:8px;padding:12px;cursor:pointer;text-align:center">'
-              + '<div style="font-size:11px;color:#9ca3af;font-weight:700">' + em + ' ' + t + '</div>'
-              + '<div style="font-size:11px;color:#6b7280;margin-top:6px">Učitavam…</div>'
-              + '</div>';
-        continue;
-      }
-      var sq = d.squeeze || {};
-      var sqScore = sq.score != null ? sq.score : 0;
-      var sqColor = scoreColor(sqScore);
-      var priceStr = d.price != null ? '$' + d.price.toFixed(2) : '—';
-      var chgStr = d.changePct ? String(d.changePct) : '';
-      var chgUp = chgStr && chgStr.charAt(0) !== '-';
-      var siStr = fmt(d.shortPctFloat);
-      var dtcStr = fmt(d.shortRatio);
-      var ctbStr = d.borrowFee && d.borrowFee.fee != null ? d.borrowFee.fee.toFixed(1)+'%' : '—';
-      var sqLbl  = sq.label ? sq.label.split(' ').slice(0,2).join(' ') : '—';
-      html += '<div onclick="squeezeShowTab(\'' + t + '\')" style="background:#1f2937;border:1px solid #374151;border-radius:8px;padding:12px;cursor:pointer" onmouseenter="this.style.borderColor=\'#6366f1\'" onmouseleave="this.style.borderColor=\'#374151\'">'
-            + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
-            +   '<div style="font-size:11px;color:#9ca3af;font-weight:700">' + em + ' ' + t + '</div>'
-            +   '<div style="font-size:14px;font-weight:900;color:' + sqColor + '">' + sqScore + '</div>'
-            + '</div>'
-            + '<div style="font-size:18px;font-weight:800;color:#f3f4f6">' + priceStr + '</div>'
-            + (chgStr ? '<div style="font-size:11px;color:' + (chgUp?'#34d399':'#ef4444') + '">' + (chgUp?'▲':'▼') + ' ' + chgStr + '</div>' : '')
-            + '<div style="margin-top:6px;display:grid;grid-template-columns:1fr 1fr;gap:3px;font-size:10px;color:#9ca3af">'
-            +   '<span>SI: <b style="color:#fff">' + siStr + '</b></span>'
-            +   '<span>DTC: <b style="color:#fff">' + dtcStr + 'd</b></span>'
-            +   '<span>CTB: <b style="color:#fff">' + ctbStr + '</b></span>'
-            +   '<span><b style="color:' + sqColor + '">' + sqLbl + '</b></span>'
-            + '</div>'
+function sqRenderGrid() {
+  var grid = document.getElementById('squeeze-grid');
+  if (!grid) return;
+  var html = '';
+  for (var ti=0; ti<_sqTickers.length; ti++) {
+    var t = _sqTickers[ti];
+    var d = _sqData[t];
+    var em = _sqEmojis[t] || '';
+    if (!d || d.loading) {
+      html += '<div onclick="squeezeShowTab(\'' + t + '\')" style="background:#1f2937;border:1px solid #374151;border-radius:8px;padding:12px;cursor:pointer;text-align:center">'
+            + '<div style="font-size:11px;color:#9ca3af;font-weight:700">' + em + ' ' + t + '</div>'
+            + '<div style="font-size:11px;color:#6b7280;margin-top:6px">Učitavam…</div>'
             + '</div>';
+      continue;
     }
-    grid.innerHTML = html;
-  }
-
-  function renderDetail(ticker) {
-    var d = _allData[ticker];
-    var panel = document.getElementById('squeeze-detail');
-    if (!panel) return;
-    if (!d || d.error) { panel.style.display = 'none'; return; }
-    if (d.loading) { showDetailLoading(ticker); return; }
-    panel.style.display = 'block';
-
-    var emojis = { AMC:'🍿', GME:'🎮', KOSS:'🎧', BYND:'🌱', UPST:'🤖', BBAI:'🐻', SMCI:'🖥️' };
     var sq = d.squeeze || {};
     var sqScore = sq.score != null ? sq.score : 0;
-    var sqCol = scoreColor(sqScore);
-    var ctbColor = d.borrowFee && d.borrowFee.fee != null ? (d.borrowFee.fee>=5?'#f87171':d.borrowFee.fee>=1?'#fbbf24':'#4b5563') : '#4b5563';
-
-    // Metrics cards
-    var items = [
-      { label: '💵 Cijena',          val: d.price!=null?'$'+d.price.toFixed(2):'—',                        color: '#f3f4f6' },
-      { label: '📉 Short Float',      val: fmt(d.shortPctFloat),                                              color: '#ef4444' },
-      { label: '⏱️ Short Ratio',      val: fmt(d.shortRatio)+'d',                                             color: '#f59e0b' },
-      { label: '💸 Cost to Borrow',   val: d.borrowFee&&d.borrowFee.fee!=null?d.borrowFee.fee.toFixed(2)+'%':'N/A', color: ctbColor },
-      { label: '🚨 FTD',              val: d.ftd?fmtQty(d.ftd.qty)+' ('+d.ftd.date+')':'N/A',                color: '#f87171' },
-      { label: '📊 Market Cap',        val: fmt(d.marketCap),                                                  color: '#e5e7eb' },
-      { label: '🏛 Inst Own',          val: fmt(d.instOwn),                                                   color: '#60a5fa' },
-      { label: '📈 52W High',          val: fmt(d.high52w),                                                   color: '#9ca3af' },
-    ];
-    var mHtml = '';
-    for (var i=0; i<items.length; i++) {
-      var it = items[i];
-      mHtml += '<div style="background:#1f2937;border:1px solid #374151;border-radius:6px;padding:9px">'
-             + '<div style="font-size:9px;color:#9ca3af;text-transform:uppercase;margin-bottom:3px">' + it.label + '</div>'
-             + '<div style="font-size:16px;font-weight:700;color:' + it.color + '">' + it.val + '</div>'
-             + '</div>';
-    }
-
-    // Squeeze factors
-    var factors = d.squeezeFactors || (d.squeeze && d.squeeze.factors) || [];
-    var fHtml = '';
-    for (var fi=0; fi<factors.length; fi++) {
-      var f = factors[fi];
-      if (f.score === null) {
-        fHtml += '<div style="display:flex;justify-content:space-between;font-size:11px;padding:4px 0;border-bottom:1px solid #1f2937">'
-               + '<span style="color:#9ca3af">' + f.name + '</span><span style="color:#4b5563">' + f.val + ' · N/A</span></div>';
-      } else {
-        var pct = Math.round(f.score / f.max * 100);
-        var fCol = pct>=75?'#ef4444':pct>=50?'#f97316':pct>=25?'#eab308':'#374151';
-        fHtml += '<div style="margin-bottom:5px">'
-               + '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">'
-               +   '<span style="color:#9ca3af">' + f.name + '</span>'
-               +   '<span style="color:#e5e7eb;font-weight:600">' + f.val + ' <span style="color:' + fCol + '">(' + f.score + '/' + f.max + ')</span></span>'
-               + '</div>'
-               + '<div style="background:#374151;border-radius:3px;height:4px">'
-               +   '<div style="background:' + fCol + ';height:4px;border-radius:3px;width:' + pct + '%;transition:width 1s"></div>'
-               + '</div></div>';
-      }
-    }
-
-    // Rebuild cijeli panel HTML — ne ovisi o ID-ovima koji su možda zamijenjeni
-    var dashArc = 163.4 * (1 - sqScore / 100);
-    panel.innerHTML =
-        '<div style="font-size:11px;color:#9ca3af;margin-bottom:12px">'
-      +   (emojis[ticker]||'') + ' <b style="color:#e5e7eb">' + (d.name||ticker) + '</b> (NYSE/NASDAQ: ' + ticker + ')'
-      + '</div>'
-      + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px">'
-      + mHtml + '</div>'
-      + '<div style="background:linear-gradient(135deg,#1e1b4b,#111827);border:1px solid #4f46e5;border-radius:10px;padding:14px">'
-      +   '<div style="display:flex;align-items:center;gap:14px;margin-bottom:12px">'
-      +     '<div style="position:relative;width:64px;height:64px;flex-shrink:0">'
-      +       '<svg width="64" height="64" viewBox="0 0 64 64">'
-      +         '<circle cx="32" cy="32" r="26" fill="none" stroke="#374151" stroke-width="5"/>'
-      +         '<circle cx="32" cy="32" r="26" fill="none" stroke="' + sqCol + '" stroke-width="5"'
-      +           ' stroke-dasharray="163.4" stroke-dashoffset="' + dashArc + '"'
-      +           ' stroke-linecap="round" transform="rotate(-90 32 32)"/>'
-      +       '</svg>'
-      +       '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center">'
-      +         '<div style="font-size:17px;font-weight:900;color:' + sqCol + '">' + sqScore + '</div>'
-      +       '</div>'
-      +     '</div>'
-      +     '<div>'
-      +       '<div style="font-size:18px;font-weight:800;color:#e5e7eb">' + (sq.label||'—') + '</div>'
-      +       '<div style="font-size:10px;color:#9ca3af;margin-top:3px">Skor 0–100 · Short Squeeze Potencijal</div>'
-      +     '</div>'
-      +   '</div>'
-      +   '<div style="display:grid;gap:5px">' + fHtml + '</div>'
-      + '</div>';
+    var sqColor = _sqScoreColor(sqScore);
+    var priceStr = d.price != null ? '$' + d.price.toFixed(2) : '—';
+    var chgStr = d.changePct ? String(d.changePct) : '';
+    var chgUp = chgStr && chgStr.charAt(0) !== '-';
+    var siStr  = _sqFmt(d.shortPctFloat);
+    var dtcStr = _sqFmt(d.shortRatio);
+    var ctbStr = d.borrowFee && d.borrowFee.fee != null ? d.borrowFee.fee.toFixed(1)+'%' : '—';
+    var sqLbl  = sq.label ? sq.label.split(' ').slice(0,2).join(' ') : '—';
+    html += '<div onclick="squeezeShowTab(\'' + t + '\')" style="background:#1f2937;border:1px solid #374151;border-radius:8px;padding:12px;cursor:pointer" onmouseenter="this.style.borderColor=\'#6366f1\'" onmouseleave="this.style.borderColor=\'#374151\'">'
+          + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
+          +   '<div style="font-size:11px;color:#9ca3af;font-weight:700">' + em + ' ' + t + '</div>'
+          +   '<div style="font-size:14px;font-weight:900;color:' + sqColor + '">' + sqScore + '</div>'
+          + '</div>'
+          + '<div style="font-size:18px;font-weight:800;color:#f3f4f6">' + priceStr + '</div>'
+          + (chgStr ? '<div style="font-size:11px;color:' + (chgUp?'#34d399':'#ef4444') + '">' + (chgUp?'▲':'▼') + ' ' + chgStr + '</div>' : '')
+          + '<div style="margin-top:6px;display:grid;grid-template-columns:1fr 1fr;gap:3px;font-size:10px;color:#9ca3af">'
+          +   '<span>SI: <b style="color:#fff">' + siStr + '</b></span>'
+          +   '<span>DTC: <b style="color:#fff">' + dtcStr + 'd</b></span>'
+          +   '<span>CTB: <b style="color:#fff">' + ctbStr + '</b></span>'
+          +   '<span><b style="color:' + sqColor + '">' + sqLbl + '</b></span>'
+          + '</div>'
+          + '</div>';
   }
+  grid.innerHTML = html;
+}
 
-  function showDetailLoading(ticker) {
-    var panel = document.getElementById('squeeze-detail');
-    if (!panel) return;
+function sqRenderDetail(ticker) {
+  var d = _sqData[ticker];
+  var panel = document.getElementById('squeeze-detail');
+  if (!panel) return;
+  if (!d || d.error) {
+    panel.style.display = 'block';
+    panel.innerHTML = '<div style="text-align:center;padding:32px;color:#dc2626">'
+      + '<div style="font-size:28px">❌</div>'
+      + '<div style="margin-top:8px">' + (d && d.error ? 'Greška: ' + d.error : 'Nema podataka') + '</div>'
+      + '</div>';
+    return;
+  }
+  if (d.loading) {
     panel.style.display = 'block';
     panel.innerHTML = '<div style="text-align:center;padding:40px 20px;color:#9ca3af">'
       + '<div style="font-size:28px;margin-bottom:12px">⏳</div>'
       + '<div style="font-size:14px;font-weight:600;color:#e5e7eb">Učitavam ' + ticker + '…</div>'
-      + '<div style="font-size:11px;margin-top:8px">Finviz + companiesmarketcap.com · može trajati 10–20s</div>'
+      + '<div style="font-size:11px;margin-top:8px">Finviz · može trajati 10–20s</div>'
       + '</div>';
+    return;
+  }
+  panel.style.display = 'block';
+
+  var sq = d.squeeze || {};
+  var sqScore = sq.score != null ? sq.score : 0;
+  var sqCol = _sqScoreColor(sqScore);
+  var ctbFee = d.borrowFee && d.borrowFee.fee != null ? d.borrowFee.fee : null;
+  var ctbColor = ctbFee!=null ? (ctbFee>=5?'#f87171':ctbFee>=1?'#fbbf24':'#4b5563') : '#4b5563';
+
+  var items = [
+    { label:'💵 Cijena',         val: d.price!=null?'$'+d.price.toFixed(2):'—',                 color:'#f3f4f6' },
+    { label:'📉 Short Float',    val: _sqFmt(d.shortPctFloat),                                   color:'#ef4444' },
+    { label:'⏱ Short Ratio',    val: _sqFmt(d.shortRatio)+'d',                                  color:'#f59e0b' },
+    { label:'💸 Cost to Borrow', val: ctbFee!=null?ctbFee.toFixed(2)+'%':'N/A',                 color:ctbColor  },
+    { label:'🚨 FTD',            val: d.ftd?_sqFmtQ(d.ftd.qty)+' ('+d.ftd.date+')':'N/A',      color:'#f87171' },
+    { label:'📊 Market Cap',     val: _sqFmt(d.marketCap),                                       color:'#e5e7eb' },
+    { label:'🏛 Inst Own',       val: _sqFmt(d.instOwn),                                         color:'#60a5fa' },
+    { label:'📈 52W High',       val: _sqFmt(d.high52w),                                         color:'#9ca3af' },
+  ];
+  var mHtml = '';
+  for (var i=0; i<items.length; i++) {
+    var it = items[i];
+    mHtml += '<div style="background:#1f2937;border:1px solid #374151;border-radius:6px;padding:9px">'
+           + '<div style="font-size:9px;color:#9ca3af;text-transform:uppercase;margin-bottom:3px">' + it.label + '</div>'
+           + '<div style="font-size:16px;font-weight:700;color:' + it.color + '">' + it.val + '</div>'
+           + '</div>';
   }
 
-  function setAmcPanelVisible(visible) {
-    var amcPanel = document.getElementById('amc-panel');
-    if (amcPanel) amcPanel.style.display = visible ? 'block' : 'none';
-  }
-
-  function scrollToDetail() {
-    var detail = document.getElementById('squeeze-detail');
-    if (detail) setTimeout(function() { detail.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 80);
-  }
-
-  window.squeezeShowTab = function(ticker) {
-    _activeTab = ticker;
-
-    // Tab highlight
-    var tabs = ['AMC','GME','KOSS','BYND','UPST','BBAI','SMCI'];
-    for (var i=0; i<tabs.length; i++) {
-      var btn = document.getElementById('squeeze-tab-'+tabs[i]);
-      if (!btn) continue;
-      btn.style.background = tabs[i]===ticker ? '#6366f1' : '#374151';
-      btn.style.color = tabs[i]===ticker ? '#fff' : '#9ca3af';
-    }
-
-    if (ticker === 'AMC') {
-      // AMC: pokaži originalni AMC panel ispod, sakrij squeeze-detail
-      setAmcPanelVisible(true);
-      var det = document.getElementById('squeeze-detail');
-      if (det) det.style.display = 'none';
-      // Scroll do AMC panela
-      var amcP = document.getElementById('amc-panel');
-      if (amcP) setTimeout(function(){ amcP.scrollIntoView({ behavior:'smooth', block:'start' }); }, 80);
+  var factors = d.squeezeFactors || (sq.factors) || [];
+  var fHtml = '';
+  for (var fi=0; fi<factors.length; fi++) {
+    var f = factors[fi];
+    if (f.score === null) {
+      fHtml += '<div style="display:flex;justify-content:space-between;font-size:11px;padding:4px 0;border-bottom:1px solid #1f2937">'
+             + '<span style="color:#9ca3af">' + f.name + '</span><span style="color:#4b5563">' + f.val + ' · N/A</span></div>';
     } else {
-      // Non-AMC: sakrij AMC panel, pokaži detail UNUTAR watchlist panela
-      setAmcPanelVisible(false);
-
-      var existing = _allData[ticker];
-      if (existing && !existing.loading && !existing.error) {
-        renderDetail(ticker);
-        scrollToDetail();
-      } else {
-        // Pokaži spinner odmah — server blokira i fetchira (~15s)
-        showDetailLoading(ticker);
-        scrollToDetail();
-        fetch('/api/squeeze?ticker='+ticker).then(function(r){return r.json();}).then(function(d){
-          if (d && d.error) {
-            var panel = document.getElementById('squeeze-detail');
-            if (panel) panel.innerHTML = '<div style="text-align:center;padding:40px;color:#dc2626">'
-              + '<div style="font-size:28px">❌</div><div style="margin-top:8px">Greška: ' + d.error + '</div></div>';
-            return;
-          }
-          _allData[ticker] = d;
-          renderGrid();
-          if (_activeTab === ticker) { renderDetail(ticker); scrollToDetail(); }
-        }).catch(function(e){
-          var panel = document.getElementById('squeeze-detail');
-          if (panel) panel.innerHTML = '<div style="text-align:center;padding:40px;color:#dc2626">'
-            + '<div style="font-size:28px">❌</div><div style="margin-top:8px">Mreža: ' + e.message + '</div></div>';
-        });
-      }
+      var pct = Math.round(f.score / f.max * 100);
+      var fCol = pct>=75?'#ef4444':pct>=50?'#f97316':pct>=25?'#eab308':'#374151';
+      fHtml += '<div style="margin-bottom:5px">'
+             + '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">'
+             +   '<span style="color:#9ca3af">' + f.name + '</span>'
+             +   '<span style="color:#e5e7eb;font-weight:600">' + f.val + ' <span style="color:' + fCol + '">(' + f.score + '/' + f.max + ')</span></span>'
+             + '</div>'
+             + '<div style="background:#374151;border-radius:3px;height:4px">'
+             +   '<div style="background:' + fCol + ';height:4px;border-radius:3px;width:' + pct + '%;transition:width 1s"></div>'
+             + '</div></div>';
     }
-  };
-
-  window.squeezeForceRefresh = function() {
-    document.getElementById('squeeze-ts').textContent = 'Osvježavam sve dionice…';
-    fetch('/api/amc?force=1').then(function(r){return r.json();}).then(function(d){
-      _allData['AMC'] = Object.assign({}, d, { squeezeFactors: d.squeeze && d.squeeze.factors });
-      if (_activeTab === 'AMC') renderDetail('AMC');
-    }).catch(function(){});
-    fetch('/api/squeeze').then(function(r){return r.json();}).then(function(arr){
-      for (var i=0; i<arr.length; i++) { if (arr[i].ticker) _allData[arr[i].ticker] = arr[i]; }
-      renderGrid();
-      if (_activeTab && _allData[_activeTab]) renderDetail(_activeTab);
-      document.getElementById('squeeze-ts').textContent = new Date().toLocaleTimeString('hr-HR',{hour:'2-digit',minute:'2-digit'}) + ' · osvježeno';
-    }).catch(function(){});
-  };
-
-  function loadSqueeze() {
-    fetch('/api/amc').then(function(r){return r.json();}).then(function(amc){
-      if (amc && !amc.error) _allData['AMC'] = Object.assign({}, amc, { squeezeFactors: amc.squeeze && amc.squeeze.factors });
-    }).catch(function(){});
-    fetch('/api/squeeze').then(function(r){return r.json();}).then(function(arr){
-      for (var i=0; i<arr.length; i++) { if (arr[i].ticker) _allData[arr[i].ticker] = arr[i]; }
-      renderGrid();
-      var ts = document.getElementById('squeeze-ts');
-      if (ts) ts.textContent = new Date().toLocaleTimeString('hr-HR',{hour:'2-digit',minute:'2-digit'}) + ' · cache';
-    }).catch(function(e){
-      var ts = document.getElementById('squeeze-ts');
-      if (ts) ts.textContent = 'Greška: ' + e.message;
-    });
   }
 
-  loadSqueeze();
-  setInterval(loadSqueeze, 60 * 60 * 1000);
-})();
+  var dashArc = 163.4 * (1 - sqScore / 100);
+  panel.innerHTML =
+      '<div style="font-size:11px;color:#9ca3af;margin-bottom:12px">'
+    +   (_sqEmojis[ticker]||'') + ' <b style="color:#e5e7eb">' + (d.name||ticker) + '</b> (NYSE/NASDAQ: ' + ticker + ')'
+    + '</div>'
+    + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px">'
+    + mHtml + '</div>'
+    + '<div style="background:linear-gradient(135deg,#1e1b4b,#111827);border:1px solid #4f46e5;border-radius:10px;padding:14px">'
+    +   '<div style="display:flex;align-items:center;gap:14px;margin-bottom:12px">'
+    +     '<div style="position:relative;width:64px;height:64px;flex-shrink:0">'
+    +       '<svg width="64" height="64" viewBox="0 0 64 64">'
+    +         '<circle cx="32" cy="32" r="26" fill="none" stroke="#374151" stroke-width="5"/>'
+    +         '<circle cx="32" cy="32" r="26" fill="none" stroke="' + sqCol + '" stroke-width="5"'
+    +           ' stroke-dasharray="163.4" stroke-dashoffset="' + dashArc + '"'
+    +           ' stroke-linecap="round" transform="rotate(-90 32 32)"/>'
+    +       '</svg>'
+    +       '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center">'
+    +         '<div style="font-size:17px;font-weight:900;color:' + sqCol + '">' + sqScore + '</div>'
+    +       '</div>'
+    +     '</div>'
+    +     '<div>'
+    +       '<div style="font-size:18px;font-weight:800;color:#e5e7eb">' + (sq.label||'—') + '</div>'
+    +       '<div style="font-size:10px;color:#9ca3af;margin-top:3px">Skor 0–100 · Short Squeeze Potencijal</div>'
+    +     '</div>'
+    +   '</div>'
+    +   '<div style="display:grid;gap:5px">' + fHtml + '</div>'
+    + '</div>';
+}
+
+// ── squeezeShowTab — GLOBAL (not window.x inside IIFE) ───────────────────────
+function squeezeShowTab(ticker) {
+  _sqActive = ticker;
+  sessionStorage.setItem('sqActiveTab', ticker);
+
+  // 1. Tab highlight
+  for (var i=0; i<_sqTickers.length; i++) {
+    var btn = document.getElementById('squeeze-tab-'+_sqTickers[i]);
+    if (!btn) continue;
+    btn.style.background = (_sqTickers[i]===ticker) ? '#6366f1' : '#374151';
+    btn.style.color      = (_sqTickers[i]===ticker) ? '#fff'     : '#9ca3af';
+  }
+
+  // 2. Always hide AMC panel first (re-shown below if AMC tab)
+  var amcPanel = document.getElementById('amc-panel');
+  if (amcPanel) amcPanel.style.display = 'none';
+
+  if (ticker === 'AMC') {
+    // Show AMC panel, hide squeeze-detail
+    if (amcPanel) amcPanel.style.display = 'block';
+    var sqDet = document.getElementById('squeeze-detail');
+    if (sqDet) sqDet.style.display = 'none';
+    setTimeout(function() {
+      var ap = document.getElementById('amc-panel');
+      if (ap) ap.scrollIntoView({ behavior:'smooth', block:'start' });
+    }, 80);
+    return;
+  }
+
+  // 3. Non-AMC: show squeeze-detail (spinner or data)
+  var panel = document.getElementById('squeeze-detail');
+  if (panel) panel.style.display = 'block';
+
+  var existing = _sqData[ticker];
+  if (existing && !existing.loading && !existing.error) {
+    sqRenderDetail(ticker);
+  } else {
+    // Show spinner immediately
+    if (panel) {
+      panel.innerHTML = '<div style="text-align:center;padding:40px 20px;color:#9ca3af">'
+        + '<div style="font-size:28px;margin-bottom:12px">⏳</div>'
+        + '<div style="font-size:14px;font-weight:600;color:#e5e7eb">Učitavam ' + ticker + '…</div>'
+        + '<div style="font-size:11px;margin-top:8px">Finviz · može trajati 10–20s</div>'
+        + '</div>';
+    }
+    // Fetch from server (blocking ~15s)
+    fetch('/api/squeeze?ticker='+ticker)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        _sqData[ticker] = data;
+        sqRenderGrid();
+        if (_sqActive === ticker) sqRenderDetail(ticker);
+      })
+      .catch(function(e) {
+        if (_sqActive === ticker) {
+          var p = document.getElementById('squeeze-detail');
+          if (p) p.innerHTML = '<div style="text-align:center;padding:40px;color:#dc2626">'
+            + '<div style="font-size:28px">❌</div>'
+            + '<div style="margin-top:8px">Mreža: ' + (e.message||'Greška') + '</div></div>';
+        }
+      });
+  }
+
+  // 4. Scroll to squeeze-detail
+  setTimeout(function() {
+    var det = document.getElementById('squeeze-detail');
+    if (det) det.scrollIntoView({ behavior:'smooth', block:'start' });
+  }, 80);
+}
+
+function squeezeForceRefresh() {
+  var tsEl = document.getElementById('squeeze-ts');
+  if (tsEl) tsEl.textContent = 'Osvježavam sve dionice…';
+  fetch('/api/amc?force=1').then(function(r){return r.json();}).then(function(d){
+    _sqData['AMC'] = Object.assign({}, d, { squeezeFactors: d.squeeze && d.squeeze.factors });
+    if (_sqActive === 'AMC') sqRenderDetail('AMC');
+  }).catch(function(){});
+  fetch('/api/squeeze').then(function(r){return r.json();}).then(function(arr){
+    for (var i=0; i<arr.length; i++) { if (arr[i] && arr[i].ticker) _sqData[arr[i].ticker] = arr[i]; }
+    sqRenderGrid();
+    if (_sqActive && _sqData[_sqActive]) sqRenderDetail(_sqActive);
+    var ts = document.getElementById('squeeze-ts');
+    if (ts) ts.textContent = new Date().toLocaleTimeString('hr-HR',{hour:'2-digit',minute:'2-digit'}) + ' · osvježeno';
+  }).catch(function(){});
+}
+
+function _sqLoad() {
+  fetch('/api/amc').then(function(r){return r.json();}).then(function(amc){
+    if (amc && !amc.error) _sqData['AMC'] = Object.assign({}, amc, { squeezeFactors: amc.squeeze && amc.squeeze.factors });
+  }).catch(function(){});
+  fetch('/api/squeeze').then(function(r){return r.json();}).then(function(arr){
+    for (var i=0; i<arr.length; i++) { if (arr[i] && arr[i].ticker) _sqData[arr[i].ticker] = arr[i]; }
+    sqRenderGrid();
+    var ts = document.getElementById('squeeze-ts');
+    if (ts) ts.textContent = new Date().toLocaleTimeString('hr-HR',{hour:'2-digit',minute:'2-digit'}) + ' · cache';
+  }).catch(function(e){
+    var ts = document.getElementById('squeeze-ts');
+    if (ts) ts.textContent = 'Greška: ' + e.message;
+  });
+}
+
+// ── sessionStorage — čuva aktivan tab kroz page reload (meta refresh) ──────
+var _sqSavedTab = sessionStorage.getItem('sqActiveTab');
+
+// Init
+_sqLoad();
+setInterval(_sqLoad, 60 * 60 * 1000);
+
+// Restore active tab after reload
+if (_sqSavedTab) {
+  sessionStorage.removeItem('sqActiveTab');
+  setTimeout(function() { squeezeShowTab(_sqSavedTab); }, 200);
+}
 </script>
 
 <!-- ═══════════════════════════════════════════════════════════ AMC PANEL ═══ -->

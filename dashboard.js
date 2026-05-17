@@ -3252,6 +3252,55 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // CSV import — POST /api/import-csv  (body: { pid, rows: [{...}] } ili raw CSV string)
+  // Dodaje redove u postojeći CSV, preskače duplikate po Order ID
+  if (url.pathname === "/api/import-csv" && req.method === "POST") {
+    let body = "";
+    req.on("data", d => { body += d; });
+    req.on("end", () => {
+      try {
+        const payload = JSON.parse(body || "{}");
+        const pid = payload.pid || "synapse_t";
+        const f = `${DATA_DIR}/trades_${pid}.csv`;
+        const CSV_HEADERS = "Date,Time (UTC),Exchange,Symbol,Side,Quantity,Price,Total USD,Fee (est.),Net P&L,SL,TP,Order ID,Mode,Portfolio,Notes";
+        if (!existsSync(f)) writeFileSync(f, CSV_HEADERS + "\n");
+
+        const existing = readFileSync(f, "utf8");
+        const existingIds = new Set(
+          existing.split("\n").slice(1)
+            .map(l => { const c = l.split(","); return c[12]?.trim(); })
+            .filter(Boolean)
+        );
+
+        const newRows = (payload.rows || []);
+        let added = 0;
+        const toAppend = [];
+        for (const r of newRows) {
+          const orderId = r["Order ID"] || r.orderId || "";
+          if (existingIds.has(orderId)) continue; // duplikat, preskoči
+          const cols = [
+            r["Date"]||"", r["Time (UTC)"]||"", r["Exchange"]||"BitGet",
+            r["Symbol"]||"", r["Side"]||"", r["Quantity"]||"", r["Price"]||"",
+            r["Total USD"]||"", r["Fee (est.)"]||"", r["Net P&L"]||"",
+            r["SL"]||"", r["TP"]||"", orderId, r["Mode"]||"LIVE",
+            r["Portfolio"]||pid, '"' + (r["Notes"]||"").replace(/"/g,"") + '"'
+          ];
+          toAppend.push(cols.join(","));
+          added++;
+        }
+        if (toAppend.length > 0) {
+          const append = (existing.endsWith("\n") ? "" : "\n") + toAppend.join("\n") + "\n";
+          writeFileSync(f, existing + append);
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true, added, skipped: newRows.length - added }));
+      } catch(e) {
+        res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
   // CSV download — GET /api/csv?pid=synapse_t
   if (url.pathname === "/api/csv") {
     const pid = url.searchParams.get("pid") || "synapse_t";

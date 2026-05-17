@@ -2842,8 +2842,20 @@ setInterval(updateCountdown, 1000);
       + '</div>';
   }
 
+  function setAmcPanelVisible(visible) {
+    var amcPanel = document.getElementById('amc-panel');
+    if (amcPanel) amcPanel.style.display = visible ? 'block' : 'none';
+  }
+
+  function scrollToDetail() {
+    var detail = document.getElementById('squeeze-detail');
+    if (detail) setTimeout(function() { detail.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 80);
+  }
+
   window.squeezeShowTab = function(ticker) {
     _activeTab = ticker;
+
+    // Tab highlight
     var tabs = ['AMC','GME','KOSS','BYND','UPST','BBAI','SMCI'];
     for (var i=0; i<tabs.length; i++) {
       var btn = document.getElementById('squeeze-tab-'+tabs[i]);
@@ -2851,42 +2863,44 @@ setInterval(updateCountdown, 1000);
       btn.style.background = tabs[i]===ticker ? '#6366f1' : '#374151';
       btn.style.color = tabs[i]===ticker ? '#fff' : '#9ca3af';
     }
+
     if (ticker === 'AMC') {
-      if (!_allData['AMC']) {
-        showDetailLoading('AMC');
-        fetch('/api/amc').then(function(r){return r.json();}).then(function(d){
-          _allData['AMC'] = Object.assign({}, d, { squeezeFactors: d.squeeze && d.squeeze.factors });
-          renderDetail('AMC');
-        }).catch(function(e){
-          var panel = document.getElementById('squeeze-detail');
-          if (panel) panel.innerHTML = '<div style="text-align:center;padding:30px;color:#dc2626">Greška: ' + e.message + '</div>';
-        });
-      } else { renderDetail('AMC'); }
+      // AMC: pokaži originalni AMC panel ispod, sakrij squeeze-detail
+      setAmcPanelVisible(true);
+      var det = document.getElementById('squeeze-detail');
+      if (det) det.style.display = 'none';
+      // Scroll do AMC panela
+      var amcP = document.getElementById('amc-panel');
+      if (amcP) setTimeout(function(){ amcP.scrollIntoView({ behavior:'smooth', block:'start' }); }, 80);
     } else {
+      // Non-AMC: sakrij AMC panel, pokaži detail UNUTAR watchlist panela
+      setAmcPanelVisible(false);
+
       var existing = _allData[ticker];
       if (existing && !existing.loading && !existing.error) {
         renderDetail(ticker);
+        scrollToDetail();
       } else {
-        // Odmah pokaži loading, server blokira i čeka podatke (~10-20s)
+        // Pokaži spinner odmah — server blokira i fetchira (~15s)
         showDetailLoading(ticker);
+        scrollToDetail();
         fetch('/api/squeeze?ticker='+ticker).then(function(r){return r.json();}).then(function(d){
           if (d && d.error) {
             var panel = document.getElementById('squeeze-detail');
-            if (panel) panel.innerHTML = '<div style="text-align:center;padding:30px;color:#dc2626">Greška: ' + d.error + '</div>';
+            if (panel) panel.innerHTML = '<div style="text-align:center;padding:40px;color:#dc2626">'
+              + '<div style="font-size:28px">❌</div><div style="margin-top:8px">Greška: ' + d.error + '</div></div>';
             return;
           }
           _allData[ticker] = d;
           renderGrid();
-          if (_activeTab === ticker) renderDetail(ticker);
+          if (_activeTab === ticker) { renderDetail(ticker); scrollToDetail(); }
         }).catch(function(e){
           var panel = document.getElementById('squeeze-detail');
-          if (panel) panel.innerHTML = '<div style="text-align:center;padding:30px;color:#dc2626">Mreža: ' + e.message + '</div>';
+          if (panel) panel.innerHTML = '<div style="text-align:center;padding:40px;color:#dc2626">'
+            + '<div style="font-size:28px">❌</div><div style="margin-top:8px">Mreža: ' + e.message + '</div></div>';
         });
       }
     }
-    // Scroll do detail panela
-    var sq = document.getElementById('squeeze-panel');
-    if (sq) { setTimeout(function(){ sq.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, 100); }
   };
 
   window.squeezeForceRefresh = function() {
@@ -4073,7 +4087,14 @@ const _squeezeFetchRunning = {};   // keyed by ticker → boolean
  */
 async function fetchSqueezeStock(cfg) {
   const { ticker, cmcSlug } = cfg;
-  if (_squeezeFetchRunning[ticker]) return;
+  // Ako je već u toku — čekaj do 25s na završetak umjesto da vratiš undefined
+  if (_squeezeFetchRunning[ticker]) {
+    for (let w = 0; w < 25; w++) {
+      await new Promise(r => setTimeout(r, 1000));
+      if (!_squeezeFetchRunning[ticker]) return _squeezeCache[ticker]?.data || null;
+    }
+    return _squeezeCache[ticker]?.data || null;
+  }
   _squeezeFetchRunning[ticker] = true;
   try {
     const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36";

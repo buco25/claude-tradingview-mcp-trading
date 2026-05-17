@@ -852,7 +852,28 @@ async function getDxyData() {
     }
   } catch { /* proba fallback */ }
 
-  // ── 2. Stooq.com fallback (DXY dnevna % promjena) ──────────────────────────
+  // ── 2. Stooq.com CSV (manje vjerojatno blokiran od JSON) ─────────────────────
+  try {
+    const r = await fetch('https://stooq.com/q/l/?s=dxy.f&f=sd2t2ohlcv&e=csv', {
+      headers: { "User-Agent": "Mozilla/5.0" },
+      signal: AbortSignal.timeout(8000)
+    });
+    const txt = await r.text();
+    // Format: Symbol,Date,Time,Open,High,Low,Close,Volume  (header + data row)
+    const lines = txt.trim().split('\n');
+    if (lines.length >= 2) {
+      const cols = lines[lines.length - 1].split(',');
+      const open = parseFloat(cols[3]), close = parseFloat(cols[6]);
+      if (!isNaN(open) && !isNaN(close) && open > 0) {
+        const change4h = parseFloat(((close - open) / open * 100).toFixed(3));
+        const direction = change4h > 0.3 ? '↑ jača' : change4h < -0.3 ? '↓ slabi' : '→ flat';
+        _dxyCache = { change4h, direction, source: 'stooq-csv', ts: Date.now() };
+        return _dxyCache;
+      }
+    }
+  } catch { /* proba sljedeći */ }
+
+  // ── 3. Stooq JSON — alternativni format ───────────────────────────────────
   try {
     const r = await fetch('https://stooq.com/q/l/?s=dxy.f&f=sd2t2ohlcvp&e=json', {
       headers: { "User-Agent": "Mozilla/5.0" },
@@ -860,13 +881,40 @@ async function getDxyData() {
     });
     const d = await r.json();
     const sym = d?.symbols?.[0];
-    if (sym && sym.p != null) {
-      const change4h = parseFloat(parseFloat(sym.p).toFixed(3));
+    if (sym && sym.p != null && sym.o != null && sym.c != null && sym.o > 0) {
+      // p = % change, ali možda nije dostupan — računaj iz o/c
+      const change4h = parseFloat(((sym.c - sym.o) / sym.o * 100).toFixed(3));
       const direction = change4h > 0.3 ? '↑ jača' : change4h < -0.3 ? '↓ slabi' : '→ flat';
-      _dxyCache = { change4h, direction, source: 'stooq', ts: Date.now() };
+      _dxyCache = { change4h, direction, source: 'stooq-json', ts: Date.now() };
       return _dxyCache;
     }
-  } catch { /* oba failala */ }
+  } catch { /* proba sljedeći */ }
+
+  // ── 4. ECB EUR/USD proxy — DXY ≈ inverzija EUR/USD (korelacija ~0.97) ────────
+  // ECB referentni tečaj: besplatan, bez ključa, pouzdan
+  try {
+    const r = await fetch(
+      'https://data-api.ecb.europa.eu/service/data/EXR/D.USD.EUR.SP00.A?lastNObservations=2&format=jsondata',
+      { headers: { 'Accept': 'application/json' }, signal: AbortSignal.timeout(10000) }
+    );
+    const d = await r.json();
+    const obs = d?.dataSets?.[0]?.series?.['0:0:0:0:0']?.observations;
+    if (obs) {
+      const keys = Object.keys(obs).sort((a, b) => parseInt(a) - parseInt(b));
+      if (keys.length >= 2) {
+        const prev  = parseFloat(obs[keys[keys.length - 2]][0]);  // jučer USD/EUR
+        const today = parseFloat(obs[keys[keys.length - 1]][0]);  // danas
+        if (prev > 0 && today > 0) {
+          // USD/EUR raste = USD jači = DXY raste; skaliraj ~0.75 (EUR = 57.6% DXY težine)
+          const usdEurChg = (today - prev) / prev * 100;
+          const change4h = parseFloat((usdEurChg * 0.75).toFixed(3));
+          const direction = change4h > 0.3 ? '↑ jača' : change4h < -0.3 ? '↓ slabi' : '→ flat';
+          _dxyCache = { change4h, direction, source: 'ecb-proxy', ts: Date.now() };
+          return _dxyCache;
+        }
+      }
+    }
+  } catch { /* sve failalo */ }
 
   return { change4h: null, direction: 'N/A', ts: Date.now() };
 }

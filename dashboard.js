@@ -2661,12 +2661,12 @@ setInterval(updateCountdown, 1000);
       style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🖥️ SMCI</button>
     <button onclick="squeezeShowTab('RIVN')" id="squeeze-tab-RIVN"
       style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">⚡ RIVN</button>
-    <button onclick="squeezeShowTab('MSTR')" id="squeeze-tab-MSTR"
-      style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">₿ MSTR</button>
-    <button onclick="squeezeShowTab('CHWY')" id="squeeze-tab-CHWY"
-      style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🐾 CHWY</button>
     <button onclick="squeezeShowTab('IONQ')" id="squeeze-tab-IONQ"
       style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">⚛️ IONQ</button>
+    <button onclick="squeezeShowTab('SOUN')" id="squeeze-tab-SOUN"
+      style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🔊 SOUN</button>
+    <button onclick="squeezeShowTab('CVNA')" id="squeeze-tab-CVNA"
+      style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🚗 CVNA</button>
   </div>
 
   <!-- Compact grid: sve dionice odjednom -->
@@ -2705,8 +2705,8 @@ setInterval(updateCountdown, 1000);
 // ── Squeeze panel — flat global functions (no IIFE, no closure issues) ──────
 var _sqData   = {};
 var _sqActive = null;
-var _sqTickers = ['AMC','GME','KOSS','BYND','UPST','BBAI','SMCI','RIVN','MSTR','CHWY','IONQ'];
-var _sqEmojis  = { AMC:'🍿', GME:'🎮', KOSS:'🎧', BYND:'🌱', UPST:'🤖', BBAI:'🐻', SMCI:'🖥️', RIVN:'⚡', MSTR:'₿', CHWY:'🐾', IONQ:'⚛️' };
+var _sqTickers = ['AMC','GME','KOSS','BYND','UPST','BBAI','SMCI','RIVN','IONQ','SOUN','CVNA'];
+var _sqEmojis  = { AMC:'🍿', GME:'🎮', KOSS:'🎧', BYND:'🌱', UPST:'🤖', BBAI:'🐻', SMCI:'🖥️', RIVN:'⚡', IONQ:'⚛️', SOUN:'🔊', CVNA:'🚗' };
 
 function _sqScoreColor(s) { return s>=75?'#ef4444':s>=55?'#f97316':s>=35?'#eab308':'#22c55e'; }
 function _sqFmt(v)  { return v != null ? v : '—'; }
@@ -4112,9 +4112,9 @@ const SQUEEZE_STOCKS = [
   { ticker: "BBAI", name: "BigBear.ai Holdings",    cmcSlug: "bigbear-ai",           emoji: "🐻" },
   { ticker: "SMCI", name: "Super Micro Computer",   cmcSlug: "super-micro-computer", emoji: "🖥️" },
   { ticker: "RIVN", name: "Rivian Automotive",      cmcSlug: "rivian",               emoji: "⚡" },
-  { ticker: "MSTR", name: "Strategy (MicroStrategy)",cmcSlug: "microstrategy",       emoji: "₿"  },
-  { ticker: "CHWY", name: "Chewy Inc.",              cmcSlug: "chewy",                emoji: "🐾" },
   { ticker: "IONQ", name: "IonQ Inc.",               cmcSlug: "ionq",                 emoji: "⚛️" },
+  { ticker: "SOUN", name: "SoundHound AI Inc.",      cmcSlug: "soundhound-ai",        emoji: "🔊" },
+  { ticker: "CVNA", name: "Carvana Co.",             cmcSlug: "carvana",              emoji: "🚗" },
 ];
 
 const _squeezeCache = {};          // keyed by ticker → { data, ts }

@@ -795,6 +795,9 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
           <div class="pos-header">
             <span class="symbol">${p.symbol}</span>
             <span class="badge ${isLong ? "badge-long" : "badge-short"}">${p.side}</span>
+            ${p.entryMode === "MOM"
+              ? '<span style="background:rgba(251,146,60,0.15);border:1px solid #f97316;border-radius:20px;padding:2px 8px;font-size:10px;color:#f97316;font-weight:700">⚡ MOM</span>'
+              : '<span style="background:rgba(96,165,250,0.15);border:1px solid #60a5fa;border-radius:20px;padding:2px 8px;font-size:10px;color:#60a5fa;font-weight:700">↩ PBK</span>'}
             <span class="badge badge-paper">${p.mode}</span>
             <span id="lp-${def.id}-${p.symbol}" style="margin-left:auto;font-size:13px;font-weight:700;color:var(--text-muted)">—</span>
           </div>

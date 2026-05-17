@@ -832,18 +832,43 @@ const DXY_TTL = 15 * 60 * 1000;
 
 async function getDxyData() {
   if (Date.now() - _dxyCache.ts < DXY_TTL && _dxyCache.change4h !== null) return _dxyCache;
+
+  // ── 1. Yahoo Finance (v8 chart API) ────────────────────────────────────────
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/DX-Y.NYB?interval=4h&range=1d&includePrePost=false`;
-    const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+    const r = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Accept": "application/json" },
+      signal: AbortSignal.timeout(8000)
+    });
+    if (r.ok) {
+      const d = await r.json();
+      const closes = d?.chart?.result?.[0]?.indicators?.quote?.[0]?.close?.filter(v => v != null) || [];
+      if (closes.length >= 2) {
+        const change4h = parseFloat(((closes[closes.length-1] - closes[0]) / closes[0] * 100).toFixed(3));
+        const direction = change4h > 0.3 ? '↑ jača' : change4h < -0.3 ? '↓ slabi' : '→ flat';
+        _dxyCache = { change4h, direction, ts: Date.now() };
+        return _dxyCache;
+      }
+    }
+  } catch { /* proba fallback */ }
+
+  // ── 2. Stooq.com fallback (DXY dnevna % promjena) ──────────────────────────
+  try {
+    const r = await fetch('https://stooq.com/q/l/?s=dxy.f&f=sd2t2ohlcvp&e=json', {
+      headers: { "User-Agent": "Mozilla/5.0" },
+      signal: AbortSignal.timeout(8000)
+    });
     const d = await r.json();
-    const closes = d?.chart?.result?.[0]?.indicators?.quote?.[0]?.close?.filter(Boolean) || [];
-    if (closes.length < 2) return _dxyCache;
-    const first = closes[0], last = closes[closes.length - 1];
-    const change4h = parseFloat(((last - first) / first * 100).toFixed(3));
-    const direction = change4h > 0.3 ? '↑ jača' : change4h < -0.3 ? '↓ slabi' : '→ flat';
-    _dxyCache = { change4h, direction, ts: Date.now() };
-    return _dxyCache;
-  } catch { return { change4h: null, direction: 'N/A', ts: Date.now() }; }
+    const sym = d?.symbols?.[0];
+    if (sym && sym.p != null) {
+      const change4h = parseFloat(parseFloat(sym.p).toFixed(3));
+      const direction = change4h > 0.3 ? '↑ jača' : change4h < -0.3 ? '↓ slabi' : '→ flat';
+      _dxyCache = { change4h, direction, source: 'stooq', ts: Date.now() };
+      return _dxyCache;
+    }
+  } catch { /* oba failala */ }
+
+  return { change4h: null, direction: 'N/A', ts: Date.now() };
 }
 export { getDxyData };
 

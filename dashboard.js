@@ -2335,12 +2335,20 @@ async function loadMarketContext() {
     }
 
     // DXY
-    if (d.dxy && d.dxy.change4h !== null) {
+    if (d.dxy) {
       const dxyV = d.dxy.change4h;
-      const dxyColor = dxyV > 0.3 ? '#dc2626' : dxyV < -0.3 ? '#059669' : '#94a3b8';
-      document.getElementById('dxy-val').textContent = (dxyV > 0 ? '+' : '') + dxyV + '%';
-      document.getElementById('dxy-val').style.color = dxyColor;
-      document.getElementById('dxy-sub').textContent = d.dxy.direction + ' | >+0.3% = LONG risk';
+      const dxyEl = document.getElementById('dxy-val');
+      const dxySubEl = document.getElementById('dxy-sub');
+      if (dxyV !== null && dxyV !== undefined) {
+        const dxyColor = dxyV > 0.3 ? '#dc2626' : dxyV < -0.3 ? '#059669' : '#94a3b8';
+        dxyEl.textContent = (dxyV > 0 ? '+' : '') + dxyV + '%';
+        dxyEl.style.color = dxyColor;
+        dxySubEl.textContent = d.dxy.direction + ' | >+0.3% = LONG risk';
+      } else {
+        dxyEl.textContent = 'N/A';
+        dxyEl.style.color = '#6b7280';
+        dxySubEl.textContent = '>+0.3% = LONG risk · API nedostupan';
+      }
     }
 
     // Session Info

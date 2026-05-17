@@ -2684,143 +2684,148 @@ setInterval(updateCountdown, 1000);
 
 <script>
 (function squeezePanel() {
-  let _allData = {};  // ticker → data
-  let _activeTab = null;
+  var _allData = {};
+  var _activeTab = null;
 
   function scoreColor(s) { return s>=75?'#ef4444':s>=55?'#f97316':s>=35?'#eab308':'#22c55e'; }
-  function setEl(id, v) { const e = document.getElementById(id); if (e) e.textContent = v; }
+  function setEl(id, v) { var e = document.getElementById(id); if (e) e.textContent = v; }
   function fmt(v) { return v != null ? v : '—'; }
+  function fmtQty(q) { return q>=1e6?(q/1e6).toFixed(2)+'M':q>=1e3?(q/1e3).toFixed(0)+'K':String(q); }
 
   function renderGrid() {
-    const grid = document.getElementById('squeeze-grid');
+    var grid = document.getElementById('squeeze-grid');
     if (!grid) return;
-    const tickers = ['AMC', 'GME', 'KOSS', 'BYND', 'UPST', 'BBAI', 'SMCI'];
-    const emojis  = { AMC:'🍿', GME:'🎮', KOSS:'🎧', BYND:'🌱', UPST:'🤖', BBAI:'🐻', SMCI:'🖥️' };
-    grid.innerHTML = tickers.map(t => {
-      const d = _allData[t];
+    var tickers = ['AMC','GME','KOSS','BYND','UPST','BBAI','SMCI'];
+    var emojis  = { AMC:'🍿', GME:'🎮', KOSS:'🎧', BYND:'🌱', UPST:'🤖', BBAI:'🐻', SMCI:'🖥️' };
+    var html = '';
+    for (var ti=0; ti<tickers.length; ti++) {
+      var t = tickers[ti];
+      var d = _allData[t];
+      var em = emojis[t] || '';
       if (!d || d.loading) {
-        return `<div onclick="squeezeShowTab('${t}')" style="background:#1f2937;border:1px solid #374151;border-radius:8px;padding:12px;cursor:pointer;text-align:center">
-          <div style="font-size:11px;color:#9ca3af;font-weight:700">${emojis[t]||''} ${t}</div>
-          <div style="font-size:11px;color:#6b7280;margin-top:6px">Učitavam…</div>
-        </div>`;
+        html += '<div onclick="squeezeShowTab(\'' + t + '\')" style="background:#1f2937;border:1px solid #374151;border-radius:8px;padding:12px;cursor:pointer;text-align:center">'
+              + '<div style="font-size:11px;color:#9ca3af;font-weight:700">' + em + ' ' + t + '</div>'
+              + '<div style="font-size:11px;color:#6b7280;margin-top:6px">Učitavam…</div>'
+              + '</div>';
+        continue;
       }
-      const sq = d.squeeze;
-      const sqColor = scoreColor(sq?.score??0);
-      const priceStr = d.price != null ? '$'+d.price.toFixed(2) : '—';
-      const chgStr = d.changePct ? String(d.changePct) : '';
-      const chgUp = chgStr && !chgStr.startsWith('-');
-      const siStr = fmt(d.shortPctFloat);
-      const dtcStr = fmt(d.shortRatio);
-      const ctbStr = d.borrowFee?.fee != null ? d.borrowFee.fee.toFixed(1)+'%' : '—';
-      return `<div onclick="squeezeShowTab('${t}')" style="background:#1f2937;border:1px solid #374151;border-radius:8px;padding:12px;cursor:pointer;transition:border-color .2s" onmouseenter="this.style.borderColor='#6366f1'" onmouseleave="this.style.borderColor='#374151'">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-          <div style="font-size:11px;color:#9ca3af;font-weight:700">${emojis[t]||''} ${t}</div>
-          <div style="font-size:14px;font-weight:900;color:${sqColor}">${sq?.score??'—'}</div>
-        </div>
-        <div style="font-size:18px;font-weight:800;color:#f3f4f6">${priceStr}</div>
-        ${chgStr ? `<div style="font-size:11px;color:${chgUp?'#34d399':'#ef4444'}">${chgUp?'▲':'▼'} ${chgStr}</div>` : ''}
-        <div style="margin-top:6px;display:grid;grid-template-columns:1fr 1fr;gap:3px;font-size:10px;color:#9ca3af">
-          <span>SI: <b style="color:#fff">${siStr}</b></span>
-          <span>DTC: <b style="color:#fff">${dtcStr}d</b></span>
-          <span>CTB: <b style="color:#fff">${ctbStr}</b></span>
-          <span><b style="color:${sqColor}">${sq?.label?.split(' ').slice(0,2).join(' ')||'—'}</b></span>
-        </div>
-      </div>`;
-    }).join('');
+      var sq = d.squeeze || {};
+      var sqScore = sq.score != null ? sq.score : 0;
+      var sqColor = scoreColor(sqScore);
+      var priceStr = d.price != null ? '$' + d.price.toFixed(2) : '—';
+      var chgStr = d.changePct ? String(d.changePct) : '';
+      var chgUp = chgStr && chgStr.charAt(0) !== '-';
+      var siStr = fmt(d.shortPctFloat);
+      var dtcStr = fmt(d.shortRatio);
+      var ctbStr = d.borrowFee && d.borrowFee.fee != null ? d.borrowFee.fee.toFixed(1)+'%' : '—';
+      var sqLbl  = sq.label ? sq.label.split(' ').slice(0,2).join(' ') : '—';
+      html += '<div onclick="squeezeShowTab(\'' + t + '\')" style="background:#1f2937;border:1px solid #374151;border-radius:8px;padding:12px;cursor:pointer" onmouseenter="this.style.borderColor=\'#6366f1\'" onmouseleave="this.style.borderColor=\'#374151\'">'
+            + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
+            +   '<div style="font-size:11px;color:#9ca3af;font-weight:700">' + em + ' ' + t + '</div>'
+            +   '<div style="font-size:14px;font-weight:900;color:' + sqColor + '">' + sqScore + '</div>'
+            + '</div>'
+            + '<div style="font-size:18px;font-weight:800;color:#f3f4f6">' + priceStr + '</div>'
+            + (chgStr ? '<div style="font-size:11px;color:' + (chgUp?'#34d399':'#ef4444') + '">' + (chgUp?'▲':'▼') + ' ' + chgStr + '</div>' : '')
+            + '<div style="margin-top:6px;display:grid;grid-template-columns:1fr 1fr;gap:3px;font-size:10px;color:#9ca3af">'
+            +   '<span>SI: <b style="color:#fff">' + siStr + '</b></span>'
+            +   '<span>DTC: <b style="color:#fff">' + dtcStr + 'd</b></span>'
+            +   '<span>CTB: <b style="color:#fff">' + ctbStr + '</b></span>'
+            +   '<span><b style="color:' + sqColor + '">' + sqLbl + '</b></span>'
+            + '</div>'
+            + '</div>';
+    }
+    grid.innerHTML = html;
   }
 
   function renderDetail(ticker) {
-    const d = _allData[ticker];
-    const panel = document.getElementById('squeeze-detail');
-    if (!d || d.loading || d.error) {
-      if (panel) panel.style.display = 'none';
-      return;
-    }
+    var d = _allData[ticker];
+    var panel = document.getElementById('squeeze-detail');
+    if (!d || d.loading || d.error) { if (panel) panel.style.display = 'none'; return; }
     if (panel) panel.style.display = 'block';
 
-    const emojis = { AMC:'🍿', GME:'🎮', KOSS:'🎧', BYND:'🌱', UPST:'🤖', BBAI:'🐻', SMCI:'🖥️' };
-    setEl('squeeze-detail-title', `${emojis[ticker]||''} ${d.name||ticker} (NYSE/NASDAQ: ${ticker})`);
+    var emojis = { AMC:'🍿', GME:'🎮', KOSS:'🎧', BYND:'🌱', UPST:'🤖', BBAI:'🐻', SMCI:'🖥️' };
+    setEl('squeeze-detail-title', (emojis[ticker]||'') + ' ' + (d.name||ticker) + ' (NYSE/NASDAQ: ' + ticker + ')');
 
-    // Metrics grid
-    const fmtQty = q => q>=1e6?(q/1e6).toFixed(2)+'M':q>=1e3?(q/1e3).toFixed(0)+'K':String(q);
-    const metrics = document.getElementById('squeeze-detail-metrics');
+    var metrics = document.getElementById('squeeze-detail-metrics');
     if (metrics) {
-      const items = [
-        { label: '💵 Cijena',        val: d.price!=null?'$'+d.price.toFixed(2):'—',                color: '#f3f4f6' },
-        { label: '📉 Short Float',   val: fmt(d.shortPctFloat),                                     color: '#ef4444' },
-        { label: '⏱️ Short Ratio',  val: fmt(d.shortRatio)+'d',                                    color: '#f59e0b' },
-        { label: '💸 Cost to Borrow',val: d.borrowFee?.fee!=null?d.borrowFee.fee.toFixed(2)+'%':'N/A', color: d.borrowFee?.fee>=5?'#f87171':d.borrowFee?.fee>=1?'#fbbf24':'#4b5563' },
-        { label: '🚨 FTD',           val: d.ftd?fmtQty(d.ftd.qty)+' ('+d.ftd.date+')':'N/A',       color: '#f87171' },
-        { label: '📊 Market Cap',    val: fmt(d.marketCap),                                         color: '#e5e7eb' },
-        { label: '🏛️ Inst Own',     val: fmt(d.instOwn),                                           color: '#60a5fa' },
-        { label: '🏔️ 52W High',     val: fmt(d.high52w),                                           color: '#9ca3af' },
+      var ctbColor = d.borrowFee && d.borrowFee.fee != null ? (d.borrowFee.fee>=5?'#f87171':d.borrowFee.fee>=1?'#fbbf24':'#4b5563') : '#4b5563';
+      var items = [
+        { label: '💵 Cijena',         val: d.price!=null?'$'+d.price.toFixed(2):'—',                   color: '#f3f4f6' },
+        { label: '📉 Short Float',     val: fmt(d.shortPctFloat),                                             color: '#ef4444' },
+        { label: '⏱️ Short Ratio',     val: fmt(d.shortRatio)+'d',                                            color: '#f59e0b' },
+        { label: '💸 Cost to Borrow',  val: d.borrowFee&&d.borrowFee.fee!=null?d.borrowFee.fee.toFixed(2)+'%':'N/A', color: ctbColor },
+        { label: '🚨 FTD',             val: d.ftd?fmtQty(d.ftd.qty)+' ('+d.ftd.date+')':'N/A',               color: '#f87171' },
+        { label: '📊 Market Cap',       val: fmt(d.marketCap),                                                 color: '#e5e7eb' },
+        { label: '🏛️ Inst Own',   val: fmt(d.instOwn),                                                  color: '#60a5fa' },
+        { label: '🏴 52W High',         val: fmt(d.high52w),                                                   color: '#9ca3af' },
       ];
-      metrics.innerHTML = items.map(it => `
-        <div style="background:#1f2937;border:1px solid #374151;border-radius:6px;padding:9px">
-          <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;margin-bottom:3px">${it.label}</div>
-          <div style="font-size:16px;font-weight:700;color:${it.color}">${it.val}</div>
-        </div>`).join('');
+      var mHtml = '';
+      for (var i=0; i<items.length; i++) {
+        var it = items[i];
+        mHtml += '<div style="background:#1f2937;border:1px solid #374151;border-radius:6px;padding:9px">'
+               + '<div style="font-size:9px;color:#9ca3af;text-transform:uppercase;margin-bottom:3px">' + it.label + '</div>'
+               + '<div style="font-size:16px;font-weight:700;color:' + it.color + '">' + it.val + '</div>'
+               + '</div>';
+      }
+      metrics.innerHTML = mHtml;
     }
 
-    // Squeeze score arc
-    const sq = d.squeeze || d;  // AMC has squeeze nested, others too
-    const sqScore = sq?.score ?? 0;
-    const arcEl = document.getElementById('sq-detail-arc');
-    if (arcEl) {
-      arcEl.style.strokeDashoffset = 163.4 * (1 - sqScore / 100);
-      arcEl.style.stroke = scoreColor(sqScore);
-    }
+    var sq = d.squeeze || {};
+    var sqScore = sq.score != null ? sq.score : 0;
+    var arcEl = document.getElementById('sq-detail-arc');
+    if (arcEl) { arcEl.style.strokeDashoffset = (163.4*(1-sqScore/100)).toString(); arcEl.style.stroke = scoreColor(sqScore); }
     setEl('sq-detail-score', sqScore);
-    document.getElementById('sq-detail-score').style.color = scoreColor(sqScore);
-    setEl('sq-detail-label', sq?.label||'—');
+    var scoreEl = document.getElementById('sq-detail-score');
+    if (scoreEl) scoreEl.style.color = scoreColor(sqScore);
+    setEl('sq-detail-label', sq.label || '—');
 
-    // Faktori
-    const factors = d.squeezeFactors || d.squeeze?.factors || [];
-    const fDiv = document.getElementById('sq-detail-factors');
+    var factors = d.squeezeFactors || (d.squeeze && d.squeeze.factors) || [];
+    var fDiv = document.getElementById('sq-detail-factors');
     if (fDiv) {
-      fDiv.innerHTML = factors.map(f => {
-        if (f.score === null) return `<div style="display:flex;justify-content:space-between;font-size:11px;padding:4px 0;border-bottom:1px solid #1f2937"><span style="color:#9ca3af">${f.name}</span><span style="color:#4b5563">${f.val} · N/A</span></div>`;
-        const pct = Math.round(f.score / f.max * 100);
-        const col = pct >= 75 ? '#ef4444' : pct >= 50 ? '#f97316' : pct >= 25 ? '#eab308' : '#374151';
-        return `<div style="margin-bottom:5px">
-          <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
-            <span style="color:#9ca3af">${f.name}</span>
-            <span style="color:#e5e7eb;font-weight:600">${f.val} <span style="color:${col}">(${f.score}/${f.max})</span></span>
-          </div>
-          <div style="background:#374151;border-radius:3px;height:4px">
-            <div style="background:${col};height:4px;border-radius:3px;width:${pct}%;transition:width 1s"></div>
-          </div>
-        </div>`;
-      }).join('');
+      var fHtml = '';
+      for (var fi=0; fi<factors.length; fi++) {
+        var f = factors[fi];
+        if (f.score === null) {
+          fHtml += '<div style="display:flex;justify-content:space-between;font-size:11px;padding:4px 0;border-bottom:1px solid #1f2937">'
+                 + '<span style="color:#9ca3af">' + f.name + '</span><span style="color:#4b5563">' + f.val + ' · N/A</span></div>';
+        } else {
+          var pct = Math.round(f.score / f.max * 100);
+          var col = pct>=75?'#ef4444':pct>=50?'#f97316':pct>=25?'#eab308':'#374151';
+          fHtml += '<div style="margin-bottom:5px">'
+                 + '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">'
+                 +   '<span style="color:#9ca3af">' + f.name + '</span>'
+                 +   '<span style="color:#e5e7eb;font-weight:600">' + f.val + ' <span style="color:' + col + '">(' + f.score + '/' + f.max + ')</span></span>'
+                 + '</div>'
+                 + '<div style="background:#374151;border-radius:3px;height:4px">'
+                 +   '<div style="background:' + col + ';height:4px;border-radius:3px;width:' + pct + '%;transition:width 1s"></div>'
+                 + '</div></div>';
+        }
+      }
+      fDiv.innerHTML = fHtml;
     }
   }
 
   window.squeezeShowTab = function(ticker) {
     _activeTab = ticker;
-    // Highlight tab
-    ['AMC','GME','KOSS','BYND','UPST','BBAI','SMCI'].forEach(t => {
-      const btn = document.getElementById('squeeze-tab-'+t);
-      if (!btn) return;
-      btn.style.background = t === ticker ? '#6366f1' : '#374151';
-      btn.style.color = t === ticker ? '#fff' : '#9ca3af';
-    });
-    // Ako je AMC — render koristi AMC data iz _amcCache (fetchAmc)
+    var tabs = ['AMC','GME','KOSS','BYND','UPST','BBAI','SMCI'];
+    for (var i=0; i<tabs.length; i++) {
+      var btn = document.getElementById('squeeze-tab-'+tabs[i]);
+      if (!btn) continue;
+      btn.style.background = tabs[i]===ticker ? '#6366f1' : '#374151';
+      btn.style.color = tabs[i]===ticker ? '#fff' : '#9ca3af';
+    }
     if (ticker === 'AMC') {
-      // Probaj dohvatiti AMC data iz /api/amc ako je prazan
       if (!_allData['AMC']) {
-        fetch('/api/amc').then(r => r.json()).then(d => {
-          _allData['AMC'] = { ...d, squeezeFactors: d.squeeze?.factors };
+        fetch('/api/amc').then(function(r){return r.json();}).then(function(d){
+          _allData['AMC'] = Object.assign({}, d, { squeezeFactors: d.squeeze && d.squeeze.factors });
           renderDetail('AMC');
-        }).catch(() => {});
-      } else {
-        renderDetail('AMC');
-      }
+        }).catch(function(){});
+      } else { renderDetail('AMC'); }
     } else {
       if (_allData[ticker] && !_allData[ticker].loading) {
         renderDetail(ticker);
       } else {
-        // Trigger fetch i loading state
-        fetch('/api/squeeze?ticker='+ticker).then(r => r.json()).then(d => {
+        fetch('/api/squeeze?ticker='+ticker).then(function(r){return r.json();}).then(function(d){
           _allData[ticker] = d;
           renderGrid();
           renderDetail(ticker);
@@ -2830,40 +2835,36 @@ setInterval(updateCountdown, 1000);
   };
 
   window.squeezeForceRefresh = function() {
-    document.getElementById('squeeze-ts').textContent = 'Osvježavam sve dionice… (može trajati 60s)';
-    // Force AMC refresh
-    fetch('/api/amc?force=1').then(r => r.json()).then(d => {
-      _allData['AMC'] = { ...d, squeezeFactors: d.squeeze?.factors };
+    document.getElementById('squeeze-ts').textContent = 'Osvježavam sve dionice…';
+    fetch('/api/amc?force=1').then(function(r){return r.json();}).then(function(d){
+      _allData['AMC'] = Object.assign({}, d, { squeezeFactors: d.squeeze && d.squeeze.factors });
       if (_activeTab === 'AMC') renderDetail('AMC');
-    }).catch(() => {});
-    // Force squeeze refresh
-    fetch('/api/squeeze').then(r => r.json()).then(arr => {
-      arr.forEach(d => { if (d.ticker) _allData[d.ticker] = d; });
+    }).catch(function(){});
+    fetch('/api/squeeze').then(function(r){return r.json();}).then(function(arr){
+      for (var i=0; i<arr.length; i++) { if (arr[i].ticker) _allData[arr[i].ticker] = arr[i]; }
       renderGrid();
       if (_activeTab && _allData[_activeTab]) renderDetail(_activeTab);
       document.getElementById('squeeze-ts').textContent = new Date().toLocaleTimeString('hr-HR',{hour:'2-digit',minute:'2-digit'}) + ' · osvježeno';
-    }).catch(() => {});
+    }).catch(function(){});
   };
 
-  async function loadSqueeze() {
-    try {
-      // Load AMC from /api/amc
-      const amc = await fetch('/api/amc').then(r => r.json());
-      if (amc && !amc.error) _allData['AMC'] = { ...amc, squeezeFactors: amc.squeeze?.factors };
-      // Load others from /api/squeeze
-      const arr = await fetch('/api/squeeze').then(r => r.json());
-      arr.forEach(d => { if (d.ticker) _allData[d.ticker] = d; });
+  function loadSqueeze() {
+    fetch('/api/amc').then(function(r){return r.json();}).then(function(amc){
+      if (amc && !amc.error) _allData['AMC'] = Object.assign({}, amc, { squeezeFactors: amc.squeeze && amc.squeeze.factors });
+    }).catch(function(){});
+    fetch('/api/squeeze').then(function(r){return r.json();}).then(function(arr){
+      for (var i=0; i<arr.length; i++) { if (arr[i].ticker) _allData[arr[i].ticker] = arr[i]; }
       renderGrid();
-      const ts = document.getElementById('squeeze-ts');
+      var ts = document.getElementById('squeeze-ts');
       if (ts) ts.textContent = new Date().toLocaleTimeString('hr-HR',{hour:'2-digit',minute:'2-digit'}) + ' · cache';
-    } catch(e) {
-      const ts = document.getElementById('squeeze-ts');
+    }).catch(function(e){
+      var ts = document.getElementById('squeeze-ts');
       if (ts) ts.textContent = 'Greška: ' + e.message;
-    }
+    });
   }
 
   loadSqueeze();
-  setInterval(loadSqueeze, 60 * 60 * 1000); // osvježi svakih 60 min
+  setInterval(loadSqueeze, 60 * 60 * 1000);
 })();
 </script>
 

@@ -666,8 +666,65 @@ function buildPortfolioStats(pid) {
     .map(([sym, s]) => ({ sym, ...s, total: s.wins + s.losses }))
     .sort((a, b) => b.total - a.total);
 
+  // ── Phase 2 stats (od 2026-05-15 = stabilna strategija) ─────────────────────
+  const phase2Start   = new Date("2026-05-15T00:00:00Z");
+  const phase2Exits   = exits.filter(r => new Date(`${r["Date"]}T${r["Time (UTC)"] || "00:00:00"}Z`) >= phase2Start);
+  const phase2Wins    = phase2Exits.filter(r => parseFloat(r["Net P&L"] || 0) >= 0);
+  const phase2Losses  = phase2Exits.filter(r => parseFloat(r["Net P&L"] || 0) < 0);
+  const phase2Pnl     = phase2Exits.reduce((s, r) => s + parseFloat(r["Net P&L"] || 0), 0);
+  const phase2WR      = phase2Exits.length > 0 ? (phase2Wins.length / phase2Exits.length * 100).toFixed(1) : null;
+  const phase2GrossW  = phase2Wins.reduce((s, r) => s + parseFloat(r["Net P&L"] || 0), 0);
+  const phase2GrossL  = Math.abs(phase2Losses.reduce((s, r) => s + parseFloat(r["Net P&L"] || 0), 0));
+  const phase2PF      = phase2GrossL > 0 ? (phase2GrossW / phase2GrossL).toFixed(2) : null;
+
+  // ── Drawdown (peak-to-trough) ─────────────────────────────────────────────────
+  let ddPeak = startCap, maxDrawdownPct = 0;
+  let ddRunning = startCap;
+  for (const r of exits) {
+    ddRunning += parseFloat(r["Net P&L"] || 0);
+    if (ddRunning > ddPeak) ddPeak = ddRunning;
+    const dd = ddPeak > 0 ? (ddPeak - ddRunning) / ddPeak * 100 : 0;
+    if (dd > maxDrawdownPct) maxDrawdownPct = dd;
+  }
+  const currentDrawdownPct = ddPeak > 0 ? (ddPeak - equity) / ddPeak * 100 : 0;
+
+  // ── WR by entry mode (PBK / MOM — parsira iz Notes) ─────────────────────────
+  const modeStats = { PBK: { wins: 0, losses: 0 }, MOM: { wins: 0, losses: 0 }, UNK: { wins: 0, losses: 0 } };
+  for (const r of exits) {
+    const notes = r["Notes"] || "";
+    const m = notes.includes("| MOM |") ? "MOM" : notes.includes("| PBK |") ? "PBK" : "UNK";
+    const pnl = parseFloat(r["Net P&L"] || 0);
+    if (pnl >= 0) modeStats[m].wins++;
+    else          modeStats[m].losses++;
+  }
+
+  // ── Profit Factor (sve closed trades) ────────────────────────────────────────
+  const grossWins   = wins.reduce((s, r) => s + parseFloat(r["Net P&L"] || 0), 0);
+  const grossLosses = Math.abs(losses.reduce((s, r) => s + parseFloat(r["Net P&L"] || 0), 0));
+  const profitFactor = grossLosses > 0 ? (grossWins / grossLosses).toFixed(2) : null;
+
+  // ── Avg trade duration (matchiraj OPEN → CLOSE po simbolu) ───────────────────
+  const _openTs = {};
+  let totalDurMs = 0, durCount = 0;
+  for (const r of rows) {
+    const side = r["Side"] || "";
+    const sym  = r["Symbol"] || "";
+    const ts   = new Date(`${r["Date"]}T${r["Time (UTC)"] || "00:00:00"}Z`).getTime();
+    if (side === "LONG" || side === "SHORT") {
+      _openTs[sym] = ts;
+    } else if ((side === "CLOSE_LONG" || side === "CLOSE_SHORT") && _openTs[sym]) {
+      totalDurMs += ts - _openTs[sym];
+      durCount++;
+      delete _openTs[sym];
+    }
+  }
+  const avgDurationMin = durCount > 0 ? Math.round(totalDurMs / durCount / 60000) : null;
+
   return { pid, startCap, rows, exits, entries, wins, losses, totalPnl, winRate, equity, pnlCurve, recentExits, symbolStatsArr,
-    pnlDay, pnlWeek, pnlMonth, pnlYear, tradesDay, tradesWeek, tradesMonth, tradesYear };
+    pnlDay, pnlWeek, pnlMonth, pnlYear, tradesDay, tradesWeek, tradesMonth, tradesYear,
+    phase2Exits, phase2Wins, phase2Losses, phase2Pnl, phase2WR, phase2PF,
+    maxDrawdownPct, currentDrawdownPct,
+    modeStats, profitFactor, avgDurationMin };
 }
 
 async function fetchLivePrices(symbols) {
@@ -1033,6 +1090,87 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="stat-sub">SL 1.5–2.5% / TP 2.5–3.5% · per-simbol · rizik 1%</div>
     </div>
   </div>
+
+  <!-- ── Phase 2 Stats Panel (od 15.5 = stabilna strategija) ──────────────── -->
+  ${(() => {
+    const p2 = s;  // koristimo iste stats objekt, jer je phase2* već izračunat unutar buildPortfolioStats
+    const p2wr   = p2.phase2WR !== null ? parseFloat(p2.phase2WR) : null;
+    const p2col  = p2wr === null ? "#9ca3af" : p2wr >= 50 ? "#059669" : p2wr >= 35 ? "#d97706" : "#dc2626";
+    const pfVal  = p2.phase2PF;
+    const pfCol  = pfVal === null ? "#9ca3af" : parseFloat(pfVal) >= 1.5 ? "#059669" : parseFloat(pfVal) >= 1 ? "#d97706" : "#dc2626";
+    const ddCur  = p2.currentDrawdownPct.toFixed(1);
+    const ddMax  = p2.maxDrawdownPct.toFixed(1);
+    const ddCol  = parseFloat(ddCur) < 5 ? "#059669" : parseFloat(ddCur) < 15 ? "#d97706" : "#dc2626";
+    const pf     = p2.profitFactor;
+    const pfAllCol = pf === null ? "#9ca3af" : parseFloat(pf) >= 1.5 ? "#059669" : parseFloat(pf) >= 1 ? "#d97706" : "#dc2626";
+    const dur    = p2.avgDurationMin;
+    const durStr = dur === null ? "—" : dur >= 60 ? `${(dur/60).toFixed(1)}h` : `${dur}min`;
+    const pbkT   = p2.modeStats.PBK.wins + p2.modeStats.PBK.losses;
+    const momT   = p2.modeStats.MOM.wins + p2.modeStats.MOM.losses;
+    const pbkWR  = pbkT > 0 ? Math.round(p2.modeStats.PBK.wins / pbkT * 100) : null;
+    const momWR  = momT > 0 ? Math.round(p2.modeStats.MOM.wins / momT * 100) : null;
+    const pbkCol = pbkWR === null ? "#9ca3af" : pbkWR >= 50 ? "#059669" : pbkWR >= 35 ? "#d97706" : "#dc2626";
+    const momCol = momWR === null ? "#9ca3af" : momWR >= 50 ? "#059669" : momWR >= 35 ? "#d97706" : "#dc2626";
+
+    return `
+  <div style="background:#1f2937;border:1px solid #374151;border-radius:12px;padding:16px 20px;margin-bottom:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div style="font-size:11px;color:#a78bfa;font-weight:700;text-transform:uppercase;letter-spacing:1px">🚀 Phase 2 Statistike (od 15.5.2026 — stabilna strategija)</div>
+      <div style="font-size:11px;color:#6b7280">${p2.phase2Exits.length} zatvorenih tradova</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
+
+      <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px;text-align:center">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">Win Rate</div>
+        <div style="font-size:24px;font-weight:800;color:${p2col}">${p2wr !== null ? p2wr + "%" : "—"}</div>
+        <div style="font-size:11px;color:#9ca3af">${p2.phase2Wins.length}W / ${p2.phase2Losses.length}L</div>
+      </div>
+
+      <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px;text-align:center">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">Net P&amp;L</div>
+        <div style="font-size:24px;font-weight:800;color:${p2.phase2Pnl >= 0 ? "#059669" : "#dc2626"}">${p2.phase2Pnl >= 0 ? "+" : ""}$${p2.phase2Pnl.toFixed(2)}</div>
+        <div style="font-size:11px;color:#9ca3af">Phase 2 ukupno</div>
+      </div>
+
+      <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px;text-align:center">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">Profit Factor</div>
+        <div style="font-size:24px;font-weight:800;color:${pfCol}">${pfVal ?? "—"}</div>
+        <div style="font-size:11px;color:#9ca3af">Phase 2 gross W/L</div>
+      </div>
+
+      <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px;text-align:center">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">All-time PF</div>
+        <div style="font-size:24px;font-weight:800;color:${pfAllCol}">${pf ?? "—"}</div>
+        <div style="font-size:11px;color:#9ca3af">svi zatvoreni tradovi</div>
+      </div>
+
+      <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px;text-align:center">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">Drawdown</div>
+        <div style="font-size:22px;font-weight:800;color:${ddCol}">-${ddCur}%</div>
+        <div style="font-size:11px;color:#9ca3af">Max: -${ddMax}%</div>
+      </div>
+
+      <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px;text-align:center">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">Avg Trajanje</div>
+        <div style="font-size:22px;font-weight:800;color:#60a5fa">${durStr}</div>
+        <div style="font-size:11px;color:#9ca3af">po tradu</div>
+      </div>
+
+      <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px;text-align:center">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">Pullback WR</div>
+        <div style="font-size:22px;font-weight:800;color:${pbkCol}">${pbkWR !== null ? pbkWR+"%" : "—"}</div>
+        <div style="font-size:11px;color:#9ca3af">1H PBK · ${pbkT} tradova</div>
+      </div>
+
+      <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px;text-align:center">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">Momentum WR</div>
+        <div style="font-size:22px;font-weight:800;color:${momCol}">${momWR !== null ? momWR+"%" : "—"}</div>
+        <div style="font-size:11px;color:#9ca3af">15m MOM · ${momT} tradova</div>
+      </div>
+
+    </div>
+  </div>`;
+  })()}
 
   <!-- Adaptive Status Panel -->
   ${(() => {
@@ -2481,6 +2619,254 @@ updateCountdown();
 setInterval(updateCountdown, 1000);
 </script>
 
+<!-- ═══════════════════════════ SQUEEZE WATCHLIST PANEL ═══════════════════ -->
+<div style="background:#1f2937;border:1px solid #374151;border-radius:12px;padding:20px;margin:20px 0" id="squeeze-panel">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+    <div style="font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:#a78bfa">
+      🧨 Short Squeeze Watchlist
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <div style="font-size:10px;color:#6b7280" id="squeeze-ts">Učitavam…</div>
+      <button onclick="squeezeForceRefresh()" title="Osvježi sve dionice"
+        style="background:#1f2937;border:1px solid #374151;border-radius:4px;color:#9ca3af;font-size:10px;padding:2px 7px;cursor:pointer">↻</button>
+    </div>
+  </div>
+
+  <!-- Tab header -->
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px" id="squeeze-tabs">
+    <button onclick="squeezeShowTab('AMC')" id="squeeze-tab-AMC"
+      style="background:#db2777;border:none;border-radius:6px;color:#fff;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🍿 AMC</button>
+    <button onclick="squeezeShowTab('GME')" id="squeeze-tab-GME"
+      style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🎮 GME</button>
+    <button onclick="squeezeShowTab('KOSS')" id="squeeze-tab-KOSS"
+      style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🎧 KOSS</button>
+    <button onclick="squeezeShowTab('BYND')" id="squeeze-tab-BYND"
+      style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🌱 BYND</button>
+    <button onclick="squeezeShowTab('UPST')" id="squeeze-tab-UPST"
+      style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🤖 UPST</button>
+    <button onclick="squeezeShowTab('BBAI')" id="squeeze-tab-BBAI"
+      style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🐻 BBAI</button>
+    <button onclick="squeezeShowTab('SMCI')" id="squeeze-tab-SMCI"
+      style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🖥️ SMCI</button>
+  </div>
+
+  <!-- Compact grid: sve dionice odjednom -->
+  <div id="squeeze-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:16px"></div>
+
+  <!-- Detail panel za odabranu dionicu -->
+  <div id="squeeze-detail" style="display:none;background:#111827;border:1px solid #374151;border-radius:10px;padding:16px">
+    <div style="font-size:11px;color:#9ca3af;margin-bottom:12px" id="squeeze-detail-title">—</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px" id="squeeze-detail-metrics"></div>
+    <!-- Squeeze score + faktori -->
+    <div style="background:linear-gradient(135deg,#1e1b4b,#111827);border:1px solid #4f46e5;border-radius:10px;padding:14px">
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px">
+        <div style="position:relative;width:64px;height:64px;flex-shrink:0">
+          <svg width="64" height="64" viewBox="0 0 64 64">
+            <circle cx="32" cy="32" r="26" fill="none" stroke="#374151" stroke-width="5"/>
+            <circle cx="32" cy="32" r="26" fill="none" stroke="#4f46e5" stroke-width="5"
+              stroke-dasharray="163.4" id="sq-detail-arc"
+              stroke-dashoffset="163.4" stroke-linecap="round"
+              transform="rotate(-90 32 32)" style="transition:stroke-dashoffset 1s,stroke 1s"/>
+          </svg>
+          <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center">
+            <div style="font-size:17px;font-weight:900;color:#fff" id="sq-detail-score">—</div>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:18px;font-weight:800;color:#e5e7eb" id="sq-detail-label">…</div>
+          <div style="font-size:10px;color:#9ca3af;margin-top:3px">Skor 0–100 · Short Squeeze Potencijal</div>
+        </div>
+      </div>
+      <div id="sq-detail-factors" style="display:grid;gap:5px"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function squeezePanel() {
+  let _allData = {};  // ticker → data
+  let _activeTab = null;
+
+  function scoreColor(s) { return s>=75?'#ef4444':s>=55?'#f97316':s>=35?'#eab308':'#22c55e'; }
+  function setEl(id, v) { const e = document.getElementById(id); if (e) e.textContent = v; }
+  function fmt(v) { return v != null ? v : '—'; }
+
+  function renderGrid() {
+    const grid = document.getElementById('squeeze-grid');
+    if (!grid) return;
+    const tickers = ['AMC', 'GME', 'KOSS', 'BYND', 'UPST', 'BBAI', 'SMCI'];
+    const emojis  = { AMC:'🍿', GME:'🎮', KOSS:'🎧', BYND:'🌱', UPST:'🤖', BBAI:'🐻', SMCI:'🖥️' };
+    grid.innerHTML = tickers.map(t => {
+      const d = _allData[t];
+      if (!d || d.loading) {
+        return `<div onclick="squeezeShowTab('${t}')" style="background:#1f2937;border:1px solid #374151;border-radius:8px;padding:12px;cursor:pointer;text-align:center">
+          <div style="font-size:11px;color:#9ca3af;font-weight:700">${emojis[t]||''} ${t}</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:6px">Učitavam…</div>
+        </div>`;
+      }
+      const sq = d.squeeze;
+      const sqColor = scoreColor(sq?.score??0);
+      const priceStr = d.price != null ? '$'+d.price.toFixed(2) : '—';
+      const chgStr = d.changePct ? String(d.changePct) : '';
+      const chgUp = chgStr && !chgStr.startsWith('-');
+      const siStr = fmt(d.shortPctFloat);
+      const dtcStr = fmt(d.shortRatio);
+      const ctbStr = d.borrowFee?.fee != null ? d.borrowFee.fee.toFixed(1)+'%' : '—';
+      return `<div onclick="squeezeShowTab('${t}')" style="background:#1f2937;border:1px solid #374151;border-radius:8px;padding:12px;cursor:pointer;transition:border-color .2s" onmouseenter="this.style.borderColor='#6366f1'" onmouseleave="this.style.borderColor='#374151'">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div style="font-size:11px;color:#9ca3af;font-weight:700">${emojis[t]||''} ${t}</div>
+          <div style="font-size:14px;font-weight:900;color:${sqColor}">${sq?.score??'—'}</div>
+        </div>
+        <div style="font-size:18px;font-weight:800;color:#f3f4f6">${priceStr}</div>
+        ${chgStr ? `<div style="font-size:11px;color:${chgUp?'#34d399':'#ef4444'}">${chgUp?'▲':'▼'} ${chgStr}</div>` : ''}
+        <div style="margin-top:6px;display:grid;grid-template-columns:1fr 1fr;gap:3px;font-size:10px;color:#9ca3af">
+          <span>SI: <b style="color:#fff">${siStr}</b></span>
+          <span>DTC: <b style="color:#fff">${dtcStr}d</b></span>
+          <span>CTB: <b style="color:#fff">${ctbStr}</b></span>
+          <span><b style="color:${sqColor}">${sq?.label?.split(' ').slice(0,2).join(' ')||'—'}</b></span>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  function renderDetail(ticker) {
+    const d = _allData[ticker];
+    const panel = document.getElementById('squeeze-detail');
+    if (!d || d.loading || d.error) {
+      if (panel) panel.style.display = 'none';
+      return;
+    }
+    if (panel) panel.style.display = 'block';
+
+    const emojis = { AMC:'🍿', GME:'🎮', KOSS:'🎧', BYND:'🌱', UPST:'🤖', BBAI:'🐻', SMCI:'🖥️' };
+    setEl('squeeze-detail-title', `${emojis[ticker]||''} ${d.name||ticker} (NYSE/NASDAQ: ${ticker})`);
+
+    // Metrics grid
+    const fmtQty = q => q>=1e6?(q/1e6).toFixed(2)+'M':q>=1e3?(q/1e3).toFixed(0)+'K':String(q);
+    const metrics = document.getElementById('squeeze-detail-metrics');
+    if (metrics) {
+      const items = [
+        { label: '💵 Cijena',        val: d.price!=null?'$'+d.price.toFixed(2):'—',                color: '#f3f4f6' },
+        { label: '📉 Short Float',   val: fmt(d.shortPctFloat),                                     color: '#ef4444' },
+        { label: '⏱️ Short Ratio',  val: fmt(d.shortRatio)+'d',                                    color: '#f59e0b' },
+        { label: '💸 Cost to Borrow',val: d.borrowFee?.fee!=null?d.borrowFee.fee.toFixed(2)+'%':'N/A', color: d.borrowFee?.fee>=5?'#f87171':d.borrowFee?.fee>=1?'#fbbf24':'#4b5563' },
+        { label: '🚨 FTD',           val: d.ftd?fmtQty(d.ftd.qty)+' ('+d.ftd.date+')':'N/A',       color: '#f87171' },
+        { label: '📊 Market Cap',    val: fmt(d.marketCap),                                         color: '#e5e7eb' },
+        { label: '🏛️ Inst Own',     val: fmt(d.instOwn),                                           color: '#60a5fa' },
+        { label: '🏔️ 52W High',     val: fmt(d.high52w),                                           color: '#9ca3af' },
+      ];
+      metrics.innerHTML = items.map(it => `
+        <div style="background:#1f2937;border:1px solid #374151;border-radius:6px;padding:9px">
+          <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;margin-bottom:3px">${it.label}</div>
+          <div style="font-size:16px;font-weight:700;color:${it.color}">${it.val}</div>
+        </div>`).join('');
+    }
+
+    // Squeeze score arc
+    const sq = d.squeeze || d;  // AMC has squeeze nested, others too
+    const sqScore = sq?.score ?? 0;
+    const arcEl = document.getElementById('sq-detail-arc');
+    if (arcEl) {
+      arcEl.style.strokeDashoffset = 163.4 * (1 - sqScore / 100);
+      arcEl.style.stroke = scoreColor(sqScore);
+    }
+    setEl('sq-detail-score', sqScore);
+    document.getElementById('sq-detail-score').style.color = scoreColor(sqScore);
+    setEl('sq-detail-label', sq?.label||'—');
+
+    // Faktori
+    const factors = d.squeezeFactors || d.squeeze?.factors || [];
+    const fDiv = document.getElementById('sq-detail-factors');
+    if (fDiv) {
+      fDiv.innerHTML = factors.map(f => {
+        if (f.score === null) return `<div style="display:flex;justify-content:space-between;font-size:11px;padding:4px 0;border-bottom:1px solid #1f2937"><span style="color:#9ca3af">${f.name}</span><span style="color:#4b5563">${f.val} · N/A</span></div>`;
+        const pct = Math.round(f.score / f.max * 100);
+        const col = pct >= 75 ? '#ef4444' : pct >= 50 ? '#f97316' : pct >= 25 ? '#eab308' : '#374151';
+        return `<div style="margin-bottom:5px">
+          <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
+            <span style="color:#9ca3af">${f.name}</span>
+            <span style="color:#e5e7eb;font-weight:600">${f.val} <span style="color:${col}">(${f.score}/${f.max})</span></span>
+          </div>
+          <div style="background:#374151;border-radius:3px;height:4px">
+            <div style="background:${col};height:4px;border-radius:3px;width:${pct}%;transition:width 1s"></div>
+          </div>
+        </div>`;
+      }).join('');
+    }
+  }
+
+  window.squeezeShowTab = function(ticker) {
+    _activeTab = ticker;
+    // Highlight tab
+    ['AMC','GME','KOSS','BYND','UPST','BBAI','SMCI'].forEach(t => {
+      const btn = document.getElementById('squeeze-tab-'+t);
+      if (!btn) return;
+      btn.style.background = t === ticker ? '#6366f1' : '#374151';
+      btn.style.color = t === ticker ? '#fff' : '#9ca3af';
+    });
+    // Ako je AMC — render koristi AMC data iz _amcCache (fetchAmc)
+    if (ticker === 'AMC') {
+      // Probaj dohvatiti AMC data iz /api/amc ako je prazan
+      if (!_allData['AMC']) {
+        fetch('/api/amc').then(r => r.json()).then(d => {
+          _allData['AMC'] = { ...d, squeezeFactors: d.squeeze?.factors };
+          renderDetail('AMC');
+        }).catch(() => {});
+      } else {
+        renderDetail('AMC');
+      }
+    } else {
+      if (_allData[ticker] && !_allData[ticker].loading) {
+        renderDetail(ticker);
+      } else {
+        // Trigger fetch i loading state
+        fetch('/api/squeeze?ticker='+ticker).then(r => r.json()).then(d => {
+          _allData[ticker] = d;
+          renderGrid();
+          renderDetail(ticker);
+        });
+      }
+    }
+  };
+
+  window.squeezeForceRefresh = function() {
+    document.getElementById('squeeze-ts').textContent = 'Osvježavam sve dionice… (može trajati 60s)';
+    // Force AMC refresh
+    fetch('/api/amc?force=1').then(r => r.json()).then(d => {
+      _allData['AMC'] = { ...d, squeezeFactors: d.squeeze?.factors };
+      if (_activeTab === 'AMC') renderDetail('AMC');
+    }).catch(() => {});
+    // Force squeeze refresh
+    fetch('/api/squeeze').then(r => r.json()).then(arr => {
+      arr.forEach(d => { if (d.ticker) _allData[d.ticker] = d; });
+      renderGrid();
+      if (_activeTab && _allData[_activeTab]) renderDetail(_activeTab);
+      document.getElementById('squeeze-ts').textContent = new Date().toLocaleTimeString('hr-HR',{hour:'2-digit',minute:'2-digit'}) + ' · osvježeno';
+    }).catch(() => {});
+  };
+
+  async function loadSqueeze() {
+    try {
+      // Load AMC from /api/amc
+      const amc = await fetch('/api/amc').then(r => r.json());
+      if (amc && !amc.error) _allData['AMC'] = { ...amc, squeezeFactors: amc.squeeze?.factors };
+      // Load others from /api/squeeze
+      const arr = await fetch('/api/squeeze').then(r => r.json());
+      arr.forEach(d => { if (d.ticker) _allData[d.ticker] = d; });
+      renderGrid();
+      const ts = document.getElementById('squeeze-ts');
+      if (ts) ts.textContent = new Date().toLocaleTimeString('hr-HR',{hour:'2-digit',minute:'2-digit'}) + ' · cache';
+    } catch(e) {
+      const ts = document.getElementById('squeeze-ts');
+      if (ts) ts.textContent = 'Greška: ' + e.message;
+    }
+  }
+
+  loadSqueeze();
+  setInterval(loadSqueeze, 60 * 60 * 1000); // osvježi svakih 60 min
+})();
+</script>
+
 <!-- ═══════════════════════════════════════════════════════════ AMC PANEL ═══ -->
 <div style="background:#1f2937;border:1px solid #374151;border-radius:12px;padding:20px;margin:20px 0" id="amc-panel">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
@@ -3384,6 +3770,38 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ── Squeeze Stocks endpoint — svih 6 dionicama (GME, KOSS, BYND, UPST, BBAI, SMCI) ──
+  if (url.pathname === "/api/squeeze") {
+    const ticker = url.searchParams?.get("ticker");
+    if (ticker) {
+      // Jedna dionica
+      const cfg = SQUEEZE_STOCKS.find(s => s.ticker === ticker.toUpperCase());
+      if (!cfg) { res.writeHead(404); res.end(JSON.stringify({ error: "Ticker not found" })); return; }
+      const cache = _squeezeCache[cfg.ticker];
+      if (cache?.data) {
+        const forceRefresh = url.searchParams?.get("force") === "1";
+        if (forceRefresh) { fetchSqueezeStock(cfg); } // fire-and-forget
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ...cache.data, cached: true, cacheAge: Math.round((Date.now()-cache.ts)/60000)+"min" }));
+      } else {
+        fetchSqueezeStock(cfg); // fire-and-forget
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ticker: cfg.ticker, loading: true, ts: new Date().toISOString() }));
+      }
+    } else {
+      // Sve dionice — vrati array
+      const result = SQUEEZE_STOCKS.map(cfg => {
+        const cache = _squeezeCache[cfg.ticker];
+        if (cache?.data) return { ...cache.data, cached: true, cacheAge: Math.round((Date.now()-cache.ts)/60000)+"min" };
+        fetchSqueezeStock(cfg); // fire-and-forget za prazan cache
+        return { ticker: cfg.ticker, name: cfg.name, emoji: cfg.emoji, loading: true };
+      });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(result));
+    }
+    return;
+  }
+
   // Dashboard HTML
   const allStats     = PORTFOLIO_DEFS.map(d => buildPortfolioStats(d.id));
   const allPositions = PORTFOLIO_DEFS.map(d => loadPositions(d.id));
@@ -3579,6 +3997,128 @@ async function fetchAmcData() {
   }
 }
 
+// ─── Squeeze Stocks config ─────────────────────────────────────────────────────
+// AMC je i dalje praćen posebno (fetchAmcData). Ovi su za generički fetchSqueezeStock.
+const SQUEEZE_STOCKS = [
+  { ticker: "GME",  name: "GameStop Corp.",        cmcSlug: "gamestop",             emoji: "🎮" },
+  { ticker: "KOSS", name: "Koss Corporation",       cmcSlug: "koss",                 emoji: "🎧" },
+  { ticker: "BYND", name: "Beyond Meat Inc.",       cmcSlug: "beyond-meat",          emoji: "🌱" },
+  { ticker: "UPST", name: "Upstart Holdings",       cmcSlug: "upstart",              emoji: "🤖" },
+  { ticker: "BBAI", name: "BigBear.ai Holdings",    cmcSlug: "bigbear-ai",           emoji: "🐻" },
+  { ticker: "SMCI", name: "Super Micro Computer",   cmcSlug: "super-micro-computer", emoji: "🖥️" },
+];
+
+const _squeezeCache = {};          // keyed by ticker → { data, ts }
+const _squeezeFetchRunning = {};   // keyed by ticker → boolean
+
+/**
+ * Generički fetch za squeeze stock podatke (isti kao fetchAmcData, ali parametriziran).
+ * @param {{ ticker: string, name: string, cmcSlug: string, emoji: string }} cfg
+ */
+async function fetchSqueezeStock(cfg) {
+  const { ticker, cmcSlug } = cfg;
+  if (_squeezeFetchRunning[ticker]) return;
+  _squeezeFetchRunning[ticker] = true;
+  try {
+    const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36";
+    const FH = { "User-Agent": UA, "Accept": "text/html,application/xhtml+xml,*/*", "Accept-Language": "en-US,en;q=0.9", "Referer": "https://finviz.com/" };
+
+    // 1. Finviz
+    const fvHtml = await fetch(`https://finviz.com/quote?t=${ticker}&p=d`, { headers: FH, signal: AbortSignal.timeout(15000) }).then(r => r.text());
+    const snap = {};
+    const snapRe = /snapshot-td-label\"[^>]*>(?:<[^>]+>)*([^<]+?)(?:<\/[^>]+>)*<\/div><\/td>\s*<td[^>]*snapshot-td2[^>]*>[^<]*<div[^>]*snapshot-td-content[^>]*>(?:<[^>]+>)*([^<]+)/g;
+    let sm;
+    while ((sm = snapRe.exec(fvHtml)) !== null) snap[sm[1].trim()] = sm[2].trim();
+
+    // 2. Cost to Borrow — companiesmarketcap.com
+    let ctbPct = null, ctbAvail = null;
+    try {
+      const cmcHtml = await fetch(
+        `https://companiesmarketcap.com/${cmcSlug}/cost-to-borrow/`,
+        { headers: { "User-Agent": UA, "Accept": "text/html", "Referer": "https://companiesmarketcap.com/" }, signal: AbortSignal.timeout(12000) }
+      ).then(r => r.text());
+      const vVals = [...cmcHtml.matchAll(/"v":([0-9.]+)/g)].map(m => parseFloat(m[1]));
+      if (vVals.length > 0) ctbPct = vVals[vVals.length - 1] / 100;
+      const data3M = cmcHtml.match(/\bdata3\s*=\s*\[([^\]]*)\]/);
+      if (data3M) {
+        const d3Vals = [...data3M[1].matchAll(/"v":"([0-9]+)"/g)].map(m => parseInt(m[1]));
+        const nonZeroAvail = d3Vals.filter(v => v > 0);
+        if (nonZeroAvail.length > 0) ctbAvail = nonZeroAvail[nonZeroAvail.length - 1];
+      }
+    } catch(e) { console.error(`${ticker} CTB fetch greška:`, e.message); }
+
+    // 3. FTD — companiesmarketcap.com
+    let ftdData = null;
+    try {
+      const ftdHtml = await fetch(
+        `https://companiesmarketcap.com/${cmcSlug}/failure-to-deliver/`,
+        { headers: { "User-Agent": UA, "Accept": "text/html", "Referer": "https://companiesmarketcap.com/" }, signal: AbortSignal.timeout(12000) }
+      ).then(r => r.text());
+      const ftdPairs = [...ftdHtml.matchAll(/"d":(\d+),"v":([0-9.]+)/g)].map(m => ({ d: parseInt(m[1]), v: parseFloat(m[2]) }));
+      if (ftdPairs.length > 0) {
+        const nonZero = ftdPairs.filter(p => p.v > 0);
+        if (nonZero.length > 0) {
+          const latest = nonZero[nonZero.length - 1];
+          const prev   = nonZero.length > 1 ? nonZero[nonZero.length - 2] : null;
+          ftdData = { qty: Math.round(latest.v), date: new Date(latest.d * 1000).toISOString().slice(0, 10), change: prev ? Math.round(latest.v - prev.v) : null };
+        }
+      }
+    } catch(e) { console.error(`${ticker} FTD fetch greška:`, e.message); }
+
+    // 4. Squeeze Score
+    const g = k => snap[k] ?? null;
+    const parseVol = s => { if (!s) return 0; s = String(s).replace(/,/g,""); return s.endsWith("M")?parseFloat(s)*1e6:s.endsWith("B")?parseFloat(s)*1e9:s.endsWith("K")?parseFloat(s)*1e3:parseFloat(s)||0; };
+    const siPct  = parseFloat(snap["Short Float"] ?? "0");
+    const dtc    = parseFloat(snap["Short Ratio"] ?? "0");
+    const relVol = (() => { const v=parseVol(snap["Volume"]), a=parseVol(snap["Avg Volume"]); return a>0?v/a:1; })();
+    const siScore  = siPct>=25?35:siPct>=20?28:siPct>=15?20:siPct>=10?12:siPct>=5?6:0;
+    const dtcScore = dtc>=7?25:dtc>=5?20:dtc>=3?14:dtc>=2?8:dtc>=1?4:0;
+    const ctb      = ctbPct ?? 0;
+    const avail    = ctbAvail ?? Infinity;
+    const ctbScore = ctb>=50?20:ctb>=20?15:ctb>=5?10:ctb>=2?6:ctb>=1?3:0;
+    const availScore = avail<100000?12:avail<500000?9:avail<2000000?6:avail<5000000?3:0;
+    const volScore = relVol>=3?8:relVol>=2?5:relVol>=1.5?3:relVol>=1?1:0;
+    const hasCTB   = ctbPct !== null;
+    const hasAvail = ctbAvail !== null;
+    const rawScore = siScore + dtcScore + ctbScore + availScore + volScore;
+    const maxScore = 35 + 25 + (hasCTB?20:0) + (hasAvail?12:0) + 8;
+    const squeezeScore = maxScore >= 100 ? Math.min(100, rawScore) : Math.min(100, Math.round(rawScore / maxScore * (maxScore < 68 ? 76 : 100)));
+    const squeezeLabel = squeezeScore>=75?"🔴 Eksplozivan":squeezeScore>=55?"🟠 Visok":squeezeScore>=35?"🟡 Umjeren":"🟢 Nizak";
+
+    const payload = {
+      ticker, name: cfg.name, emoji: cfg.emoji,
+      price: parseFloat(g("Price")??"0")||null, changePct: g("Change"),
+      volume: g("Volume"), avgVolume: g("Avg Volume"), marketCap: g("Market Cap"),
+      shortPctFloat: g("Short Float"), shortRatio: g("Short Ratio"), shortInterest: g("Short Interest"),
+      sharesFloat: g("Shs Float"), sharesOutstand: g("Shs Outstand"),
+      instOwn: g("Inst Own"), insiderOwn: g("Insider Own"),
+      pe: g("P/E"), high52w: g("52W High"), low52w: g("52W Low"),
+      ftd: ftdData,
+      borrowFee: hasCTB ? { fee: ctbPct, available: ctbAvail ?? null } : null,
+      squeeze: { score: squeezeScore, label: squeezeLabel, partial: !hasCTB || !hasAvail },
+      squeezeFactors: [
+        { name:"Short Interest",   val:siPct.toFixed(1)+"%",     score:siScore,                 max:35 },
+        { name:"Days to Cover",    val:dtc.toFixed(1)+"d",       score:dtcScore,                max:25 },
+        { name:"Cost to Borrow",   val:hasCTB?ctb.toFixed(2)+"%":"N/A",  score:hasCTB?ctbScore:null,  max:20 },
+        { name:"Shares Available", val:hasAvail?(avail>=1e6?(avail/1e6).toFixed(1)+"M":(avail/1e3).toFixed(0)+"K"):"N/A", score:hasAvail?availScore:null, max:12 },
+        { name:"Rel. Volume",      val:relVol.toFixed(2)+"x",    score:volScore,                max:8  },
+      ],
+      source: "finviz.com + companiesmarketcap.com",
+      ts: new Date().toISOString()
+    };
+    if (!_squeezeCache[ticker]) _squeezeCache[ticker] = { data: null, ts: 0 };
+    _squeezeCache[ticker].data = payload;
+    _squeezeCache[ticker].ts   = Date.now();
+    console.log(`${ticker} squeeze=${squeezeScore} si=${siPct}% ctb=${ctbPct?.toFixed(2)||"N/A"}% dtc=${dtc}`);
+    return payload;
+  } catch(e) {
+    console.error(`fetchSqueezeStock(${ticker}) greška:`, e.message);
+    return null;
+  } finally {
+    _squeezeFetchRunning[ticker] = false;
+  }
+}
+
 // ─── Telegram helper (dashboard) ──────────────────────────────────────────────
 async function tgDash(msg) {
   const token  = process.env.TELEGRAM_BOT_TOKEN;
@@ -3765,5 +4305,20 @@ server.listen(PORT, () => {
       await amcSqueezeMonitor();
     }, 30 * 60 * 1000);           // svakih 30 min
   }, 90 * 1000); // pričekaj 90s da se server stabilizira pri startu
+
+  // ─── Squeeze Stocks background fetch — svakih 60 min (GME, KOSS, BYND, UPST, BBAI, SMCI) ──
+  setTimeout(async () => {
+    // Sekvencijalno da ne preopteretimo Finviz/CMC (svaki ~10s)
+    for (const cfg of SQUEEZE_STOCKS) {
+      try { await fetchSqueezeStock(cfg); } catch {}
+      await new Promise(r => setTimeout(r, 10000));
+    }
+    setInterval(async () => {
+      for (const cfg of SQUEEZE_STOCKS) {
+        try { await fetchSqueezeStock(cfg); } catch {}
+        await new Promise(r => setTimeout(r, 10000));
+      }
+    }, 60 * 60 * 1000); // svakih 60 min
+  }, 180 * 1000); // pričekaj 3 min (nakon AMC fetcha)
 
 });

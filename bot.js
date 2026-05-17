@@ -2426,6 +2426,10 @@ function writeEntryCsv(pid, entry) {
   const qty  = (entry.tradeSize / entry.price).toFixed(6);
   const fee  = (entry.tradeSize * 0.0006).toFixed(4);  // Bitget taker 0.06%
   const mode = PAPER_TRADING ? "PAPER" : BITGET_DEMO ? "DEMO" : "LIVE";
+  const entryMode = entry.entryMode || "PBK";
+  const sigCount  = entry.sigMask != null
+    ? entry.sigMask.toString(2).split("").filter(b => b === "1").length
+    : "?";
 
   const row = [
     date, time, "BitGet", entry.symbol, entry.signal,
@@ -2433,7 +2437,7 @@ function writeEntryCsv(pid, entry) {
     fee, "OPEN",
     fmtPrice(entry.sl), fmtPrice(entry.tp),
     entry.orderId || "", mode, pid,
-    `"${entry.strategy} | SL ${entry.slPct??SL_PCT}% TP ${entry.tpPct??TP_PCT}%"`,
+    `"${entry.strategy} | ${entryMode} | Sig ${sigCount}/13 | SL ${entry.slPct??SL_PCT}% TP ${entry.tpPct??TP_PCT}%"`,
   ].join(",");
 
   appendFileSync(csvFilePath(pid), row + "\n");
@@ -3662,7 +3666,7 @@ export async function run() {
         const timestamp = new Date().toISOString();
         const orderId   = `${isLive ? "LIVE" : "PAPER"}-${Date.now()}`;
         const mode      = isLive ? (BITGET_DEMO ? "DEMO" : "LIVE") : "PAPER";
-        const entry = { symbol, signal, price, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode, sigMask: result.sigMask ?? null };
+        const entry = { symbol, signal, price, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode, sigMask: result.sigMask ?? null, entryMode: result.isMomentum ? "MOM" : "PBK" };
 
         if (!isLive) {
           addPosition(pid, entry);

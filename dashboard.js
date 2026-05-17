@@ -2717,7 +2717,7 @@ function sqRenderGrid() {
     var d = _sqData[t];
     var em = _sqEmojis[t] || '';
     if (!d || d.loading) {
-      html += '<div onclick="squeezeShowTab(\'' + t + '\')" style="background:#1f2937;border:1px solid #374151;border-radius:8px;padding:12px;cursor:pointer;text-align:center">'
+      html += '<div data-ticker="' + t + '" onclick="squeezeShowTab(this.dataset.ticker)" style="background:#1f2937;border:1px solid #374151;border-radius:8px;padding:12px;cursor:pointer;text-align:center">'
             + '<div style="font-size:11px;color:#9ca3af;font-weight:700">' + em + ' ' + t + '</div>'
             + '<div style="font-size:11px;color:#6b7280;margin-top:6px">Učitavam…</div>'
             + '</div>';
@@ -2733,7 +2733,7 @@ function sqRenderGrid() {
     var dtcStr = _sqFmt(d.shortRatio);
     var ctbStr = d.borrowFee && d.borrowFee.fee != null ? d.borrowFee.fee.toFixed(1)+'%' : '—';
     var sqLbl  = sq.label ? sq.label.split(' ').slice(0,2).join(' ') : '—';
-    html += '<div onclick="squeezeShowTab(\'' + t + '\')" style="background:#1f2937;border:1px solid #374151;border-radius:8px;padding:12px;cursor:pointer" onmouseenter="this.style.borderColor=\'#6366f1\'" onmouseleave="this.style.borderColor=\'#374151\'">'
+    html += '<div data-ticker="' + t + '" onclick="squeezeShowTab(this.dataset.ticker)" style="background:#1f2937;border:1px solid #374151;border-radius:8px;padding:12px;cursor:pointer;transition:border-color .2s">'
           + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
           +   '<div style="font-size:11px;color:#9ca3af;font-weight:700">' + em + ' ' + t + '</div>'
           +   '<div style="font-size:14px;font-weight:900;color:' + sqColor + '">' + sqScore + '</div>'

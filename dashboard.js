@@ -2748,69 +2748,98 @@ setInterval(updateCountdown, 1000);
   function renderDetail(ticker) {
     var d = _allData[ticker];
     var panel = document.getElementById('squeeze-detail');
-    if (!d || d.loading || d.error) { if (panel) panel.style.display = 'none'; return; }
-    if (panel) panel.style.display = 'block';
+    if (!panel) return;
+    if (!d || d.error) { panel.style.display = 'none'; return; }
+    if (d.loading) { showDetailLoading(ticker); return; }
+    panel.style.display = 'block';
 
     var emojis = { AMC:'🍿', GME:'🎮', KOSS:'🎧', BYND:'🌱', UPST:'🤖', BBAI:'🐻', SMCI:'🖥️' };
-    setEl('squeeze-detail-title', (emojis[ticker]||'') + ' ' + (d.name||ticker) + ' (NYSE/NASDAQ: ' + ticker + ')');
-
-    var metrics = document.getElementById('squeeze-detail-metrics');
-    if (metrics) {
-      var ctbColor = d.borrowFee && d.borrowFee.fee != null ? (d.borrowFee.fee>=5?'#f87171':d.borrowFee.fee>=1?'#fbbf24':'#4b5563') : '#4b5563';
-      var items = [
-        { label: '💵 Cijena',         val: d.price!=null?'$'+d.price.toFixed(2):'—',                   color: '#f3f4f6' },
-        { label: '📉 Short Float',     val: fmt(d.shortPctFloat),                                             color: '#ef4444' },
-        { label: '⏱️ Short Ratio',     val: fmt(d.shortRatio)+'d',                                            color: '#f59e0b' },
-        { label: '💸 Cost to Borrow',  val: d.borrowFee&&d.borrowFee.fee!=null?d.borrowFee.fee.toFixed(2)+'%':'N/A', color: ctbColor },
-        { label: '🚨 FTD',             val: d.ftd?fmtQty(d.ftd.qty)+' ('+d.ftd.date+')':'N/A',               color: '#f87171' },
-        { label: '📊 Market Cap',       val: fmt(d.marketCap),                                                 color: '#e5e7eb' },
-        { label: '🏛️ Inst Own',   val: fmt(d.instOwn),                                                  color: '#60a5fa' },
-        { label: '🏴 52W High',         val: fmt(d.high52w),                                                   color: '#9ca3af' },
-      ];
-      var mHtml = '';
-      for (var i=0; i<items.length; i++) {
-        var it = items[i];
-        mHtml += '<div style="background:#1f2937;border:1px solid #374151;border-radius:6px;padding:9px">'
-               + '<div style="font-size:9px;color:#9ca3af;text-transform:uppercase;margin-bottom:3px">' + it.label + '</div>'
-               + '<div style="font-size:16px;font-weight:700;color:' + it.color + '">' + it.val + '</div>'
-               + '</div>';
-      }
-      metrics.innerHTML = mHtml;
-    }
-
     var sq = d.squeeze || {};
     var sqScore = sq.score != null ? sq.score : 0;
-    var arcEl = document.getElementById('sq-detail-arc');
-    if (arcEl) { arcEl.style.strokeDashoffset = (163.4*(1-sqScore/100)).toString(); arcEl.style.stroke = scoreColor(sqScore); }
-    setEl('sq-detail-score', sqScore);
-    var scoreEl = document.getElementById('sq-detail-score');
-    if (scoreEl) scoreEl.style.color = scoreColor(sqScore);
-    setEl('sq-detail-label', sq.label || '—');
+    var sqCol = scoreColor(sqScore);
+    var ctbColor = d.borrowFee && d.borrowFee.fee != null ? (d.borrowFee.fee>=5?'#f87171':d.borrowFee.fee>=1?'#fbbf24':'#4b5563') : '#4b5563';
 
-    var factors = d.squeezeFactors || (d.squeeze && d.squeeze.factors) || [];
-    var fDiv = document.getElementById('sq-detail-factors');
-    if (fDiv) {
-      var fHtml = '';
-      for (var fi=0; fi<factors.length; fi++) {
-        var f = factors[fi];
-        if (f.score === null) {
-          fHtml += '<div style="display:flex;justify-content:space-between;font-size:11px;padding:4px 0;border-bottom:1px solid #1f2937">'
-                 + '<span style="color:#9ca3af">' + f.name + '</span><span style="color:#4b5563">' + f.val + ' · N/A</span></div>';
-        } else {
-          var pct = Math.round(f.score / f.max * 100);
-          var col = pct>=75?'#ef4444':pct>=50?'#f97316':pct>=25?'#eab308':'#374151';
-          fHtml += '<div style="margin-bottom:5px">'
-                 + '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">'
-                 +   '<span style="color:#9ca3af">' + f.name + '</span>'
-                 +   '<span style="color:#e5e7eb;font-weight:600">' + f.val + ' <span style="color:' + col + '">(' + f.score + '/' + f.max + ')</span></span>'
-                 + '</div>'
-                 + '<div style="background:#374151;border-radius:3px;height:4px">'
-                 +   '<div style="background:' + col + ';height:4px;border-radius:3px;width:' + pct + '%;transition:width 1s"></div>'
-                 + '</div></div>';
-        }
-      }
-      fDiv.innerHTML = fHtml;
+    // Metrics cards
+    var items = [
+      { label: '💵 Cijena',          val: d.price!=null?'$'+d.price.toFixed(2):'—',                        color: '#f3f4f6' },
+      { label: '📉 Short Float',      val: fmt(d.shortPctFloat),                                              color: '#ef4444' },
+      { label: '⏱️ Short Ratio',      val: fmt(d.shortRatio)+'d',                                             color: '#f59e0b' },
+      { label: '💸 Cost to Borrow',   val: d.borrowFee&&d.borrowFee.fee!=null?d.borrowFee.fee.toFixed(2)+'%':'N/A', color: ctbColor },
+      { label: '🚨 FTD',              val: d.ftd?fmtQty(d.ftd.qty)+' ('+d.ftd.date+')':'N/A',                color: '#f87171' },
+      { label: '📊 Market Cap',        val: fmt(d.marketCap),                                                  color: '#e5e7eb' },
+      { label: '🏛 Inst Own',          val: fmt(d.instOwn),                                                   color: '#60a5fa' },
+      { label: '📈 52W High',          val: fmt(d.high52w),                                                   color: '#9ca3af' },
+    ];
+    var mHtml = '';
+    for (var i=0; i<items.length; i++) {
+      var it = items[i];
+      mHtml += '<div style="background:#1f2937;border:1px solid #374151;border-radius:6px;padding:9px">'
+             + '<div style="font-size:9px;color:#9ca3af;text-transform:uppercase;margin-bottom:3px">' + it.label + '</div>'
+             + '<div style="font-size:16px;font-weight:700;color:' + it.color + '">' + it.val + '</div>'
+             + '</div>';
     }
+
+    // Squeeze factors
+    var factors = d.squeezeFactors || (d.squeeze && d.squeeze.factors) || [];
+    var fHtml = '';
+    for (var fi=0; fi<factors.length; fi++) {
+      var f = factors[fi];
+      if (f.score === null) {
+        fHtml += '<div style="display:flex;justify-content:space-between;font-size:11px;padding:4px 0;border-bottom:1px solid #1f2937">'
+               + '<span style="color:#9ca3af">' + f.name + '</span><span style="color:#4b5563">' + f.val + ' · N/A</span></div>';
+      } else {
+        var pct = Math.round(f.score / f.max * 100);
+        var fCol = pct>=75?'#ef4444':pct>=50?'#f97316':pct>=25?'#eab308':'#374151';
+        fHtml += '<div style="margin-bottom:5px">'
+               + '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">'
+               +   '<span style="color:#9ca3af">' + f.name + '</span>'
+               +   '<span style="color:#e5e7eb;font-weight:600">' + f.val + ' <span style="color:' + fCol + '">(' + f.score + '/' + f.max + ')</span></span>'
+               + '</div>'
+               + '<div style="background:#374151;border-radius:3px;height:4px">'
+               +   '<div style="background:' + fCol + ';height:4px;border-radius:3px;width:' + pct + '%;transition:width 1s"></div>'
+               + '</div></div>';
+      }
+    }
+
+    // Rebuild cijeli panel HTML — ne ovisi o ID-ovima koji su možda zamijenjeni
+    var dashArc = 163.4 * (1 - sqScore / 100);
+    panel.innerHTML =
+        '<div style="font-size:11px;color:#9ca3af;margin-bottom:12px">'
+      +   (emojis[ticker]||'') + ' <b style="color:#e5e7eb">' + (d.name||ticker) + '</b> (NYSE/NASDAQ: ' + ticker + ')'
+      + '</div>'
+      + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px">'
+      + mHtml + '</div>'
+      + '<div style="background:linear-gradient(135deg,#1e1b4b,#111827);border:1px solid #4f46e5;border-radius:10px;padding:14px">'
+      +   '<div style="display:flex;align-items:center;gap:14px;margin-bottom:12px">'
+      +     '<div style="position:relative;width:64px;height:64px;flex-shrink:0">'
+      +       '<svg width="64" height="64" viewBox="0 0 64 64">'
+      +         '<circle cx="32" cy="32" r="26" fill="none" stroke="#374151" stroke-width="5"/>'
+      +         '<circle cx="32" cy="32" r="26" fill="none" stroke="' + sqCol + '" stroke-width="5"'
+      +           ' stroke-dasharray="163.4" stroke-dashoffset="' + dashArc + '"'
+      +           ' stroke-linecap="round" transform="rotate(-90 32 32)"/>'
+      +       '</svg>'
+      +       '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center">'
+      +         '<div style="font-size:17px;font-weight:900;color:' + sqCol + '">' + sqScore + '</div>'
+      +       '</div>'
+      +     '</div>'
+      +     '<div>'
+      +       '<div style="font-size:18px;font-weight:800;color:#e5e7eb">' + (sq.label||'—') + '</div>'
+      +       '<div style="font-size:10px;color:#9ca3af;margin-top:3px">Skor 0–100 · Short Squeeze Potencijal</div>'
+      +     '</div>'
+      +   '</div>'
+      +   '<div style="display:grid;gap:5px">' + fHtml + '</div>'
+      + '</div>';
+  }
+
+  function showDetailLoading(ticker) {
+    var panel = document.getElementById('squeeze-detail');
+    if (!panel) return;
+    panel.style.display = 'block';
+    panel.innerHTML = '<div style="text-align:center;padding:40px 20px;color:#9ca3af">'
+      + '<div style="font-size:28px;margin-bottom:12px">⏳</div>'
+      + '<div style="font-size:14px;font-weight:600;color:#e5e7eb">Učitavam ' + ticker + '…</div>'
+      + '<div style="font-size:11px;margin-top:8px">Finviz + companiesmarketcap.com · može trajati 10–20s</div>'
+      + '</div>';
   }
 
   window.squeezeShowTab = function(ticker) {
@@ -2824,22 +2853,40 @@ setInterval(updateCountdown, 1000);
     }
     if (ticker === 'AMC') {
       if (!_allData['AMC']) {
+        showDetailLoading('AMC');
         fetch('/api/amc').then(function(r){return r.json();}).then(function(d){
           _allData['AMC'] = Object.assign({}, d, { squeezeFactors: d.squeeze && d.squeeze.factors });
           renderDetail('AMC');
-        }).catch(function(){});
+        }).catch(function(e){
+          var panel = document.getElementById('squeeze-detail');
+          if (panel) panel.innerHTML = '<div style="text-align:center;padding:30px;color:#dc2626">Greška: ' + e.message + '</div>';
+        });
       } else { renderDetail('AMC'); }
     } else {
-      if (_allData[ticker] && !_allData[ticker].loading) {
+      var existing = _allData[ticker];
+      if (existing && !existing.loading && !existing.error) {
         renderDetail(ticker);
       } else {
+        // Odmah pokaži loading, server blokira i čeka podatke (~10-20s)
+        showDetailLoading(ticker);
         fetch('/api/squeeze?ticker='+ticker).then(function(r){return r.json();}).then(function(d){
+          if (d && d.error) {
+            var panel = document.getElementById('squeeze-detail');
+            if (panel) panel.innerHTML = '<div style="text-align:center;padding:30px;color:#dc2626">Greška: ' + d.error + '</div>';
+            return;
+          }
           _allData[ticker] = d;
           renderGrid();
-          renderDetail(ticker);
+          if (_activeTab === ticker) renderDetail(ticker);
+        }).catch(function(e){
+          var panel = document.getElementById('squeeze-detail');
+          if (panel) panel.innerHTML = '<div style="text-align:center;padding:30px;color:#dc2626">Mreža: ' + e.message + '</div>';
         });
       }
     }
+    // Scroll do detail panela
+    var sq = document.getElementById('squeeze-panel');
+    if (sq) { setTimeout(function(){ sq.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, 100); }
   };
 
   window.squeezeForceRefresh = function() {
@@ -3783,22 +3830,22 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === "/api/squeeze") {
     const ticker = url.searchParams?.get("ticker");
     if (ticker) {
-      // Jedna dionica
+      // Jedna dionica — BLOCKING: čeka na podatke ako cache prazan (do 25s)
       const cfg = SQUEEZE_STOCKS.find(s => s.ticker === ticker.toUpperCase());
       if (!cfg) { res.writeHead(404); res.end(JSON.stringify({ error: "Ticker not found" })); return; }
       const cache = _squeezeCache[cfg.ticker];
-      if (cache?.data) {
-        const forceRefresh = url.searchParams?.get("force") === "1";
-        if (forceRefresh) { fetchSqueezeStock(cfg); } // fire-and-forget
+      const forceRefresh = url.searchParams?.get("force") === "1";
+      if (cache?.data && !forceRefresh) {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ...cache.data, cached: true, cacheAge: Math.round((Date.now()-cache.ts)/60000)+"min" }));
       } else {
-        fetchSqueezeStock(cfg); // fire-and-forget
+        // Blokiraj i čekaj na podatke (max 25s) — ovo radi pri prvom kliku na tab
+        const data = await fetchSqueezeStock(cfg);
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ticker: cfg.ticker, loading: true, ts: new Date().toISOString() }));
+        res.end(JSON.stringify(data || { ticker: cfg.ticker, error: "Fetch nije uspio" }));
       }
     } else {
-      // Sve dionice — vrati array
+      // Sve dionice — vrati što imamo u cache-u, trigger fetch za prazan
       const result = SQUEEZE_STOCKS.map(cfg => {
         const cache = _squeezeCache[cfg.ticker];
         if (cache?.data) return { ...cache.data, cached: true, cacheAge: Math.round((Date.now()-cache.ts)/60000)+"min" };
@@ -4328,6 +4375,6 @@ server.listen(PORT, () => {
         await new Promise(r => setTimeout(r, 10000));
       }
     }, 60 * 60 * 1000); // svakih 60 min
-  }, 180 * 1000); // pričekaj 3 min (nakon AMC fetcha)
+  }, 45 * 1000); // pričekaj 45s (nakon AMC fetcha)
 
 });

@@ -1,6 +1,4 @@
 {
-  "watchlist_fib_gp": [],
-  "watchlist_ob": [],
   "all_symbols": [
     "DOGEUSDT",
     "NEARUSDT",
@@ -19,10 +17,6 @@
     "INJUSDT",
     "JUPUSDT"
   ],
-  "watchlist_ema_rsi": [],
-  "watchlist_3layer": [],
-  "watchlist_mega": [],
-  "watchlist_synapse7": [],
   "watchlist_synapse_t": [
     "DOGEUSDT",
     "NEARUSDT",
@@ -42,13 +36,8 @@
     "JUPUSDT"
   ],
   "portfolio_timeframes": {
-    "ema_rsi": "1H",
-    "mega": "15m",
-    "synapse7": "15m",
     "synapse_t": "15m"
   },
-  "symbol_timeframes": {},
-  "mega_timeframes": {},
   "default_timeframe": "1H",
   "_sltp_note": "Per-simbol SL/TP na osnovu 30-dnevnog ATR analize. Tier1=niska vol, Tier2=srednja, Tier3=visoka.",
   "symbol_sltp": {
@@ -196,84 +185,6 @@
     }
   },
   "strategies": {
-    "fib_gp": {
-      "name": "Fib Golden Pocket + Market Structure",
-      "symbols": [],
-      "note": "Deaktivirana — PF < 1.0 na svim TF-ovima.",
-      "params": {
-        "pivotLen": 4,
-        "fibLo": 0.45,
-        "fibHi": 0.65,
-        "fibTp": 1.5,
-        "ema9Len": 9,
-        "ema21Len": 21,
-        "atrLen": 14,
-        "atrSlMult": 0.5
-      }
-    },
-    "ema_rsi": {
-      "name": "EMA Cross + RSI Pullback",
-      "params": {
-        "ema9Len": 9,
-        "ema21Len": 21,
-        "ema50Len": 50,
-        "rsiLen": 14,
-        "rsiLongLo": 35,
-        "rsiLongHi": 58,
-        "rsiShortLo": 42,
-        "rsiShortHi": 65,
-        "atrLen": 14,
-        "atrSl": 1,
-        "atrTp": 2.5
-      }
-    },
-    "three_layer": {
-      "name": "Signal + Momentum + Trend (3-Layer) — DEAKTIVIRAN",
-      "note": "Uklonjen — WR 27.8%, P&L -$14 nakon 18 tradova.",
-      "params": {
-        "ema9Len": 9,
-        "ema21Len": 21,
-        "ema145Len": 145,
-        "macdFast": 12,
-        "macdSlow": 26,
-        "macdSignal": 9,
-        "atrLen": 14,
-        "atrSl": 1,
-        "atrTp": 1.5
-      }
-    },
-    "order_block": {
-      "name": "Order Block — Session Open (deaktiviran)",
-      "params": {
-        "sessionHours": [
-          9,
-          15
-        ],
-        "obLookback": 10,
-        "ema21Len": 21,
-        "ema50Len": 50,
-        "rrRatio": 2
-      }
-    },
-    "synapse7": {
-      "name": "SYNAPSE-7 — AI kNN + AutoTune + 6-Scale + RSI + CVD",
-      "description": "Kombinira 5 podsustava. Min 4/5 signala za ulaz. kMem 100 (25h). SL 2% / TP 4%.",
-      "params": {
-        "kLen": 10,
-        "kMem": 100,
-        "kK": 5,
-        "kSmth": 5,
-        "kSigLn": 5,
-        "atWin": 20,
-        "yzMin": 3,
-        "rsiLen": 14,
-        "rsiMaLen": 14,
-        "cvdLen": 20,
-        "minSig": 4,
-        "slPct": 2,
-        "tpPct": 4
-      }
-    },
     "synapse_t": {
       "name": "ULTRA — 13-Signal Combined Strategy (ATR per-symbol SL/TP)",
       "description": "Kombinira 13 signala: E50(REV), RSI(REV), E55(REV), CHP, CVD(REV), R⟳, MCD, E145, VOL(REV), MCC(REV), RSI↗, SRS, SRB. Mandatory gates: ADX≥30, 6Sc≥4/6, RSI asimetričan, 5mSR. Min 7/13 signala. LONG_ONLY. Per-simbol SL/TP: Tier1 SL1.5%/TP4% | Tier2 SL2%/TP4.5% | Tier3 SL2.5%/TP5.5%. 50x leverage (BTC 75x).",
@@ -281,26 +192,6 @@
         "minSig": 6,
         "slPct": 1.5,
         "tpPct": 4.0
-      }
-    },
-    "mega": {
-      "name": "MEGA — EMA9/21 + EMA55/200 + RSI + ADX + Choppiness",
-      "params": {
-        "ema9Len": 9,
-        "ema21Len": 21,
-        "ema55Len": 55,
-        "ema200Len": 200,
-        "rsiLen": 14,
-        "adxLen": 14,
-        "adxMin": 18,
-        "chopLen": 14,
-        "chopMax": 61.8,
-        "rsiLongLo": 30,
-        "rsiLongHi": 60,
-        "rsiShortLo": 40,
-        "rsiShortHi": 70,
-        "slPct": 2,
-        "tpPct": 4
       }
     }
   },

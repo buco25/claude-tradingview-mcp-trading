@@ -1,15 +1,10 @@
 /**
- * Trading Bot — 4-Portfolio Mode
+ * Trading Bot — ULTRA Strategy (synapse_t)
  *
- * Portfolio 1 — EMA+RSI    → 1H  | SL 2%  / TP 4%
- * Portfolio 2 — MEGA       → 15m | SL 2%  / TP 4%
- * Portfolio 3 — SYNAPSE-7  → 15m | SL 2%  / TP 4%
- * Portfolio 4 — ULTRA      → 1H  | Per-simbol SL/TP (ATR tier) | 50x (BTC 75x) | rizik 1.5% banke po tradeu
- *
- * Risk-based sizing: margin = equity × 1.5% | notional = margin × 50x (BTC 75x)
- *   Tier 1 (BTC/ETH/SOL/LINK/XRP): SL 1.5% / TP 4.0% (RR 1:2.67)
- *   Tier 2 (DOGE/NEAR/ADA/SUI/TAO/HYPE/PEPE/APT/SEI): SL 2.0% / TP 4.5% (RR 1:2.25)
- *   Tier 3 (ENA): SL 2.5% / TP 5.5% (RR 1:2.20)
+ * ULTRA → 15m | Per-simbol SL/TP (ATR tier) | Tier-based leverage | rizik 1.5% banke po tradeu
+ *   Tier 1 (BTC/ETH/SOL/LINK/XRP): SL 1.5% / TP 4.0% → 40x leverage (liq 2.0%)
+ *   Tier 2 (DOGE/NEAR/ADA/SUI/TAO/HYPE/APT/SEI/INJ): SL 2.0% / TP 4.5% → 35x (liq 2.36%)
+ *   Tier 3 (ENA/JUP): SL 2.5% / TP 5.5% → 30x (liq 2.83%)
  */
 
 import "dotenv/config";
@@ -1036,33 +1031,6 @@ const PORTFOLIO_IDS = ["synapse_t"];  // Aktivni portfolio — samo ULTRA
 function buildPortfolios(rules) {
   const tfs = rules.portfolio_timeframes || {};
   return {
-    ema_rsi: {
-      id:        "ema_rsi",
-      name:      "EMA+RSI",
-      symbols:   rules.watchlist_ema_rsi    || [],
-      strategy:  "ema_rsi",
-      params:    rules.strategies.ema_rsi.params,
-      timeframe: tfs.ema_rsi      || "1H",
-      slPct:     2.0, tpPct: 4.0,
-    },
-    mega: {
-      id:        "mega",
-      name:      "MEGA",
-      symbols:   rules.watchlist_mega       || [],
-      strategy:  "mega",
-      params:    rules.strategies.mega.params,
-      timeframe: tfs.mega         || "15m",
-      slPct:     2.0, tpPct: 4.0,
-    },
-    synapse7: {
-      id:        "synapse7",
-      name:      "SYNAPSE-7",
-      symbols:   rules.watchlist_synapse7   || [],
-      strategy:  "synapse7",
-      params:    rules.strategies.synapse7?.params  || {},
-      timeframe: tfs.synapse7     || "15m",
-      slPct:     2.0, tpPct: 4.0,
-    },
     synapse_t: {
       id:           "synapse_t",
       name:         "ULTRA",
@@ -1070,9 +1038,9 @@ function buildPortfolios(rules) {
       strategy:     "synapse_t",
       params:       rules.strategies.synapse_t?.params || {},
       timeframe:    tfs.synapse_t    || "15m",
-      slPct:        1.0, tpPct: 2.0,   // ULTRA: SL 1% / TP 2% | 100x → SL = likvidacija
-      live:         true,               // ← LIVE trading
-      startCapital: 296.99,            // ← Bitget balans 2026-05-09 (stvarni)
+      slPct:        1.0, tpPct: 2.0,
+      live:         true,
+      startCapital: 296.99,
     },
   };
 }
@@ -1225,145 +1193,6 @@ function calcMACD(closes, fast = 12, slow = 26, signal = 9) {
 }
 
 // ─── Strategije ────────────────────────────────────────────────────────────────
-
-function analyzeEmaRsi(candles, cfg) {
-  const { ema9Len = 9, ema21Len = 21, ema50Len = 50,
-          rsiLen = 14, rsiLongLo = 35, rsiLongHi = 58,
-          rsiShortLo = 42, rsiShortHi = 65 } = cfg;
-  const closes = candles.map(c => c.close);
-  const price  = closes[closes.length - 1];
-
-  const ema9  = calcEMA(closes, ema9Len);
-  const ema21 = calcEMA(closes, ema21Len);
-  const ema50 = calcEMA(closes, ema50Len);
-  const rsi   = calcRSI(closes, rsiLen);
-
-  if (!ema9 || !ema21 || !ema50 || rsi === null)
-    return { price, signal: "NEUTRAL", reason: "Nedovoljno podataka" };
-
-  const prevCloses = closes.slice(0, -1);
-  const pEma9  = calcEMA(prevCloses, ema9Len);
-  const pEma21 = calcEMA(prevCloses, ema21Len);
-
-  const crossUp   = pEma9 !== null && pEma21 !== null && pEma9 <= pEma21 && ema9 > ema21;
-  const crossDown = pEma9 !== null && pEma21 !== null && pEma9 >= pEma21 && ema9 < ema21;
-
-  let signal = "NEUTRAL", reason = "";
-
-  if (price > ema50 && crossUp && rsi >= rsiLongLo && rsi <= rsiLongHi) {
-    signal = "LONG";
-    reason = `EMA9/21 cross UP | RSI ${rsi.toFixed(1)} | Cijena > EMA50`;
-  } else if (price < ema50 && crossDown && rsi >= rsiShortLo && rsi <= rsiShortHi) {
-    signal = "SHORT";
-    reason = `EMA9/21 cross DOWN | RSI ${rsi.toFixed(1)} | Cijena < EMA50`;
-  } else {
-    if (!crossUp && !crossDown)           reason = "Nema EMA crossovera";
-    else if (crossUp && price <= ema50)   reason = "Cross UP ali cijena ispod EMA50";
-    else if (crossDown && price >= ema50) reason = "Cross DOWN ali cijena iznad EMA50";
-    else reason = `RSI ${rsi.toFixed(1)} izvan zone`;
-  }
-
-  return { price, ema9, ema21, ema50, rsi, signal, reason };
-}
-
-function analyzeThreeLayer(candles, cfg) {
-  const { ema9Len = 9, ema21Len = 21, ema145Len = 145,
-          macdFast = 12, macdSlow = 26, macdSignal = 9 } = cfg;
-  const closes = candles.map(c => c.close);
-  const price  = closes[closes.length - 1];
-
-  const ema9   = calcEMA(closes, ema9Len);
-  const ema21  = calcEMA(closes, ema21Len);
-  const ema145 = calcEMA(closes, ema145Len);
-  const hist   = calcMACD(closes, macdFast, macdSlow, macdSignal);
-
-  if (!ema9 || !ema21 || !ema145 || hist === null)
-    return { price, signal: "NEUTRAL", reason: "Nedovoljno podataka (EMA/MACD)" };
-
-  const prevCloses = closes.slice(0, -1);
-  const pEma9  = calcEMA(prevCloses, ema9Len);
-  const pEma21 = calcEMA(prevCloses, ema21Len);
-
-  const crossUp   = pEma9 !== null && pEma21 !== null && pEma9 <= pEma21 && ema9 > ema21;
-  const crossDown = pEma9 !== null && pEma21 !== null && pEma9 >= pEma21 && ema9 < ema21;
-
-  let signal = "NEUTRAL", reason = "";
-
-  if (crossUp && hist > 0 && price > ema145) {
-    signal = "LONG";
-    reason = `EMA9/21 cross UP | MACD hist ${hist.toFixed(6)} > 0 | Cijena > EMA145`;
-  } else if (crossDown && hist < 0 && price < ema145) {
-    signal = "SHORT";
-    reason = `EMA9/21 cross DOWN | MACD hist ${hist.toFixed(6)} < 0 | Cijena < EMA145`;
-  } else {
-    if (!crossUp && !crossDown)                    reason = "Nema EMA crossovera";
-    else if (crossUp && hist <= 0)                 reason = `MACD hist negativan (${hist.toFixed(6)})`;
-    else if (crossDown && hist >= 0)               reason = `MACD hist pozitivan (${hist.toFixed(6)})`;
-    else if (crossUp && price <= ema145)            reason = "Cijena ispod EMA145 — trend filter";
-    else if (crossDown && price >= ema145)          reason = "Cijena iznad EMA145 — trend filter";
-    else                                            reason = "Uvjeti nisu ispunjeni";
-  }
-
-  return { price, ema9, ema21, ema145, hist, signal, reason };
-}
-
-function analyzeMega(candles, cfg) {
-  const {
-    ema9Len = 9, ema21Len = 21, ema55Len = 55, ema200Len = 200,
-    rsiLen = 14, adxLen = 14, adxMin = 18, chopLen = 14, chopMax = 61.8,
-    rsiLongLo = 30, rsiLongHi = 60, rsiShortLo = 40, rsiShortHi = 70,
-  } = cfg;
-
-  const closes = candles.map(c => c.close);
-  const price  = closes[closes.length - 1];
-  const ema9   = calcEMA(closes, ema9Len);
-  const ema21  = calcEMA(closes, ema21Len);
-  const ema55  = calcEMA(closes, ema55Len);
-  const ema200 = calcEMA(closes, ema200Len);
-  const rsi    = calcRSI(closes, rsiLen);
-  const adx    = calcADX(candles, adxLen);
-  const chop   = calcChop(candles, chopLen);
-
-  if (!ema9 || !ema21 || !ema55 || rsi === null)
-    return { price, signal: "NEUTRAL", reason: "Nedovoljno podataka" };
-
-  const prevCloses  = closes.slice(0, -1);
-  const prev2Closes = closes.slice(0, -2);
-  const pEma9  = calcEMA(prevCloses, ema9Len);
-  const pEma21 = calcEMA(prevCloses, ema21Len);
-  const p2Ema9 = calcEMA(prev2Closes, ema9Len);
-  const p2Ema21= calcEMA(prev2Closes, ema21Len);
-  if (!pEma9 || !pEma21) return { price, signal: "NEUTRAL", reason: "Nedovoljno podataka za cross" };
-
-  const crossUp   = (p2Ema9 <= p2Ema21 && pEma9 > pEma21) || (pEma9 <= pEma21 && ema9 > ema21);
-  const crossDown = (p2Ema9 >= p2Ema21 && pEma9 < pEma21) || (pEma9 >= pEma21 && ema9 < ema21);
-
-  const trendUp   = price > ema55 && (!ema200 || price > ema200);
-  const trendDown = price < ema55 && (!ema200 || price < ema200);
-  const trending  = adx === null || adx > adxMin;
-  const notChoppy = chop === null || chop < chopMax;
-
-  let signal = "NEUTRAL", reason = "";
-
-  if (crossUp && trendUp && rsi > rsiLongLo && rsi < rsiLongHi && trending && notChoppy) {
-    signal = "LONG";
-    reason = `EMA9/21 cross UP | RSI ${rsi.toFixed(1)} | ADX ${adx?.toFixed(1) ?? "n/a"} | Chop ${chop?.toFixed(1) ?? "n/a"}`;
-  } else if (crossDown && trendDown && rsi > rsiShortLo && rsi < rsiShortHi && trending && notChoppy) {
-    signal = "SHORT";
-    reason = `EMA9/21 cross DOWN | RSI ${rsi.toFixed(1)} | ADX ${adx?.toFixed(1) ?? "n/a"} | Chop ${chop?.toFixed(1) ?? "n/a"}`;
-  } else {
-    const why = [];
-    if (!crossUp && !crossDown)                                     why.push("Nema EMA cross");
-    if ((crossUp && !trendUp) || (crossDown && !trendDown))        why.push("Trend filter (EMA55/200)");
-    if (crossUp   && !(rsi > rsiLongLo && rsi < rsiLongHi))       why.push(`RSI ${rsi.toFixed(1)} van ${rsiLongLo}-${rsiLongHi}`);
-    if (crossDown && !(rsi > rsiShortLo && rsi < rsiShortHi))     why.push(`RSI ${rsi.toFixed(1)} van ${rsiShortLo}-${rsiShortHi}`);
-    if (!trending)  why.push(`ADX ${adx?.toFixed(1) ?? "n/a"} < ${adxMin}`);
-    if (!notChoppy) why.push(`Chop ${chop?.toFixed(1) ?? "n/a"} > ${chopMax}`);
-    reason = why.join(" | ") || "Uvjeti nisu ispunjeni";
-  }
-
-  return { price, ema9, ema21, ema55, ema200, rsi, adx, chop, signal, reason };
-}
 
 // ─── SYNAPSE-7 helpers ─────────────────────────────────────────────────────────
 
@@ -2001,67 +1830,6 @@ function loadPending(pid) {
 
 function savePending(pid, list) {
   writeFileSync(pendingFile(pid), JSON.stringify(list, null, 2));
-}
-
-async function analyzeSynapse7Pullback(symbol, candles, cfg) {
-  const last   = candles[candles.length - 1];
-  const price  = last.close;
-  const pid    = "synapse7";
-
-  // 1) Provjeri postoji li pending za ovaj simbol
-  let pending = loadPending(pid);
-  const now   = Date.now();
-
-  // Makni stare (TTL istekao)
-  pending = pending.filter(p => now - p.ts < PULLBACK_TTL);
-
-  const existing = pending.find(p => p.symbol === symbol);
-
-  if (existing) {
-    // Provjeri breakout — koristimo HIGH/LOW trenutne svijeće (ne close)
-    const hit = existing.side === "LONG"
-      ? last.high > existing.triggerHigh
-      : last.low  < existing.triggerLow;
-
-    if (hit) {
-      pending = pending.filter(p => p.symbol !== symbol);
-      savePending(pid, pending);
-      const baseResult = analyzeSynapse7(candles, cfg);
-      return {
-        ...baseResult,
-        signal: existing.side,
-        price,
-        reason: `[S7 BRK ${existing.side}] Signal @ ${fmtPrice(existing.signalPrice)} | breakout @ ${fmtPrice(price)}`,
-      };
-    }
-
-    // Cancel ako score pao ili signal flipnuo
-    const freshResult = analyzeSynapse7(candles, cfg);
-    if (freshResult.signal !== existing.side) {
-      pending = pending.filter(p => p.symbol !== symbol);
-      savePending(pid, pending);
-      console.log(`  🔄 [SYNAPSE-7] ${symbol} — pending ${existing.side} canceliran (${freshResult.signal === "NEUTRAL" ? "score pao" : "flip"})`);
-    } else {
-      console.log(`  ⏳ [SYNAPSE-7] ${symbol} ${existing.side} čeka breakout | TrigH:${fmtPrice(existing.triggerHigh)} TrigL:${fmtPrice(existing.triggerLow)} | CandH:${fmtPrice(last.high)} CandL:${fmtPrice(last.low)} | Close:${fmtPrice(price)}`);
-    }
-    return { price, signal: "NEUTRAL", reason: `Čeka S7 breakout H:${fmtPrice(existing.triggerHigh)} L:${fmtPrice(existing.triggerLow)}` };
-  }
-
-  // 2) Nema pendinga — pokreni normalnu analizu
-  const result = analyzeSynapse7(candles, cfg);
-
-  if (result.signal === "LONG" || result.signal === "SHORT") {
-    const sigCandle   = candles[candles.length - 1];
-    const triggerHigh = sigCandle.high;
-    const triggerLow  = sigCandle.low;
-
-    pending.push({ symbol, side: result.signal, signalPrice: price, triggerHigh, triggerLow, ts: now });
-    savePending(pid, pending);
-    console.log(`  📌 [SYNAPSE-7] ${symbol} ${result.signal} signal @ ${fmtPrice(price)} → čeka breakout H:${fmtPrice(triggerHigh)} L:${fmtPrice(triggerLow)}`);
-    return { price, signal: "NEUTRAL", reason: `S7 signal, čeka breakout H:${fmtPrice(triggerHigh)} L:${fmtPrice(triggerLow)}` };
-  }
-
-  return result;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────────
@@ -3531,10 +3299,8 @@ export async function run() {
 
         let result;
         switch (pDef.strategy) {
-          case "mega":        result = analyzeMega(candles, pDef.params);                              break;
-          case "synapse7":    result = await analyzeSynapse7Pullback(symbol, candles, pDef.params);   break;
           case "synapse_t":   result = await analyzeUltraPullback(symbol, candles, pDef.params);      break;
-          default:            result = analyzeEmaRsi(candles, pDef.params);                           break;
+          default:            result = { signal: "NEUTRAL", reason: "Nepoznata strategija" };         break;
         }
 
         let { signal, reason } = result;

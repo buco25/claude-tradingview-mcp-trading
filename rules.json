@@ -101,7 +101,7 @@
     },
     "ETHUSDT": {
       "slPct": 1.5,
-      "tpPct": 4,
+      "tpPct": 3,
       "tier": 1,
       "avgRange": "3.55%"
     },
@@ -119,7 +119,7 @@
     },
     "SOLUSDT": {
       "slPct": 1.5,
-      "tpPct": 4,
+      "tpPct": 3,
       "tier": 1,
       "avgRange": "3.54%"
     },
@@ -131,7 +131,7 @@
     },
     "LINKUSDT": {
       "slPct": 1.5,
-      "tpPct": 4,
+      "tpPct": 3,
       "tier": 1,
       "avgRange": "3.87%"
     },
@@ -143,13 +143,13 @@
     },
     "BTCUSDT": {
       "slPct": 1.5,
-      "tpPct": 4,
+      "tpPct": 3,
       "tier": 1,
       "avgRange": "2.76%"
     },
     "XRPUSDT": {
       "slPct": 1.5,
-      "tpPct": 4,
+      "tpPct": 3,
       "tier": 1,
       "avgRange": "3.07%"
     },
@@ -197,7 +197,7 @@
   },
   "risk_rules": [
     "Risk-based sizing: margin = equity × 1.5% | notional = margin × tier-based leverage | Per-simbol SL/TP iz symbol_sltp",
-    "ULTRA: Tier1(SL1.5%→40x/liq2%) Tier2(SL2%→30x/liq2.8%) Tier3(SL2.5%→25x/liq3.5%) / BTC 75x / rizik 1.5% banke po tradeu",
+    "ULTRA: Tier1(SL1.5%/TP3%→40x/liq2%/RR1:2) Tier2(SL2%/TP4.5%→35x/liq2.36%/RR1:2.25) Tier3(SL2.5%/TP5.5%→30x/liq2.83%/RR1:2.2) / rizik 1.5% banke po tradeu",
     "KRITIČNO: getSafeLeverage() računa max_lev = 1/(slPct+0.3%buffer+0.5%maint) — liq distance uvijek > SL → nema likvidacije umjesto SL-a",
     "Samo jedna pozicija po simbolu istovremeno",
     "Max 8 otvorenih pozicija istovremeno + BTC bonus slot",

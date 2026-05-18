@@ -904,19 +904,32 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     }).join("");
 
     return `
-      <div class="section-label" style="color:${def.color}">🎯 ULTRA — Zadnjih ${s.recentExits.length} tradova</div>
-      <div class="table-wrap">
-        <table class="trade-table">
-          <thead><tr><th>Datum</th><th>Symbol</th><th>Side</th><th>Cijena</th><th>P&amp;L</th><th>Info</th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
+      <div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';this.querySelector('.caret').textContent=this.nextElementSibling.style.display==='none'?'▶':'▼'"
+        style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;padding:8px 0;margin-bottom:4px">
+        <span class="section-label" style="color:${def.color};margin:0">📊 Win/Loss po coinu (${s.symbolStatsArr.length})</span>
+        <span class="caret" style="color:#9ca3af;font-size:11px">▶</span>
       </div>
-      <div class="section-label" style="color:${def.color};margin-top:18px">📊 Win/Loss po coinu</div>
-      <div class="table-wrap">
-        <table class="trade-table">
-          <thead><tr><th>Coin</th><th>Dobitni</th><th>Gubitni</th><th>WR</th><th></th><th>P&amp;L</th><th>Status</th></tr></thead>
-          <tbody>${symRows}</tbody>
-        </table>
+      <div style="display:none">
+        <div class="table-wrap">
+          <table class="trade-table">
+            <thead><tr><th>Coin</th><th>W</th><th>L</th><th>WR</th><th></th><th>P&amp;L</th></tr></thead>
+            <tbody>${symRows}</tbody>
+          </table>
+        </div>
+      </div>
+
+      <div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';this.querySelector('.caret').textContent=this.nextElementSibling.style.display==='none'?'▶':'▼'"
+        style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;padding:8px 0;margin-top:10px;margin-bottom:4px">
+        <span class="section-label" style="color:${def.color};margin:0">🎯 ULTRA — Zadnjih ${s.recentExits.length} tradova</span>
+        <span class="caret" style="color:#9ca3af;font-size:11px">▶</span>
+      </div>
+      <div style="display:none">
+        <div class="table-wrap">
+          <table class="trade-table">
+            <thead><tr><th>Datum</th><th>Symbol</th><th>Side</th><th>Cijena</th><th>P&amp;L</th><th>Info</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
       </div>
       ${(() => {
         const allSyms = rules.all_symbols || [];

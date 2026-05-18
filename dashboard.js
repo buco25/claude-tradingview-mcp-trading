@@ -3107,7 +3107,7 @@ if (_sqSavedTab) {
       </div>
       <div>
         <div style="font-size:22px;font-weight:800;color:#e5e7eb" id="amc-squeeze-label">…</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px">Skor 0–100 · Finviz + companiesmarketcap</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px">Skor 0–100 · Finviz + chartexchange.com</div>
       </div>
     </div>
     <!-- Faktori -->
@@ -3194,7 +3194,7 @@ if (_sqSavedTab) {
                           : q >= 1e3 ? (q/1e3).toFixed(0)+'K'
                           : String(q);
         setEl('amc-ftd', fmtQty(d.ftd.qty));
-        setEl('amc-ftd-sub', d.ftd.date + (d.ftd.price != null ? ' · $' + d.ftd.price.toFixed(2) : ' · companiesmarketcap'));
+        setEl('amc-ftd-sub', d.ftd.date + (d.ftd.price != null ? ' · $' + d.ftd.price.toFixed(2) : ' · chartexchange.com'));
         // Prikaži promjenu od prethodnog dana
         const chgEl = document.getElementById('amc-ftd-chg');
         if (chgEl) {
@@ -3230,7 +3230,7 @@ if (_sqSavedTab) {
           const availStr = avail >= 1e6 ? (avail/1e6).toFixed(1)+'M' : avail >= 1e3 ? (avail/1e3).toFixed(0)+'K' : String(avail);
           ctbSub.textContent = 'Dostupno za borrow: ' + availStr + ' dionica';
         } else {
-          ctbSub.textContent = 'companiesmarketcap.com';
+          ctbSub.textContent = 'companiesmarketcap.com (CTB)';
         }
       } else {
         ctbEl.textContent = 'N/A';
@@ -3963,8 +3963,9 @@ const server = http.createServer(async (req, res) => {
   res.end(html);
 });
 
-// ─── fetchAmcData() — Finviz + companiesmarketcap.com ─────────────────────────
-// ChartExchange blokiran na Railway → Finviz (SI%, DTC, price) + CMC (CTB, FTD, Shares).
+// ─── fetchAmcData() — Finviz + chartexchange.com ──────────────────────────────
+// FTD: chartexchange.com (SEC data, per-settlement-date shares count, server-rendered).
+// CTB: companiesmarketcap.com (cost to borrow %, dostupno za borrow).
 // Score se normalizira na dostupne faktore.
 let _amcFetchRunning = false;
 async function fetchAmcData() {
@@ -4035,37 +4036,29 @@ async function fetchAmcData() {
       console.log("AMC CTB: " + (ctbPct !== null ? ctbPct.toFixed(4)+"%" : "N/A") + " avail: " + (ctbAvail != null ? (ctbAvail/1e6).toFixed(2)+"M" : "N/A"));
     } catch(e) { console.error("AMC CTB fetch greška:", e.message); }
 
-    // ── 3. FTD — companiesmarketcap.com ──────────────────────────────────────
-    // data=[{d:unixTs, v:ftdShares}] — raw share count, direktno (bez dijeljenja)
+    // ── 3. FTD — chartexchange.com (SEC data, server-rendered, točan per-dan broj dionica)
+    // CMC pokazuje kumulativne period-notional $ vrijednosti — nije shares count, ne koristimo.
     let ftdData = null;
     let ftdHistory = [];
     try {
-      const ftdHtml = await fetch(
-        "https://companiesmarketcap.com/amc-entertainment/failure-to-deliver/",
-        { headers: { "User-Agent": UA, "Accept": "text/html", "Referer": "https://companiesmarketcap.com/" },
-          signal: AbortSignal.timeout(12000) }
+      const ceHtml = await fetch(
+        "https://chartexchange.com/symbol/nyse-amc/failure-to-deliver/",
+        { headers: { "User-Agent": UA, "Accept": "text/html", "Referer": "https://chartexchange.com/" },
+          signal: AbortSignal.timeout(15000) }
       ).then(r => r.text());
-      const ftdPairs = [...ftdHtml.matchAll(/"d":(\d+),"v":([0-9.]+)/g)]
-        .map(m => ({ d: parseInt(m[1]), v: parseFloat(m[2]) }));
-      if (ftdPairs.length > 0) {
-        const nonZero = ftdPairs.filter(p => p.v > 0);
-        if (nonZero.length > 0) {
-          const latest = nonZero[nonZero.length - 1];
-          const prev   = nonZero.length > 1 ? nonZero[nonZero.length - 2] : null;
-          ftdData = {
-            qty:    Math.round(latest.v),
-            date:   new Date(latest.d * 1000).toISOString().slice(0, 10),
-            change: prev ? Math.round(latest.v - prev.v) : null,
-            price:  null
-          };
-          ftdHistory = nonZero.slice(-10).map(p => ({
-            date: new Date(p.d * 1000).toISOString().slice(0, 10),
-            qty:  Math.round(p.v)
-          }));
-        }
+      // Parse: "On <span>2026-04-30</span> there were <span>2,236,607</span> FTDs"
+      const m = ceHtml.match(/On\s+(?:<[^>]+>)?(\d{4}-\d{2}-\d{2})(?:<\/[^>]+>)?\s+there were\s+(?:<[^>]+>)?([\d,]+)(?:<\/[^>]+>)?\s+FTDs/);
+      if (m) {
+        ftdData = { qty: parseInt(m[2].replace(/,/g, "")), date: m[1], change: null, price: null };
       }
-      console.log("AMC FTD: " + (ftdData ? ftdData.qty.toLocaleString() + " @ " + ftdData.date : "N/A"));
-    } catch(e) { console.error("AMC FTD fetch greška:", e.message); }
+      // Previous period for change calc
+      const allM = [...ceHtml.matchAll(/On\s+(?:<[^>]+>)?(\d{4}-\d{2}-\d{2})(?:<\/[^>]+>)?\s+there were\s+(?:<[^>]+>)?([\d,]+)(?:<\/[^>]+>)?\s+FTDs/g)];
+      if (allM.length >= 2 && ftdData) {
+        const prevQty = parseInt(allM[allM.length - 2][2].replace(/,/g, ""));
+        ftdData.change = ftdData.qty - prevQty;
+      }
+      console.log("AMC FTD (CE): " + (ftdData ? ftdData.qty.toLocaleString() + " @ " + ftdData.date : "N/A"));
+    } catch(e) { console.error("AMC FTD CE greška:", e.message); }
 
     // ── 4. Shares Outstanding — companiesmarketcap.com ───────────────────────
     // data=[{d:unixTs, v:sharesCount}] — raw broj dionica
@@ -4132,7 +4125,7 @@ async function fetchAmcData() {
       borrowFee: hasCTB ? { fee: ctbPct, available: ctbAvail ?? null } : null,
       shortInterestCE: null,
       squeeze: { score:squeezeScore, label:squeezeLabel, factors:squeezeFactors, partial },
-      source: "finviz.com + companiesmarketcap.com",
+      source: "finviz.com + chartexchange.com",
       ts: new Date().toISOString()
     };
     _amcCache.data = payload;
@@ -4150,16 +4143,16 @@ async function fetchAmcData() {
 // ─── Squeeze Stocks config ─────────────────────────────────────────────────────
 // AMC je i dalje praćen posebno (fetchAmcData). Ovi su za generički fetchSqueezeStock.
 const SQUEEZE_STOCKS = [
-  { ticker: "GME",  name: "GameStop Corp.",        cmcSlug: "gamestop",             emoji: "🎮" },
-  { ticker: "KOSS", name: "Koss Corporation",       cmcSlug: "koss",                 emoji: "🎧" },
-  { ticker: "BYND", name: "Beyond Meat Inc.",       cmcSlug: "beyond-meat",          emoji: "🌱" },
-  { ticker: "UPST", name: "Upstart Holdings",       cmcSlug: "upstart",              emoji: "🤖" },
-  { ticker: "BBAI", name: "BigBear.ai Holdings",    cmcSlug: "bigbear-ai",           emoji: "🐻" },
-  { ticker: "SMCI", name: "Super Micro Computer",   cmcSlug: "super-micro-computer", emoji: "🖥️" },
-  { ticker: "RIVN", name: "Rivian Automotive",      cmcSlug: "rivian",               emoji: "⚡" },
-  { ticker: "IONQ", name: "IonQ Inc.",               cmcSlug: "ionq",                 emoji: "⚛️" },
-  { ticker: "SOUN", name: "SoundHound AI Inc.",      cmcSlug: "soundhound-ai",        emoji: "🔊" },
-  { ticker: "HIMS", name: "Hims & Hers Health Inc.", cmcSlug: "hims-hers-health",     emoji: "💊" },
+  { ticker: "GME",  name: "GameStop Corp.",        cmcSlug: "gamestop",             ceSlug: "nyse-gme",    emoji: "🎮" },
+  { ticker: "KOSS", name: "Koss Corporation",       cmcSlug: "koss",                 ceSlug: "nasdaq-koss", emoji: "🎧" },
+  { ticker: "BYND", name: "Beyond Meat Inc.",       cmcSlug: "beyond-meat",          ceSlug: "nasdaq-bynd", emoji: "🌱" },
+  { ticker: "UPST", name: "Upstart Holdings",       cmcSlug: "upstart",              ceSlug: "nasdaq-upst", emoji: "🤖" },
+  { ticker: "BBAI", name: "BigBear.ai Holdings",    cmcSlug: "bigbear-ai",           ceSlug: "nyse-bbai",   emoji: "🐻" },
+  { ticker: "SMCI", name: "Super Micro Computer",   cmcSlug: "super-micro-computer", ceSlug: "nasdaq-smci", emoji: "🖥️" },
+  { ticker: "RIVN", name: "Rivian Automotive",      cmcSlug: "rivian",               ceSlug: "nasdaq-rivn", emoji: "⚡" },
+  { ticker: "IONQ", name: "IonQ Inc.",               cmcSlug: "ionq",                 ceSlug: "nyse-ionq",   emoji: "⚛️" },
+  { ticker: "SOUN", name: "SoundHound AI Inc.",      cmcSlug: "soundhound-ai",        ceSlug: "nasdaq-soun", emoji: "🔊" },
+  { ticker: "HIMS", name: "Hims & Hers Health Inc.", cmcSlug: "hims-hers-health",     ceSlug: "nyse-hims",   emoji: "💊" },
 ];
 
 const _squeezeCache = {};          // keyed by ticker → { data, ts }
@@ -4167,10 +4160,10 @@ const _squeezeFetchRunning = {};   // keyed by ticker → boolean
 
 /**
  * Generički fetch za squeeze stock podatke (isti kao fetchAmcData, ali parametriziran).
- * @param {{ ticker: string, name: string, cmcSlug: string, emoji: string }} cfg
+ * @param {{ ticker: string, name: string, cmcSlug: string, ceSlug: string, emoji: string }} cfg
  */
 async function fetchSqueezeStock(cfg) {
-  const { ticker, cmcSlug } = cfg;
+  const { ticker, cmcSlug, ceSlug } = cfg;
   // Ako je već u toku — čekaj do 25s na završetak umjesto da vratiš undefined
   if (_squeezeFetchRunning[ticker]) {
     for (let w = 0; w < 25; w++) {
@@ -4208,23 +4201,29 @@ async function fetchSqueezeStock(cfg) {
       }
     } catch(e) { console.error(`${ticker} CTB fetch greška:`, e.message); }
 
-    // 3. FTD — companiesmarketcap.com
+    // 3. FTD — chartexchange.com (SEC data, server-rendered, točan per-dan broj dionica)
+    // CMC pokazuje kumulativne period-notional $ vrijednosti — nije shares count, ne koristimo.
     let ftdData = null;
-    try {
-      const ftdHtml = await fetch(
-        `https://companiesmarketcap.com/${cmcSlug}/failure-to-deliver/`,
-        { headers: { "User-Agent": UA, "Accept": "text/html", "Referer": "https://companiesmarketcap.com/" }, signal: AbortSignal.timeout(12000) }
-      ).then(r => r.text());
-      const ftdPairs = [...ftdHtml.matchAll(/"d":(\d+),"v":([0-9.]+)/g)].map(m => ({ d: parseInt(m[1]), v: parseFloat(m[2]) }));
-      if (ftdPairs.length > 0) {
-        const nonZero = ftdPairs.filter(p => p.v > 0);
-        if (nonZero.length > 0) {
-          const latest = nonZero[nonZero.length - 1];
-          const prev   = nonZero.length > 1 ? nonZero[nonZero.length - 2] : null;
-          ftdData = { qty: Math.round(latest.v), date: new Date(latest.d * 1000).toISOString().slice(0, 10), change: prev ? Math.round(latest.v - prev.v) : null };
+    if (ceSlug) {
+      try {
+        const ceHtml = await fetch(
+          `https://chartexchange.com/symbol/${ceSlug}/failure-to-deliver/`,
+          { headers: { "User-Agent": UA, "Accept": "text/html", "Referer": "https://chartexchange.com/" }, signal: AbortSignal.timeout(15000) }
+        ).then(r => r.text());
+        // Parse: "On <span>2026-04-30</span> there were <span>2,236,607</span> FTDs"
+        const m = ceHtml.match(/On\s+(?:<[^>]+>)?(\d{4}-\d{2}-\d{2})(?:<\/[^>]+>)?\s+there were\s+(?:<[^>]+>)?([\d,]+)(?:<\/[^>]+>)?\s+FTDs/);
+        if (m) {
+          ftdData = { qty: parseInt(m[2].replace(/,/g, "")), date: m[1], change: null };
         }
-      }
-    } catch(e) { console.error(`${ticker} FTD fetch greška:`, e.message); }
+        // Also try to find previous period for change calc
+        const allM = [...ceHtml.matchAll(/On\s+(?:<[^>]+>)?(\d{4}-\d{2}-\d{2})(?:<\/[^>]+>)?\s+there were\s+(?:<[^>]+>)?([\d,]+)(?:<\/[^>]+>)?\s+FTDs/g)];
+        if (allM.length >= 2 && ftdData) {
+          const prevQty = parseInt(allM[allM.length - 2][2].replace(/,/g, ""));
+          ftdData.change = ftdData.qty - prevQty;
+        }
+        console.log(`${ticker} FTD (CE): ${ftdData ? ftdData.qty.toLocaleString() + " @ " + ftdData.date : "N/A"}`);
+      } catch(e) { console.error(`${ticker} FTD CE greška:`, e.message); }
+    }
 
     // 4. Squeeze Score
     const g = k => snap[k] ?? null;
@@ -4264,7 +4263,7 @@ async function fetchSqueezeStock(cfg) {
         { name:"Shares Available", val:hasAvail?(avail>=1e6?(avail/1e6).toFixed(1)+"M":(avail/1e3).toFixed(0)+"K"):"N/A", score:hasAvail?availScore:null, max:12 },
         { name:"Rel. Volume",      val:relVol.toFixed(2)+"x",    score:volScore,                max:8  },
       ],
-      source: "finviz.com + companiesmarketcap.com",
+      source: "finviz.com + chartexchange.com",
       ts: new Date().toISOString()
     };
     if (!_squeezeCache[ticker]) _squeezeCache[ticker] = { data: null, ts: 0 };

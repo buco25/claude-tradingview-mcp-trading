@@ -4062,6 +4062,62 @@ async function fetchSecFtdData() {
   }
 }
 
+// ─── RegSHO Threshold Securities List ─────────────────────────────────────────
+// NASDAQ: nasdaqtrader.com/dynamic/symdir/regsho/nasdaqth{YYYYMMDD}.txt
+// NYSE/NYSEMKT/NYSEARCA: nyse.com/api/regulatory/threshold-securities/download
+// Dionica na listi = FTD ≥ 0.5% float, 5+ uzastopnih dana → jaki squeeze signal
+// Cache 24h, pokriva sve US burze
+let _regShoCache = null; // { tickers: Set<string>, ts, date, count }
+
+async function fetchRegShoList() {
+  if (_regShoCache && (Date.now() - _regShoCache.ts) < 24 * 3600 * 1000) {
+    return _regShoCache.tickers;
+  }
+  const tickers = new Set();
+  const now = new Date();
+  // Probaj zadnjih 5 radnih dana (lista može biti objavljena sa zakašnjenjem)
+  for (let back = 0; back < 7; back++) {
+    const d = new Date(now);
+    d.setUTCDate(d.getUTCDate() - back);
+    const dow = d.getUTCDay();
+    if (dow === 0 || dow === 6) continue; // preskoči vikend
+    const yyyymmdd  = `${d.getUTCFullYear()}${String(d.getUTCMonth()+1).padStart(2,'0')}${String(d.getUTCDate()).padStart(2,'0')}`;
+    const yyyy_mm_dd = `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
+
+    const parseTxt = txt => {
+      let n = 0;
+      for (const line of txt.split('\n')) {
+        const sym = line.split('|')[0].trim();
+        if (sym && sym !== 'Symbol' && /^[A-Z]/.test(sym)) { tickers.add(sym); n++; }
+      }
+      return n;
+    };
+
+    let gotData = false;
+    // 1. NASDAQ
+    try {
+      const r = await fetch(`https://www.nasdaqtrader.com/dynamic/symdir/regsho/nasdaqth${yyyymmdd}.txt`,
+        { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(10000) });
+      if (r.ok) { const n = parseTxt(await r.text()); console.log(`RegSHO NASDAQ ${yyyymmdd}: ${n}`); gotData = true; }
+    } catch(e) {}
+    // 2. NYSE, NYSE American, NYSE Arca
+    for (const mkt of ['NYSE', 'NYSEMKT', 'NYSEARCA']) {
+      try {
+        const r = await fetch(`https://www.nyse.com/api/regulatory/threshold-securities/download?selectedDate=${yyyy_mm_dd}&market=${mkt}`,
+          { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(10000) });
+        if (r.ok) { const n = parseTxt(await r.text()); console.log(`RegSHO ${mkt} ${yyyy_mm_dd}: ${n}`); gotData = true; }
+      } catch(e) {}
+    }
+    if (gotData) {
+      _regShoCache = { tickers, ts: Date.now(), date: yyyymmdd, count: tickers.size };
+      console.log(`RegSHO cache: ${tickers.size} unique simbola @ ${yyyymmdd}`);
+      return tickers;
+    }
+  }
+  console.warn('RegSHO: nije dostupna ni jedna lista');
+  return _regShoCache?.tickers || new Set();
+}
+
 // ─── fetchAmcData() — Finviz + SEC FTD + companiesmarketcap.com (CTB) ─────────
 // FTD: SEC zvanični podaci via fetchSecFtdData() (bi-monthly, per-settlement-date shares).
 // CTB: companiesmarketcap.com (cost to borrow %, dostupno za borrow).
@@ -4173,6 +4229,10 @@ async function fetchAmcData() {
     const dtc    = parseFloat(snap["Short Ratio"]  ?? "0");
     const relVol = (() => { const v=parseVol(snap["Volume"]), a=parseVol(snap["Avg Volume"]); return a>0?v/a:1; })();
 
+    // RegSHO threshold list
+    const regShoList = await fetchRegShoList().catch(() => new Set());
+    const isRegSho   = regShoList.has("AMC");
+
     const siScore    = siPct>=25?35:siPct>=20?28:siPct>=15?20:siPct>=10?12:siPct>=5?6:0;
     const dtcScore   = dtc>=7?25:dtc>=5?20:dtc>=3?14:dtc>=2?8:dtc>=1?4:0;
     const ctb        = ctbPct ?? 0;
@@ -4180,11 +4240,12 @@ async function fetchAmcData() {
     const ctbScore   = ctb>=50?20:ctb>=20?15:ctb>=5?10:ctb>=2?6:ctb>=1?3:0;
     const availScore = avail<100000?12:avail<500000?9:avail<2000000?6:avail<5000000?3:0;
     const volScore   = relVol>=3?8:relVol>=2?5:relVol>=1.5?3:relVol>=1?1:0;
+    const regShoScore = isRegSho ? 10 : 0;
 
     const hasCTB    = ctbPct !== null;
     const hasAvail  = ctbAvail !== null;
-    const rawScore  = siScore + dtcScore + ctbScore + availScore + volScore;
-    const maxScore  = 35 + 25 + (hasCTB?20:0) + (hasAvail?12:0) + 8;
+    const rawScore  = siScore + dtcScore + ctbScore + availScore + volScore + regShoScore;
+    const maxScore  = 35 + 25 + (hasCTB?20:0) + (hasAvail?12:0) + 8 + 10;
     // Normalizacija: ako nedostaju podaci, skaliraj na dostupni max
     const squeezeScore = maxScore >= 100
       ? Math.min(100, rawScore)
@@ -4196,6 +4257,7 @@ async function fetchAmcData() {
       { name:"Cost to Borrow",   val:hasCTB  ? ctb.toFixed(2)+"%" : "N/A",                                                   score:hasCTB  ?ctbScore:null,  max:20 },
       { name:"Shares Available", val:hasAvail? (avail>=1e6?(avail/1e6).toFixed(1)+"M":(avail/1e3).toFixed(0)+"K") : "N/A",   score:hasAvail?availScore:null, max:12 },
       { name:"Rel. Volume",      val:relVol.toFixed(2)+"x",                                                                   score:volScore,             max:8  },
+      { name:"RegSHO lista",     val:isRegSho ? "⚠️ DA" : "NE",                                                               score:regShoScore,          max:10 },
     ];
     const partial = !hasCTB || !hasAvail;
 
@@ -4208,6 +4270,7 @@ async function fetchAmcData() {
       institutions, insiderActivity,
       ftd: ftdData, ftdHistory,
       sharesOutstandCMC,
+      regsho: isRegSho,
       borrowFee: hasCTB ? { fee: ctbPct, available: ctbAvail ?? null } : null,
       shortInterestCE: null,
       squeeze: { score:squeezeScore, label:squeezeLabel, factors:squeezeFactors, partial },
@@ -4216,7 +4279,7 @@ async function fetchAmcData() {
     };
     _amcCache.data = payload;
     _amcCache.ts   = Date.now();
-    console.log("AMC data osvježen — squeeze=" + squeezeScore + " si=" + siPct + "% ctb=" + (ctbPct?.toFixed(4)||"N/A") + "% dtc=" + dtc);
+    console.log("AMC data osvježen — squeeze=" + squeezeScore + " si=" + siPct + "% ctb=" + (ctbPct?.toFixed(4)||"N/A") + "% dtc=" + dtc + (isRegSho ? " ⚠️ RegSHO" : ""));
     return payload;
   } catch(e) {
     console.error("fetchAmcData greška:", e.message);
@@ -4303,17 +4366,23 @@ async function fetchSqueezeStock(cfg) {
     const siPct  = parseFloat(snap["Short Float"] ?? "0");
     const dtc    = parseFloat(snap["Short Ratio"] ?? "0");
     const relVol = (() => { const v=parseVol(snap["Volume"]), a=parseVol(snap["Avg Volume"]); return a>0?v/a:1; })();
-    const siScore  = siPct>=25?35:siPct>=20?28:siPct>=15?20:siPct>=10?12:siPct>=5?6:0;
-    const dtcScore = dtc>=7?25:dtc>=5?20:dtc>=3?14:dtc>=2?8:dtc>=1?4:0;
-    const ctb      = ctbPct ?? 0;
-    const avail    = ctbAvail ?? Infinity;
-    const ctbScore = ctb>=50?20:ctb>=20?15:ctb>=5?10:ctb>=2?6:ctb>=1?3:0;
+
+    // RegSHO threshold list (zajednički cache, jedanput po danu)
+    const regShoList  = await fetchRegShoList().catch(() => new Set());
+    const isRegSho    = regShoList.has(ticker);
+
+    const siScore    = siPct>=25?35:siPct>=20?28:siPct>=15?20:siPct>=10?12:siPct>=5?6:0;
+    const dtcScore   = dtc>=7?25:dtc>=5?20:dtc>=3?14:dtc>=2?8:dtc>=1?4:0;
+    const ctb        = ctbPct ?? 0;
+    const avail      = ctbAvail ?? Infinity;
+    const ctbScore   = ctb>=50?20:ctb>=20?15:ctb>=5?10:ctb>=2?6:ctb>=1?3:0;
     const availScore = avail<100000?12:avail<500000?9:avail<2000000?6:avail<5000000?3:0;
-    const volScore = relVol>=3?8:relVol>=2?5:relVol>=1.5?3:relVol>=1?1:0;
-    const hasCTB   = ctbPct !== null;
-    const hasAvail = ctbAvail !== null;
-    const rawScore = siScore + dtcScore + ctbScore + availScore + volScore;
-    const maxScore = 35 + 25 + (hasCTB?20:0) + (hasAvail?12:0) + 8;
+    const volScore   = relVol>=3?8:relVol>=2?5:relVol>=1.5?3:relVol>=1?1:0;
+    const regShoScore = isRegSho ? 10 : 0;
+    const hasCTB     = ctbPct !== null;
+    const hasAvail   = ctbAvail !== null;
+    const rawScore   = siScore + dtcScore + ctbScore + availScore + volScore + regShoScore;
+    const maxScore   = 35 + 25 + (hasCTB?20:0) + (hasAvail?12:0) + 8 + 10;
     const squeezeScore = maxScore >= 100 ? Math.min(100, rawScore) : Math.min(100, Math.round(rawScore / maxScore * (maxScore < 68 ? 76 : 100)));
     const squeezeLabel = squeezeScore>=75?"🔴 Eksplozivan":squeezeScore>=55?"🟠 Visok":squeezeScore>=35?"🟡 Umjeren":"🟢 Nizak";
 
@@ -4325,7 +4394,7 @@ async function fetchSqueezeStock(cfg) {
       sharesFloat: g("Shs Float"), sharesOutstand: g("Shs Outstand"),
       instOwn: g("Inst Own"), insiderOwn: g("Insider Own"),
       pe: g("P/E"), high52w: g("52W High"), low52w: g("52W Low"),
-      ftd: ftdData,
+      ftd: ftdData, regsho: isRegSho,
       borrowFee: hasCTB ? { fee: ctbPct, available: ctbAvail ?? null } : null,
       squeeze: { score: squeezeScore, label: squeezeLabel, partial: !hasCTB || !hasAvail },
       squeezeFactors: [
@@ -4334,6 +4403,7 @@ async function fetchSqueezeStock(cfg) {
         { name:"Cost to Borrow",   val:hasCTB?ctb.toFixed(2)+"%":"N/A",  score:hasCTB?ctbScore:null,  max:20 },
         { name:"Shares Available", val:hasAvail?(avail>=1e6?(avail/1e6).toFixed(1)+"M":(avail/1e3).toFixed(0)+"K"):"N/A", score:hasAvail?availScore:null, max:12 },
         { name:"Rel. Volume",      val:relVol.toFixed(2)+"x",    score:volScore,                max:8  },
+        { name:"RegSHO lista",     val:isRegSho ? "⚠️ DA" : "NE",                              score:regShoScore,             max:10 },
       ],
       source: "finviz.com + sec.gov FTD",
       ts: new Date().toISOString()

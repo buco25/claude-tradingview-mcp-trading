@@ -3107,7 +3107,7 @@ if (_sqSavedTab) {
       </div>
       <div>
         <div style="font-size:22px;font-weight:800;color:#e5e7eb" id="amc-squeeze-label">…</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px">Skor 0–100 · Finviz + chartexchange.com</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px">Skor 0–100 · Finviz + sec.gov FTD</div>
       </div>
     </div>
     <!-- Faktori -->
@@ -3194,7 +3194,7 @@ if (_sqSavedTab) {
                           : q >= 1e3 ? (q/1e3).toFixed(0)+'K'
                           : String(q);
         setEl('amc-ftd', fmtQty(d.ftd.qty));
-        setEl('amc-ftd-sub', d.ftd.date + (d.ftd.price != null ? ' · $' + d.ftd.price.toFixed(2) : ' · chartexchange.com'));
+        setEl('amc-ftd-sub', d.ftd.date + (d.ftd.price != null ? ' · $' + d.ftd.price.toFixed(2) : '') + ' · sec.gov');
         // Prikaži promjenu od prethodnog dana
         const chgEl = document.getElementById('amc-ftd-chg');
         if (chgEl) {
@@ -3963,8 +3963,107 @@ const server = http.createServer(async (req, res) => {
   res.end(html);
 });
 
-// ─── fetchAmcData() — Finviz + chartexchange.com ──────────────────────────────
-// FTD: chartexchange.com (SEC data, per-settlement-date shares count, server-rendered).
+// ─── SEC FTD Data — zvanični podaci, jedan download za sve tickere ─────────────
+// Preuzima ZIP sa www.sec.gov/files/data/fails-deliver-data/cnsfails{YYYYMM}{a|b}.zip
+// Format: SETTLEMENT DATE|CUSIP|SYMBOL|QUANTITY (FAILS)|DESCRIPTION|PRICE
+// Cache 24h — podaci se objavljuju bi-monthly pa se ne mijenjaju često.
+let _secFtdCache = null;   // { data: {SYMBOL: {qty,date,price,change}}, ts, period }
+let _secFtdFetching = false;
+
+async function fetchSecFtdData() {
+  if (_secFtdFetching) {
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      if (!_secFtdFetching) break;
+    }
+    return _secFtdCache?.data || {};
+  }
+  if (_secFtdCache && (Date.now() - _secFtdCache.ts) < 24 * 3600 * 1000) {
+    return _secFtdCache.data;
+  }
+  _secFtdFetching = true;
+  try {
+    // Odredi koja su razdoblja vjerojatno objavljena:
+    // {Y}{M}a = 1-15 tog mjeseca, objavljeno ~1. sljedećeg; {Y}{M}b = 16-end, objavljeno ~15. sljedećeg
+    const now = new Date();
+    const y  = now.getUTCFullYear();
+    const m  = now.getUTCMonth() + 1;
+    const pm = m === 1 ? 12 : m - 1;
+    const py = m === 1 ? y - 1 : y;
+    const fmt = (yr, mo) => `${yr}${String(mo).padStart(2, "0")}`;
+    // Pokušaj redoslijedom: ovaj mjesec b→a, prošli b→a
+    const periods = [
+      `${fmt(y, m)}b`, `${fmt(y, m)}a`,
+      `${fmt(py, pm)}b`, `${fmt(py, pm)}a`,
+    ];
+
+    let zipBuf = null, usedPeriod = null;
+    for (const period of periods) {
+      const url = `https://www.sec.gov/files/data/fails-deliver-data/cnsfails${period}.zip`;
+      try {
+        const resp = await fetch(url, {
+          headers: { "User-Agent": "TradingBot admin@tradingbot.example.com", "Accept-Encoding": "identity" },
+          signal: AbortSignal.timeout(30000)
+        });
+        if (resp.ok) {
+          zipBuf = Buffer.from(await resp.arrayBuffer());
+          usedPeriod = period;
+          console.log(`SEC FTD: preuzeto ${period}.zip (${(zipBuf.length/1024/1024).toFixed(2)} MB)`);
+          break;
+        }
+      } catch(e) { console.warn(`SEC FTD: ${period} nedostupan —`, e.message); }
+    }
+
+    if (!zipBuf) {
+      console.error("SEC FTD: nije dostupno nijedno razdoblje");
+      return _secFtdCache?.data || {};
+    }
+
+    // Raspakiraj ZIP (adm-zip, pure JS)
+    const { default: AdmZip } = await import("adm-zip");
+    const zip = new AdmZip(zipBuf);
+    const entry = zip.getEntries().find(e => e.name.endsWith(".txt"));
+    if (!entry) throw new Error("No .txt entry in zip");
+    const txt = entry.getData().toString("utf8");
+
+    // Parsiraj pipe-delimited
+    const byTicker = {};
+    for (const line of txt.split("\n")) {
+      const p = line.split("|");
+      if (p.length < 5) continue;
+      const rawDate = p[0].trim();
+      const sym     = p[2].trim();
+      const qty     = parseInt(p[3]) || 0;
+      const price   = parseFloat(p[5]) || null;
+      if (!sym || rawDate.length !== 8 || !/^\d{8}$/.test(rawDate)) continue;
+      const date = `${rawDate.slice(0,4)}-${rawDate.slice(4,6)}-${rawDate.slice(6,8)}`;
+      if (!byTicker[sym]) byTicker[sym] = [];
+      byTicker[sym].push({ date, qty, price });
+    }
+
+    // Za svaki ticker uzmi zadnji settlement i promjenu
+    const result = {};
+    for (const [sym, rows] of Object.entries(byTicker)) {
+      rows.sort((a, b) => a.date.localeCompare(b.date));
+      const latest = rows[rows.length - 1];
+      const prev   = rows.length > 1 ? rows[rows.length - 2] : null;
+      result[sym]  = { qty: latest.qty, date: latest.date, price: latest.price,
+                        change: prev ? latest.qty - prev.qty : null };
+    }
+
+    _secFtdCache = { data: result, ts: Date.now(), period: usedPeriod };
+    console.log(`SEC FTD cache osvježen — ${usedPeriod}, ${Object.keys(result).length} simbola`);
+    return result;
+  } catch(e) {
+    console.error("SEC FTD parse greška:", e.message);
+    return _secFtdCache?.data || {};
+  } finally {
+    _secFtdFetching = false;
+  }
+}
+
+// ─── fetchAmcData() — Finviz + SEC FTD + companiesmarketcap.com (CTB) ─────────
+// FTD: SEC zvanični podaci via fetchSecFtdData() (bi-monthly, per-settlement-date shares).
 // CTB: companiesmarketcap.com (cost to borrow %, dostupno za borrow).
 // Score se normalizira na dostupne faktore.
 let _amcFetchRunning = false;
@@ -4036,29 +4135,16 @@ async function fetchAmcData() {
       console.log("AMC CTB: " + (ctbPct !== null ? ctbPct.toFixed(4)+"%" : "N/A") + " avail: " + (ctbAvail != null ? (ctbAvail/1e6).toFixed(2)+"M" : "N/A"));
     } catch(e) { console.error("AMC CTB fetch greška:", e.message); }
 
-    // ── 3. FTD — chartexchange.com (SEC data, server-rendered, točan per-dan broj dionica)
-    // CMC pokazuje kumulativne period-notional $ vrijednosti — nije shares count, ne koristimo.
+    // ── 3. FTD — SEC zvanični podaci via fetchSecFtdData()
     let ftdData = null;
     let ftdHistory = [];
     try {
-      const ceHtml = await fetch(
-        "https://chartexchange.com/symbol/nyse-amc/failure-to-deliver/",
-        { headers: { "User-Agent": UA, "Accept": "text/html", "Referer": "https://chartexchange.com/" },
-          signal: AbortSignal.timeout(15000) }
-      ).then(r => r.text());
-      // Parse: "On <span>2026-04-30</span> there were <span>2,236,607</span> FTDs"
-      const m = ceHtml.match(/On\s+(?:<[^>]+>)?(\d{4}-\d{2}-\d{2})(?:<\/[^>]+>)?\s+there were\s+(?:<[^>]+>)?([\d,]+)(?:<\/[^>]+>)?\s+FTDs/);
-      if (m) {
-        ftdData = { qty: parseInt(m[2].replace(/,/g, "")), date: m[1], change: null, price: null };
+      const ftdMap = await fetchSecFtdData();
+      if (ftdMap["AMC"]) {
+        ftdData = { ...ftdMap["AMC"] };
       }
-      // Previous period for change calc
-      const allM = [...ceHtml.matchAll(/On\s+(?:<[^>]+>)?(\d{4}-\d{2}-\d{2})(?:<\/[^>]+>)?\s+there were\s+(?:<[^>]+>)?([\d,]+)(?:<\/[^>]+>)?\s+FTDs/g)];
-      if (allM.length >= 2 && ftdData) {
-        const prevQty = parseInt(allM[allM.length - 2][2].replace(/,/g, ""));
-        ftdData.change = ftdData.qty - prevQty;
-      }
-      console.log("AMC FTD (CE): " + (ftdData ? ftdData.qty.toLocaleString() + " @ " + ftdData.date : "N/A"));
-    } catch(e) { console.error("AMC FTD CE greška:", e.message); }
+      console.log("AMC FTD (SEC): " + (ftdData ? ftdData.qty.toLocaleString() + " @ " + ftdData.date : "N/A"));
+    } catch(e) { console.error("AMC FTD SEC greška:", e.message); }
 
     // ── 4. Shares Outstanding — companiesmarketcap.com ───────────────────────
     // data=[{d:unixTs, v:sharesCount}] — raw broj dionica
@@ -4125,7 +4211,7 @@ async function fetchAmcData() {
       borrowFee: hasCTB ? { fee: ctbPct, available: ctbAvail ?? null } : null,
       shortInterestCE: null,
       squeeze: { score:squeezeScore, label:squeezeLabel, factors:squeezeFactors, partial },
-      source: "finviz.com + chartexchange.com",
+      source: "finviz.com + sec.gov FTD",
       ts: new Date().toISOString()
     };
     _amcCache.data = payload;
@@ -4201,29 +4287,15 @@ async function fetchSqueezeStock(cfg) {
       }
     } catch(e) { console.error(`${ticker} CTB fetch greška:`, e.message); }
 
-    // 3. FTD — chartexchange.com (SEC data, server-rendered, točan per-dan broj dionica)
-    // CMC pokazuje kumulativne period-notional $ vrijednosti — nije shares count, ne koristimo.
+    // 3. FTD — SEC zvanični podaci via fetchSecFtdData()
     let ftdData = null;
-    if (ceSlug) {
-      try {
-        const ceHtml = await fetch(
-          `https://chartexchange.com/symbol/${ceSlug}/failure-to-deliver/`,
-          { headers: { "User-Agent": UA, "Accept": "text/html", "Referer": "https://chartexchange.com/" }, signal: AbortSignal.timeout(15000) }
-        ).then(r => r.text());
-        // Parse: "On <span>2026-04-30</span> there were <span>2,236,607</span> FTDs"
-        const m = ceHtml.match(/On\s+(?:<[^>]+>)?(\d{4}-\d{2}-\d{2})(?:<\/[^>]+>)?\s+there were\s+(?:<[^>]+>)?([\d,]+)(?:<\/[^>]+>)?\s+FTDs/);
-        if (m) {
-          ftdData = { qty: parseInt(m[2].replace(/,/g, "")), date: m[1], change: null };
-        }
-        // Also try to find previous period for change calc
-        const allM = [...ceHtml.matchAll(/On\s+(?:<[^>]+>)?(\d{4}-\d{2}-\d{2})(?:<\/[^>]+>)?\s+there were\s+(?:<[^>]+>)?([\d,]+)(?:<\/[^>]+>)?\s+FTDs/g)];
-        if (allM.length >= 2 && ftdData) {
-          const prevQty = parseInt(allM[allM.length - 2][2].replace(/,/g, ""));
-          ftdData.change = ftdData.qty - prevQty;
-        }
-        console.log(`${ticker} FTD (CE): ${ftdData ? ftdData.qty.toLocaleString() + " @ " + ftdData.date : "N/A"}`);
-      } catch(e) { console.error(`${ticker} FTD CE greška:`, e.message); }
-    }
+    try {
+      const ftdMap = await fetchSecFtdData();
+      if (ftdMap[ticker]) {
+        ftdData = { ...ftdMap[ticker] };
+      }
+      console.log(`${ticker} FTD (SEC): ${ftdData ? ftdData.qty.toLocaleString() + " @ " + ftdData.date : "N/A"}`);
+    } catch(e) { console.error(`${ticker} FTD SEC greška:`, e.message); }
 
     // 4. Squeeze Score
     const g = k => snap[k] ?? null;
@@ -4263,7 +4335,7 @@ async function fetchSqueezeStock(cfg) {
         { name:"Shares Available", val:hasAvail?(avail>=1e6?(avail/1e6).toFixed(1)+"M":(avail/1e3).toFixed(0)+"K"):"N/A", score:hasAvail?availScore:null, max:12 },
         { name:"Rel. Volume",      val:relVol.toFixed(2)+"x",    score:volScore,                max:8  },
       ],
-      source: "finviz.com + chartexchange.com",
+      source: "finviz.com + sec.gov FTD",
       ts: new Date().toISOString()
     };
     if (!_squeezeCache[ticker]) _squeezeCache[ticker] = { data: null, ts: 0 };

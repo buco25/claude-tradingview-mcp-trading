@@ -904,12 +904,12 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     }).join("");
 
     return `
-      <div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';this.querySelector('.caret').textContent=this.nextElementSibling.style.display==='none'?'▶':'▼'"
+      <div id="collhdr-wl" onclick="colToggle('wl')"
         style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;padding:8px 0;margin-bottom:4px">
         <span class="section-label" style="color:${def.color};margin:0">📊 Win/Loss po coinu (${s.symbolStatsArr.length})</span>
-        <span class="caret" style="color:#9ca3af;font-size:11px">▶</span>
+        <span id="collcaret-wl" style="color:#9ca3af;font-size:11px">▶</span>
       </div>
-      <div style="display:none">
+      <div id="collbody-wl" style="display:none">
         <div class="table-wrap">
           <table class="trade-table">
             <thead><tr><th>Coin</th><th>W</th><th>L</th><th>WR</th><th></th><th>P&amp;L</th></tr></thead>
@@ -918,12 +918,12 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         </div>
       </div>
 
-      <div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';this.querySelector('.caret').textContent=this.nextElementSibling.style.display==='none'?'▶':'▼'"
+      <div id="collhdr-t20" onclick="colToggle('t20')"
         style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;padding:8px 0;margin-top:10px;margin-bottom:4px">
         <span class="section-label" style="color:${def.color};margin:0">🎯 ULTRA — Zadnjih ${s.recentExits.length} tradova</span>
-        <span class="caret" style="color:#9ca3af;font-size:11px">▶</span>
+        <span id="collcaret-t20" style="color:#9ca3af;font-size:11px">▶</span>
       </div>
-      <div style="display:none">
+      <div id="collbody-t20" style="display:none">
         <div class="table-wrap">
           <table class="trade-table">
             <thead><tr><th>Datum</th><th>Symbol</th><th>Side</th><th>Cijena</th><th>P&amp;L</th><th>Info</th></tr></thead>
@@ -931,6 +931,27 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
           </table>
         </div>
       </div>
+      <script>
+        function colToggle(key) {
+          var body = document.getElementById('collbody-' + key);
+          var caret = document.getElementById('collcaret-' + key);
+          var open = body.style.display === 'none';
+          body.style.display = open ? 'block' : 'none';
+          caret.textContent = open ? '▼' : '▶';
+          try { sessionStorage.setItem('coll_' + key, open ? '1' : '0'); } catch(e) {}
+        }
+        (function restoreCollState() {
+          ['wl','t20'].forEach(function(key) {
+            try {
+              if (sessionStorage.getItem('coll_' + key) === '1') {
+                var body = document.getElementById('collbody-' + key);
+                var caret = document.getElementById('collcaret-' + key);
+                if (body) { body.style.display = 'block'; caret.textContent = '▼'; }
+              }
+            } catch(e) {}
+          });
+        })();
+      </script>
       ${(() => {
         const allSyms = rules.all_symbols || [];
         const watchlist = rules.watchlist_synapse_t || [];

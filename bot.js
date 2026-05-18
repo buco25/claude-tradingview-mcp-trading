@@ -2380,7 +2380,7 @@ export function writeExitCsv(pid, pos, exitPrice, reason, pnl) {
     feeTotal, netPnl,
     fmtPrice(pos.sl), fmtPrice(pos.tp),
     pos.orderId || "", pos.mode, pid,
-    `"${icon}: ${reason} | Ulaz ${fmtPrice(pos.entryPrice)} → Izlaz ${fmtPrice(exitPrice)}"`,
+    `"${icon}: ${reason} | ${pos.entryMode || "PBK"} | Ulaz ${fmtPrice(pos.entryPrice)} → Izlaz ${fmtPrice(exitPrice)}"`,
   ].join(",");
 
   appendFileSync(csvFilePath(pid), row + "\n");

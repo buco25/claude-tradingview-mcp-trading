@@ -688,11 +688,22 @@ function buildPortfolioStats(pid) {
   }
   const currentDrawdownPct = ddPeak > 0 ? (ddPeak - equity) / ddPeak * 100 : 0;
 
-  // ── WR by entry mode (PBK / MOM — parsira iz Notes) ─────────────────────────
+  // ── WR by entry mode (PBK / MOM) ─────────────────────────────────────────────
+  // Traži MOM/PBK u exit Notes-u (novi format) ili u entry Notes-u istog simbola (stari format)
   const modeStats = { PBK: { wins: 0, losses: 0 }, MOM: { wins: 0, losses: 0 }, UNK: { wins: 0, losses: 0 } };
+  // Build lookup: symbol → entryMode iz entry redova (za stari CSV bez entryMode u exit Notes)
+  const entryModeBySymbol = {};
+  for (const r of entries) {
+    const notes = r["Notes"] || "";
+    if (notes.includes("| MOM |")) entryModeBySymbol[r["Symbol"]] = "MOM";
+    else if (notes.includes("| PBK |")) entryModeBySymbol[r["Symbol"]] = "PBK";
+  }
   for (const r of exits) {
     const notes = r["Notes"] || "";
-    const m = notes.includes("| MOM |") ? "MOM" : notes.includes("| PBK |") ? "PBK" : "UNK";
+    // Novo: entryMode je u exit Notes-u direktno
+    let m = notes.includes("| MOM |") ? "MOM" : notes.includes("| PBK |") ? "PBK" : null;
+    // Fallback: lookup iz entry reda za isti simbol (stari CSV)
+    if (!m) m = entryModeBySymbol[r["Symbol"]] || "UNK";
     const pnl = parseFloat(r["Net P&L"] || 0);
     if (pnl >= 0) modeStats[m].wins++;
     else          modeStats[m].losses++;

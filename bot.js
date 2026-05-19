@@ -1,10 +1,13 @@
 /**
  * Trading Bot — ULTRA Strategy (synapse_t)
  *
- * ULTRA → 15m | Per-simbol SL/TP (ATR tier) | Tier-based leverage | rizik 1.5% banke po tradeu
- *   Tier 1 (BTC/ETH/SOL/LINK/XRP): SL 1.5% / TP 4.0% → 40x leverage (liq 2.0%)
- *   Tier 2 (DOGE/NEAR/ADA/SUI/TAO/HYPE/APT/SEI/INJ): SL 2.0% / TP 4.5% → 35x (liq 2.36%)
- *   Tier 3 (ENA/JUP): SL 2.5% / TP 5.5% → 30x (liq 2.83%)
+ * ULTRA → 15m | Per-simbol SL/TP (30-day daily range analiza May 2026) | rizik 1.5% banke po tradeu
+ *   Tier 0 (BTC):                       SL 2.5% / TP 3.75% → 34x  (liq ~2.54% = SL)
+ *   Tier 1 (ETH/SOL/XRP/LINK/ADA/DOGE): SL 4.0% / TP 6.0%  → 22x  (liq ~4.15% = SL)
+ *   Tier 2 (NEAR/HYPE/SUI/SEI/APT/TAO): SL 5.5% / TP 8.25% → 16x  (liq ~5.85% = SL)
+ *   Tier 3 (JUP/ENA/INJ):               SL 7.0% / TP 10.5% → 13x  (liq ~7.29% = SL)
+ *
+ * Dinamički TP: BTC Regime NEUTRAL/kontra signal → TP = SL×1.5 | BULL+LONG ili BEAR+SHORT → TP = SL×3
  */
 
 import "dotenv/config";
@@ -19,8 +22,15 @@ const LEVERAGE      = 50;     // 50x default → SL 1.5% = 75% margine (više pr
 const BTC_LEVERAGE  = 75;    // BTC posebno — 75x
 const START_CAPITAL = 1000;   // po portfoliju
 const RISK_PCT      = 1.5;    // % banke koji rizikaš po tradeu (= veličina uloga/margine)
-const SL_PCT        = 1.5;    // fallback SL % (Tier 1) — override per-simbol u symbol_sltp
-const TP_PCT        = 4.0;    // fallback TP % (Tier 1) — override per-simbol u symbol_sltp
+const SL_PCT        = 4.0;    // fallback SL % (Tier 1) — override per-simbol u symbol_sltp
+const TP_PCT        = 6.0;    // fallback TP % (Tier 1, 1.5×SL) — override per-simbol u symbol_sltp
+
+// ─── Dinamički TP — tržišni uvjeti (BTC Regime) ───────────────────────────────
+// JAKO: BTC Regime BULL + signal LONG, ili BEAR + signal SHORT → TP = SL × 3 (1:3 R:R)
+// NORMALNO: BTC Regime NEUTRAL, ili regime ne podudara signal → TP = SL × 1.5 (1:1.5 R:R)
+const STRONG_SIGNAL_SCORE = 9;    // nekorišten za TP (zadržan za eventualne filter provjere)
+const STRONG_TP_MULT      = 3.0;  // jako tržište → TP = SL × 3 (1:3 R:R)
+const NORMAL_TP_MULT      = 1.5;  // konsolidacija / neutralno → TP = SL × 1.5 (1:1.5 R:R)
 const MAX_TRADES_PER_DAY = 100;
 const MAX_OPEN_PER_PORTFOLIO = 8;  // max otvorenih pozicija po portfoliju (+ BTC bonus slot)
 const MAX_NEW_ENTRIES_PER_SCAN = 3; // max NOVIH ulaza po scan ciklusu (sprječava 8 simultanih gubitaka)
@@ -2548,15 +2558,16 @@ export async function checkBeStopAll() {
 //   Tier3 SL=2.5% → 30x (liq 2.83%)  ✅
 //   BTC   SL=1.5% → 40x (liq 2.00%)  ✅ (BTC_LEVERAGE 75x je PREVIŠE za 1.5% SL)
 function getSafeLeverage(slPct) {
-  const MAINT  = 0.005;  // 0.5% Bitget maintenance margin (konzervativno za sve symbolove)
-  const BUFFER = 0.003;  // 0.3% sigurnosni buffer između SL i liq
-  // max_lev pri kojima liq_distance > slPct + buffer
-  const maxLev = 1 / (slPct / 100 + BUFFER + MAINT);
-  // Zaokruži na najbliži niži višekratnik od 5, između 10 i 50
-  return Math.max(10, Math.min(50, Math.floor(maxLev / 5) * 5));
+  // Strategija: liq cijena = SL cijena (likvidacija je backup za SL)
+  // Formula: liq_dist = 1/L - MMR → postavimo liq_dist = SL% → L = 1/(SL% + MMR)
+  // Math.floor → liq je uvijek malo DALJE od SL-a (SL uvijek okida prvi)
+  const MAINT  = 0.004;  // 0.4% BitGet maintenance margin (standardni za male pozicije)
+  const maxLev = 1 / (slPct / 100 + MAINT);
+  return Math.max(10, Math.min(125, Math.floor(maxLev)));
+  // Provjera: SL2.5%→34x(liq@2.54%) SL4%→22x(liq@4.15%) SL5.5%→16x(liq@5.85%) SL7%→13x(liq@7.29%)
 }
 
-async function setupSymbol(symbol, slPct) {
+async function setupSymbol(symbol, slPct, preferredLeverage = null) {
   // 1) Isolated margin mode
   const mm = await bitgetPost("/api/v2/mix/account/set-margin-mode", {
     symbol, productType: "USDT-FUTURES", marginCoin: "USDT", marginMode: "isolated",
@@ -2564,10 +2575,14 @@ async function setupSymbol(symbol, slPct) {
   if (mm.code !== "00000") console.log(`  ⚠️  marginMode ${symbol}: ${mm.msg}`);
 
   // 2) Tier-based leverage — sprječava likvidaciju PRIJE SL-a
-  //    getSafeLeverage(slPct) → max leverage pri kojem liq_distance > SL + buffer
-  //    Ako slPct nije dan → fallback na LEVERAGE (50x) za non-BTC, BTC_LEVERAGE za BTC
+  //    Prioritet: preferredLeverage (iz symbol_sltp.leverage) > getSafeLeverage(slPct) > globalni
   let targetLev;
-  if (slPct != null) {
+  if (preferredLeverage != null) {
+    // Direktno iz rules.json — već je izračunat za tier
+    targetLev = preferredLeverage;
+    const liqDist = ((1 / targetLev - 0.005) * 100).toFixed(2);
+    console.log(`  🛡️  ${symbol} Tier leverage ${targetLev}x (liq @ ~${liqDist}%)`);
+  } else if (slPct != null) {
     targetLev = getSafeLeverage(slPct);
     const liqDist = ((1 / targetLev - 0.005) * 100).toFixed(2);
     console.log(`  🛡️  ${symbol} SL=${slPct}% → siguran leverage ${targetLev}x (liq @ ~${liqDist}% > SL)`);
@@ -2639,10 +2654,10 @@ async function closeBitgetPosition(symbol, side, quantity) {
   }
 }
 
-async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp, slPct, tpPct) {
+async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp, slPct, tpPct, preferredLeverage = null) {
   // Postavi isolated margin + tier-based leverage prije svakog naloga
-  // slPct → getSafeLeverage → liq distance > SL (sprječava likvidaciju umjesto SL-a)
-  const actualLeverage = await setupSymbol(symbol, slPct);
+  // preferredLeverage (iz symbol_sltp.leverage) ima prioritet nad getSafeLeverage
+  const actualLeverage = await setupSymbol(symbol, slPct, preferredLeverage);
   const quantity  = (sizeUSD / price).toFixed(4);
   const holdSide  = side === "LONG" ? "long" : "short";
 
@@ -3524,6 +3539,28 @@ export async function run() {
           console.log(`  📐 [Tier-SL] ${symbol} Tier${symSltp.tier??'?'}: SL ${slPct}% / TP ${tpPct}%`);
         }
 
+        // ── Dinamički TP — tržišni uvjeti (BTC Regime) ────────────────────────
+        // Jako tržište: BTC Regime BULL + signal LONG, ili BEAR + signal SHORT → TP × 3 (1:3 R:R)
+        // Konsolidacija / neutralno: BTC Regime NEUTRAL, ili regime ne podudara signal → TP × 1.5 (1:1.5 R:R)
+        // Pravilo: samo POVEĆAVAMO TP, nikad ne smanjujemo ako je S/R dal bolji target
+        const _isStrong = (_btcRegime === "BULL" && signal === "LONG") ||
+                          (_btcRegime === "BEAR" && signal === "SHORT");
+        const _tpMult     = _isStrong ? STRONG_TP_MULT : NORMAL_TP_MULT;
+        const _dynTpPct   = slPct * _tpMult;
+        const signalStrength = _isStrong ? "strong" : "normal";
+
+        if (_dynTpPct > tpPct) {
+          // Dinamički target veći od S/R ili ATR targeta → koristimo dinamički
+          tpPct = _dynTpPct;
+          tp    = signal === "LONG" ? price * (1 + tpPct / 100) : price * (1 - tpPct / 100);
+        }
+
+        if (_isStrong) {
+          console.log(`  💪 [JAKO TRŽIŠTE] ${symbol} — BTC Regime: ${_btcRegime} + ${signal} → TP ×3 = ${tpPct.toFixed(2)}% | RR 1:${(tpPct/slPct).toFixed(1)}`);
+        } else {
+          console.log(`  📊 [KONSOLIDACIJA] ${symbol} — BTC Regime: ${_btcRegime} (${signal}) → TP ×1.5 = ${tpPct.toFixed(2)}% | RR 1:${(tpPct/slPct).toFixed(1)}`);
+        }
+
         // Risk-based position sizing: SL gubitak = točno RISK_PCT% trenutne equity
         const startCap   = pDef.startCapital ?? START_CAPITAL;
         const equity     = getPortfolioEquity(pid, startCap);
@@ -3543,16 +3580,19 @@ export async function run() {
         const timestamp = new Date().toISOString();
         const orderId   = `${isLive ? "LIVE" : "PAPER"}-${Date.now()}`;
         const mode      = isLive ? (BITGET_DEMO ? "DEMO" : "LIVE") : "PAPER";
-        const entry = { symbol, signal, price, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode, sigMask: result.sigMask ?? null, entryMode: result.isMomentum ? "MOM" : "PBK" };
+        const entry = { symbol, signal, price, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode, sigMask: result.sigMask ?? null, entryMode: result.isMomentum ? "MOM" : "PBK", signalStrength };
+
+        const _strengthEmoji = signalStrength === "strong" ? "💪" : "📊";
+        const _rrLabel = `RR 1:${(tpPct/slPct).toFixed(1)}`;
 
         if (!isLive) {
           addPosition(pid, entry);
           writeEntryCsv(pid, entry);
           _newEntriesThisScan++;
-          await tg(`📋 PAPER [${pDef.name}/${pDef.timeframe}] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b>\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}\nEquity: $${equity.toFixed(2)} | Risk: $${riskAmount.toFixed(2)} | Notional: $${tradeSize.toFixed(0)} | Margin: $${margin.toFixed(2)} | ${LEVERAGE}x`);
+          await tg(`📋 PAPER [${pDef.name}/${pDef.timeframe}] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b> ${_strengthEmoji}\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} (${slPct.toFixed(1)}%) | TP: ${fmtPrice(tp)} (${tpPct.toFixed(1)}%) | ${_rrLabel}\nEquity: $${equity.toFixed(2)} | Risk: $${riskAmount.toFixed(2)} | Notional: $${tradeSize.toFixed(0)} | Margin: $${margin.toFixed(2)} | ${symSltp.leverage ?? LEVERAGE}x`);
         } else {
           try {
-            const order = await placeBitGetOrder(symbol, signal, tradeSize, price, sl, tp, slPct, tpPct);
+            const order = await placeBitGetOrder(symbol, signal, tradeSize, price, sl, tp, slPct, tpPct, symSltp.leverage ?? null);
             const usedLev    = order?.actualLeverage || LEVERAGE;
             const usedMargin = tradeSize / usedLev;
             entry.orderId = order?.orderId || orderId;
@@ -3561,7 +3601,7 @@ export async function run() {
             writeEntryCsv(pid, entry);
             _newEntriesThisScan++;
             console.log(`  ✅ LIVE NALOG [${pDef.name}] — ${entry.orderId}`);
-            await tg(`🔴 LIVE [${pDef.name}/${pDef.timeframe}] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b>\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} | TP: ${fmtPrice(tp)}\nEquity: $${equity.toFixed(2)} | Risk: $${riskAmount.toFixed(2)} | Notional: $${tradeSize.toFixed(0)} | Margin: $${usedMargin.toFixed(2)} | ${usedLev}x${usedLev < LEVERAGE ? " ⚠️ max lev" : ""}`);
+            await tg(`🔴 LIVE [${pDef.name}/${pDef.timeframe}] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b> ${_strengthEmoji}\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} (${slPct.toFixed(1)}%) | TP: ${fmtPrice(tp)} (${tpPct.toFixed(1)}%) | ${_rrLabel}\nEquity: $${equity.toFixed(2)} | Risk: $${riskAmount.toFixed(2)} | Notional: $${tradeSize.toFixed(0)} | Margin: $${usedMargin.toFixed(2)} | ${usedLev}x`);
           } catch (err) {
             console.log(`  ❌ LIVE NALOG PAO — ${err.message}`);
             await tg(`❌ LIVE GREŠKA [${pDef.name}] ${symbol}\n${err.message}`);

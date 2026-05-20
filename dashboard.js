@@ -2900,6 +2900,78 @@ function sqRenderDetail(ticker) {
     +     '</div>'
     +   '</div>'
     +   '<div style="display:grid;gap:5px">' + fHtml + '</div>'
+    + '</div>'
+    + _squeezeRecHtml(d, ticker);
+}
+
+function _squeezeRecHtml(d, ticker) {
+  // Izgradi preporuku (dionice vs opcije) direktno iz podataka panela
+  var sq    = d.squeeze || {};
+  var borrow = d.borrowFee || null;
+  var si     = { pct: parseFloat(d.shortPctFloat||'0'), daysToCover: parseFloat(d.shortRatio||'0') };
+  if (!sq.score) return '';
+
+  // Pozovi istu server-side logiku ali u JS-u (duplicirana za brzi UI prikaz)
+  var score  = sq.score;
+  var ctb    = borrow && borrow.fee != null ? borrow.fee : 0;
+  var dtc    = si.daysToCover || 0;
+  var avail  = borrow && borrow.available != null ? borrow.available : Infinity;
+  var siPct  = si.pct || 0;
+
+  var urgency = (dtc>=5?2:dtc>=3?1:0) + (ctb>=10?2:ctb>=3?1:0)
+              + (avail<500000?2:avail<2000000?1:0) + (siPct>=25?1:0);
+
+  var action='', shares='', opts='', risk='', recColor='#374151';
+
+  if (score >= 75) {
+    recColor = '#7f1d1d';
+    if (urgency >= 5) {
+      action = '⚡ AGRESIVAN ULAZ — setup zreo';
+      shares = '60% dionice — baza bez expiry';
+      opts   = '40% call opcije — ATM, expiry 14–21 dana';
+      risk   = 'Stop na dionicama -15%. Opcije mogu isteći 0 ako squeeze kasni.';
+    } else {
+      action = '🔥 SNAŽAN SETUP — squeeze moguć uskoro';
+      shares = '70% dionice';
+      opts   = '30% call opcije — blago OTM, expiry 3–6 tjedana';
+      risk   = 'Stop -12%. Opcije = lottery ticket.';
+    }
+  } else if (score >= 55) {
+    recColor = '#78350f';
+    if (urgency >= 4) {
+      action = '📈 DOBAR SETUP — vrijedi pozicionirati se';
+      shares = '80% dionice (primarni vozilo)';
+      opts   = '20% call opcije — ITM ili ATM, expiry 4–8 tjedana';
+      risk   = 'Squeeze može kasniti tjednima. Opcije izađi na -50%.';
+    } else {
+      action = '👀 PRATI — uđi samo u dionice';
+      shares = '100% dionice — bez opcija';
+      opts   = 'Opcije NISU preporučene (theta ubija u čekanju)';
+      risk   = 'Postavi alert ako score prijeđe 75 ili CTB skoči na 5%+.';
+    }
+  } else {
+    return '<div style="margin-top:10px;background:#111827;border:1px solid #374151;border-radius:8px;padding:12px;font-size:11px;color:#6b7280">🟡 <b>Preporuka:</b> Setup nije spreman — bez akcije. Prati daljnje promjene.</div>';
+  }
+
+  return '<div style="margin-top:10px;background:#111827;border:1px solid #dc2626;border-radius:10px;padding:14px">'
+    + '<div style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🎯 Preporuka za akciju</div>'
+    + '<div style="font-size:14px;font-weight:800;color:#fbbf24;margin-bottom:10px">' + action + '</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">'
+    +   '<div style="background:#1f2937;border:1px solid #374151;border-radius:6px;padding:8px">'
+    +     '<div style="font-size:9px;color:#60a5fa;text-transform:uppercase;margin-bottom:4px">📈 Dionice</div>'
+    +     '<div style="font-size:11px;color:#e5e7eb">' + shares + '</div>'
+    +   '</div>'
+    +   '<div style="background:#1f2937;border:1px solid #374151;border-radius:6px;padding:8px">'
+    +     '<div style="font-size:9px;color:#a78bfa;text-transform:uppercase;margin-bottom:4px">⚡ Call opcije</div>'
+    +     '<div style="font-size:11px;color:#e5e7eb">' + opts + '</div>'
+    +   '</div>'
+    + '</div>'
+    + '<div style="background:#1f2937;border:1px dashed #dc2626;border-radius:6px;padding:8px;font-size:10px;color:#f87171">'
+    +   '⚠️ <b>Rizik:</b> ' + risk
+    + '</div>'
+    + '<div style="margin-top:8px;font-size:10px;color:#6b7280">'
+    +   '📊 Urgencija: ' + urgency + '/7 · CTB ' + ctb.toFixed(2) + '% · DTC ' + dtc.toFixed(1) + 'd · SI ' + siPct.toFixed(1) + '%'
+    + '</div>'
     + '</div>';
 }
 

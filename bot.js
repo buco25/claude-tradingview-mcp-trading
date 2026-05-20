@@ -35,6 +35,24 @@ const MAX_TRADES_PER_DAY = 100;
 const MAX_OPEN_PER_PORTFOLIO = 8;  // max otvorenih pozicija po portfoliju (+ BTC bonus slot)
 const MAX_NEW_ENTRIES_PER_SCAN = 3; // max NOVIH ulaza po scan ciklusu (sprječava 8 simultanih gubitaka)
 
+// ─── 7. Korelacijski filter — sektori ─────────────────────────────────────────
+const SYMBOL_SECTORS = {
+  "BTCUSDT":  "BTC",
+  "ETHUSDT":  "OG_L1",  "SOLUSDT":  "OG_L1",  "ADAUSDT":  "OG_L1", "XRPUSDT":  "OG_L1",
+  "NEARUSDT": "ALT_L1", "SUIUSDT":  "ALT_L1", "APTUSDT":  "ALT_L1","SEIUSDT":  "ALT_L1", "INJUSDT": "ALT_L1",
+  "LINKUSDT": "DEFI",   "JUPUSDT":  "DEFI",   "ENAUSDT":  "DEFI",
+  "TAOUSDT":  "AI",     "HYPEUSDT": "AI",
+  "DOGEUSDT": "MEME",
+};
+const MAX_PER_SECTOR = 2;  // max otvorenih pozicija istog sektora
+
+// ─── 4. Market Breadth ─────────────────────────────────────────────────────────
+const BREADTH_STRONG = 5;   // ≥ 5 simbola u istom smjeru = jako tržište (pojačava TP×3)
+
+// ─── 6. Partial TP — djelomično zatvaranje pozicije ───────────────────────────
+const PARTIAL_TP_TRIGGER = 50;   // % TP puta → aktivira djelomično zatvaranje
+const PARTIAL_CLOSE_PCT  = 50;   // % pozicije koji se zatvara
+
 // ─── ULTRA strategija — zaštitni parametri ────────────────────────────────────
 const LONG_ONLY      = false;         // SHORT dozvoljeni kada BTC regime BEAR/NEUTRAL
 const ADX_MIN        = 30;            // ADX prag — bazni (dinamički raste ako WR pada)
@@ -215,6 +233,45 @@ async function getBtcRegime() {
     console.log(`  ⚠️  [REGIME] Greška: ${e.message}`);
     return "UNKNOWN";
   }
+}
+
+// ─── 4. Market Breadth — brzi pre-scan EMA9/21 na 15m ───────────────────────
+let _breadthCache = { data: null, ts: 0 };
+const BREADTH_TTL = 15 * 60 * 1000;
+
+async function computeMarketBreadth(symbols) {
+  if (Date.now() - _breadthCache.ts < BREADTH_TTL && _breadthCache.data) return _breadthCache.data;
+  let bullish = 0, bearish = 0, neutral = 0;
+  try {
+    const results = await Promise.all(symbols.map(async sym => {
+      try {
+        const candles = await fetchCandles(sym, "15m", 25);
+        if (candles.length < 22) return "NEUTRAL";
+        const closes = candles.map(c => c.close);
+        const n = closes.length - 1;
+        // EMA9 i EMA21 na 15m
+        const ka = 2 / 10, kb = 2 / 22;
+        let ea = closes.slice(0, 9).reduce((a, b) => a + b, 0) / 9;
+        let eb = closes.slice(0, 21).reduce((a, b) => a + b, 0) / 21;
+        for (let i = 21; i <= n; i++) {
+          ea = closes[i] * ka + ea * (1 - ka);
+          eb = closes[i] * kb + eb * (1 - kb);
+        }
+        const price = closes[n];
+        if (ea > eb && price > ea) return "BULL";
+        if (ea < eb && price < ea) return "BEAR";
+        return "NEUTRAL";
+      } catch { return "NEUTRAL"; }
+    }));
+    for (const r of results) {
+      if (r === "BULL") bullish++;
+      else if (r === "BEAR") bearish++;
+      else neutral++;
+    }
+  } catch {}
+  const data = { bullish, bearish, neutral, total: symbols.length };
+  _breadthCache = { data, ts: Date.now() };
+  return data;
 }
 
 // ─── Funding Rate gate + Trend tracking ──────────────────────────────────────
@@ -2162,6 +2219,29 @@ async function checkPortfolioPositions(pid) {
           ? (liveP - pos.entryPrice) * qty
           : (pos.entryPrice - liveP) * qty;
 
+        // ── PARTIAL-TP: zatvori 50% pozicije kad je PARTIAL_TP_TRIGGER% TP puta ──
+        if (!pos.partialClosed && isLivePortfolio) {
+          const _tpPctP  = pos.tpPct ?? 4.0;
+          const _pricePctP = pos.side === "LONG"
+            ? (liveP - pos.entryPrice) / pos.entryPrice * 100
+            : (pos.entryPrice - liveP) / pos.entryPrice * 100;
+          const _tpProgressP = _pricePctP / _tpPctP * 100;
+          if (_tpProgressP >= PARTIAL_TP_TRIGGER) {
+            console.log(`  📦 [PARTIAL-TP] ${pos.symbol} ${pos.side} — ${_tpProgressP.toFixed(0)}% TP → zatvaramo ${PARTIAL_CLOSE_PCT}%`);
+            const _pClosed = await partialClosePosition(pos);
+            if (_pClosed) {
+              pos.partialClosed = true;
+              const _allPos = loadPositions(pid);
+              const _pIdx   = _allPos.findIndex(p => p.symbol === pos.symbol && p.side === pos.side);
+              if (_pIdx >= 0) {
+                _allPos[_pIdx].partialClosed = true;
+                _allPos[_pIdx].quantity = (pos.quantity ?? (pos.totalUSD / pos.entryPrice)) * (1 - PARTIAL_CLOSE_PCT / 100);
+                savePositions(pid, _allPos);
+              }
+            }
+          }
+        }
+
         // ── BE-STOP: ako je 50%+ TP dostignut → pomakni SL na entry+buffer ──
         if (!pos.beMoved && isLivePortfolio) {
           const tpPct   = pos.tpPct ?? 4.0;
@@ -2502,6 +2582,33 @@ async function moveSLtoBreakEven(pos) {
     return true;
   } catch(e) {
     console.log(`  ⚠️  [BE-STOP] ${symbol} greška: ${e.message}`);
+    return false;
+  }
+}
+
+// ─── 6. Partial TP — zatvori 50% pozicije kad je 50% TP puta dostignut ──────────
+async function partialClosePosition(pos, closePct = PARTIAL_CLOSE_PCT) {
+  if (PAPER_TRADING) return false;
+  if (pos.partialClosed) return false;
+  const qty       = (pos.quantity ?? (pos.totalUSD / pos.entryPrice)) * (closePct / 100);
+  const closeSide = pos.side === "LONG" ? "sell" : "buy";
+  try {
+    const res = await bitgetPost("/api/v2/mix/order/place-order", {
+      symbol: pos.symbol, productType: "USDT-FUTURES",
+      marginMode: "isolated", marginCoin: "USDT",
+      side: closeSide, tradeSide: "close",
+      orderType: "market",
+      size: parseFloat(qty.toFixed(4)).toString(),
+    });
+    if (res.code === "00000") {
+      console.log(`  📦 [PARTIAL-TP] ${pos.symbol} ${pos.side} — zatvoreno ${closePct}% (qty: ${qty.toFixed(4)}) | ostatak čeka TP`);
+      await tg(`📦 <b>PARTIAL-TP [ULTRA]</b> ${pos.symbol} ${pos.side}\nZatvoreno ${closePct}% pozicije (${qty.toFixed(4)} jed)\nOstatak čeka puni TP.`);
+      return true;
+    }
+    console.log(`  ⚠️  [PARTIAL-TP] ${pos.symbol} fail: ${res.code} ${res.msg}`);
+    return false;
+  } catch(e) {
+    console.log(`  ⚠️  [PARTIAL-TP] ${pos.symbol} greška: ${e.message}`);
     return false;
   }
 }
@@ -3255,6 +3362,32 @@ export async function run() {
       pDef.params._dynAdx = dynAdx;
     }
 
+    // ── 1. USDT.D proxy — Stablecoin Inflow/Outflow ──────────────────────────
+    let _stableDir = "NEUTRAL";
+    if (pDef.strategy === "synapse_t") {
+      try {
+        const stable = await getStablecoinInflow();
+        _stableDir = stable?.direction ?? "NEUTRAL";
+        console.log(`  💰 [STABLE] ${stable?.totalB ?? '?'}B USD | ${_stableDir} ${stable?.changePct ?? '?'}% (7d)`);
+      } catch { console.log(`  ⚠️  [STABLE] Nije dostupno`); }
+    }
+
+    // ── 5. BTC Dominance / Altcoin Season ─────────────────────────────────────
+    let _altSeason = null;
+    if (pDef.strategy === "synapse_t") {
+      try {
+        _altSeason = await getAltcoinSeason();
+        if (_altSeason) console.log(`  🌊 [BTC.D] ${_altSeason.btcDom}% — ${_altSeason.season} (score: ${_altSeason.score})`);
+      } catch { console.log(`  ⚠️  [BTC.D] Nije dostupno`); }
+    }
+
+    // ── 4. Market Breadth pre-scan (EMA9/21 na 15m) ───────────────────────────
+    let _marketBreadth = { bullish: 0, bearish: 0, neutral: 0, total: 0 };
+    if (pDef.strategy === "synapse_t") {
+      _marketBreadth = await computeMarketBreadth(pDef.symbols);
+      console.log(`  📊 [BREADTH] ▲${_marketBreadth.bullish} ▼${_marketBreadth.bearish} —${_marketBreadth.neutral} / ${_marketBreadth.total} simbola`);
+    }
+
     let _newEntriesThisScan = 0;  // Reset po portfoliju, ne dopuštamo simultano previše ulaza
     for (const symbol of pDef.symbols) {
       const existingPos = openPositions.find(p => p.symbol === symbol);
@@ -3386,7 +3519,36 @@ export async function run() {
           }
         }
 
-        // ── Funding rate gate — blokira LONG ako tržište preokomjerno long ──
+        // ── 7. Korelacijski filter — max MAX_PER_SECTOR pozicija istog sektora ──
+        if (pDef.strategy === "synapse_t") {
+          const sector = SYMBOL_SECTORS[symbol];
+          if (sector && sector !== "BTC") {
+            const sectorOpen = openPositions.filter(p => SYMBOL_SECTORS[p.symbol] === sector).length;
+            if (sectorOpen >= MAX_PER_SECTOR) {
+              console.log(`  🔗 [SEKTOR] ${symbol} — sektor "${sector}" pun (${sectorOpen}/${MAX_PER_SECTOR}) → preskačem`);
+              continue;
+            }
+          }
+        }
+
+        // ── 1. Stablecoin OUTFLOW → LONG oprezniji (size ×0.7) ──────────────
+        // Outflow = kapital napušta crypto ecosystem → smanjujemo izloženost
+        let _stableSizeMult = 1.0;
+        if (pDef.strategy === "synapse_t" && signal === "LONG" && _stableDir === "OUTFLOW") {
+          _stableSizeMult = 0.7;
+          console.log(`  💰 [STABLE-OUT] ${symbol} — stablecoin OUTFLOW → size ×0.7`);
+        }
+
+        // ── 5. BTC Dominance — BTC_SEASON blokira altcoin LONG ───────────────
+        // BTC_SEASON (BTC.D > 58%) = BTC vodi tržište, altcoini slabe → ne idemo LONG altcoin
+        if (pDef.strategy === "synapse_t" && signal === "LONG" && symbol !== "BTCUSDT") {
+          if (_altSeason?.season === "BTC SEASON") {
+            console.log(`  🌊 [BTC.D] ${symbol} — BTC_SEASON (${_altSeason.btcDom}%) → altcoin LONG blokiran`);
+            continue;
+          }
+        }
+
+        // ── 2. Funding rate gate — blokira LONG ako tržište preokomjerno long ──
         if (pDef.strategy === "synapse_t") {
           const fr = await getFundingRate(symbol);
           const frHist = recordFundingTrend(symbol, fr);
@@ -3539,26 +3701,27 @@ export async function run() {
           console.log(`  📐 [Tier-SL] ${symbol} Tier${symSltp.tier??'?'}: SL ${slPct}% / TP ${tpPct}%`);
         }
 
-        // ── Dinamički TP — tržišni uvjeti (BTC Regime) ────────────────────────
-        // Jako tržište: BTC Regime BULL + signal LONG, ili BEAR + signal SHORT → TP × 3 (1:3 R:R)
-        // Konsolidacija / neutralno: BTC Regime NEUTRAL, ili regime ne podudara signal → TP × 1.5 (1:1.5 R:R)
+        // ── Dinamički TP — tržišni uvjeti (BTC Regime + Market Breadth) ────────
+        // JAKO: BTC Regime BULL+LONG ili BEAR+SHORT AND Breadth ≥ 5 → TP × 3 (1:3 R:R)
+        // NORMALNO: NEUTRAL ili Breadth prenizak → TP × 1.5 (1:1.5 R:R)
         // Pravilo: samo POVEĆAVAMO TP, nikad ne smanjujemo ako je S/R dal bolji target
-        const _isStrong = (_btcRegime === "BULL" && signal === "LONG") ||
-                          (_btcRegime === "BEAR" && signal === "SHORT");
+        const _breadthBull = _marketBreadth.bullish >= BREADTH_STRONG;
+        const _breadthBear = _marketBreadth.bearish >= BREADTH_STRONG;
+        const _isStrong = (_btcRegime === "BULL" && signal === "LONG"  && _breadthBull) ||
+                          (_btcRegime === "BEAR" && signal === "SHORT" && _breadthBear);
         const _tpMult     = _isStrong ? STRONG_TP_MULT : NORMAL_TP_MULT;
         const _dynTpPct   = slPct * _tpMult;
         const signalStrength = _isStrong ? "strong" : "normal";
 
         if (_dynTpPct > tpPct) {
-          // Dinamički target veći od S/R ili ATR targeta → koristimo dinamički
           tpPct = _dynTpPct;
           tp    = signal === "LONG" ? price * (1 + tpPct / 100) : price * (1 - tpPct / 100);
         }
 
         if (_isStrong) {
-          console.log(`  💪 [JAKO TRŽIŠTE] ${symbol} — BTC Regime: ${_btcRegime} + ${signal} → TP ×3 = ${tpPct.toFixed(2)}% | RR 1:${(tpPct/slPct).toFixed(1)}`);
+          console.log(`  💪 [JAKO TRŽIŠTE] ${symbol} — Regime:${_btcRegime} + Breadth▲${_marketBreadth.bullish} + ${signal} → TP ×3 = ${tpPct.toFixed(2)}% | RR 1:${(tpPct/slPct).toFixed(1)}`);
         } else {
-          console.log(`  📊 [KONSOLIDACIJA] ${symbol} — BTC Regime: ${_btcRegime} (${signal}) → TP ×1.5 = ${tpPct.toFixed(2)}% | RR 1:${(tpPct/slPct).toFixed(1)}`);
+          console.log(`  📊 [KONSOLIDACIJA] ${symbol} — Regime:${_btcRegime} Breadth▲${_marketBreadth.bullish}▼${_marketBreadth.bearish} → TP ×1.5 = ${tpPct.toFixed(2)}% | RR 1:${(tpPct/slPct).toFixed(1)}`);
         }
 
         // Risk-based position sizing: SL gubitak = točno RISK_PCT% trenutne equity
@@ -3566,7 +3729,7 @@ export async function run() {
         const equity     = getPortfolioEquity(pid, startCap);
 
         const riskAmount = equity * (RISK_PCT / 100);
-        const tradeSize  = (riskAmount / (slPct / 100)) * (atrTrend?.sizeMult ?? 1) * (_oiSizeMult ?? 1) * (_vwapSizeMult ?? 1);
+        const tradeSize  = (riskAmount / (slPct / 100)) * (atrTrend?.sizeMult ?? 1) * (_oiSizeMult ?? 1) * (_vwapSizeMult ?? 1) * (_stableSizeMult ?? 1);
         const margin     = tradeSize / LEVERAGE;  // preliminarno — ažurira se nakon setupSymbol
 
         if (!checkDailyLimit(pid)) {

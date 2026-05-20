@@ -1238,16 +1238,17 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       .map(([k,v]) => ({ name: k, wr: (v.wins/v.total*100).toFixed(0), total: v.total }))
       .sort((a,b) => b.wr - a.wr);
 
-    // Učitaj recent WR (zadnjih 10 trejdova) za dinamički ADX
+    // Učitaj recent WR (zadnjih 10 trejdova DANAS) za dinamički ADX
+    // VAŽNO: samo današnji trejdovi — usklađeno s bot.js getDynamicAdx()
     const csvPath = `${DATA_DIR}/trades_synapse_t.csv`;
     let dynAdxVal = 30, recentWr = null, recentN = 0;
     if (existsSync(csvPath)) {
       try {
+        const today = new Date().toISOString().slice(0, 10);  // YYYY-MM-DD
         const lines = readFileSync(csvPath,"utf8").trim().split("\n");
         const exits = lines.slice(1)
-          .filter(l => l.includes("CLOSE_LONG") || l.includes("CLOSE_SHORT"))
-          .slice(-10);
-        if (exits.length >= 5) {
+          .filter(l => l.startsWith(today) && (l.includes("CLOSE_LONG") || l.includes("CLOSE_SHORT")));
+        if (exits.length >= 3) {
           const wins = exits.filter(l => parseFloat(l.split(",")[9]||0) > 0).length;
           recentWr = Math.round(wins/exits.length*100);
           recentN  = exits.length;

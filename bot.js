@@ -1005,7 +1005,7 @@ export function getConsecutiveLossCount(pid) {
 // Čitamo nakon izlaza koji signal je bio aktivan i označavamo win/loss
 // Svaka 10. analiza ispisuje per-signal WR u konzolu
 
-const SIG_NAMES = ["E50⟳","RSI⟳","E55⟳","CHP","CVD⟳","R⟳","MCD","E145","VOL⟳","MCC⟳","RSI↗","SRS","SRB"];
+const SIG_NAMES = ["E50⟳","RSI⟳","CHP","CVD⟳","R⟳","MCD","E145","MCC⟳","RSI↗","SRS","SRB"];
 const getSigStatsFile = () => `${DATA_DIR}/signal_stats.json`;
 
 function loadSigStats() {
@@ -1530,7 +1530,7 @@ function analyzeUltra(candles, cfg) {
 
   const e9s  = emaSeries(9); const e21s = emaSeries(21);
   const ema9 = e9s[n-1]; const ema21 = e21s[n-1];
-  const ema50  = ema(50);  const ema55  = ema(55);
+  const ema50  = ema(50);
   const ema145 = ema(145); const ema200 = ema(200);
 
   // RSI series (last 6 bars za detekciju recovery)
@@ -1678,26 +1678,25 @@ function analyzeUltra(candles, cfg) {
     }
   }
 
-  // ── 13 signala: +1 = bullish, -1 = bearish, 0 = neutral ──
+  // ── 11 signala: +1 = bullish, -1 = bearish, 0 = neutral ──
   // OBAVEZNI GATING (ne broje se u signale): ADX≥dynamic, 6Sc≥4, RSI asimetričan | 5mSR blokira u run()
   // Maknuti: CRS (WR 14%), ADXsn (obavezan), 6Sc (obavezan)
-  // REVERSANI (WR<31.5% kada ▲ → logika invertirana):
-  //   E50, RSI zona, E55, CVD, VOL, MCC — contrarian/pullback interpretacija
+  // Maknuti 2025-05: E55⟳ (duplikat E50), VOL⟳ (asimetričan — nikad +1 za LONG)
+  // REVERSANI (logika invertirana za pullback):
+  //   E50, RSI zona, CVD, MCC — contrarian/pullback interpretacija
   const sigs = [
     price > ema50 ? -1 : 1,                          //  1. E50  REV: cijena>EMA50 = previsoko = -1, ispod = pullback = +1
     rsi < 45 ? -1 : rsi > 55 ? 1 : 0,               //  2. RSI  REV: RSI>55 = momentum = +1, RSI<45 = slabi = -1
-    price > ema55 ? -1 : 1,                          //  3. E55  REV: cijena>EMA55 = previsoko = -1, ispod = pullback = +1
-    chop < 61.8 ? 1 : -1,                            //  4. CHP: nije choppy = +1 (normalan)
-    cvdSum > 0 ? -1 : 1,                             //  5. CVD  REV: kupni vol = već uđeni = -1, prodajni = potenc. dno = +1
+    chop < 61.8 ? 1 : -1,                            //  3. CHP: nije choppy = +1 (normalan)
+    cvdSum > 0 ? -1 : 1,                             //  4. CVD  REV: kupni vol = već uđeni = -1, prodajni = potenc. dno = +1
     (rsiMin5 < 35 && rsi > 35 && rsiRising) ? 1
-      : (rsiMax5 > 65 && rsi < 65 && rsiFalling) ? -1 : 0, //  6. R⟳: RSI recovery (normalan)
-    macdHist !== null ? (macdHist > 0 ? 1 : -1) : 0, //  7. MCD: MACD histogram (normalan)
-    price > ema145 ? 1 : -1,                          //  8. E145: dugoročni trend (normalan)
-    volLast > volAvg20 ? -1 : 0,                      //  9. VOL  REV: visoki vol = kasni ulaz = -1, low vol = 0 (neutralan)
-    macdCrossUp ? -1 : macdCrossDn ? 1 : 0,           // 10. MCC  REV: cross gore = kasno = -1, cross dolje = dno = +1
-    rsiRising ? 1 : rsiFalling ? -1 : 0,              // 11. RSI↗: RSI smjer (normalan)
-    sig17sr,                                           // 12. SRS: S/R bounce (normalan)
-    sig18bk,                                           // 13. SRB: S/R breakout (normalan)
+      : (rsiMax5 > 65 && rsi < 65 && rsiFalling) ? -1 : 0, //  5. R⟳: RSI recovery (normalan)
+    macdHist !== null ? (macdHist > 0 ? 1 : -1) : 0, //  6. MCD: MACD histogram (normalan)
+    price > ema145 ? 1 : -1,                          //  7. E145: dugoročni trend (normalan)
+    macdCrossUp ? -1 : macdCrossDn ? 1 : 0,           //  8. MCC  REV: cross gore = kasno = -1, cross dolje = dno = +1
+    rsiRising ? 1 : rsiFalling ? -1 : 0,              //  9. RSI↗: RSI smjer (normalan)
+    sig17sr,                                           // 10. SRS: S/R bounce (normalan)
+    sig18bk,                                           // 11. SRB: S/R breakout (normalan)
   ];
 
   const bullCnt = sigs.filter(s => s === 1).length;
@@ -1732,12 +1731,12 @@ function analyzeUltra(candles, cfg) {
     const sigMask = sigs.reduce((mask, v, i) => v === 1 ? mask | (1 << i) : mask, 0);
     return { price, signal: "LONG",  bullScore: bullCnt, bearScore: bearCnt, sigMask,
       nearSup, nearRes,
-      reason: `ULTRA LONG ↑${bullCnt}/13 | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ 6Sc:${scaleUp}/6✓ RSI:${rsi.toFixed(0)}<72✓ [3ob+${MIN_CONFIRM}]` };
+      reason: `ULTRA LONG ↑${bullCnt}/11 | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ 6Sc:${scaleUp}/6✓ RSI:${rsi.toFixed(0)}<72✓ [3ob+${MIN_CONFIRM}]` };
   }
   if (!LONG_ONLY && bearCnt >= MIN_CONFIRM && scaleOkShort && rsiShortOk) {
     return { price, signal: "SHORT", bullScore: bullCnt, bearScore: bearCnt,
       nearSup, nearRes,
-      reason: `ULTRA SHORT ↓${bearCnt}/13 | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ 6Sc:${scaleDn}/6✓ RSI:${rsi.toFixed(0)}>30✓ [3ob+${MIN_CONFIRM}]` };
+      reason: `ULTRA SHORT ↓${bearCnt}/11 | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ 6Sc:${scaleDn}/6✓ RSI:${rsi.toFixed(0)}>30✓ [3ob+${MIN_CONFIRM}]` };
   }
   if (LONG_ONLY && bearCnt >= MIN_CONFIRM && scaleOkShort && rsiShortOk) {
     return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
@@ -1748,22 +1747,20 @@ function analyzeUltra(candles, cfg) {
   // Ako pullback signal nije dostigao prag, provjeri momentum/breakout logiku:
   // Isti 13 signala ali 6 reversanih vraćamo u originalnu (trend-following) logiku.
   // Viši prag (MOM_MIN) jer su momentum ulazi rizičniji od pullback ulaza.
-  const MOM_MIN = 9;  // sniženo s 10 — breakouti rijetko dosežu 10/13
+  const MOM_MIN = 8;  // 8/11 = 72.7% (≈ jednako kao 9/13 = 69%)
   const momSigs = [
     price > ema50  ?  1 : -1,                          //  1. E50  MOM: >EMA50 = trend gore = +1
     rsi > 55 ? 1 : rsi < 45 ? -1 : 0,                 //  2. RSI  MOM: >55 = momentum = +1
-    price > ema55  ?  1 : -1,                          //  3. E55  MOM: >EMA55 = trend gore = +1
-    chop < 61.8 ? 1 : -1,                              //  4. CHP: isti
-    cvdSum > 0 ?  1 : -1,                              //  5. CVD  MOM: kupni vol = potvrda pumpa = +1
+    chop < 61.8 ? 1 : -1,                              //  3. CHP: isti
+    cvdSum > 0 ?  1 : -1,                              //  4. CVD  MOM: kupni vol = potvrda pumpa = +1
     (rsiMin5 < 35 && rsi > 35 && rsiRising) ? 1
-      : (rsiMax5 > 65 && rsi < 65 && rsiFalling) ? -1 : 0, //  6. R⟳: isti
-    macdHist !== null ? (macdHist > 0 ? 1 : -1) : 0,  //  7. MCD: isti
-    price > ema145 ?  1 : -1,                          //  8. E145: isti
-    volLast > volAvg20 ?  1 : 0,                       //  9. VOL  MOM: visoki vol = breakout potvrda = +1
-    macdCrossUp ?  1 : macdCrossDn ? -1 : 0,           // 10. MCC  MOM: cross gore = momentum = +1
-    rsiRising ? 1 : rsiFalling ? -1 : 0,               // 11. RSI↗: isti
-    sig17sr,                                            // 12. SRS: isti
-    sig18bk,                                            // 13. SRB: isti
+      : (rsiMax5 > 65 && rsi < 65 && rsiFalling) ? -1 : 0, //  5. R⟳: isti
+    macdHist !== null ? (macdHist > 0 ? 1 : -1) : 0,  //  6. MCD: isti
+    price > ema145 ?  1 : -1,                          //  7. E145: isti
+    macdCrossUp ?  1 : macdCrossDn ? -1 : 0,           //  8. MCC  MOM: cross gore = momentum = +1
+    rsiRising ? 1 : rsiFalling ? -1 : 0,               //  9. RSI↗: isti
+    sig17sr,                                            // 10. SRS: isti
+    sig18bk,                                            // 11. SRB: isti
   ];
   const momBull = momSigs.filter(s => s === 1).length;
   const momBear = momSigs.filter(s => s === -1).length;
@@ -1774,12 +1771,12 @@ function analyzeUltra(candles, cfg) {
   if (momBull >= MOM_MIN && rsiLongOk && adx >= MOM_ADX_MIN) {
     return { price, signal: "LONG", bullScore: momBull, bearScore: momBear,
       nearSup, nearRes, isMomentum: true,
-      reason: `MOMENTUM LONG ↑${momBull}/13 | ADX:${adx.toFixed(0)}≥${MOM_ADX_MIN}✓ RSI:${rsi.toFixed(0)}<72✓ [bez 6SC]` };
+      reason: `MOMENTUM LONG ↑${momBull}/11 | ADX:${adx.toFixed(0)}≥${MOM_ADX_MIN}✓ RSI:${rsi.toFixed(0)}<72✓ [bez 6SC]` };
   }
   if (!LONG_ONLY && momBear >= MOM_MIN && rsiShortOk && adx >= MOM_ADX_MIN) {
     return { price, signal: "SHORT", bullScore: momBull, bearScore: momBear,
       nearSup, nearRes, isMomentum: true,
-      reason: `MOMENTUM SHORT ↓${momBear}/13 | ADX:${adx.toFixed(0)}≥${MOM_ADX_MIN}✓ RSI:${rsi.toFixed(0)}>30✓ [bez 6SC]` };
+      reason: `MOMENTUM SHORT ↓${momBear}/11 | ADX:${adx.toFixed(0)}≥${MOM_ADX_MIN}✓ RSI:${rsi.toFixed(0)}>30✓ [bez 6SC]` };
   }
 
   // Dijagnoza zašto nema signala

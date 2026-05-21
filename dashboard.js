@@ -4025,6 +4025,24 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Signal stats — GET /api/signal-stats
+  if (url.pathname === "/api/signal-stats") {
+    const f = `${DATA_DIR}/signal_stats.json`;
+    if (!existsSync(f)) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "signal_stats.json not found", DATA_DIR }));
+      return;
+    }
+    try {
+      const raw = JSON.parse(readFileSync(f, "utf8"));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(raw));
+    } catch(e) {
+      res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
+    }
+    return;
+  }
+
   // Dashboard HTML
   const allStats     = PORTFOLIO_DEFS.map(d => buildPortfolioStats(d.id));
   const allPositions = PORTFOLIO_DEFS.map(d => loadPositions(d.id));

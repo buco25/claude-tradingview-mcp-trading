@@ -4575,8 +4575,26 @@ function squeezeRecommendation(sq, borrow, si) {
   return { action, shares, options, risk, compare };
 }
 
+// ─── Squeeze Alert State — persistan na disku (preživi Railway restart) ─────────
+const SQUEEZE_ALERT_FILE = `${DATA_DIR}/squeeze_alert_state.json`;
+
+function loadSqueezeAlertState() {
+  try {
+    if (existsSync(SQUEEZE_ALERT_FILE)) return JSON.parse(readFileSync(SQUEEZE_ALERT_FILE, "utf8"));
+  } catch {}
+  return {};
+}
+
+function saveSqueezeAlertState(state) {
+  try { writeFileSync(SQUEEZE_ALERT_FILE, JSON.stringify(state, null, 2)); } catch {}
+}
+
+// Učitaj stanje s diska pri pokretanju
+let _sqAlertStatePersist = loadSqueezeAlertState();
+
 // ─── AMC Squeeze Monitor — svakih 30 min (koristi fetchAmcData()) ─────────────
-const _amcAlertState = { lastScore: 0, lastAlertTs: 0, lastLevel: "" };
+// AMC koristi isti persist (pod ključem "AMC")
+
 
 async function amcSqueezeMonitor() {
   try {
@@ -4588,10 +4606,11 @@ async function amcSqueezeMonitor() {
     const score  = d.squeeze.score;
     const level  = score >= 75 ? "explosive" : score >= 55 ? "high" : score >= 35 ? "moderate" : "low";
     const now    = Date.now();
-    const cooldownMs = (level === "explosive" ? 3 : 6) * 3600 * 1000;
-    const levelRaised = (level === "explosive" && _amcAlertState.lastLevel !== "explosive")
-                     || (level === "high"      && ["moderate","low",""].includes(_amcAlertState.lastLevel));
-    const cooldownExpired = (now - _amcAlertState.lastAlertTs) >= cooldownMs;
+    const amcState = _sqAlertStatePersist["AMC"] || { lastLevel: "", lastAlertTs: 0 };
+    const cooldownMs = 24 * 3600 * 1000;  // 1x dnevno — preživi restart
+    const levelRaised = (level === "explosive" && amcState.lastLevel !== "explosive")
+                     || (level === "high"      && ["moderate","low",""].includes(amcState.lastLevel));
+    const cooldownExpired = (now - amcState.lastAlertTs) >= cooldownMs;
 
     if (score >= 55 && (levelRaised || cooldownExpired)) {
       const borrow = d.borrowFee;
@@ -4626,9 +4645,8 @@ async function amcSqueezeMonitor() {
         + "📡 Izvor: ChartExchange + Finviz";
 
       await tgDash(msg);
-      _amcAlertState.lastScore   = score;
-      _amcAlertState.lastAlertTs = now;
-      _amcAlertState.lastLevel   = level;
+      _sqAlertStatePersist["AMC"] = { lastLevel: level, lastAlertTs: now };
+      saveSqueezeAlertState(_sqAlertStatePersist);
       console.log("🧨 AMC Squeeze alert poslan — score " + score + ", level " + level);
     } else {
       console.log("📊 AMC Squeeze check: score=" + score + " level=" + level + " (bez alerta)");
@@ -4639,7 +4657,7 @@ async function amcSqueezeMonitor() {
 }
 
 // ─── Squeeze Stocks Monitor — šalje Telegram alert kad dođe setup ─────────────
-const _sqAlertState = {}; // keyed by ticker → { lastLevel, lastAlertTs }
+// State se čuva u _sqAlertStatePersist (disk) — ne gubi se na restartu
 
 function _sqParseVol(s) {
   if (!s) return 0;
@@ -4662,8 +4680,8 @@ async function squeezeStocksMonitor() {
       const score   = sq.score ?? 0;
       const level   = score >= 75 ? "explosive" : score >= 60 ? "high" : score >= 45 ? "moderate" : "low";
       const now     = Date.now();
-      const state   = _sqAlertState[cfg.ticker] || { lastLevel: "", lastAlertTs: 0 };
-      const cooldownMs = (level === "explosive" ? 4 : 8) * 3600 * 1000;
+      const state   = _sqAlertStatePersist[cfg.ticker] || { lastLevel: "", lastAlertTs: 0 };
+      const cooldownMs = 24 * 3600 * 1000;  // max 1 alert dnevno po dionici — preživi restart
       const levelRaised = (level === "explosive" && state.lastLevel !== "explosive")
                        || (level === "high"      && ["moderate","low",""].includes(state.lastLevel));
       const cooldownExpired = (now - state.lastAlertTs) >= cooldownMs;
@@ -4711,7 +4729,8 @@ async function squeezeStocksMonitor() {
         + `⏰ ${new Date().toLocaleString("hr-HR", { timeZone: "Europe/Zagreb" })}`;
 
       await tgDash(msg);
-      _sqAlertState[cfg.ticker] = { lastLevel: level, lastAlertTs: now };
+      _sqAlertStatePersist[cfg.ticker] = { lastLevel: level, lastAlertTs: now };
+      saveSqueezeAlertState(_sqAlertStatePersist);
       console.log(`🧨 ${cfg.ticker} squeeze alert poslan — score ${score}, relVol ${relVol.toFixed(2)}x`);
 
     } catch (e) {

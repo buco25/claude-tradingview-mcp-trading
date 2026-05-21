@@ -2203,6 +2203,14 @@ async function checkPortfolioPositions(pid) {
             // 2. Blacklist — 3 uzastopna SL → 24h ban
             await recordSymbolSl(pid, pos.symbol);
             await checkAndRemoveSymbol(pid, pos.symbol);
+          } else {
+            // WIN exit — dodaj u re-entry queue (45 min prozor za ponovni ulaz u trend)
+            const prev = _winReEntry.get(pos.symbol);
+            const cnt  = (prev?.count || 0) + 1;
+            if (cnt <= REENTRY_MAX) {
+              _winReEntry.set(pos.symbol, { side: pos.side, pid, ts: Date.now(), count: cnt });
+              console.log(`  🔁 [RE-ENTRY] ${pos.symbol} WIN — re-entry enabled (${cnt}/${REENTRY_MAX}, 45min prozor)`);
+            }
           }
           // Svaki 5. trade ispiši signal statistiku
           { const st = loadSigStats(); const tot = Object.values(st).reduce((s,v)=>s+v.total,0); if(tot>0&&tot%5===0) printSigStats(); }
@@ -2217,7 +2225,8 @@ async function checkPortfolioPositions(pid) {
           : (pos.entryPrice - liveP) * qty;
 
         // ── PARTIAL-TP: zatvori 50% pozicije kad je PARTIAL_TP_TRIGGER% TP puta ──
-        if (!pos.partialClosed && isLivePortfolio) {
+        // PRESKAČEMO ako je trail već aktivan — ne zatvaramo rano, puštamo trend
+        if (!pos.partialClosed && !pos.trailActive && isLivePortfolio) {
           const _tpPctP  = pos.tpPct ?? 4.0;
           const _pricePctP = pos.side === "LONG"
             ? (liveP - pos.entryPrice) / pos.entryPrice * 100
@@ -2267,6 +2276,17 @@ async function checkPortfolioPositions(pid) {
             : (pos.entryPrice - liveP) / pos.entryPrice * 100;
 
           if (pricePct >= TRAIL_ACTIVATE_PCT) {
+            // ── Prva aktivacija traila: otkaži TP nalog, pusti trend da teče ──
+            if (!pos.trailActive) {
+              pos.trailActive = true;
+              const allPos0 = loadPositions(pid);
+              const idx0 = allPos0.findIndex(p => p.symbol === pos.symbol && p.side === pos.side);
+              if (idx0 >= 0) { allPos0[idx0].trailActive = true; savePositions(pid, allPos0); }
+              const tpCancelled = await cancelTpOrder(pos);
+              console.log(`  📈 [TRAIL] ${pos.symbol} ${pos.side} — trail AKTIVAN +${pricePct.toFixed(1)}%${tpCancelled ? " | TP otkazan" : ""}`);
+              await tg(`📈 [TRAIL ON] ${pos.symbol} ${pos.side}\n+${pricePct.toFixed(1)}% — TP otkazan, trailing SL preuzima\nCijena: ${fmtPrice(liveP)} | SL prati ${TRAIL_SL_PCT}% ispod vrha`);
+            }
+
             const peak = pos.side === "LONG"
               ? Math.max(pos.trailPeak || 0, liveP)
               : Math.min(pos.trailPeak || Infinity, liveP);
@@ -3015,6 +3035,43 @@ async function updateTrailSL(pos, newSlPrice) {
   }
 }
 
+// ─── Cancel TP nalog na BitGetu (koristi se kad trail preuzima izlaz) ─────────
+async function cancelTpOrder(pos) {
+  if (PAPER_TRADING) return false;
+  const { symbol, side } = pos;
+  const holdSide = side === "LONG" ? "long" : "short";
+  try {
+    const ts   = Date.now().toString();
+    const path = `/api/v2/mix/order/orders-plan-pending?symbol=${symbol}&productType=USDT-FUTURES&planType=pos_profit`;
+    const sign = signBitGet(ts, "GET", path);
+    const r    = await fetch(`${BITGET.baseUrl}${path}`, {
+      headers: { "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": sign,
+        "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET.passphrase, "Content-Type": "application/json" },
+    });
+    const d = await r.json();
+    const orders = (d.data?.entrustedList || []).filter(o => o.holdSide === holdSide);
+    if (orders.length > 0) {
+      await bitgetPost("/api/v2/mix/order/cancel-plan-order", {
+        symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
+        orderId: orders[0].orderId,
+      });
+      console.log(`  🚫 [TRAIL] TP nalog otkazan za ${symbol} — trail SL sada jedini izlaz`);
+      return true;
+    }
+    return false;  // nema aktivnog TP naloga
+  } catch (e) {
+    console.log(`  ⚠️  [TRAIL] cancelTpOrder failed ${symbol}: ${e.message}`);
+    return false;
+  }
+}
+
+// ─── Re-entry tracking — prati WIN izlaze za brzo ponovni ulaz u trend ─────────
+// Kad pozicija zatvori s profitom (WIN), čuvamo simbol/smjer do 45 min.
+// Sljedeći scan() ciklus može re-ući u ISTI smjer s labavijim uvjetima.
+const _winReEntry = new Map();  // symbol → { side, pid, ts, count }
+const REENTRY_WINDOW_MS  = 45 * 60 * 1000;  // 45 min prozor za re-entry
+const REENTRY_MAX         = 2;               // max ponavljanja po trendu
+
 // ─── Daily trade counter ────────────────────────────────────────────────────────
 
 const _todayTrades = {};
@@ -3395,9 +3452,14 @@ export async function run() {
       }
 
       // Provjeri limit otvorenih pozicija
+      // RE-ENTRY iznimka: ako simbol ima WIN re-entry queue u 45min → +1 bonus slot
       const currentOpen = loadPositions(pid).length;
-      if (currentOpen >= MAX_OPEN_PER_PORTFOLIO && symbol !== BTC_EXCEPTION) {
-        console.log(`  🔒 [${pDef.name}] Max ${MAX_OPEN_PER_PORTFOLIO} dostignut — preskačem ${symbol}`);
+      const _reEntry = _winReEntry.get(symbol);
+      const _reEntryActive = _reEntry && (Date.now() - _reEntry.ts) < REENTRY_WINDOW_MS;
+      if (!_reEntryActive && _reEntry) _winReEntry.delete(symbol);  // istekao prozor
+      const _maxOpen = _reEntryActive ? MAX_OPEN_PER_PORTFOLIO + 1 : MAX_OPEN_PER_PORTFOLIO;
+      if (currentOpen >= _maxOpen && symbol !== BTC_EXCEPTION) {
+        console.log(`  🔒 [${pDef.name}] Max ${MAX_OPEN_PER_PORTFOLIO}${_reEntryActive?" (re-entry +1)":""} dostignut — preskačem ${symbol}`);
         continue;
       }
 
@@ -3466,6 +3528,12 @@ export async function run() {
         if (signal === "NEUTRAL") {
           console.log(`  🚫 [${pDef.name}] ${symbol} — ${reason}`);
           continue;
+        }
+
+        // RE-ENTRY marker — loguj i očisti queue ako smjer odgovara
+        if (_reEntryActive && _reEntry.side === signal) {
+          console.log(`  🔁 [RE-ENTRY] ${symbol} ${signal} — isti smjer kao WIN exit, nastavljam trend`);
+          _winReEntry.delete(symbol);  // iskorišten
         }
 
         // ── Regime + SP500 + 1H trend filter — po smjeru signala ─────────────

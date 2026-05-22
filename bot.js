@@ -66,6 +66,13 @@ const TRAIL_ACTIVATE_PCT = 0.50; // faktor TP-a za aktivaciju traila (50% puta d
                                   // npr. TP 8.25% → trail se aktivira na 4.1%, TP 16.5% → 8.25%
 const TRAIL_SL_PCT       = 1.5;  // trail SL X% ispod/iznad peak-a (bio 0.8 — pretijesan)
 
+// ─── Ghost Stop — zaštita od stop huntinga ────────────────────────────────────
+// pos.sl = pravi SL (što bot prati, što čuvamo u JSON-u)
+// BitGet ghost SL = pravi SL ± GHOST_BUFFER% (vidljivo za algoritme, teže za hunt)
+// Ako bot radi: zatvara na pravom SL (market order) — izlaz blizu pravog SL-a
+// Ako bot padne: BitGet ghost SL je safety net (0.5% dalje — malo lošija egzekucija)
+const GHOST_STOP_BUFFER = 0.005; // 0.5% buffer između pravog SL i ghost SL na burzi
+
 // ─── Ekonomski kalendar ───────────────────────────────────────────────────────
 const ECON_BLOCK_MIN = 15;  // blokiraj ±15min oko HIGH impact USD eventa
 
@@ -2277,6 +2284,38 @@ async function checkPortfolioPositions(pid) {
           ? (liveP - pos.entryPrice) * qty
           : (pos.entryPrice - liveP) * qty;
 
+        // ── SOFT SL: bot zatvara na pravom SL (ghost stop bypass) ──────────────
+        // pos.sl = pravi SL koji bot prati — BitGet ghost SL je 0.5% dalje (decoy)
+        // Samo dok trail NIJE aktivan (trail sam pomiče SL pa nema potrebe za soft check)
+        if (isLivePortfolio && pos.sl && !pos.trailActive && !pos.partialClosed) {
+          const softSlHit = pos.side === "LONG" ? liveP <= pos.sl : liveP >= pos.sl;
+          if (softSlHit) {
+            console.log(`  🛑 [SOFT SL] ${pos.symbol} ${pos.side} — cijena ${fmtPrice(liveP)} ≤ SL ${fmtPrice(pos.sl)} → tržišni izlaz (ghost bypass)`);
+            try {
+              const hSide = pos.side === "LONG" ? "long" : "short";
+              await bitgetPost("/api/v2/mix/order/place-order", {
+                symbol: pos.symbol, productType: "USDT-FUTURES", marginMode: "isolated", marginCoin: "USDT",
+                side: hSide === "long" ? "sell" : "buy", tradeSide: "close",
+                orderType: "market", size: String(qty.toFixed(4)),
+              });
+              const pnl = pos.side === "LONG"
+                ? (liveP - pos.entryPrice) * qty
+                : (pos.entryPrice - liveP) * qty;
+              writeExitCsv(pid, pos, liveP, "Soft SL — bot izlaz", pnl);
+              await tg(`🛑 [SOFT SL] ${pos.symbol} ${pos.side}\nBot zatvorio na pravom SL ${fmtPrice(pos.sl)}\nEgzekucija: ${fmtPrice(liveP)} | P&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}\n(Ghost SL na BitGet ${pos.side === "LONG" ? "-" : "+"}0.5% nije bio vidljiv algoritmima)`);
+              symbolSlCooldown.set(pos.symbol, Date.now());
+              saveSlCooldown();
+              await recordSymbolSl(pid, pos.symbol);
+              await checkAndRemoveSymbol(pid, pos.symbol);
+              if (pos.sigMask != null) recordSignalOutcome(pos.sigMask, false);
+              recordSymbolOutcome(pos.symbol, false);
+              continue;
+            } catch (e) {
+              console.log(`  ⚠️  [SOFT SL] Greška zatvaranja ${pos.symbol}: ${e.message} — ostavljamo, ghost SL na BitGet aktivan`);
+            }
+          }
+        }
+
         // ── PARTIAL-TP: zatvori 50% pozicije kad je PARTIAL_TP_TRIGGER% TP puta ──
         // PRESKAČEMO ako je trail već aktivan — ne zatvaramo rano, puštamo trend
         if (!pos.partialClosed && !pos.trailActive && isLivePortfolio) {
@@ -2891,18 +2930,23 @@ async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp, slPct, tpP
     ? fillPrice * (1 + _tpPct / 100)
     : fillPrice * (1 - _tpPct / 100);
 
-  // 1) Hard SL — fiksni stop loss od fill cijene — KRITIČNO: ako fail → zatvori poziciju!
+  // 1) Hard SL — ghost stop na BitGetu (0.5% dalje od pravog SL → teže za stop hunt)
+  // Pravi SL se čuva u pos.sl i prati ga bot svake minute (softSL u checkPortfolioPositions)
+  // BitGet ghost SL = emergency safety net ako bot padne (malo lošija egzekucija za 0.5%)
+  const ghostSlFromFill = side === "LONG"
+    ? slFromFill * (1 - GHOST_STOP_BUFFER)  // LONG: ghost je 0.5% NIŽE od pravog SL
+    : slFromFill * (1 + GHOST_STOP_BUFFER); // SHORT: ghost je 0.5% VIŠE od pravog SL
   let slOk = false;
   try {
     const slRes = await bitgetPost("/api/v2/mix/order/place-tpsl-order", {
       symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
       planType: "pos_loss",
-      triggerPrice: fmtPrice(slFromFill, symbol),
+      triggerPrice: fmtPrice(ghostSlFromFill, symbol),
       triggerType: "mark_price", holdSide,
     });
     if (slRes.code === "00000") {
       slOk = true;
-      console.log(`  🛡️  Hard SL @ ${fmtPrice(slFromFill, symbol)} OK`);
+      console.log(`  🛡️  Ghost SL @ ${fmtPrice(ghostSlFromFill, symbol)} (pravi SL: ${fmtPrice(slFromFill, symbol)}) OK`);
     } else {
       console.log(`  🚨 Hard SL FAIL: code=${slRes.code} ${slRes.msg} — zatvaramo poziciju radi sigurnosti!`);
     }
@@ -3063,7 +3107,11 @@ async function updateTrailSL(pos, newSlPrice) {
   if (PAPER_TRADING) return false;
   const { symbol, side } = pos;
   const holdSide = side === "LONG" ? "long" : "short";
-  const slStr = fmtPrice(newSlPrice, symbol);
+  // Ghost buffer: trail SL na BitGetu je 0.5% dalje (bot prati pravi SL u pos.sl)
+  const ghostTrailSl = side === "LONG"
+    ? newSlPrice * (1 - GHOST_STOP_BUFFER)
+    : newSlPrice * (1 + GHOST_STOP_BUFFER);
+  const slStr = fmtPrice(ghostTrailSl, symbol);
   try {
     const ts   = Date.now().toString();
     const path = `/api/v2/mix/order/orders-plan-pending?symbol=${symbol}&productType=USDT-FUTURES&planType=pos_loss`;

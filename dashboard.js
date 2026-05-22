@@ -796,10 +796,11 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     if (positions.length === 0)
       return `<div class="section-label" style="color:${def.color}">🎯 ULTRA — nema otvorenih pozicija</div>`;
 
-    const posHtml = positions.map(p => {
+    const posHtml = positions.map((p, idx) => {
       const isLong = p.side === "LONG";
+      const posUid = `${def.id}-${p.symbol}-${idx}`;  // jedinstven ID čak i za pyramid
       return `
-        <div class="pos-card ${isLong ? "pos-long" : "pos-short"}" id="pos-${def.id}-${p.symbol}">
+        <div class="pos-card ${isLong ? "pos-long" : "pos-short"}" id="pos-${posUid}">
           <div class="pos-header">
             <span class="symbol">${p.symbol}</span>
             <span class="badge ${isLong ? "badge-long" : "badge-short"}">${p.side}</span>
@@ -807,7 +808,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
               ? '<span style="background:rgba(251,146,60,0.15);border:1px solid #f97316;border-radius:20px;padding:2px 8px;font-size:10px;color:#f97316;font-weight:700">⚡ MOM</span>'
               : '<span style="background:rgba(96,165,250,0.15);border:1px solid #60a5fa;border-radius:20px;padding:2px 8px;font-size:10px;color:#60a5fa;font-weight:700">↩ PBK</span>'}
             <span class="badge badge-paper">${p.mode}</span>
-            <span id="lp-${def.id}-${p.symbol}" style="margin-left:auto;font-size:13px;font-weight:700;color:var(--text-muted)">—</span>
+            <span id="lp-${posUid}" style="margin-left:auto;font-size:13px;font-weight:700;color:var(--text-muted)">—</span>
           </div>
           <div class="pos-grid">
             <div><label>Entry</label><span>${fmtP(p.entryPrice)}</span></div>
@@ -819,9 +820,9 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <div><label>Otvoreno</label><span>${fmtLocalTs(p.openedAt)}</span></div>
           </div>
           <div class="pos-pnl-row">
-            <div id="pnl-${def.id}-${p.symbol}" style="font-size:14px;font-weight:700;color:#9ca3af">—</div>
+            <div id="pnl-${posUid}" style="font-size:14px;font-weight:700;color:#9ca3af">—</div>
             <div style="flex:1;min-width:0">
-              <div class="range-bar"><div id="bar-${def.id}-${p.symbol}" class="range-fill"></div></div>
+              <div class="range-bar"><div id="bar-${posUid}" class="range-fill"></div></div>
               <div class="range-labels">
                 <small>SL ${fmtP(p.sl)}${p.slPct ? ' ('+parseFloat(p.slPct).toFixed(2)+'%)' : ''}</small>
                 <small>TP ${fmtP(p.tp)}${p.tpPct ? ' ('+parseFloat(p.tpPct).toFixed(2)+'%)' : ''}</small>
@@ -837,21 +838,21 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
           </div>
           <script>
           (function(){
-            const sym="${p.symbol}", side="${p.side}", pid="${def.id}";
+            const uid="${posUid}", sym="${p.symbol}", side="${p.side}";
             const entry=${p.entryPrice}, qty=${p.quantity}, notional=${p.totalUSD};
             const sl=${p.sl}, tp=${p.tp};
             function fmtLive(v){if(v>=1000)return "$"+v.toFixed(2);if(v>=1)return "$"+v.toFixed(4);if(v>=0.001)return "$"+v.toFixed(6);return "$"+v.toFixed(10);}
             function update(price){
-              document.getElementById("lp-"+pid+"-"+sym).textContent=fmtLive(price);
+              document.getElementById("lp-"+uid).textContent=fmtLive(price);
               const pnl=side==="LONG"?(price-entry)*qty:(entry-price)*qty;
               const pct=(pnl/notional*100).toFixed(2);
-              const el=document.getElementById("pnl-"+pid+"-"+sym);
+              const el=document.getElementById("pnl-"+uid);
               el.textContent=(pnl>=0?"+":"")+"$"+pnl.toFixed(4)+" ("+pct+"%)";
               el.style.color=pnl>=0?"#059669":"#dc2626";
               const range=Math.abs(tp-sl);
               const pos2=side==="LONG"?(price-sl)/range:(sl-price)/range;
               const pct2=Math.max(0,Math.min(100,pos2*100));
-              const bar=document.getElementById("bar-"+pid+"-"+sym);
+              const bar=document.getElementById("bar-"+uid);
               bar.style.width=pct2+"%";bar.style.background=pnl>=0?"#059669":"#dc2626";
             }
             async function poll(){try{const r=await fetch("/api/live?sym="+sym);const d=await r.json();if(d.price)update(d.price);}catch{}}

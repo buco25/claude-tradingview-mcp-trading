@@ -1720,8 +1720,11 @@ function analyzeUltra(candles, cfg) {
   }
 
   // 3. RSI filter — asimetričan po smjeru
-  const rsiLongOk  = rsi < 72;   // LONG: blokiran samo ako je ekstremno overbought
-  const rsiShortOk = rsi > 30;   // SHORT: blokiran samo ako je ekstremno oversold
+  // Jako trending tržište (ADX>50 + 6Sc=6/6): RSI može ostati overbought dugo → opuštamo prag
+  const _strongTrend = adx > 50 && scaleUp === 6;  // LONG jak trend
+  const _strongTrendS = adx > 50 && scaleDn === 6; // SHORT jak trend
+  const rsiLongOk  = rsi < (_strongTrend  ? 85 : 72);  // Normalno <72, jak trend <85
+  const rsiShortOk = rsi > (_strongTrendS ? 15 : 30);  // Normalno >30, jak trend >15
 
   // ── Min 5/13 potvrđujućih signala ──────────────────────────────────────────
   const MIN_CONFIRM = minSig;  // čita iz rules.json (trenutno 5)
@@ -1731,12 +1734,12 @@ function analyzeUltra(candles, cfg) {
     const sigMask = sigs.reduce((mask, v, i) => v === 1 ? mask | (1 << i) : mask, 0);
     return { price, signal: "LONG",  bullScore: bullCnt, bearScore: bearCnt, sigMask,
       nearSup, nearRes,
-      reason: `ULTRA LONG ↑${bullCnt}/11 | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ 6Sc:${scaleUp}/6✓ RSI:${rsi.toFixed(0)}<72✓ [3ob+${MIN_CONFIRM}]` };
+      reason: `ULTRA LONG ↑${bullCnt}/11 | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ 6Sc:${scaleUp}/6✓ RSI:${rsi.toFixed(0)}<${_strongTrend?85:72}✓${_strongTrend?" [STRONG]":""} [3ob+${MIN_CONFIRM}]` };
   }
   if (!LONG_ONLY && bearCnt >= MIN_CONFIRM && scaleOkShort && rsiShortOk) {
     return { price, signal: "SHORT", bullScore: bullCnt, bearScore: bearCnt,
       nearSup, nearRes,
-      reason: `ULTRA SHORT ↓${bearCnt}/11 | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ 6Sc:${scaleDn}/6✓ RSI:${rsi.toFixed(0)}>30✓ [3ob+${MIN_CONFIRM}]` };
+      reason: `ULTRA SHORT ↓${bearCnt}/11 | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ 6Sc:${scaleDn}/6✓ RSI:${rsi.toFixed(0)}>${_strongTrendS?15:30}✓${_strongTrendS?" [STRONG]":""} [3ob+${MIN_CONFIRM}]` };
   }
   if (LONG_ONLY && bearCnt >= MIN_CONFIRM && scaleOkShort && rsiShortOk) {
     return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
@@ -1771,22 +1774,24 @@ function analyzeUltra(candles, cfg) {
   if (momBull >= MOM_MIN && rsiLongOk && adx >= MOM_ADX_MIN) {
     return { price, signal: "LONG", bullScore: momBull, bearScore: momBear,
       nearSup, nearRes, isMomentum: true,
-      reason: `MOMENTUM LONG ↑${momBull}/11 | ADX:${adx.toFixed(0)}≥${MOM_ADX_MIN}✓ RSI:${rsi.toFixed(0)}<72✓ [bez 6SC]` };
+      reason: `MOMENTUM LONG ↑${momBull}/11 | ADX:${adx.toFixed(0)}≥${MOM_ADX_MIN}✓ RSI:${rsi.toFixed(0)}<${_strongTrend?85:72}✓${_strongTrend?" [STRONG]":""} [bez 6SC]` };
   }
   if (!LONG_ONLY && momBear >= MOM_MIN && rsiShortOk && adx >= MOM_ADX_MIN) {
     return { price, signal: "SHORT", bullScore: momBull, bearScore: momBear,
       nearSup, nearRes, isMomentum: true,
-      reason: `MOMENTUM SHORT ↓${momBear}/11 | ADX:${adx.toFixed(0)}≥${MOM_ADX_MIN}✓ RSI:${rsi.toFixed(0)}>30✓ [bez 6SC]` };
+      reason: `MOMENTUM SHORT ↓${momBear}/11 | ADX:${adx.toFixed(0)}≥${MOM_ADX_MIN}✓ RSI:${rsi.toFixed(0)}>${_strongTrendS?15:30}✓${_strongTrendS?" [STRONG]":""} [bez 6SC]` };
   }
 
   // Dijagnoza zašto nema signala
   const dirStr = scaleOkLong ? `LONG(${scaleUp}/6)` : scaleOkShort ? `SHORT(${scaleDn}/6)` : `6Sc✗`;
+  const _rsiLongPrag  = _strongTrend  ? 85 : 72;
+  const _rsiShortPrag = _strongTrendS ? 15 : 30;
   const whyNot = bullCnt >= bearCnt
-    ? `↑${bullCnt}/13 ${dirStr}${!rsiLongOk ? ` RSI${rsi.toFixed(0)}≥72✗` : ""} | MOM:${momBull}/13`
-    : `↓${bearCnt}/13 ${dirStr}${!rsiShortOk ? ` RSI${rsi.toFixed(0)}≤30✗` : ""} | MOM:${momBear}/13`;
+    ? `↑${bullCnt}/11 ${dirStr}${!rsiLongOk  ? ` RSI${rsi.toFixed(0)}≥${_rsiLongPrag}✗`  : ""} | MOM:${momBull}/11`
+    : `↓${bearCnt}/11 ${dirStr}${!rsiShortOk ? ` RSI${rsi.toFixed(0)}≤${_rsiShortPrag}✗` : ""} | MOM:${momBear}/11`;
   return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
     momBull, momBear,
-    reason: `ULTRA: ${whyNot} (treba 4ob+${MIN_CONFIRM}/13 pullback ili ${MOM_MIN}/13 momentum)` };
+    reason: `ULTRA: ${whyNot} (treba 4ob+${MIN_CONFIRM}/11 pullback ili ${MOM_MIN}/11 momentum)` };
 }
 
 // ─── ULTRA Immediate Entry ─────────────────────────────────────────────────────

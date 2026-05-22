@@ -364,7 +364,7 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
   }
 
   // ── ULTRA — 11 signala (identično bot.js analyzeUltra) ──
-  // OBAVEZNI GATING: ADX≥30, 6Sc≥4, RSI asimetričan (5mSR informativan, ne blokira)
+  // OBAVEZNI GATING: ADX≥30, 6Sc≥4, RSI asimetričan, 5mSR (obavezan za pullback, preskočen za MOM)
   // Maknuti iz signala: CRS (WR 14%), ADXsn (obavezan), 6Sc (obavezan), EMA smjer (nije obavezan)
   // Maknuti 2025-05: E55⟳ (duplikat E50), VOL⟳ (asimetričan — nikad +1 za LONG)
   let ultraSig = "—";
@@ -398,7 +398,7 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
       ultraBull = ultraSigs16.filter(s => s === 1).length;
       ultraBear = ultraSigs16.filter(s => s === -1).length;
 
-      // 3 obavezna gating uvjeta: ADX≥30, 6Sc≥4, RSI asimetričan (5mSR informativan)
+      // 3+1 obavezna gating uvjeta: ADX≥30, 6Sc≥4, RSI asimetričan, 5mSR (pullback obavezan)
       const adxOk       = adxV >= 30;
       const scaleOkLong  = scaleUp >= 4;
       const scaleOkShort = scaleDn >= 4;
@@ -1914,12 +1914,13 @@ function mandatoryBoxes(s) {
 
   // 4. 5m S/R test — informativan, NE blokira ulaz
   const srOk  = s.srOk;
-  const srCol = srOk === true ? '#059669' : srOk === false ? '#d97706' : '#94a3b8';
-  const srBg  = srOk === true ? '#0d3d26' : srOk === false ? '#3d2a00' : '#1c2128';
-  const srTip = srOk === true  ? '5m S/R test ✓ — cijena testirala S/R zonu (informativno, ne blokira)' :
-                srOk === false ? '5m S/R test — nema S/R potvrde (informativno, ulaz i dalje moguć)' :
-                                 '5m S/R test: provjerava se samo za LONG/SHORT signale (informativno)';
-  const srLbl = srOk === true ? '5mSR✓' : srOk === false ? '5mSR·' : '5mSR';
+  // 5mSR je OBAVEZAN za pullback ulaze — crveno blokira (srOk=false ILI srOk=null)
+  const srCol = srOk === true ? '#059669' : srOk === false ? '#dc2626' : '#94a3b8';
+  const srBg  = srOk === true ? '#0d3d26' : srOk === false ? '#3d0d0d' : '#1c2128';
+  const srTip = srOk === true  ? '5m S/R test ✓ — cijena testirala S/R zonu (obavezan za pullback) ✓' :
+                srOk === false ? '5m S/R test ✗ — nema dodir S/R razine → pullback BLOKIRAN (MOM ulaz i dalje moguć)' :
+                                 '5m S/R test ? — nema S/R razina u lookbacku → pullback blokiran (MOM preskače)';
+  const srLbl = srOk === true ? '5mSR✓' : srOk === false ? '5mSR✗' : '5mSR?';
 
   function badge(label, col, bg, tip) {
     return '<span title="' + tip + '" style="display:inline-flex;flex-direction:column;align-items:center;background:' + bg +

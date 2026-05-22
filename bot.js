@@ -1867,9 +1867,9 @@ async function analyzeUltraPullback(symbol, candles, cfg) {
   const result = analyzeUltra(candles, cfg);
 
   if (result.signal === "LONG" || result.signal === "SHORT") {
-    // 5m S/R test — informativan, NE blokira ulaz
+    // 5m S/R test — OBAVEZAN za pullback ulaze (blokira u run() ako srOk !== true)
     const srOk = await check5mSRTest(symbol, result.signal).catch(() => null);
-    const srLabel = srOk === true ? "5mSR✓" : srOk === false ? "5mSR✗(info)" : "5mSR?";
+    const srLabel = srOk === true ? "5mSR✓" : srOk === false ? "5mSR✗" : "5mSR?";
     console.log(`  ✅ [ULTRA] ${symbol} ${result.signal} @ ${fmtPrice(price)} — 3 uvjeta OK (${result.bullScore ?? 0}↑/${result.bearScore ?? 0}↓ | ${srLabel})`);
   }
 
@@ -3680,16 +3680,22 @@ export async function run() {
           continue;
         }
 
-        // ── 5m S/R Gate — blokira pullback ulaz ako cijena nije kod ključne razine ────
+        // ── 5m S/R Gate — OBAVEZAN: blokira pullback ulaz ako cijena nije kod S/R razine ────
+        // Blokira: srOk=false (nema dodir) ILI srOk=null (nema S/R razine u lookbacku)
         // Momentum ulazi preskaču 5mSR (cijena se odmiče od S/R, ne testira ga)
         if (pDef.strategy === "synapse_t" && !result.isMomentum) {
-          try {
-            const srOk = await check5mSRTest(symbol, signal);
-            if (srOk === false) {
-              console.log(`  🧱 [5mSR] ${symbol} — cijena nije kod S/R razine → pullback ${signal} preskočen`);
-              continue;
-            }
-          } catch { /* ignoriramo grešku, ne blokiramo */ }
+          const srOk = await check5mSRTest(symbol, signal).catch(() => null);
+          if (srOk !== true) {
+            const reason = srOk === false ? "nema dodir S/R" : "nema S/R razine u lookbacku";
+            console.log(`  🧱 [5mSR] ${symbol} — ${reason} → pullback ${signal} preskočen`);
+            writeCsv(pid, {
+              symbol, side: signal,
+              price: fmtPrice(price),
+              notes: `Blokirano: 5mSR — ${reason}`,
+              orderId: "BLOCKED", mode: "BLOCKED",
+            });
+            continue;
+          }
         }
 
         // 🔄 INVERTED MODE — trgujemo suprotno od signala (long→short, short→long)

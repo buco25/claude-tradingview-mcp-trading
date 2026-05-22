@@ -3795,23 +3795,6 @@ export async function run() {
           console.log(`  📊 [KONSOLIDACIJA] ${symbol} — Regime:${_btcRegime} Breadth▲${_marketBreadth.bullish}▼${_marketBreadth.bearish} → TP ×1.5 = ${tpPct.toFixed(2)}% | RR 1:${(tpPct/slPct).toFixed(1)}`);
         }
 
-        // ── Minimalna SL udaljenost: $1 po jedinici (fee zaštita) ─────────────────
-        // Za jeftine coinove (LINK $9.78, SL 4% = $0.39) tradeSize naraste jer
-        // tradeSize = riskAmount / slPct, pa fee jede proporcionalno više.
-        // $1/unit znači: coin mora biti ≥ ~$25 za 4% SL, ≥ ~$40 za 2.5% SL.
-        const MIN_SL_DIST_USD = 1.0;
-        const slDistUSD = Math.abs(price - sl);
-        if (slDistUSD < MIN_SL_DIST_USD) {
-          console.log(`  🚫 [MIN-SL] ${symbol} preskočen — SL $${slDistUSD.toFixed(4)}/unit < $${MIN_SL_DIST_USD} (naknada > dobitak)`);
-          writeCsv(pid, {
-            symbol, side: signal,
-            price: fmtPrice(price), sl: fmtPrice(sl),
-            notes: `Blokirano: SL $${slDistUSD.toFixed(4)}/unit < $${MIN_SL_DIST_USD} min (fee zaštita)`,
-            orderId: "BLOCKED", mode: "BLOCKED",
-          });
-          continue;
-        }
-
         // Risk-based position sizing: SL gubitak = točno RISK_PCT% trenutne equity
         const startCap   = pDef.startCapital ?? START_CAPITAL;
         const equity     = getPortfolioEquity(pid, startCap);

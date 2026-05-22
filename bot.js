@@ -3076,6 +3076,172 @@ async function cancelTpOrder(pos) {
   }
 }
 
+// ─── Pyramid: otkaži SVE plan naloge za simbol/smjer (SL + TP + trail) ───────────
+async function cancelAllPlanOrders(symbol, side) {
+  const holdSide = side === "LONG" ? "long" : "short";
+  const planTypes = ["pos_loss", "pos_profit", "track_stop"];
+  let cancelled = 0;
+  for (const planType of planTypes) {
+    try {
+      const ts   = Date.now().toString();
+      const path = `/api/v2/mix/order/orders-plan-pending?symbol=${symbol}&productType=USDT-FUTURES&planType=${planType}`;
+      const sign = signBitGet(ts, "GET", path);
+      const r    = await fetch(`${BITGET.baseUrl}${path}`, {
+        headers: { "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": sign,
+          "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET.passphrase, "Content-Type": "application/json" },
+      });
+      const d = await r.json();
+      const orders = (d.data?.entrustedList || []).filter(o => o.holdSide === holdSide);
+      for (const o of orders) {
+        await bitgetPost("/api/v2/mix/order/cancel-plan-order", {
+          symbol, productType: "USDT-FUTURES", marginCoin: "USDT", orderId: o.orderId,
+        });
+        cancelled++;
+        console.log(`  🗑️  [PYRAMID] Otkazan ${planType} nalog ${o.orderId} za ${symbol}`);
+      }
+    } catch (e) {
+      console.log(`  ⚠️  [PYRAMID] cancelAllPlanOrders ${symbol} ${planType}: ${e.message}`);
+    }
+  }
+  return cancelled;
+}
+
+// ─── Pyramid: dodaj na postojeću poziciju, merged SL/TP od avg entry ─────────────
+// One-Way mode na BitGetu: svi LONG orderi za isti simbol spajaju se u jednu poziciju.
+// Ova funkcija:
+//   1. Otvara dodatnu količinu bez SL/TP
+//   2. Otkazuje stare SL/TP plan naloge
+//   3. Računa prosječnu ulaznu cijenu (weighted avg)
+//   4. Postavlja nove SL/TP od avg entry
+//   5. Ažurira postojeći JSON zapis (ne dodaje novi)
+async function addToPyramid(pid, existingPos, signal, newTradeSize, slPct, tpPct, isLive, symSltp) {
+  const { symbol, side, entryPrice: oldEntry, quantity: oldQty, totalUSD: oldNotional } = existingPos;
+  const holdSide = side === "LONG" ? "long" : "short";
+
+  if (isLive && !PAPER_TRADING) {
+    // ── LIVE: otvori dodatnu količinu na BitGetu ──
+    const liveP = (await fetchLivePrices([symbol]))[symbol] || oldEntry;
+    const newQty = newTradeSize / liveP;
+
+    // 1. Otvori market order (bez SL/TP — postavljamo ručno ispod)
+    const orderBody = {
+      symbol, productType: "USDT-FUTURES",
+      marginMode: "isolated", marginCoin: "USDT",
+      side: side === "LONG" ? "buy" : "sell",
+      tradeSide: "open", orderType: "market", size: newQty.toFixed(4),
+    };
+    const orderData = await bitgetPost("/api/v2/mix/order/place-order", orderBody);
+    if (!orderData || orderData.code !== "00000") {
+      console.log(`  ❌ [PYRAMID] Order fail: ${orderData?.code} ${orderData?.msg}`);
+      return null;
+    }
+
+    // 2. Čekaj fill i dohvati stvarnu cijenu
+    await new Promise(r => setTimeout(r, 2000));
+    let fillPrice = liveP;
+    try {
+      const orderId = orderData.data?.orderId;
+      const detPath = `/api/v2/mix/order/detail?symbol=${symbol}&productType=USDT-FUTURES&orderId=${orderId}`;
+      const ts2 = Date.now().toString();
+      const det = await fetch(`${BITGET.baseUrl}${detPath}`, {
+        headers: { "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": signBitGet(ts2, "GET", detPath),
+          "ACCESS-TIMESTAMP": ts2, "ACCESS-PASSPHRASE": BITGET.passphrase, "Content-Type": "application/json" },
+      }).then(r => r.json());
+      if (det.code === "00000" && det.data?.priceAvg) fillPrice = parseFloat(det.data.priceAvg);
+    } catch(e) { console.log(`  ⚠️  [PYRAMID] Fill fetch: ${e.message}`); }
+
+    // 3. Otkaži stare SL/TP naloge
+    await cancelAllPlanOrders(symbol, side);
+
+    // 4. Prosječna ulazna cijena
+    const totalQty  = oldQty + newQty;
+    const avgEntry  = (oldQty * oldEntry + newQty * fillPrice) / totalQty;
+    const totalUSD  = oldNotional + newTradeSize;
+
+    // 5. Novi SL/TP od avg entry
+    const _slPct = slPct ?? SL_PCT;
+    const _tpPct = tpPct ?? TP_PCT;
+    const newSl = side === "LONG" ? avgEntry * (1 - _slPct / 100) : avgEntry * (1 + _slPct / 100);
+    const newTp = side === "LONG" ? avgEntry * (1 + _tpPct / 100) : avgEntry * (1 - _tpPct / 100);
+
+    // 6. Postavi novi hard SL
+    await bitgetPost("/api/v2/mix/order/place-tpsl-order", {
+      symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
+      planType: "pos_loss",
+      triggerPrice: fmtPrice(newSl, symbol),
+      triggerType: "mark_price", holdSide,
+    });
+    // 7. Postavi novi trailing stop (aktivacija na TP razini)
+    try {
+      const trailCallbackRatio = String((_slPct / 100).toFixed(4));
+      await bitgetPost("/api/v2/mix/order/place-tpsl-order", {
+        symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
+        planType: "track_stop",
+        triggerPrice: fmtPrice(newTp, symbol),
+        callbackRatio: trailCallbackRatio, holdSide,
+      });
+    } catch(e) {
+      // Fallback: fiksni TP
+      await bitgetPost("/api/v2/mix/order/place-tpsl-order", {
+        symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
+        planType: "pos_profit",
+        triggerPrice: fmtPrice(newTp, symbol),
+        triggerType: "mark_price", holdSide,
+      });
+    }
+
+    // 8. Ažuriraj JSON zapis — jedan merged zapis, ne dva
+    const allPos = loadPositions(pid);
+    const idx = allPos.findIndex(p => p.symbol === symbol && p.side === side);
+    if (idx >= 0) {
+      allPos[idx].entryPrice = parseFloat(avgEntry.toFixed(6));
+      allPos[idx].quantity   = totalQty;
+      allPos[idx].totalUSD   = totalUSD;
+      allPos[idx].sl         = newSl;
+      allPos[idx].tp         = newTp;
+      allPos[idx].trailActive = false;  // reset trail
+      allPos[idx].trailPeak   = null;
+      allPos[idx].beMoved     = false;
+      allPos[idx].pyramidCount = (allPos[idx].pyramidCount || 1) + 1;
+      savePositions(pid, allPos);
+    }
+
+    console.log(`  🔺 [PYRAMID] ${symbol} ${side} — avg entry ${fmtPrice(avgEntry)} | qty ${totalQty.toFixed(4)} | SL ${fmtPrice(newSl)} TP ${fmtPrice(newTp)}`);
+    await tg(`🔺 [PYRAMID +${(allPos[idx]?.pyramidCount||2)}] ${symbol} ${side}\nAvg entry: ${fmtPrice(avgEntry)} (bio: ${fmtPrice(oldEntry)})\nQty: ${totalQty.toFixed(4)} | SL: ${fmtPrice(newSl)} | TP: ${fmtPrice(newTp)}`);
+    return { avgEntry, totalQty, newSl, newTp };
+
+  } else {
+    // ── PAPER: simulacija pyramid ──
+    const liveP = (await fetchLivePrices([symbol]))[symbol] || oldEntry;
+    const newQty    = newTradeSize / liveP;
+    const totalQty  = oldQty + newQty;
+    const avgEntry  = (oldQty * oldEntry + newQty * liveP) / totalQty;
+    const totalUSD  = oldNotional + newTradeSize;
+    const _slPct    = slPct ?? SL_PCT;
+    const _tpPct    = tpPct ?? TP_PCT;
+    const newSl = side === "LONG" ? avgEntry * (1 - _slPct / 100) : avgEntry * (1 + _slPct / 100);
+    const newTp = side === "LONG" ? avgEntry * (1 + _tpPct / 100) : avgEntry * (1 - _tpPct / 100);
+
+    const allPos = loadPositions(pid);
+    const idx = allPos.findIndex(p => p.symbol === symbol && p.side === side);
+    if (idx >= 0) {
+      const prevCount = allPos[idx].pyramidCount || 1;
+      allPos[idx].entryPrice   = parseFloat(avgEntry.toFixed(6));
+      allPos[idx].quantity     = totalQty;
+      allPos[idx].totalUSD     = totalUSD;
+      allPos[idx].sl           = newSl;
+      allPos[idx].tp           = newTp;
+      allPos[idx].trailActive  = false;
+      allPos[idx].trailPeak    = null;
+      allPos[idx].beMoved      = false;
+      allPos[idx].pyramidCount = prevCount + 1;
+      savePositions(pid, allPos);
+      console.log(`  🔺 [PYRAMID PAPER] ${symbol} ${side} — avg entry ${fmtPrice(avgEntry)} | qty ${totalQty.toFixed(4)} | SL ${fmtPrice(newSl)} TP ${fmtPrice(newTp)}`);
+    }
+    return { avgEntry, totalQty, newSl, newTp };
+  }
+}
+
 // ─── Re-entry tracking — prati WIN izlaze za brzo ponovni ulaz u trend ─────────
 // Kad pozicija zatvori s profitom (WIN), čuvamo simbol/smjer do 45 min.
 // Sljedeći scan() ciklus može re-ući u ISTI smjer s labavijim uvjetima.
@@ -3837,9 +4003,30 @@ export async function run() {
           continue;
         }
 
-        console.log(`🎯 [${pDef.name}] ${signal} ${symbol} @ ${fmtPrice(price)} | SL ${fmtPrice(sl)} | TP ${fmtPrice(tp)} | $${tradeSize.toFixed(0)}`);
+        const isLive    = pDef.live === true && !PAPER_TRADING;
+        const _isPyramid = existingPos && existingPos.side === signal;
 
-        const isLive    = pDef.live === true && !PAPER_TRADING;  // live samo ako portfolio to zahtijeva I globalni flag nije paper
+        console.log(`🎯 [${pDef.name}] ${_isPyramid?"🔺 PYRAMID":"NEW"} ${signal} ${symbol} @ ${fmtPrice(price)} | SL ${fmtPrice(sl)} | TP ${fmtPrice(tp)} | $${tradeSize.toFixed(0)}`);
+
+        // ── PYRAMID: merged avg entry, single SL/TP na BitGetu ──────────────────
+        if (_isPyramid) {
+          const pyramidResult = await addToPyramid(pid, existingPos, signal, tradeSize, slPct, tpPct, isLive, symSltp);
+          if (pyramidResult) {
+            _newEntriesThisScan++;
+            // CSV zapis pyramid adicije (za povijest)
+            writeCsv(pid, {
+              symbol, side: signal,
+              price: fmtPrice(pyramidResult.avgEntry), sl: fmtPrice(pyramidResult.newSl), tp: fmtPrice(pyramidResult.newTp),
+              quantity: pyramidResult.totalQty.toFixed(4), totalUSD: (existingPos.totalUSD + tradeSize).toFixed(2),
+              notes: `PYRAMID +${existingPosList.length + 1} | avg entry ${fmtPrice(pyramidResult.avgEntry)} | SL ${slPct.toFixed(1)}% TP ${tpPct.toFixed(1)}%`,
+              orderId: `${isLive?"LIVE":"PAPER"}-PYR-${Date.now()}`,
+              mode: isLive ? (BITGET_DEMO ? "DEMO" : "LIVE") : "PAPER",
+            });
+          }
+          continue;  // Ne prolazimo kroz normalni entry flow
+        }
+
+        // ── NOVI ulaz (nije pyramid) ─────────────────────────────────────────────
         const timestamp = new Date().toISOString();
         const orderId   = `${isLive ? "LIVE" : "PAPER"}-${Date.now()}`;
         const mode      = isLive ? (BITGET_DEMO ? "DEMO" : "LIVE") : "PAPER";

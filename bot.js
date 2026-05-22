@@ -33,6 +33,7 @@ const STRONG_TP_MULT      = 3.0;  // jako tržište → TP = SL × 3 (1:3 R:R)
 const NORMAL_TP_MULT      = 1.5;  // konsolidacija / neutralno → TP = SL × 1.5 (1:1.5 R:R)
 const MAX_TRADES_PER_DAY = 100;
 const MAX_OPEN_PER_PORTFOLIO = 8;  // max otvorenih pozicija po portfoliju (+ BTC bonus slot)
+const MAX_PYRAMID           = 2;   // max adicija (pyramid) po simbolu u istom smjeru
 const MAX_NEW_ENTRIES_PER_SCAN = 3; // max NOVIH ulaza po scan ciklusu (sprječava 8 simultanih gubitaka)
 
 // ─── 7. Korelacijski filter — sektori ─────────────────────────────────────────
@@ -3449,11 +3450,20 @@ export async function run() {
 
     let _newEntriesThisScan = 0;  // Reset po portfoliju, ne dopuštamo simultano previše ulaza
     for (const symbol of pDef.symbols) {
-      const existingPos = openPositions.find(p => p.symbol === symbol);
+      // ── Pyramid (DCA) logika: dopuštamo max MAX_PYRAMID adicija u ISTOM smjeru ──
+      const existingPosList = openPositions.filter(p => p.symbol === symbol);
+      const existingPos     = existingPosList[0];  // prva/primarna pozicija
       if (existingPos) {
-        // Pozicija već otvorena — preskačemo (flip logika uklonjena, LONG_ONLY mod)
-        console.log(`  ⏭️  [${pDef.name}] ${symbol} — pozicija već otvorena (${existingPos.side}), preskačem`);
-        continue;
+        // Ako signal nije u istom smjeru — skip
+        // (signal još nije poznat ovdje, provjerava se ispod nakon analize)
+        // Placeholder: ako smjer ne odgovara, skip odmah u analizi
+        const pyramidCount = existingPosList.length;
+        if (pyramidCount >= MAX_PYRAMID) {
+          console.log(`  ⏭️  [${pDef.name}] ${symbol} — max pyramid (${pyramidCount}/${MAX_PYRAMID}) dostignut, preskačem`);
+          continue;
+        }
+        // Inače puštamo da prođe analizu — smjer će se provjeriti ispod
+        console.log(`  🔺 [${pDef.name}] ${symbol} — postoji pozicija (${existingPos.side}), provjeravamo pyramid ulaz (${pyramidCount}/${MAX_PYRAMID})`);
       }
 
       // Provjeri limit otvorenih pozicija
@@ -3533,6 +3543,15 @@ export async function run() {
         if (signal === "NEUTRAL") {
           console.log(`  🚫 [${pDef.name}] ${symbol} — ${reason}`);
           continue;
+        }
+
+        // ── Pyramid provjera smjera: ako postoji pozicija, signal mora biti ISTI smjer ──
+        if (existingPos && existingPos.side !== signal) {
+          console.log(`  ⏭️  [${pDef.name}] ${symbol} — pozicija ${existingPos.side} otvorena, signal ${signal} suprotan → skip (bez hedgea)`);
+          continue;
+        }
+        if (existingPos && existingPos.side === signal) {
+          console.log(`  🔺 [PYRAMID] ${symbol} ${signal} — adicija ${existingPosList.length + 1}/${MAX_PYRAMID} u trendu`);
         }
 
         // RE-ENTRY marker — loguj i očisti queue ako smjer odgovara

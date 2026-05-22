@@ -33,7 +33,7 @@ const STRONG_TP_MULT      = 3.0;  // jako tržište → TP = SL × 3 (1:3 R:R)
 const NORMAL_TP_MULT      = 1.5;  // konsolidacija / neutralno → TP = SL × 1.5 (1:1.5 R:R)
 const MAX_TRADES_PER_DAY = 100;
 const MAX_OPEN_PER_PORTFOLIO = 8;  // max otvorenih pozicija po portfoliju (+ BTC bonus slot)
-const MAX_PYRAMID           = 2;   // max adicija (pyramid) po simbolu u istom smjeru
+const MAX_PYRAMID           = 3;   // max adicija (pyramid) po simbolu u istom smjeru
 const MAX_NEW_ENTRIES_PER_SCAN = 3; // max NOVIH ulaza po scan ciklusu (sprječava 8 simultanih gubitaka)
 
 // ─── 7. Korelacijski filter — sektori ─────────────────────────────────────────

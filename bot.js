@@ -62,7 +62,8 @@ const SL_COOLDOWN_MS = 4 * 60 * 60 * 1000;  // 4h cooldown po simbolu nakon SL-a
 // ─── Trailing stop — aktivira se nakon dovoljnog profita ─────────────────────
 // Problem: 1.5% aktivacija + 0.8% gap → exit na samo +0.7% kod prvog odskok (XRP +$0.88)
 // Fix: širi gap (1.5%) i kasnija aktivacija (2.5%) — preživljava normalne 1-2% skokove
-const TRAIL_ACTIVATE_PCT = 2.5;  // % profita za aktivaciju traila (bio 1.5 — prerano)
+const TRAIL_ACTIVATE_PCT = 0.50; // faktor TP-a za aktivaciju traila (50% puta do TP-a)
+                                  // npr. TP 8.25% → trail se aktivira na 4.1%, TP 16.5% → 8.25%
 const TRAIL_SL_PCT       = 1.5;  // trail SL X% ispod/iznad peak-a (bio 0.8 — pretijesan)
 
 // ─── Ekonomski kalendar ───────────────────────────────────────────────────────
@@ -2275,13 +2276,17 @@ async function checkPortfolioPositions(pid) {
           }
         }
 
-        // ── TRAILING STOP: aktivira se kad je TRAIL_ACTIVATE_PCT% u profitu ──
+        // ── TRAILING STOP: aktivira se na 50% puta do TP-a (dinamički po poziciji) ──
         if (isLivePortfolio) {
           const pricePct = pos.side === "LONG"
             ? (liveP - pos.entryPrice) / pos.entryPrice * 100
             : (pos.entryPrice - liveP) / pos.entryPrice * 100;
 
-          if (pricePct >= TRAIL_ACTIVATE_PCT) {
+          // Dinamički prag: 50% od tpPct pozicije (min 3% zaštita od šuma)
+          const _tpPct = pos.tpPct ?? 8.0;
+          const _trailActivate = Math.max(_tpPct * TRAIL_ACTIVATE_PCT, 3.0);
+
+          if (pricePct >= _trailActivate) {
             // ── Prva aktivacija traila: otkaži TP nalog, pusti trend da teče ──
             if (!pos.trailActive) {
               pos.trailActive = true;
@@ -2289,8 +2294,8 @@ async function checkPortfolioPositions(pid) {
               const idx0 = allPos0.findIndex(p => p.symbol === pos.symbol && p.side === pos.side);
               if (idx0 >= 0) { allPos0[idx0].trailActive = true; savePositions(pid, allPos0); }
               const tpCancelled = await cancelTpOrder(pos);
-              console.log(`  📈 [TRAIL] ${pos.symbol} ${pos.side} — trail AKTIVAN +${pricePct.toFixed(1)}%${tpCancelled ? " | TP otkazan" : ""}`);
-              await tg(`📈 [TRAIL ON] ${pos.symbol} ${pos.side}\n+${pricePct.toFixed(1)}% — TP otkazan, trailing SL preuzima\nCijena: ${fmtPrice(liveP)} | SL prati ${TRAIL_SL_PCT}% ispod vrha`);
+              console.log(`  📈 [TRAIL] ${pos.symbol} ${pos.side} — trail AKTIVAN +${pricePct.toFixed(1)}% (prag: ${_trailActivate.toFixed(1)}% = 50% TP ${_tpPct.toFixed(1)}%)${tpCancelled ? " | TP otkazan" : ""}`);
+              await tg(`📈 [TRAIL ON] ${pos.symbol} ${pos.side}\n+${pricePct.toFixed(1)}% — TP otkazan, trailing SL preuzima\nPrag: ${_trailActivate.toFixed(1)}% (50% od TP ${_tpPct.toFixed(1)}%) | SL prati ${TRAIL_SL_PCT}% ispod vrha`);
             }
 
             const peak = pos.side === "LONG"

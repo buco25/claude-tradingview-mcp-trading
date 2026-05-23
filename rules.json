@@ -165,10 +165,10 @@
   },
   "strategies": {
     "synapse_t": {
-      "name": "ULTRA — 13-Signal Combined Strategy (ATR per-symbol SL/TP)",
-      "description": "Kombinira 13 signala: E50(REV), RSI(REV), E55(REV), CHP, CVD(REV), R⟳, MCD, E145, VOL(REV), MCC(REV), RSI↗, SRS, SRB. Mandatory gates: ADX≥30, 6Sc≥4/6, RSI asimetričan, 5mSR. Min 7/13 signala. LONG_ONLY. Per-simbol SL/TP iz symbol_sltp. Tier0(BTC):SL2.5%/TP3.75%/30x | Tier1:SL4%/TP6%/20x | Tier2:SL5.5%/TP8.25%/15x | Tier3:SL7%/TP10.5%/12x. TP neutralni=1.5×SL, TP jak signal=3×SL (TBD).",
+      "name": "ULTRA — Option C: 3 gates + 7 signals (ATR per-symbol SL/TP)",
+      "description": "Option C (23.05.2026): 3 obavezna gating (ADX≥30, RSI asimetričan, VOL_EXH tiered) + 7 neovisnih signala: E50(REV), CVD(REV), MCD, E145, SRS, SRB, RDIV. Maknuti: 6SC gate (redundantan), 5mSR gate (previše lažnih negativi), RSI signal (redundantan s gate-om), CHP (redundantan s ADX gate-om). Min 4/7 pullback, 5/7 momentum. Per-simbol SL/TP iz symbol_sltp. Tier0(BTC):SL2.5%/TP3.75%/34x | Tier1:SL4%/TP6%/22x | Tier2:SL5.5%/TP8.25%/16x | Tier3:SL7%/TP10.5%/13x. TP neutralni=1.5×SL, TP jak signal=3×SL.",
       "params": {
-        "minSig": 6,
+        "minSig": 4,
         "slPct": 4.0,
         "tpPct": 6.0
       }

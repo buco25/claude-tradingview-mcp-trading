@@ -408,7 +408,7 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
   // Dodato 2025-05: RDIV (RSI divergencija — bullish/bearish)
   let ultraSig = "—";
   let ultraBull = 0, ultraBear = 0;
-  let ultraSigs16 = new Array(9).fill(0);
+  let ultraSigs16 = new Array(7).fill(0);
   let ultraMinSig = 5;  // default, ažurira se ispod
   {
     const { minSig = 5 } = ultraCfg;
@@ -419,18 +419,16 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
       const chopV = chop ?? 100;
 
       // REVERSANI signali (WR<31.5% kada ▲ → logika invertirana, contrarian/pullback):
-      // Maknuti: R⟳/MCC/RSI↗ — ulaze u distribucijsku fazu (80% reversal nakon high-vol svjeća)
+      // Option C: 7 signala — maknuti RSI signal (redundantan s RSI gate-om) i CHP (redundantan s ADX gate-om)
       // Dodan: VOL_EXH gate (ne broji se u signal, blokira ulaz)
       ultraSigs16 = [
         ema50 ? (price > ema50 ? -1 : 1) : 0,                           //  1. E50  REV: >EMA50=previsoko=-1, ispod=pullback=+1
-        rsiV < 45 ? -1 : rsiV > 55 ? 1 : 0,                             //  2. RSI  REV: >55=momentum=+1, <45=slabi=-1
-        chopV < 61.8 ? 1 : -1,                                           //  3. CHP: nije choppy=+1 (normalan)
-        cvdSum > 0 ? -1 : 1,                                             //  4. CVD  REV: kupni vol=već uđeni=-1, prodajni=+1
-        macdH !== null ? (macdH > 0 ? 1 : -1) : 0,                      //  5. MCD: MACD histogram (normalan)
-        ema145 ? (price > ema145 ? 1 : -1) : 0,                         //  6. E145: dugoročni trend (normalan)
-        srsBounce,                                                        //  7. SRS: S/R bounce (normalan)
-        srbBreak,                                                         //  8. SRB: S/R breakout (normalan)
-        sigRsiDivD,                                                       //  9. RDIV: RSI divergencija (bullish=+1, bearish=-1)
+        cvdSum > 0 ? -1 : 1,                                             //  2. CVD  REV: kupni vol=već uđeni=-1, prodajni=+1
+        macdH !== null ? (macdH > 0 ? 1 : -1) : 0,                      //  3. MCD: MACD histogram (normalan)
+        ema145 ? (price > ema145 ? 1 : -1) : 0,                         //  4. E145: dugoročni trend (normalan)
+        srsBounce,                                                        //  5. SRS: S/R bounce (normalan)
+        srbBreak,                                                         //  6. SRB: S/R breakout (normalan)
+        sigRsiDivD,                                                       //  7. RDIV: RSI divergencija (bullish=+1, bearish=-1)
       ];
 
       ultraBull = ultraSigs16.filter(s => s === 1).length;
@@ -449,25 +447,23 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
       else if (adxOk && scaleOkLong  && rsiLongOk  && ultraBull === minSig - 1) ultraSig = "SETUP↑";
       else if (adxOk && scaleOkShort && rsiShortOk && ultraBear === minSig - 1) ultraSig = "SETUP↓";
 
-      // Momentum signali (non-reversed, hibrid fallback) — viši prag 7/9
+      // Momentum signali (non-reversed, hibrid fallback) — prag 5/7
       if (ultraSig === "—") {
         var momSigsD = [
           ema50  ? (price > ema50  ?  1 : -1) : 0,       //  1. E50  MOM: >EMA50=+1
-          rsiV > 55 ? 1 : rsiV < 45 ? -1 : 0,            //  2. RSI  MOM: >55=+1
-          chopV < 61.8 ? 1 : -1,                          //  3. CHP: isti
-          cvdSum > 0 ?  1 : -1,                           //  4. CVD  MOM: kupni vol=+1
-          macdH !== null ? (macdH > 0 ? 1 : -1) : 0,    //  5. MCD: isti
-          ema145 ? (price > ema145 ?  1 : -1) : 0,       //  6. E145: isti
-          ultraSigs16[6],                                  //  7. SRS: isti
-          ultraSigs16[7],                                  //  8. SRB: isti
-          ultraSigs16[8],                                  //  9. RDIV: isti
+          cvdSum > 0 ?  1 : -1,                           //  2. CVD  MOM: kupni vol=+1
+          macdH !== null ? (macdH > 0 ? 1 : -1) : 0,    //  3. MCD: isti
+          ema145 ? (price > ema145 ?  1 : -1) : 0,       //  4. E145: isti
+          ultraSigs16[4],                                  //  5. SRS: isti
+          ultraSigs16[5],                                  //  6. SRB: isti
+          ultraSigs16[6],                                  //  7. RDIV: isti
         ];
         var momBullD = momSigsD.filter(function(s){return s===1;}).length;
         var momBearD = momSigsD.filter(function(s){return s===-1;}).length;
-        // Momentum: bez 6SC gate, ADX >= 20, prag 7/9
+        // Momentum: bez 6SC gate, ADX >= 20, prag 5/7
         var momAdxOk = adxV >= 20;
-        if (momAdxOk && rsiLongOk  && momBullD >= 7) { ultraSig = "MOM↑"; ultraBull = momBullD; }
-        else if (momAdxOk && rsiShortOk && momBearD >= 7) { ultraSig = "MOM↓"; ultraBear = momBearD; }
+        if (momAdxOk && rsiLongOk  && momBullD >= 5) { ultraSig = "MOM↑"; ultraBull = momBullD; }
+        else if (momAdxOk && rsiShortOk && momBearD >= 5) { ultraSig = "MOM↓"; ultraBear = momBearD; }
       }
     }
   }
@@ -1125,7 +1121,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="logo">🎯</div>
       <div>
         <div class="title">ULTRA Trading Bot</div>
-        <div class="subtitle">Pullback: ADX≥30·6Sc·RSI·SR·VOL_EXH min 5/9 (1H) · Momentum: ADX≥20·RSI min 7/9 · LONG+SHORT · BTC regime · rizik 1.5%</div>
+        <div class="subtitle">Pullback: ADX·RSI·VOL_EXH min 4/7 (1H) · Momentum: ADX≥20·RSI min 5/7 · LONG+SHORT · BTC regime · rizik 1.5%</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -1599,9 +1595,9 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <div class="scan-card">
     <div class="scan-header">
       <div>
-        <div class="chart-title" style="margin-bottom:2px">🎯 ULTRA Scanner — ${ALL_SYMBOLS.length} simbola | 5OB + 9SIG | min ${rules.strategies?.synapse_t?.params?.minSig ?? 5}/9 | ulaz odmah</div>
+        <div class="chart-title" style="margin-bottom:2px">🎯 ULTRA Scanner — ${ALL_SYMBOLS.length} simbola | 3OB + 7SIG | min ${rules.strategies?.synapse_t?.params?.minSig ?? 4}/7 | ulaz odmah</div>
         <div style="font-size:12px;color:var(--text-muted)">
-          E50 · RSI · E55 · CHP · CVD · R⟳ · MCD · E145 · VOL · MCC · RSI↗ · SRS · SRB
+          E50 · CVD · MCD · E145 · SRS · SRB · RDIV
           &nbsp;|&nbsp; 🟡 Čeka breakout &nbsp; 🟢 Signal &nbsp; Cache 90s &nbsp;|&nbsp;
           <button onclick="toggleLegend()" style="background:none;border:1px solid #30363d;border-radius:4px;color:#9ca3af;font-size:11px;cursor:pointer;padding:2px 8px">📖 Legenda signala</button>
         </div>
@@ -1621,8 +1617,8 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <th>Symbol</th>
             <th>Cijena</th>
             <th style="color:#d97706;text-align:center">1H</th>
-            <th style="color:#d97706;text-align:center">4OB <span style="font-weight:400;font-size:10px;color:#94a3b8">ADX·6Sc·RSI·SR</span></th>
-            <th style="color:#db2777;text-align:center">9 Signala</th>
+            <th style="color:#d97706;text-align:center">3OB <span style="font-weight:400;font-size:10px;color:#94a3b8">ADX·RSI·VOL_EXH</span></th>
+            <th style="color:#db2777;text-align:center">7 Signala</th>
             <th style="color:#db2777;text-align:center;width:60px">↑↓</th>
             <th style="min-width:160px">Status</th>
           </tr>
@@ -1637,7 +1633,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <!-- Signal legend (collapsible) -->
   <div id="sig-legend" style="display:none;margin-top:12px">
     <div class="chart-card" style="padding:16px 20px">
-      <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — ULTRA (5 obavezna gating + 9 neovisnih signala, min 5/9 za ulaz)</div>
+      <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — ULTRA (3 obavezna gating + 7 neovisnih signala, min 4/7 za ulaz)</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:8px;font-size:12px">
         ${[
           ['EMA', '▲ EMA9 > EMA21 → kratkoročni bull trend  |  ▼ EMA9 < EMA21 → bear'],
@@ -1666,7 +1662,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       </div>
       <div style="margin-top:10px;font-size:11px;color:#94a3b8">
         🟢 Zeleno = bullish signal aktiviran &nbsp;|&nbsp; 🔴 Crveno = bearish &nbsp;|&nbsp; ⬛ Sivo = neutral/nema signala &nbsp;|&nbsp;
-        Min <b style="color:#db2777">5/9</b> neovisnih signala + 5 obavezna gating (ADX≥30·6Sc·RSI·5mSR·VOL_EXH) · SL <b style="color:#d97706">2.5–7%</b> / TP <b style="color:#d97706">3.75–10.5%</b> po simbolu · rizik <b>1.5%</b> banke po tradeu
+        Min <b style="color:#db2777">4/7</b> neovisnih signala + 3 obavezna gating (ADX≥30·RSI·VOL_EXH) · SL <b style="color:#d97706">2.5–7%</b> / TP <b style="color:#d97706">3.75–10.5%</b> po simbolu · rizik <b>1.5%</b> banke po tradeu
       </div>
     </div>
   </div>
@@ -1773,13 +1769,13 @@ function synapse7Html(s) {
 function ultraHtml(s) {
   const bull   = s.ultraBull ?? 0;
   const bear   = s.ultraBear ?? 0;
-  const sig16  = s.ultraSigs16 || new Array(9).fill(0);
+  const sig16  = s.ultraSigs16 || new Array(7).fill(0);
   const sig    = s.ultraSig || "—";
 
   if (!s.ultraSigs16) return '<span style="color:#94a3b8;font-size:11px">—</span>';
 
-  // 9 signala — R⟳/MCC/RSI↗ maknuti (ulaz u distribuciju); VOL_EXH dodan kao gate
-  const names16 = ['E50','RSI','Chop','CVD','MACD hist','E145','SRS','SRB','RSI div'];
+  // 7 signala (Option C) — RSI signal i CHP maknuti; VOL_EXH dodan kao gate
+  const names16 = ['E50','CVD','MACD','E145','SRS','SRB','RDIV'];
   const tooltipText = names16.map((l,i)=>l+':'+(sig16[i]===1?'↑':sig16[i]===-1?'↓':'·')).join(' | ');
 
   const dots = sig16.slice(0, 11).map((v, i) => {
@@ -1788,10 +1784,10 @@ function ultraHtml(s) {
   }).join('');
 
   const scoreStr = bull > bear
-    ? '<span style="color:#059669;font-weight:700">↑'+bull+'/9</span>'
+    ? '<span style="color:#059669;font-weight:700">↑'+bull+'/7</span>'
     : bear > bull
-    ? '<span style="color:#dc2626;font-weight:700">↓'+bear+'/9</span>'
-    : '<span style="color:#9ca3af">'+Math.max(bull,bear)+'/9</span>';
+    ? '<span style="color:#dc2626;font-weight:700">↓'+bear+'/7</span>'
+    : '<span style="color:#9ca3af">'+Math.max(bull,bear)+'/7</span>';
 
   const sigPart = sig==="LONG"   ? ' <span class="sig-long">▲ LONG</span>'
                 : sig==="SHORT"  ? ' <span class="sig-short">▼ SHORT</span>'
@@ -1868,47 +1864,42 @@ async function resetOne(pid) {
   location.reload();
 }
 
-// ── Signal label boxes (11 genuinnih signala) ──
+// ── Signal label boxes (7 signala — Option C) ──
 // Maknuti: CRS (WR 14%), ADXsn (obavezan gate), 6Sc (obavezan gate), EMA smjer (nije obavezan)
 // Maknuti 2025-05: E55⟳ (duplikat E50), VOL⟳ (asimetričan — nikad +1 za LONG)
-const SIG_NAMES = ['E50','RSI','CHP','CVD','MCD','E145','SRS','SRB','RDIV'];
+// Maknuti Option C: RSI (redundantan s RSI gate-om), CHP (redundantan s ADX gate-om)
+const SIG_NAMES = ['E50','CVD','MCD','E145','SRS','SRB','RDIV'];
 
 // Uvjeti za tooltip — objasni zašto je signal zelen/crven
-// 9 genuinnih signala — 4 REVERSANO (WR<31.5% kad ▲, logika invertirana)
+// 7 genuinnih signala — 2 REVERSANO (E50, CVD — contrarian/pullback logika)
 // REV = contrarian/pullback: signal +1 kad je cijena NIŽE / momentum SLAB (potencijalni bounce)
-// Maknuti: R⟳/MCC/RSI↗ — ulaze u distribucijsku fazu (MM prodaje u jaki move)
+// Maknuti: RSI signal (redundantan s RSI gate-om), CHP (redundantan s ADX gate-om)
 const SIG_COND_BULL = [
   '[REV] Cijena < EMA50 — pullback u trendu, potencijalni bounce',      //  1. E50 REV
-  '[REV] RSI > 55 — jak momentum, nastavljanje trenda',                 //  2. RSI REV
-  'Chop < 61.8 — tržište trenira, nije bočno',                         //  3. CHP
-  '[REV] CVD prodajni — potencijalno dno, reversal gore',              //  4. CVD REV
-  'MACD histogram > 0 — bullish momentum potvrđen',                    //  5. MCD
-  'Cijena > EMA145 — dugoročni trend gore',                            //  6. E145
-  'Bounce od S/R supporta + RSI raste — reakcija na podršku',          //  7. SRS
-  'Proboj S/R resistance gore zadnja 3 bara',                          //  8. SRB
-  'RSI divergencija — niža cijena, viši RSI (bullish div)',            //  9. RDIV
+  '[REV] CVD prodajni — potencijalno dno, reversal gore',              //  2. CVD REV
+  'MACD histogram > 0 — bullish momentum potvrđen',                    //  3. MCD
+  'Cijena > EMA145 — dugoročni trend gore',                            //  4. E145
+  'Bounce od S/R supporta + RSI raste — reakcija na podršku',          //  5. SRS
+  'Proboj S/R resistance gore zadnja 3 bara',                          //  6. SRB
+  'RSI divergencija — niža cijena, viši RSI (bullish div)',            //  7. RDIV
 ];
 const SIG_COND_BEAR = [
   '[REV] Cijena > EMA50 — previsoko, iscrpljen move',                  //  1. E50 REV
-  '[REV] RSI < 45 — slab momentum, potencijalni nastavak pada',        //  2. RSI REV
-  'Chop > 61.8 — bočno tržište, nema trenda',                         //  3. CHP
-  '[REV] CVD kupovni — svi već unutra, potencijalni vrh',              //  4. CVD REV
-  'MACD histogram < 0 — bearish momentum potvrđen',                   //  5. MCD
-  'Cijena < EMA145 — dugoročni trend dolje',                           //  6. E145
-  'Bounce od S/R resistancea + RSI pada — reakcija na otpor',          //  7. SRS
-  'Proboj S/R supporta dolje zadnja 3 bara',                           //  8. SRB
-  'RSI divergencija — viša cijena, niži RSI (bearish div)',            //  9. RDIV
+  '[REV] CVD kupovni — svi već unutra, potencijalni vrh',              //  2. CVD REV
+  'MACD histogram < 0 — bearish momentum potvrđen',                   //  3. MCD
+  'Cijena < EMA145 — dugoročni trend dolje',                           //  4. E145
+  'Bounce od S/R resistancea + RSI pada — reakcija na otpor',          //  5. SRS
+  'Proboj S/R supporta dolje zadnja 3 bara',                           //  6. SRB
+  'RSI divergencija — viša cijena, niži RSI (bearish div)',            //  7. RDIV
 ];
 const SIG_COND_NEUT = [
   'EMA50 nedostupan',                                    //  1. E50
-  'RSI 45–55 — neutralna zona (REV: ni jak ni slab)',   //  2. RSI
-  '—',                                                   //  3. CHP
-  'CVD = 0 — nema dominacije',                          //  4. CVD
-  'MACD nedostupan',                                     //  5. MCD
-  'EMA145 nedostupan',                                   //  6. E145
-  'Cijena nije blizu S/R razine',                       //  7. SRS
-  'Nema S/R proboja u zadnja 3 bara',                   //  8. SRB
-  'Nema RSI divergencije',                              //  9. RDIV
+  'CVD = 0 — nema dominacije',                          //  2. CVD
+  'MACD nedostupan',                                     //  3. MCD
+  'EMA145 nedostupan',                                   //  4. E145
+  'Cijena nije blizu S/R razine',                       //  5. SRS
+  'Nema S/R proboja u zadnja 3 bara',                   //  6. SRB
+  'Nema RSI divergencije',                              //  7. RDIV
 ];
 
 function mandatoryBoxes(s) {
@@ -2016,7 +2007,7 @@ function statusBox(s) {
     return '<div style="background:rgba(5,150,105,0.1);border:1px solid ' + (s.volLow ? '#f59e0b' : '#059669') + ';border-radius:8px;padding:8px 10px">' +
       '<div style="font-size:11px;color:#059669;font-weight:700;margin-bottom:4px">' + (s.volLow ? '⚠️ SIGNAL (vol nizak)' : '✅ SIGNAL AKTIVIRAN') + '</div>' +
       '<div style="font-size:13px;font-weight:700;color:#059669">▲ LONG</div>' +
-      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Ulaz odmah @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBull||0) + '/9</b></div>' +
+      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Ulaz odmah @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBull||0) + '/7</b></div>' +
       volWarning +
       '</div>';
   }
@@ -2024,24 +2015,24 @@ function statusBox(s) {
     return '<div style="background:rgba(220,38,38,0.1);border:1px solid ' + (s.volLow ? '#f59e0b' : '#dc2626') + ';border-radius:8px;padding:8px 10px">' +
       '<div style="font-size:11px;color:#dc2626;font-weight:700;margin-bottom:4px">' + (s.volLow ? '⚠️ SIGNAL (vol nizak)' : '✅ SIGNAL AKTIVIRAN') + '</div>' +
       '<div style="font-size:13px;font-weight:700;color:#dc2626">▼ SHORT</div>' +
-      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Ulaz odmah @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBear||0) + '/9</b></div>' +
+      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Ulaz odmah @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBear||0) + '/7</b></div>' +
       volWarning +
       '</div>';
   }
-  if (sig === "SETUP↑") return '<span style="color:#d97706;font-size:12px">◈ SETUP ↑ &nbsp;<span style="color:#94a3b8;font-size:11px">(' + (s.ultraBull||0) + '/9)</span></span>' + (s.volLow ? '<br><span style="color:#f59e0b;font-size:10px">⚠️ VOL ' + s.volRatio + 'x</span>' : '');
-  if (sig === "SETUP↓") return '<span style="color:#d97706;font-size:12px">◈ SETUP ↓ &nbsp;<span style="color:#94a3b8;font-size:11px">(' + (s.ultraBear||0) + '/9)</span></span>' + (s.volLow ? '<br><span style="color:#f59e0b;font-size:10px">⚠️ VOL ' + s.volRatio + 'x</span>' : '');
+  if (sig === "SETUP↑") return '<span style="color:#d97706;font-size:12px">◈ SETUP ↑ &nbsp;<span style="color:#94a3b8;font-size:11px">(' + (s.ultraBull||0) + '/7)</span></span>' + (s.volLow ? '<br><span style="color:#f59e0b;font-size:10px">⚠️ VOL ' + s.volRatio + 'x</span>' : '');
+  if (sig === "SETUP↓") return '<span style="color:#d97706;font-size:12px">◈ SETUP ↓ &nbsp;<span style="color:#94a3b8;font-size:11px">(' + (s.ultraBear||0) + '/7)</span></span>' + (s.volLow ? '<br><span style="color:#f59e0b;font-size:10px">⚠️ VOL ' + s.volRatio + 'x</span>' : '');
   if (sig === "MOM↑") {
     return '<div style="background:rgba(59,130,246,0.1);border:1px solid #3b82f6;border-radius:8px;padding:8px 10px">' +
       '<div style="font-size:11px;color:#3b82f6;font-weight:700;margin-bottom:4px">🚀 MOMENTUM LONG</div>' +
       '<div style="font-size:13px;font-weight:700;color:#3b82f6">▲ LONG</div>' +
-      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Breakout ulaz @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBull||0) + '/9</b></div>' +
+      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Breakout ulaz @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBull||0) + '/7</b></div>' +
       '</div>';
   }
   if (sig === "MOM↓") {
     return '<div style="background:rgba(139,92,246,0.1);border:1px solid #8b5cf6;border-radius:8px;padding:8px 10px">' +
       '<div style="font-size:11px;color:#8b5cf6;font-weight:700;margin-bottom:4px">🚀 MOMENTUM SHORT</div>' +
       '<div style="font-size:13px;font-weight:700;color:#8b5cf6">▼ SHORT</div>' +
-      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Breakdown ulaz @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBear||0) + '/9</b></div>' +
+      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Breakdown ulaz @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBear||0) + '/7</b></div>' +
       '</div>';
   }
 

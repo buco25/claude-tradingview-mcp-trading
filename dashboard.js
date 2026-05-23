@@ -11,7 +11,8 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, check5mSRTest, 
   getFearGreed, getBtcDominance, getDxyData, getConsecutiveLossCount,
   getSessionInfo, calcAtrTrend, getSp500Data, calcSymbolCorrelation,
   getDeribitPutCall, getLiquidationRisk, getEconEvents, isEconBlocked, calcVWAP,
-  getLongShortRatio, getStablecoinInflow, getBtcPerpBasis, getAltcoinSeason } from "./bot.js";
+  getLongShortRatio, getStablecoinInflow, getBtcPerpBasis, getAltcoinSeason,
+  generateDailyReport } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -4789,9 +4790,36 @@ async function scheduledRun() {
   finally { botRunning = false; }
 }
 
+// ─── Daily Report scheduler — svaki dan u 07:00 UTC ───────────────────────────
+// Generira MM/Algo analizu i šalje na Telegram. Neovisno o Claude sesiji.
+let _dailyReportRunning = false;
+let _lastDailyReportDate = "";
+
+setInterval(async () => {
+  const now      = new Date();
+  const utcHour  = now.getUTCHours();
+  const utcMin   = now.getUTCMinutes();
+  const dateStr  = now.toISOString().slice(0, 10);
+  // Pali u 07:00–07:04 UTC (buffer 5 min jer scheduler radi svakih 5 min)
+  if (utcHour !== 7 || utcMin > 4) return;
+  // Samo jednom dnevno
+  if (_lastDailyReportDate === dateStr) return;
+  if (_dailyReportRunning) return;
+  _dailyReportRunning   = true;
+  _lastDailyReportDate  = dateStr;
+  try {
+    console.log("📋 [Daily Report] Pokretanje jutarnje analize...");
+    await generateDailyReport();
+  } catch (e) {
+    console.error("Daily Report greška:", e.message);
+  } finally {
+    _dailyReportRunning = false;
+  }
+}, 60 * 1000); // provjera svake minute
+
 server.listen(PORT, () => {
   console.log(`📊 Dashboard: http://localhost:${PORT}`);
-  console.log(`⚙️  Bot scheduler aktivan (svake 1 min)`);
+  console.log(`⚙️  Bot scheduler aktivan (svake 5 min) | Daily report: 07:00 UTC`);
   scheduledRun();
   setInterval(scheduledRun, 5 * 60 * 1000);
 

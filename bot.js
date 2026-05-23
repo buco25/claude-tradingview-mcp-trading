@@ -73,6 +73,30 @@ const TRAIL_SL_PCT       = 1.5;  // trail SL X% ispod/iznad peak-a (bio 0.8 — 
 // Ako bot padne: BitGet ghost SL je safety net (0.5% dalje — malo lošija egzekucija)
 const GHOST_STOP_BUFFER = 0.005; // 0.5% buffer između pravog SL i ghost SL na burzi
 
+// ─── VOL_EXH tiered threshold — ovisno o likvidnosti simbola ──────────────────
+// Analiza: liquid simboli (BTC/ETH/SOL) nastavljaju trend pri 1.5-2× vol → viši threshold
+// Tanki alti (TAO/HYPE/JUP/ENA) distribuiraju već pri 1.3× → niži threshold
+// Izvor: MM/Algo analiza 23.05.2026 — docs/MM_Algo_Analysis.xlsx
+const VOL_EXH_TIERS = {
+  "BTCUSDT":  2.5,  // Tier 0 — najefikasniji market, tek 2.5× je pouzdan signal
+  "ETHUSDT":  2.0,  // Tier 1 — visoka likvidnost, trend nastavlja pri 1.5-2×
+  "SOLUSDT":  2.0,  // Tier 1 — bull barei nastavljaju u trendu, threshold viši
+  "XRPUSDT":  2.0,  // Tier 1 — likvidan altcoin
+  "ADAUSDT":  1.7,  // Tier 2 — srednja likvidnost
+  "LINKUSDT": 1.7,  // Tier 2
+  "DOGEUSDT": 1.7,  // Tier 2 — MEME vol spiky ali likvidno
+  "NEARUSDT": 1.4,  // Tier 3 — tanje knjige, MM distribuira ranije
+  "SUIUSDT":  1.4,  // Tier 3
+  "APTUSDT":  1.4,  // Tier 3
+  "SEIUSDT":  1.4,  // Tier 3
+  "INJUSDT":  1.4,  // Tier 3
+  "TAOUSDT":  1.3,  // Tier 4 — tanko tržište, reversal 80% pri 1.3×
+  "HYPEUSDT": 1.3,  // Tier 4 — pump/dump pattern, MM dominira
+  "JUPUSDT":  1.3,  // Tier 4 — tanak DEFI token
+  "ENAUSDT":  1.3,  // Tier 4 — tanak DEFI token
+};
+const VOL_EXH_DEFAULT = 1.5; // fallback za nepoznate simbole
+
 // ─── Ekonomski kalendar ───────────────────────────────────────────────────────
 const ECON_BLOCK_MIN = 15;  // blokiraj ±15min oko HIGH impact USD eventa
 
@@ -1514,7 +1538,7 @@ function analyzeSynapseT(candles, cfg) {
 // SL 1% / TP 2%
 
 function analyzeUltra(candles, cfg) {
-  const { minSig = 8, _dynAdx } = cfg;
+  const { minSig = 8, _dynAdx, symbol: _sym } = cfg;
   const effectiveAdx = _dynAdx ?? ADX_MIN;  // koristi dinamički ADX ako dostupan
   const closes = candles.map(c => c.close);
   const vols   = candles.map(c => c.volume || 0);
@@ -1778,14 +1802,15 @@ function analyzeUltra(candles, cfg) {
   const rsiShortOk = rsi > (_strongTrendS ? 15 : 30);
 
   // 4. VOL EXHAUSTION gate — ne ulazi na high-volume svjeće (= distribucija/akumulacija MM-a)
-  // Analiza: 80% puta high-vol bull candle → sljedeća svjeća ide dolje (MM prodaje u naše buyove)
-  // Threshold: 1.5x avg20 = ulazimo samo na normalno-niskim vol svjećama (pullback = low vol)
-  const VOL_EXH_THRESHOLD = 1.5;
+  // Tiered threshold: BTC/ETH/SOL (2.0-2.5×) vs tanki alts (1.3-1.4×)
+  // Izvor: MM/Algo analiza 23.05.2026 — docs/MM_Algo_Analysis.xlsx
+  // SOL nastavlja trend pri 1.5-2×, TAO/HYPE distribuiraju već pri 1.3×
+  const VOL_EXH_THRESHOLD = VOL_EXH_TIERS[_sym] ?? VOL_EXH_DEFAULT;
   const volRatioNow = volAvg20 > 0 ? volLast / volAvg20 : 1;
   const volExhOk = volRatioNow < VOL_EXH_THRESHOLD;
   if (!volExhOk) {
     return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
-      reason: `VOL_EXH: ${volRatioNow.toFixed(1)}x avg — high-vol svjeća, čekamo pullback na nižem vol` };
+      reason: `VOL_EXH: ${volRatioNow.toFixed(2)}x avg ≥ ${VOL_EXH_THRESHOLD}× (${_sym||"def"}) — high-vol svjeća, čekamo pullback` };
   }
 
   // ── Min 5/13 potvrđujućih signala ──────────────────────────────────────────
@@ -1927,8 +1952,8 @@ async function analyzeUltraPullback(symbol, candles, cfg) {
   pending = pending.filter(p => p.symbol !== symbol);
   savePending(pid, pending);
 
-  // Pokreni 15m analizu
-  const result = analyzeUltra(candles, cfg);
+  // Pokreni analizu (proslijedi symbol za tiered VOL_EXH threshold)
+  const result = analyzeUltra(candles, { ...cfg, symbol });
 
   if (result.signal === "LONG" || result.signal === "SHORT") {
     // 5m S/R test — OBAVEZAN za pullback ulaze (blokira u run() ako srOk !== true)

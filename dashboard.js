@@ -42,6 +42,17 @@ const PORTFOLIO_DEFS = [
 // Placeholder — pravi ALL_SYMBOLS se postavlja na dnu, nakon definicije loadRules
 let ALL_SYMBOLS = [];
 
+// ─── VOL_EXH tiered threshold (mora biti identično bot.js VOL_EXH_TIERS) ─────
+// Izvor: MM/Algo analiza 23.05.2026 — docs/MM_Algo_Analysis.xlsx
+const VOL_EXH_TIERS_D = {
+  "BTCUSDT":  2.5,
+  "ETHUSDT":  2.0, "SOLUSDT":  2.0, "XRPUSDT":  2.0,
+  "ADAUSDT":  1.7, "LINKUSDT": 1.7, "DOGEUSDT": 1.7,
+  "NEARUSDT": 1.4, "SUIUSDT":  1.4, "APTUSDT":  1.4, "SEIUSDT":  1.4, "INJUSDT":  1.4,
+  "TAOUSDT":  1.3, "HYPEUSDT": 1.3, "JUPUSDT":  1.3, "ENAUSDT":  1.3,
+};
+const VOL_EXH_DEFAULT_D = 1.5;
+
 // ─── Scanner indicator helpers ─────────────────────────────────────────────────
 
 function _ema(closes, p) {
@@ -521,12 +532,14 @@ async function runScan(rules) {
         const tpPct   = symSltp.tpPct ?? 2.5;
 
         // Volume anomaly check (isti algoritam kao bot.js)
-        let volRatio = 1, volLow = false;
+        let volRatio = 1, volLow = false, volHigh = false, volExhThreshold = VOL_EXH_DEFAULT_D;
         if (candles.length >= 22) {
           const vols = candles.slice(-22, -2).map(c => c.volume);
           const avg  = vols.reduce((a, b) => a + b, 0) / vols.length;
-          volRatio   = avg > 0 ? candles[candles.length - 2].volume / avg : 1;
-          volLow     = volRatio < 0.3;
+          volRatio         = avg > 0 ? candles[candles.length - 2].volume / avg : 1;
+          volLow           = volRatio < 0.3;
+          volExhThreshold  = VOL_EXH_TIERS_D[sym] ?? VOL_EXH_DEFAULT_D;
+          volHigh          = volRatio >= volExhThreshold; // VOL_EXH bi blokirao ulaz
         }
 
         // 5m S/R test — samo za simbole koji imaju aktivan LONG/SHORT signal
@@ -555,7 +568,7 @@ async function runScan(rules) {
 
         const vwap = calcVWAP(candles);
         const vwapDistPct = vwap ? parseFloat(((candles[candles.length-1].close - vwap) / vwap * 100).toFixed(2)) : null;
-        results.push({ symbol: sym, ...s, pending, slPct, tpPct, srOk, trend1h, vwap: vwap ? parseFloat(vwap.toFixed(6)) : null, vwapDistPct, volRatio: parseFloat(volRatio.toFixed(2)), volLow });
+        results.push({ symbol: sym, ...s, pending, slPct, tpPct, srOk, trend1h, vwap: vwap ? parseFloat(vwap.toFixed(6)) : null, vwapDistPct, volRatio: parseFloat(volRatio.toFixed(2)), volLow, volHigh, volExhThreshold });
       } catch (e) {
         results.push({ symbol: sym, error: e.message });
       }
@@ -1991,10 +2004,12 @@ function scoreBox(bull, bear, sig, minSig) {
 function statusBox(s) {
   const sig = s.ultraSig;
 
-  // Nizak volumen — bot bi preskočio ovaj signal
-  const volWarning = s.volLow
-    ? '<div style="font-size:10px;color:#f59e0b;margin-top:3px">⚠️ VOL nizak ' + s.volRatio + 'x · bot preskoči</div>'
-    : '';
+  // Volume upozorenja — nizak vol (slabi signal) ili visok vol (VOL_EXH blocker)
+  const volWarning = s.volHigh
+    ? '<div style="font-size:10px;color:#ef4444;margin-top:3px">🚫 VOL_EXH: ' + s.volRatio + 'x ≥ ' + (s.volExhThreshold||1.5) + '× — bot blokiran</div>'
+    : s.volLow
+      ? '<div style="font-size:10px;color:#f59e0b;margin-top:3px">⚠️ VOL nizak ' + s.volRatio + 'x · slabi signal</div>'
+      : '';
 
   // Aktivan signal — bot ulazi odmah na close svjećice
   if (sig === "LONG") {

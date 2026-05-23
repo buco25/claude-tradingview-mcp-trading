@@ -4405,6 +4405,108 @@ function _buildReport(dateStr, stats, symReports) {
   return { md, tg: tgMsg };
 }
 
+// ─── Email slanje daily reporta ───────────────────────────────────────────────
+// Podržava Resend (preporučeno, bez novih npm paketa) i SendGrid.
+// Env vars: RESEND_API_KEY ili SENDGRID_API_KEY + REPORT_EMAIL + REPORT_FROM_EMAIL
+
+function _mdToHtml(md) {
+  // Jednostavna konverzija markdown → HTML za email (bez paketa)
+  let html = md
+    // Naslovi
+    .replace(/^### (.+)$/gm,  '<h3 style="color:#1e293b;margin:16px 0 6px">$1</h3>')
+    .replace(/^## (.+)$/gm,   '<h2 style="color:#0f172a;border-bottom:1px solid #e2e8f0;padding-bottom:6px;margin:20px 0 10px">$1</h2>')
+    .replace(/^# (.+)$/gm,    '<h1 style="color:#0f172a;margin:0 0 4px">$1</h1>')
+    // Bold
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    // Tablice — header row
+    .replace(/^\|(.+)\|$/gm, (line, inner) => {
+      const cells = inner.split("|").map(c => c.trim());
+      if (cells.every(c => /^[-:]+$/.test(c))) return ""; // separator row
+      const tag = line.includes("---") ? "th" : "td";
+      const tdStyle = 'style="padding:6px 10px;border:1px solid #e2e8f0;font-size:13px"';
+      return `<tr>${cells.map(c=>`<${tag} ${tdStyle}>${c}</${tag}>`).join("")}</tr>`;
+    })
+    // Wrap table rows
+    .replace(/(<tr>.*<\/tr>\n?)+/gs, m =>
+      `<table style="border-collapse:collapse;width:100%;margin:10px 0">${m}</table>`)
+    // Liste
+    .replace(/^- (.+)$/gm, '<li style="margin:2px 0">$1</li>')
+    .replace(/(<li.*<\/li>\n?)+/gs, m => `<ul style="margin:6px 0;padding-left:20px">${m}</ul>`)
+    // Italic
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    // Horizontalna linija
+    .replace(/^---$/gm, '<hr style="border:none;border-top:1px solid #e2e8f0;margin:16px 0">')
+    // Paragrafi (redovi koji nisu HTML)
+    .replace(/^(?!<[a-z]|$)(.+)$/gm, '<p style="margin:4px 0;font-size:14px">$1</p>')
+    // Prazni redovi
+    .replace(/\n\n+/g, "\n");
+
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:700px;margin:0 auto;padding:24px;color:#1e293b;background:#f8fafc">
+  <div style="background:#fff;border-radius:12px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,0.1)">
+    ${html}
+    <div style="margin-top:24px;padding-top:16px;border-top:1px solid #e2e8f0;font-size:11px;color:#94a3b8">
+      Automatski generirao ULTRA Trading Bot | Railway Cloud | ${new Date().toISOString()} UTC
+    </div>
+  </div>
+</body></html>`;
+}
+
+async function _sendReportEmail(markdownContent, dateStr) {
+  const toEmail   = process.env.REPORT_EMAIL;
+  const fromEmail = process.env.REPORT_FROM_EMAIL || "ULTRA Bot <onboarding@resend.dev>";
+  const subject   = `📊 ULTRA Daily Report — ${dateStr}`;
+  const html      = _mdToHtml(markdownContent);
+
+  if (!toEmail) {
+    console.log("  ℹ️ [Email] REPORT_EMAIL nije postavljen — skip");
+    return;
+  }
+
+  // ── Resend (preporučeno) ────────────────────────────────────────────────────
+  const resendKey = process.env.RESEND_API_KEY;
+  if (resendKey) {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${resendKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from: fromEmail, to: [toEmail], subject, html, text: markdownContent }),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Resend: ${res.status} — ${err}`);
+    }
+    console.log(`  ✉️ [Email/Resend] Report poslan na ${toEmail}`);
+    return;
+  }
+
+  // ── SendGrid (alternativa) ──────────────────────────────────────────────────
+  const sgKey = process.env.SENDGRID_API_KEY;
+  if (sgKey) {
+    const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${sgKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        personalizations: [{ to: [{ email: toEmail }] }],
+        from: { email: fromEmail.replace(/.*<(.+)>/, "$1").trim() },
+        subject,
+        content: [
+          { type: "text/html",  value: html },
+          { type: "text/plain", value: markdownContent },
+        ],
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`SendGrid: ${res.status} — ${err}`);
+    }
+    console.log(`  ✉️ [Email/SendGrid] Report poslan na ${toEmail}`);
+    return;
+  }
+
+  console.log("  ⚠️ [Email] Ni RESEND_API_KEY ni SENDGRID_API_KEY nisu postavljeni — skip");
+}
+
 export async function generateDailyReport() {
   const now     = new Date();
   const dateStr = now.toISOString().slice(0, 10);
@@ -4441,6 +4543,11 @@ export async function generateDailyReport() {
   // 5. Telegram
   try { await tg(report.tg); } catch (e) {
     console.log(`  ⚠️ [Daily Report] Telegram greška: ${e.message}`);
+  }
+
+  // 6. Email
+  try { await _sendReportEmail(report.md, dateStr); } catch (e) {
+    console.log(`  ⚠️ [Daily Report] Email greška: ${e.message}`);
   }
 
   return report.md;

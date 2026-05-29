@@ -2893,6 +2893,32 @@ setInterval(loadSweepStatus, 60 * 1000);  // osvježi svaku minutu
       style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🔊 SOUN</button>
     <button onclick="squeezeShowTab('HIMS')" id="squeeze-tab-HIMS"
       style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">💊 HIMS</button>
+    <button onclick="squeezeShowTab('MSTR')" id="squeeze-tab-MSTR"
+      style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">₿ MSTR</button>
+    <button onclick="squeezeShowTab('LCID')" id="squeeze-tab-LCID"
+      style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🚗 LCID</button>
+    <button onclick="squeezeShowTab('HOOD')" id="squeeze-tab-HOOD"
+      style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🪶 HOOD</button>
+    <button onclick="squeezeShowTab('OPEN')" id="squeeze-tab-OPEN"
+      style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🏠 OPEN</button>
+    <button onclick="squeezeShowTab('NKLA')" id="squeeze-tab-NKLA"
+      style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🚛 NKLA</button>
+    <button onclick="squeezeShowTab('MVIS')" id="squeeze-tab-MVIS"
+      style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🔭 MVIS</button>
+    <button onclick="squeezeShowTab('CLOV')" id="squeeze-tab-CLOV"
+      style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🍀 CLOV</button>
+    <button onclick="squeezeShowTab('WKHS')" id="squeeze-tab-WKHS"
+      style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🐴 WKHS</button>
+    <button onclick="squeezeShowTab('TLRY')" id="squeeze-tab-TLRY"
+      style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🌿 TLRY</button>
+    <button onclick="squeezeShowTab('AI')" id="squeeze-tab-AI"
+      style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🧠 AI</button>
+    <button onclick="squeezeShowTab('LMND')" id="squeeze-tab-LMND"
+      style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🍋 LMND</button>
+    <button onclick="squeezeShowTab('SOFI')" id="squeeze-tab-SOFI"
+      style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">💳 SOFI</button>
+    <button onclick="squeezeShowTab('FFIE')" id="squeeze-tab-FFIE"
+      style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🔋 FFIE</button>
   </div>
 
   <!-- Compact grid: sve dionice odjednom -->
@@ -2931,8 +2957,8 @@ setInterval(loadSweepStatus, 60 * 1000);  // osvježi svaku minutu
 // ── Squeeze panel — flat global functions (no IIFE, no closure issues) ──────
 var _sqData   = {};
 var _sqActive = null;
-var _sqTickers = ['AMC','GME','KOSS','BYND','UPST','BBAI','SMCI','RIVN','IONQ','SOUN','HIMS'];
-var _sqEmojis  = { AMC:'🍿', GME:'🎮', KOSS:'🎧', BYND:'🌱', UPST:'🤖', BBAI:'🐻', SMCI:'🖥️', RIVN:'⚡', IONQ:'⚛️', SOUN:'🔊', HIMS:'💊' };
+var _sqTickers = ['AMC','GME','KOSS','BYND','UPST','BBAI','SMCI','RIVN','IONQ','SOUN','HIMS','MSTR','LCID','HOOD','OPEN','NKLA','MVIS','CLOV','WKHS','TLRY','AI','LMND','SOFI','FFIE'];
+var _sqEmojis  = { AMC:'🍿', GME:'🎮', KOSS:'🎧', BYND:'🌱', UPST:'🤖', BBAI:'🐻', SMCI:'🖥️', RIVN:'⚡', IONQ:'⚛️', SOUN:'🔊', HIMS:'💊', MSTR:'₿', LCID:'🚗', HOOD:'🪶', OPEN:'🏠', NKLA:'🚛', MVIS:'🔭', CLOV:'🍀', WKHS:'🐴', TLRY:'🌿', AI:'🧠', LMND:'🍋', SOFI:'💳', FFIE:'🔋' };
 
 function _sqScoreColor(s) { return s>=75?'#ef4444':s>=55?'#f97316':s>=35?'#eab308':'#22c55e'; }
 function _sqFmt(v)  { return v != null ? v : '—'; }
@@ -4698,6 +4724,19 @@ const SQUEEZE_STOCKS = [
   { ticker: "IONQ", name: "IonQ Inc.",               cmcSlug: "ionq",                 ceSlug: "nyse-ionq",   emoji: "⚛️" },
   { ticker: "SOUN", name: "SoundHound AI Inc.",      cmcSlug: "soundhound-ai",        ceSlug: "nasdaq-soun", emoji: "🔊" },
   { ticker: "HIMS", name: "Hims & Hers Health Inc.", cmcSlug: "hims-hers-health",     ceSlug: "nyse-hims",   emoji: "💊" },
+  { ticker: "MSTR", name: "Strategy Inc. (MicroStrategy)", cmcSlug: "microstrategy",      ceSlug: "nasdaq-mstr", emoji: "₿"  },
+  { ticker: "LCID", name: "Lucid Group Inc.",          cmcSlug: "lucid-motors",          ceSlug: "nasdaq-lcid", emoji: "🚗" },
+  { ticker: "HOOD", name: "Robinhood Markets Inc.",    cmcSlug: "robinhood-markets",     ceSlug: "nasdaq-hood", emoji: "🪶" },
+  { ticker: "OPEN", name: "Opendoor Technologies",     cmcSlug: "opendoor-technologies", ceSlug: "nasdaq-open", emoji: "🏠" },
+  { ticker: "NKLA", name: "Nikola Corporation",        cmcSlug: "nikola",                ceSlug: "nasdaq-nkla", emoji: "🚛" },
+  { ticker: "MVIS", name: "MicroVision Inc.",          cmcSlug: "microvision",           ceSlug: "nasdaq-mvis", emoji: "🔭" },
+  { ticker: "CLOV", name: "Clover Health Investments", cmcSlug: "clover-health",         ceSlug: "nasdaq-clov", emoji: "🍀" },
+  { ticker: "WKHS", name: "Workhorse Group Inc.",      cmcSlug: "workhorse-group",       ceSlug: "nasdaq-wkhs", emoji: "🐴" },
+  { ticker: "TLRY", name: "Tilray Brands Inc.",        cmcSlug: "tilray-brands",         ceSlug: "nasdaq-tlry", emoji: "🌿" },
+  { ticker: "AI",   name: "C3.ai Inc.",                cmcSlug: "c3-ai",                 ceSlug: "nyse-ai",     emoji: "🧠" },
+  { ticker: "LMND", name: "Lemonade Inc.",             cmcSlug: "lemonade",              ceSlug: "nyse-lmnd",   emoji: "🍋" },
+  { ticker: "SOFI", name: "SoFi Technologies Inc.",    cmcSlug: "sofi-technologies",     ceSlug: "nasdaq-sofi", emoji: "💳" },
+  { ticker: "FFIE", name: "Faraday Future Intelligent Electric", cmcSlug: "faraday-future", ceSlug: "nasdaq-ffie", emoji: "🔋" },
 ];
 
 const _squeezeCache = {};          // keyed by ticker → { data, ts }

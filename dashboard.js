@@ -2864,6 +2864,7 @@ setInterval(loadSweepStatus, 60 * 1000);  // osvježi svaku minutu
     </div>
     <div style="display:flex;align-items:center;gap:8px">
       <div style="font-size:10px;color:#6b7280" id="squeeze-ts">Učitavam…</div>
+      <div style="font-size:10px;color:#6b7280;font-style:italic" id="sq-hidden-count"></div>
       <button onclick="squeezeForceRefresh()" title="Osvježi sve dionice"
         style="background:#1f2937;border:1px solid #374151;border-radius:4px;color:#9ca3af;font-size:10px;padding:2px 7px;cursor:pointer">↻</button>
     </div>
@@ -2897,9 +2898,7 @@ setInterval(loadSweepStatus, 60 * 1000);  // osvježi svaku minutu
       style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">₿ MSTR</button>
     <button onclick="squeezeShowTab('LCID')" id="squeeze-tab-LCID"
       style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🚗 LCID</button>
-    <button onclick="squeezeShowTab('HOOD')" id="squeeze-tab-HOOD"
-      style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🪶 HOOD</button>
-    <button onclick="squeezeShowTab('OPEN')" id="squeeze-tab-OPEN"
+<button onclick="squeezeShowTab('OPEN')" id="squeeze-tab-OPEN"
       style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🏠 OPEN</button>
 <button onclick="squeezeShowTab('MVIS')" id="squeeze-tab-MVIS"
       style="background:#374151;border:none;border-radius:6px;color:#9ca3af;font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer">🔭 MVIS</button>
@@ -2955,8 +2954,8 @@ setInterval(loadSweepStatus, 60 * 1000);  // osvježi svaku minutu
 // ── Squeeze panel — flat global functions (no IIFE, no closure issues) ──────
 var _sqData   = {};
 var _sqActive = null;
-var _sqTickers = ['AMC','GME','KOSS','BYND','UPST','BBAI','SMCI','RIVN','IONQ','SOUN','HIMS','MSTR','LCID','HOOD','OPEN','MVIS','CLOV','WKHS','TLRY','AI','LMND','SOFI','FFIE'];
-var _sqEmojis  = { AMC:'🍿', GME:'🎮', KOSS:'🎧', BYND:'🌱', UPST:'🤖', BBAI:'🐻', SMCI:'🖥️', RIVN:'⚡', IONQ:'⚛️', SOUN:'🔊', HIMS:'💊', MSTR:'₿', LCID:'🚗', HOOD:'🪶', OPEN:'🏠', MVIS:'🔭', CLOV:'🍀', WKHS:'🐴', TLRY:'🌿', AI:'🧠', LMND:'🍋', SOFI:'💳', FFIE:'🔋' };
+var _sqTickers = ['AMC','GME','KOSS','BYND','UPST','BBAI','SMCI','RIVN','IONQ','SOUN','HIMS','MSTR','LCID','OPEN','MVIS','CLOV','WKHS','TLRY','AI','LMND','SOFI','FFIE'];
+var _sqEmojis  = { AMC:'🍿', GME:'🎮', KOSS:'🎧', BYND:'🌱', UPST:'🤖', BBAI:'🐻', SMCI:'🖥️', RIVN:'⚡', IONQ:'⚛️', SOUN:'🔊', HIMS:'💊', MSTR:'₿', LCID:'🚗', OPEN:'🏠', MVIS:'🔭', CLOV:'🍀', WKHS:'🐴', TLRY:'🌿', AI:'🧠', LMND:'🍋', SOFI:'💳', FFIE:'🔋' };
 
 function _sqScoreColor(s) { return s>=75?'#ef4444':s>=55?'#f97316':s>=35?'#eab308':'#22c55e'; }
 function _sqFmt(v)  { return v != null ? v : '—'; }
@@ -2966,15 +2965,22 @@ function scoreColor(s) { return _sqScoreColor(s); }
 function fmt(v)        { return _sqFmt(v); }
 function fmtQty(q)     { return _sqFmtQ(q); }
 
+var SQ_MIN_SCORE = 10; // filtriraj tickere s score < SQ_MIN_SCORE
+
 function sqRenderGrid() {
   var grid = document.getElementById('squeeze-grid');
   if (!grid) return;
   var html = '';
+  var hiddenCount = 0;
   for (var ti=0; ti<_sqTickers.length; ti++) {
     var t = _sqTickers[ti];
     var d = _sqData[t];
     var em = _sqEmojis[t] || '';
+    var tabBtn = document.getElementById('squeeze-tab-' + t);
+
     if (!d || d.loading) {
+      // Još učitavamo — prikaži spinner, tab vidljiv
+      if (tabBtn) tabBtn.style.display = '';
       html += '<div data-ticker="' + t + '" onclick="squeezeShowTab(this.dataset.ticker)" style="background:#1f2937;border:1px solid #374151;border-radius:8px;padding:12px;cursor:pointer;text-align:center">'
             + '<div style="font-size:11px;color:#9ca3af;font-weight:700">' + em + ' ' + t + '</div>'
             + '<div style="font-size:11px;color:#6b7280;margin-top:6px">Učitavam…</div>'
@@ -2983,6 +2989,15 @@ function sqRenderGrid() {
     }
     var sq = d.squeeze || {};
     var sqScore = sq.score != null ? sq.score : 0;
+
+    // Sakrij tickere s niskim scoreom
+    if (sqScore < SQ_MIN_SCORE) {
+      hiddenCount++;
+      if (tabBtn) tabBtn.style.display = 'none';
+      continue;
+    }
+
+    if (tabBtn) tabBtn.style.display = '';
     var sqColor = _sqScoreColor(sqScore);
     var priceStr = d.price != null ? '$' + d.price.toFixed(2) : '—';
     var chgStr = d.changePct ? String(d.changePct) : '';
@@ -3006,6 +3021,9 @@ function sqRenderGrid() {
           + '</div>'
           + '</div>';
   }
+  // Counter skrivenih
+  var hiddenEl = document.getElementById('sq-hidden-count');
+  if (hiddenEl) hiddenEl.textContent = hiddenCount > 0 ? hiddenCount + ' skriveno (score < ' + SQ_MIN_SCORE + ')' : '';
   grid.innerHTML = html;
 }
 
@@ -4724,7 +4742,6 @@ const SQUEEZE_STOCKS = [
   { ticker: "HIMS", name: "Hims & Hers Health Inc.", cmcSlug: "hims-hers-health",     ceSlug: "nyse-hims",   emoji: "💊" },
   { ticker: "MSTR", name: "Strategy Inc. (MicroStrategy)", cmcSlug: "microstrategy",      ceSlug: "nasdaq-mstr", emoji: "₿"  },
   { ticker: "LCID", name: "Lucid Group Inc.",          cmcSlug: "lucid-motors",          ceSlug: "nasdaq-lcid", emoji: "🚗" },
-  { ticker: "HOOD", name: "Robinhood Markets Inc.",    cmcSlug: "robinhood-markets",     ceSlug: "nasdaq-hood", emoji: "🪶" },
   { ticker: "OPEN", name: "Opendoor Technologies",     cmcSlug: "opendoor-technologies", ceSlug: "nasdaq-open", emoji: "🏠" },
   { ticker: "MVIS", name: "MicroVision Inc.",          cmcSlug: "microvision",           ceSlug: "nasdaq-mvis", emoji: "🔭" },
   { ticker: "CLOV", name: "Clover Health Investments", cmcSlug: "clover-health",         ceSlug: "nasdaq-clov", emoji: "🍀" },

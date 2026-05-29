@@ -1394,6 +1394,28 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div style="font-size:11px;color:#9ca3af" id="cb-sub">učitavam…</div>
       </div>
 
+      <!-- MM Sweep Detektor -->
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px" id="sweep-card">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">🛡️ MM Sweep Aktivnost</div>
+        <div style="font-size:18px;font-weight:800" id="sweep-status">…</div>
+        <div style="background:#374151;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
+          <div id="sweep-bar" style="height:100%;border-radius:4px;background:#059669;transition:width .5s,background .5s;width:0%"></div>
+        </div>
+        <div style="font-size:11px;color:#9ca3af" id="sweep-sub">Učitavam likvide…</div>
+        <div style="font-size:10px;margin-top:6px;display:flex;gap:8px;flex-wrap:wrap" id="sweep-liq-row"></div>
+      </div>
+
+      <!-- Liq Zone Scanner — svi simboli -->
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px;grid-column:span 2" id="liq-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div style="font-size:10px;color:#9ca3af;text-transform:uppercase">💥 Liq Zone Scanner (16 simbola)</div>
+          <div style="font-size:10px;color:#6b7280" id="liq-ts">učitavam…</div>
+        </div>
+        <div id="liq-danger-row" style="margin-bottom:6px"></div>
+        <div id="liq-caution-row" style="margin-bottom:6px"></div>
+        <div id="liq-clear-row"></div>
+      </div>
+
       <!-- Daily P&L Budget -->
       <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
         <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">💰 Dnevni P&L Budget</div>
@@ -2169,7 +2191,12 @@ async function doScan() {
       const t1hCol  = t1h === 'BULL' ? '#10b981' : t1h === 'BEAR' ? '#ef4444' : '#6b7280';
       const t1hIcon = t1h === 'BULL' ? '▲' : t1h === 'BEAR' ? '▼' : '·';
 
-      const rsiAdxInfo = '<div style="font-size:10px;color:#6b7280;margin-top:2px">RSI <span style="color:' + rsiCol + '">' + (s.rsi||'—') + '</span> · ADX <span style="color:' + adxCol + '">' + (s.adx||'—') + '</span></div>';
+      const volR = s.volRatio ?? null;
+      const volThr = s.volExhThreshold ?? 1.5;
+      const volCol = volR === null ? '#6b7280' : s.volHigh ? '#ef4444' : s.volLow ? '#f59e0b' : volR >= 1.2 ? '#10b981' : '#6b7280';
+      const volIcon = volR === null ? '' : s.volHigh ? ' 🚫' : s.volLow ? ' ⚠️' : '';
+      const volStr  = volR !== null ? volR.toFixed(2) + '×' + volIcon : '—';
+      const rsiAdxInfo = '<div style="font-size:10px;color:#6b7280;margin-top:2px">RSI <span style="color:' + rsiCol + '">' + (s.rsi||'—') + '</span> · ADX <span style="color:' + adxCol + '">' + (s.adx||'—') + '</span> · Vol <span style="color:' + volCol + '" title="Vol/Avg20: ' + volStr + ' | VOL_EXH threshold: ' + volThr + '×">' + volStr + '</span></div>';
       return '<tr style="' + rowBg + '">' +
         '<td style="color:#94a3b8;font-size:11px;text-align:center;padding:6px 4px">' + (i+1) + '</td>' +
         '<td style="font-weight:800;font-size:13px;white-space:nowrap;padding:6px 8px">' + s.symbol.replace("USDT","") + '<span style="color:#94a3b8;font-size:10px;font-weight:400">USDT</span>' +
@@ -2695,6 +2722,138 @@ function updateCountdown() {
 }
 updateCountdown();
 setInterval(updateCountdown, 1000);
+
+// ── Liq Zone Scanner — svi simboli ───────────────────────────────────────────
+async function loadLiqZones() {
+  try {
+    const r = await fetch('/api/liqzones');
+    const d = await r.json();
+    const dangerEl  = document.getElementById('liq-danger-row');
+    const cautionEl = document.getElementById('liq-caution-row');
+    const clearEl   = document.getElementById('liq-clear-row');
+    const tsEl      = document.getElementById('liq-ts');
+    const cardEl    = document.getElementById('liq-card');
+    if (!dangerEl) return;
+
+    if (tsEl) tsEl.textContent = 'osvježeno ' + new Date().toLocaleTimeString('hr-HR', {hour:'2-digit',minute:'2-digit'});
+
+    // Boja kartice prema najgorem stanju
+    const hasDanger  = d.grouped.DANGER?.length  > 0;
+    const hasCaution = d.grouped.CAUTION?.length > 0;
+    cardEl.style.borderColor = hasDanger ? '#dc2626' : hasCaution ? '#d97706' : '#374151';
+    cardEl.style.boxShadow   = hasDanger ? '0 0 10px rgba(220,38,38,0.25)' : '';
+
+    function fmtChip(s, col) {
+      const sym   = s.symbol.replace('USDT','');
+      const dist  = s.minDist?.toFixed(1) ?? '?';
+      const title = (s.closestLong  ? 'LONG liq $'  + Math.round(s.closestLong.price)  + ' (' + s.closestLong.dist  + '%) ' : '')
+                  + (s.closestShort ? 'SHORT liq $' + Math.round(s.closestShort.price) + ' (' + s.closestShort.dist + '%)' : '');
+      return '<span title="' + title + '" style="display:inline-flex;align-items:center;gap:3px;background:' + col + ';border-radius:4px;padding:2px 6px;font-size:11px;font-weight:700;cursor:default">'
+           + sym + '<span style="font-weight:400;font-size:10px;opacity:.85">' + dist + '%</span></span>';
+    }
+
+    // DANGER row
+    if (d.grouped.DANGER?.length > 0) {
+      dangerEl.innerHTML = '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
+        + '<span style="font-size:10px;color:#dc2626;font-weight:700;min-width:60px">🔴 DANGER</span>'
+        + d.grouped.DANGER.map(s => fmtChip(s, 'rgba(220,38,38,0.25)')).join(' ')
+        + '</div>';
+    } else {
+      dangerEl.innerHTML = '<div style="font-size:10px;color:#4b5563">🔴 DANGER — nema simbola</div>';
+    }
+
+    // CAUTION row
+    if (d.grouped.CAUTION?.length > 0) {
+      cautionEl.innerHTML = '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
+        + '<span style="font-size:10px;color:#d97706;font-weight:700;min-width:60px">🟡 CAUTION</span>'
+        + d.grouped.CAUTION.map(s => fmtChip(s, 'rgba(217,119,6,0.2)')).join(' ')
+        + '</div>';
+    } else {
+      cautionEl.innerHTML = '<div style="font-size:10px;color:#4b5563">🟡 CAUTION — nema simbola</div>';
+    }
+
+    // CLEAR row — samo simboli, bez detalja (da ne zauzima puno mjesta)
+    if (d.grouped.CLEAR?.length > 0) {
+      clearEl.innerHTML = '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
+        + '<span style="font-size:10px;color:#059669;font-weight:700;min-width:60px">🟢 CLEAR</span>'
+        + d.grouped.CLEAR.map(s => fmtChip(s, 'rgba(5,150,105,0.15)')).join(' ')
+        + '</div>';
+    }
+  } catch(e) {
+    const el = document.getElementById('liq-danger-row');
+    if (el) el.innerHTML = '<span style="color:#6b7280;font-size:11px">Greška: ' + e.message + '</span>';
+  }
+}
+loadLiqZones();
+setInterval(loadLiqZones, 2 * 60 * 1000);
+
+// ── MM Sweep Detektor — live Coinglass liquidation data ───────────────────────
+async function loadSweepStatus() {
+  try {
+    const r = await fetch("/api/sweep");
+    const d = await r.json();
+    const statusEl  = document.getElementById('sweep-status');
+    const barEl     = document.getElementById('sweep-bar');
+    const subEl     = document.getElementById('sweep-sub');
+    const liqRowEl  = document.getElementById('sweep-liq-row');
+    const cardEl    = document.getElementById('sweep-card');
+    if (!statusEl) return;
+
+    // ── Pauza aktivna (sweep detektiran) ──────────────────────────────────────
+    if (d.paused) {
+      const remH = (d.remainMs / 3600000).toFixed(1);
+      const liqM = d.sweepState.liquidationUsd ? (d.sweepState.liquidationUsd/1e6).toFixed(0) : '?';
+      statusEl.textContent = '🛑 SWEEP PAUZA';
+      statusEl.style.color = '#dc2626';
+      barEl.style.width    = '100%';
+      barEl.style.background = '#dc2626';
+      cardEl.style.borderColor = '#dc2626';
+      cardEl.style.boxShadow = '0 0 12px rgba(220,38,38,0.4)';
+      subEl.textContent = '⏸ Novi ulazi blokirani još ' + remH + 'h · $' + liqM + 'M likvida';
+      subEl.style.color = '#dc2626';
+    }
+    // ── Normalno — prikaz BTC vol ratio zadnjih 90min ────────────────────────
+    else {
+      cardEl.style.borderColor = '#374151';
+      cardEl.style.boxShadow = '';
+      if (d.btcVol) {
+        const maxR = d.btcVol.maxVolRat;
+        // Boja: zelena < 1.5×, narančasta 1.5-3×, crvena ≥ 3×
+        const pct = Math.min(maxR / 3.0 * 100, 100);
+        const col = maxR >= 3.0 ? '#dc2626' : maxR >= 1.5 ? '#d97706' : '#059669';
+        statusEl.textContent = 'Max vol: ' + maxR + '× avg';
+        statusEl.style.color = col;
+        barEl.style.width    = pct + '%';
+        barEl.style.background = col;
+        subEl.textContent = 'BTC 15m zadnjih 90min · Sweep prag: 3× vol + 50% wick';
+        subEl.style.color = '#9ca3af';
+
+        // Mini prikaz zadnjih 6 svjećica
+        if (d.btcVol.recent && liqRowEl) {
+          liqRowEl.innerHTML = d.btcVol.recent.map((c, i) => {
+            const cv = c.volRat >= 3.0 ? '#dc2626' : c.volRat >= 1.5 ? '#d97706' : '#6b7280';
+            const sweep = c.volRat >= 3.0 && c.wickPct >= 50 ? ' ⚠️' : '';
+            const label = i === 5 ? 'Sad' : '-' + (5-i) + 'c';
+            return '<span style="text-align:center;display:flex;flex-direction:column;align-items:center;gap:1px">'
+              + '<span style="color:' + cv + ';font-weight:700;font-size:11px">' + c.volRat + '×' + sweep + '</span>'
+              + '<span style="color:#4b5563;font-size:9px">' + label + '</span>'
+              + '</span>';
+          }).join('<span style="color:#374151;padding:0 2px">│</span>');
+        }
+      } else {
+        statusEl.textContent = 'N/A';
+        statusEl.style.color = '#6b7280';
+        barEl.style.width = '0%';
+        subEl.textContent = 'Bitget nedostupan';
+      }
+    }
+  } catch(e) {
+    const el = document.getElementById('sweep-sub');
+    if (el) el.textContent = 'Greška: ' + e.message;
+  }
+}
+loadSweepStatus();
+setInterval(loadSweepStatus, 60 * 1000);  // osvježi svaku minutu
 </script>
 
 <!-- ═══════════════════════════ SQUEEZE WATCHLIST PANEL ═══════════════════ -->
@@ -3958,6 +4117,24 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Daily report — GET /api/report?date=YYYY-MM-DD (ili latest)
+  if (url.pathname === "/api/report") {
+    const date = url.searchParams.get("date") || "latest";
+    const reportDir = `${DATA_DIR}/daily_reports`;
+    const f = date === "latest"
+      ? `${reportDir}/latest.md`
+      : `${reportDir}/${date}.md`;
+    if (!existsSync(f)) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Report not found", path: f, hint: "Report se generira u 07:00 UTC" }));
+      return;
+    }
+    const md = readFileSync(f, "utf8");
+    res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end(md);
+    return;
+  }
+
   // CSV download — GET /api/csv?pid=synapse_t
   if (url.pathname === "/api/csv") {
     const pid = url.searchParams.get("pid") || "synapse_t";
@@ -3965,6 +4142,113 @@ const server = http.createServer(async (req, res) => {
     if (!existsSync(f)) { res.writeHead(404); res.end("Not found"); return; }
     res.writeHead(200, { "Content-Type": "text/csv", "Content-Disposition": `attachment; filename="trades_${pid}.csv"` });
     res.end(readFileSync(f, "utf8"));
+    return;
+  }
+
+  // Sweep status — GET /api/sweep
+  // Čita sweep_pause_synapse_t.json koji bot piše kada detektira BTC sweep candle
+  if (url.pathname === "/api/sweep") {
+    const pid = "synapse_t";
+    const sweepFile = `${DATA_DIR}/sweep_pause_${pid}.json`;
+    const sweepState = existsSync(sweepFile) ? JSON.parse(readFileSync(sweepFile, "utf8")) : {};
+    const paused   = !!(sweepState.until && Date.now() < sweepState.until);
+    const remainMs = paused ? sweepState.until - Date.now() : 0;
+
+    // Dohvati BTC 15m klines za live vol ratio prikaz (bez eksternog API-ja)
+    let btcVol = null;
+    try {
+      const kResp = await fetch(
+        "https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=15m&limit=26",
+        { signal: AbortSignal.timeout(5000) }
+      );
+      if (kResp.ok) {
+        const kJson = await kResp.json();
+        const klines = kJson?.data ?? [];
+        if (klines.length >= 22) {
+          const vols  = klines.map(c => parseFloat(c[5]));
+          const avg20 = vols.slice(0, 20).reduce((a, b) => a + b, 0) / 20;
+          // Zadnjih 6 svjećica = ~90min
+          const recent = klines.slice(-6).map(c => {
+            const [, o, h, l, cl, v] = c.map(Number);
+            const range   = h - l || 1;
+            const body    = Math.abs(cl - o);
+            const wick    = range - body;
+            return {
+              volRat:  +(v / avg20).toFixed(2),
+              wickPct: +((wick / range) * 100).toFixed(0),
+              dir:     cl < o ? "bearish" : "bullish",
+            };
+          });
+          const maxVolRat = Math.max(...recent.map(r => r.volRat));
+          const sweepCandle = recent.find(r => r.volRat >= 3.0 && r.wickPct >= 50);
+          btcVol = { avg20: +avg20.toFixed(2), recent, maxVolRat: +maxVolRat.toFixed(2), sweepCandle: sweepCandle || null };
+        }
+      }
+    } catch (_) { /* Bitget timeout — ok */ }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ paused, remainMs, sweepState, btcVol }));
+    return;
+  }
+
+  // Liq Zones — GET /api/liqzones (svi simboli paralelno)
+  if (url.pathname === "/api/liqzones") {
+    const SYMBOLS  = ["BTCUSDT","ETHUSDT","SOLUSDT","XRPUSDT","ADAUSDT","LINKUSDT","DOGEUSDT",
+                      "NEARUSDT","HYPEUSDT","SUIUSDT","SEIUSDT","APTUSDT","TAOUSDT","JUPUSDT","ENAUSDT","INJUSDT"];
+    const PIVOT_LEN = 8, N_PIVOTS = 4, RANGE_PCT = 12.0, LEVS = [10,20,25,50,100];
+
+    function calcSymLiq(klines) {
+      if (!klines || klines.length < PIVOT_LEN * 2 + 5) return null;
+      const cp = klines[klines.length - 1].c;
+      const phArr = [], plArr = [];
+      for (let i = PIVOT_LEN; i < klines.length - PIVOT_LEN; i++) {
+        const hi = klines[i].h, lo = klines[i].l;
+        let isPH = true, isPL = true;
+        for (let j = i - PIVOT_LEN; j <= i + PIVOT_LEN; j++) {
+          if (j === i) continue;
+          if (klines[j].h >= hi) isPH = false;
+          if (klines[j].l <= lo) isPL = false;
+        }
+        if (isPH && phArr.length < N_PIVOTS) phArr.push(hi);
+        if (isPL && plArr.length < N_PIVOTS) plArr.push(lo);
+      }
+      const zones = [];
+      phArr.forEach((entry, rank) => LEVS.forEach(lev => {
+        const liqP = entry * (1 - 1/lev), dist = Math.abs(liqP - cp) / cp * 100;
+        if (dist <= RANGE_PCT) zones.push({ type:"LONG", price:+liqP.toFixed(2), lev, rank, dist:+dist.toFixed(2) });
+      }));
+      plArr.forEach((entry, rank) => LEVS.forEach(lev => {
+        const liqP = entry * (1 + 1/lev), dist = Math.abs(liqP - cp) / cp * 100;
+        if (dist <= RANGE_PCT) zones.push({ type:"SHORT", price:+liqP.toFixed(2), lev, rank, dist:+dist.toFixed(2) });
+      }));
+      zones.sort((a,b) => a.dist - b.dist);
+      const cL = zones.find(z => z.type === "LONG");
+      const cS = zones.find(z => z.type === "SHORT");
+      const minDist = Math.min(cL?.dist ?? 99, cS?.dist ?? 99);
+      return { price: cp, minDist: +minDist.toFixed(2), danger: minDist < 1.0 ? "DANGER" : minDist < 2.5 ? "CAUTION" : "CLEAR", closestLong: cL, closestShort: cS };
+    }
+
+    const results = await Promise.all(SYMBOLS.map(async sym => {
+      try {
+        const r = await fetch(
+          `https://api.bitget.com/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=1H&limit=150`,
+          { signal: AbortSignal.timeout(7000) }
+        );
+        if (!r.ok) return { symbol: sym, error: "HTTP " + r.status };
+        const j = await r.json();
+        const klines = (j?.data ?? []).map(c => ({ h:+c[2], l:+c[3], c:+c[4] }));
+        const liq = calcSymLiq(klines);
+        return liq ? { symbol: sym, ...liq } : { symbol: sym, danger: "CLEAR", minDist: 99 };
+      } catch(e) { return { symbol: sym, error: e.message, danger: "CLEAR", minDist: 99 }; }
+    }));
+
+    const grouped = {
+      DANGER:  results.filter(r => r.danger === "DANGER").sort((a,b) => a.minDist - b.minDist),
+      CAUTION: results.filter(r => r.danger === "CAUTION").sort((a,b) => a.minDist - b.minDist),
+      CLEAR:   results.filter(r => r.danger === "CLEAR").sort((a,b) => a.minDist - b.minDist),
+    };
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ results, grouped, ts: new Date().toISOString() }));
     return;
   }
 
@@ -4539,12 +4823,15 @@ async function tgDash(msg) {
   const chatId = process.env.TELEGRAM_CHAT_ID;
   if (!token || !chatId) return;
   try {
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    const body = Buffer.from(JSON.stringify({ chat_id: chatId, text: msg, parse_mode: "HTML" }), "utf8");
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: "HTML" }),
+      headers: { "Content-Type": "application/json; charset=utf-8", "Content-Length": body.length },
+      body,
     });
-  } catch { /* tiho */ }
+    const json = await res.json().catch(() => ({}));
+    if (!json.ok) console.warn("[TG DASH FAIL]", json.description, "| preview:", msg.slice(0, 60));
+  } catch (e) { console.warn("[TG DASH ERROR]", e.message); }
 }
 
 // ─── Short Squeeze preporuka — logika ─────────────────────────────────────────

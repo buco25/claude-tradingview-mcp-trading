@@ -2,11 +2,13 @@
  * Trading Bot — ULTRA Strategy (synapse_t)
  *
  * ULTRA → 15m | Per-simbol SL/TP (30-day daily range analiza May 2026) | rizik 1.5% banke po tradeu
- *   Tier 0 (BTC):                       SL 2.5% / TP 3.75% → 34x  (liq ~2.54% = SL)
- *   Tier 1 (ETH/SOL/XRP/LINK/ADA/DOGE): SL 4.0% / TP 6.0%  → 22x  (liq ~4.15% = SL)
- *   Tier 2 (NEAR/HYPE/SUI/SEI/APT/TAO): SL 5.5% / TP 8.25% → 16x  (liq ~5.85% = SL)
- *   Tier 3 (JUP/ENA/INJ):               SL 7.0% / TP 10.5% → 13x  (liq ~7.29% = SL)
+ *   Tier 0 (BTC):                       SL 1.5% / TP 2.25% → 52x  (liq ~1.55% = SL)
+ *   Tier 1 (ETH/SOL/XRP/LINK/ADA/DOGE): SL 2.0% / TP 3.0%  → 41x  (liq ~2.04% = SL)
+ *   Tier 2 (NEAR/HYPE/SUI/SEI/APT/TAO): SL 2.5% / TP 3.75% → 34x  (liq ~2.54% = SL)
+ *   Tier 3 (JUP/ENA/INJ):               SL 3.0% / TP 4.5%  → 29x  (liq ~3.05% = SL)
  *
+ * 50% zatvara na TP, 50% ostaje na trail SL. Max 3 pozicije, bez pyramidinga.
+ * Rebalans 26.05.2026 — tješnji SL/TP za brži izlaz i bolji R:R.
  * Dinamički TP: BTC Regime NEUTRAL/kontra signal → TP = SL×1.5 | BULL+LONG ili BEAR+SHORT → TP = SL×3
  */
 
@@ -22,8 +24,8 @@ const LEVERAGE      = 50;     // 50x default → SL 1.5% = 75% margine (više pr
 const BTC_LEVERAGE  = 75;    // BTC posebno — 75x
 const START_CAPITAL = 1000;   // po portfoliju
 const RISK_PCT      = 1.5;    // % banke koji rizikaš po tradeu (= veličina uloga/margine)
-const SL_PCT        = 4.0;    // fallback SL % (Tier 1) — override per-simbol u symbol_sltp
-const TP_PCT        = 6.0;    // fallback TP % (Tier 1, 1.5×SL) — override per-simbol u symbol_sltp
+const SL_PCT        = 2.0;    // fallback SL % (Tier 1) — override per-simbol u symbol_sltp
+const TP_PCT        = 3.0;    // fallback TP % (Tier 1, 1.5×SL) — override per-simbol u symbol_sltp
 
 // ─── Dinamički TP — tržišni uvjeti (BTC Regime) ───────────────────────────────
 // JAKO: BTC Regime BULL + signal LONG, ili BEAR + signal SHORT → TP = SL × 3 (1:3 R:R)
@@ -32,8 +34,8 @@ const STRONG_SIGNAL_SCORE = 9;    // nekorišten za TP (zadržan za eventualne f
 const STRONG_TP_MULT      = 3.0;  // jako tržište → TP = SL × 3 (1:3 R:R)
 const NORMAL_TP_MULT      = 1.5;  // konsolidacija / neutralno → TP = SL × 1.5 (1:1.5 R:R)
 const MAX_TRADES_PER_DAY = 100;
-const MAX_OPEN_PER_PORTFOLIO = 8;  // max otvorenih pozicija po portfoliju (+ BTC bonus slot)
-const MAX_PYRAMID           = 3;   // max adicija (pyramid) po simbolu u istom smjeru
+const MAX_OPEN_PER_PORTFOLIO = 3;  // max otvorenih pozicija po portfoliju (rebalans 26.05.2026)
+const MAX_PYRAMID           = 0;   // pyramid onemogućen (26.05.2026) — jedna pozicija po simbolu
 const MAX_NEW_ENTRIES_PER_SCAN = 3; // max NOVIH ulaza po scan ciklusu (sprječava 8 simultanih gubitaka)
 
 // ─── 7. Korelacijski filter — sektori ─────────────────────────────────────────
@@ -50,9 +52,9 @@ const MAX_PER_SECTOR = 2;  // max otvorenih pozicija istog sektora
 // ─── 4. Market Breadth ─────────────────────────────────────────────────────────
 const BREADTH_STRONG = 5;   // ≥ 5 simbola u istom smjeru = jako tržište (pojačava TP×3)
 
-// ─── 6. Partial TP — djelomično zatvaranje pozicije ───────────────────────────
-const PARTIAL_TP_TRIGGER = 50;   // % TP puta → aktivira djelomično zatvaranje
-const PARTIAL_CLOSE_PCT  = 50;   // % pozicije koji se zatvara
+// ─── 6. Partial TP — 50% na TP razini, 50% ostaje na trail SL ────────────────
+const PARTIAL_TP_TRIGGER = 100;  // % TP puta → pali na pravom TP (100% = cijena dosegla TP)
+const PARTIAL_CLOSE_PCT  = 50;   // % pozicije koji se zatvara na TP
 
 // ─── ULTRA strategija — zaštitni parametri ────────────────────────────────────
 const LONG_ONLY      = false;         // SHORT dozvoljeni kada BTC regime BEAR/NEUTRAL
@@ -416,6 +418,56 @@ export async function getAllFundingRates(symbols) {
 const VOL_LOOKBACK = 20;
 const VOL_LOW_MULT = 0.3;
 const VOL_HIGH_MULT = 2.0;
+
+// ─── Liq Zone kalkulator — koristi već dohvaćene 1H candle ──────────────────
+// Pronalazi pivot highs/lows i računa gdje su leveraged pozicije u opasnosti od liq.
+// Vraća: { danger: "CLEAR"|"CAUTION"|"DANGER", minDist, closestLong, closestShort }
+function calcLiqZones(candles) {
+  const PIVOT_LEN = 8;   // bar-ova lijevo/desno za pivot detekciju (1H: 8h prozor)
+  const N_PIVOTS  = 4;   // max pivota koje koristimo
+  const RANGE_PCT = 12.0; // max % od cijene za prikaz zona
+  const LEVS      = [10, 20, 25, 50, 100];
+
+  if (!candles || candles.length < PIVOT_LEN * 2 + 5) return { danger: "CLEAR", minDist: 99 };
+
+  const cp = candles[candles.length - 1].close;
+  const phArr = [], plArr = [];
+
+  for (let i = PIVOT_LEN; i < candles.length - PIVOT_LEN; i++) {
+    const hi = candles[i].high, lo = candles[i].low;
+    let isPH = true, isPL = true;
+    for (let j = i - PIVOT_LEN; j <= i + PIVOT_LEN; j++) {
+      if (j === i) continue;
+      if (candles[j].high >= hi) isPH = false;
+      if (candles[j].low  <= lo) isPL = false;
+    }
+    if (isPH && phArr.length < N_PIVOTS) phArr.push(hi);
+    if (isPL && plArr.length < N_PIVOTS) plArr.push(lo);
+  }
+
+  const zones = [];
+  phArr.forEach((entry, rank) => {
+    LEVS.forEach(lev => {
+      const liqP = entry * (1.0 - 1.0 / lev);
+      const dist = Math.abs(liqP - cp) / cp * 100;
+      if (dist <= RANGE_PCT) zones.push({ type: "LONG", price: liqP, lev, rank, dist });
+    });
+  });
+  plArr.forEach((entry, rank) => {
+    LEVS.forEach(lev => {
+      const liqP = entry * (1.0 + 1.0 / lev);
+      const dist = Math.abs(liqP - cp) / cp * 100;
+      if (dist <= RANGE_PCT) zones.push({ type: "SHORT", price: liqP, lev, rank, dist });
+    });
+  });
+
+  const cLong  = zones.filter(z => z.type === "LONG").sort((a,b) => a.dist - b.dist)[0];
+  const cShort = zones.filter(z => z.type === "SHORT").sort((a,b) => a.dist - b.dist)[0];
+  const minD   = Math.min(cLong?.dist ?? 99, cShort?.dist ?? 99);
+  const danger = minD < 1.0 ? "DANGER" : minD < 2.5 ? "CAUTION" : "CLEAR";
+
+  return { danger, minDist: +minD.toFixed(2), closestLong: cLong, closestShort: cShort };
+}
 
 function checkVolumeAnomaly(candles) {
   // Koristimo zadnju ZATVORENU svjeću (index -2), ne posljednju koja se još formira!
@@ -1178,12 +1230,15 @@ async function tg(msg) {
   const chatId = process.env.TELEGRAM_CHAT_ID;
   if (!token || !chatId) return;
   try {
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    const body = Buffer.from(JSON.stringify({ chat_id: chatId, text: msg, parse_mode: "HTML" }), "utf8");
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: "HTML" }),
+      headers: { "Content-Type": "application/json; charset=utf-8", "Content-Length": body.length },
+      body,
     });
-  } catch { /* tiho */ }
+    const json = await res.json().catch(() => ({}));
+    if (!json.ok) console.warn("[TG FAIL]", json.description, "| preview:", msg.slice(0, 60));
+  } catch (e) { console.warn("[TG ERROR]", e.message); }
 }
 
 // ─── Market Data ───────────────────────────────────────────────────────────────
@@ -2332,26 +2387,38 @@ async function checkPortfolioPositions(pid) {
           }
         }
 
-        // ── PARTIAL-TP: zatvori 50% pozicije kad je PARTIAL_TP_TRIGGER% TP puta ──
-        // PRESKAČEMO ako je trail već aktivan — ne zatvaramo rano, puštamo trend
+        // ── TP HIT: zatvori 50% na TP razini, aktiviraj trail za ostatak 50% ──
+        // Pali se kad cijena dosegne TP (100% TP puta). Otkazuje Bitget plan naloge
+        // da track_stop ne zatvori cijelu poziciju, pa trail preuzima ostatak.
         if (!pos.partialClosed && !pos.trailActive && isLivePortfolio) {
-          const _tpPctP  = pos.tpPct ?? 4.0;
+          const _tpPctP    = pos.tpPct ?? 4.0;
           const _pricePctP = pos.side === "LONG"
             ? (liveP - pos.entryPrice) / pos.entryPrice * 100
             : (pos.entryPrice - liveP) / pos.entryPrice * 100;
           const _tpProgressP = _pricePctP / _tpPctP * 100;
           if (_tpProgressP >= PARTIAL_TP_TRIGGER) {
-            console.log(`  📦 [PARTIAL-TP] ${pos.symbol} ${pos.side} — ${_tpProgressP.toFixed(0)}% TP → zatvaramo ${PARTIAL_CLOSE_PCT}%`);
+            console.log(`  🎯 [TP HIT] ${pos.symbol} ${pos.side} — TP dostignut @ ${fmtPrice(liveP)} (+${_pricePctP.toFixed(1)}%) → zatvaramo ${PARTIAL_CLOSE_PCT}%, ostatak na trail SL`);
             const _pClosed = await partialClosePosition(pos);
             if (_pClosed) {
+              // Otkaži sve Bitget plan naloge (track_stop bi inače zatvorio puni qty)
+              await cancelAllPlanOrders(pos.symbol, pos.side);
+              // Aktiviraj trail odmah — peak počinje od TP razine
               pos.partialClosed = true;
+              pos.trailActive   = true;
+              pos.trailPeak     = liveP;
+              const _newQty = (pos.quantity ?? (pos.totalUSD / pos.entryPrice)) * (1 - PARTIAL_CLOSE_PCT / 100);
               const _allPos = loadPositions(pid);
               const _pIdx   = _allPos.findIndex(p => p.symbol === pos.symbol && p.side === pos.side);
               if (_pIdx >= 0) {
                 _allPos[_pIdx].partialClosed = true;
-                _allPos[_pIdx].quantity = (pos.quantity ?? (pos.totalUSD / pos.entryPrice)) * (1 - PARTIAL_CLOSE_PCT / 100);
+                _allPos[_pIdx].trailActive   = true;
+                _allPos[_pIdx].trailPeak     = liveP;
+                _allPos[_pIdx].quantity      = _newQty;
                 savePositions(pid, _allPos);
               }
+              // Postavi Ghost SL na Bitgetu za preostalu 50% poziciju
+              await updateTrailSL(pos, pos.sl);
+              await tg(`✅ <b>TP HIT [ULTRA]</b> ${pos.symbol} ${pos.side}\n+${_pricePctP.toFixed(1)}% @ ${fmtPrice(liveP)}\n\n💰 50% pozicije ZATVORENO — profit zaključan\n📈 50% ostaje — trail SL ${TRAIL_SL_PCT}% ispod vrha\nTrail peak start: ${fmtPrice(liveP)}`);
             }
           }
         }
@@ -2377,49 +2444,30 @@ async function checkPortfolioPositions(pid) {
           }
         }
 
-        // ── TRAILING STOP: aktivira se na 50% puta do TP-a (dinamički po poziciji) ──
-        if (isLivePortfolio) {
-          const pricePct = pos.side === "LONG"
-            ? (liveP - pos.entryPrice) / pos.entryPrice * 100
-            : (pos.entryPrice - liveP) / pos.entryPrice * 100;
+        // ── TRAILING STOP: prati peak i pomiče SL — aktivira se tek nakon TP HIT ──
+        // Aktivacija se radi u TP HIT bloku iznad (partialClosed=true, trailActive=true).
+        // Ovdje samo pratimo peak i ažuriramo SL na Bitgetu.
+        if (isLivePortfolio && pos.trailActive && pos.partialClosed) {
+          const peak = pos.side === "LONG"
+            ? Math.max(pos.trailPeak || 0, liveP)
+            : Math.min(pos.trailPeak || Infinity, liveP);
+          const prevPeak = pos.trailPeak;
 
-          // Dinamički prag: 50% od tpPct pozicije (min 3% zaštita od šuma)
-          const _tpPct = pos.tpPct ?? 8.0;
-          const _trailActivate = Math.max(_tpPct * TRAIL_ACTIVATE_PCT, 3.0);
-
-          if (pricePct >= _trailActivate) {
-            // ── Prva aktivacija traila: otkaži TP nalog, pusti trend da teče ──
-            if (!pos.trailActive) {
-              pos.trailActive = true;
-              const allPos0 = loadPositions(pid);
-              const idx0 = allPos0.findIndex(p => p.symbol === pos.symbol && p.side === pos.side);
-              if (idx0 >= 0) { allPos0[idx0].trailActive = true; savePositions(pid, allPos0); }
-              const tpCancelled = await cancelTpOrder(pos);
-              console.log(`  📈 [TRAIL] ${pos.symbol} ${pos.side} — trail AKTIVAN +${pricePct.toFixed(1)}% (prag: ${_trailActivate.toFixed(1)}% = 50% TP ${_tpPct.toFixed(1)}%)${tpCancelled ? " | TP otkazan" : ""}`);
-              await tg(`📈 [TRAIL ON] ${pos.symbol} ${pos.side}\n+${pricePct.toFixed(1)}% — TP otkazan, trailing SL preuzima\nPrag: ${_trailActivate.toFixed(1)}% (50% od TP ${_tpPct.toFixed(1)}%) | SL prati ${TRAIL_SL_PCT}% ispod vrha`);
-            }
-
-            const peak = pos.side === "LONG"
-              ? Math.max(pos.trailPeak || 0, liveP)
-              : Math.min(pos.trailPeak || Infinity, liveP);
-            const prevPeak = pos.trailPeak;
-
-            if (prevPeak === undefined || prevPeak === null ||
-                (pos.side === "LONG" && peak > prevPeak) ||
-                (pos.side === "SHORT" && peak < prevPeak)) {
-              const newSl = pos.side === "LONG"
-                ? peak * (1 - TRAIL_SL_PCT / 100)
-                : peak * (1 + TRAIL_SL_PCT / 100);
-              const improving = pos.side === "LONG" ? newSl > (pos.sl || 0) : newSl < (pos.sl || Infinity);
-              if (improving) {
-                const moved = await updateTrailSL(pos, newSl);
-                if (moved) {
-                  const allPos = loadPositions(pid);
-                  const idx    = allPos.findIndex(p => p.symbol === pos.symbol && p.side === pos.side);
-                  if (idx >= 0) { allPos[idx].trailPeak = peak; allPos[idx].sl = newSl; savePositions(pid, allPos); }
-                  pos.trailPeak = peak; pos.sl = newSl;
-                  console.log(`  📈 [TRAIL] ${pos.symbol} ${pos.side} — peak ${fmtPrice(peak)} → trail SL: ${fmtPrice(newSl)}`);
-                }
+          if (prevPeak === undefined || prevPeak === null ||
+              (pos.side === "LONG" && peak > prevPeak) ||
+              (pos.side === "SHORT" && peak < prevPeak)) {
+            const newSl = pos.side === "LONG"
+              ? peak * (1 - TRAIL_SL_PCT / 100)
+              : peak * (1 + TRAIL_SL_PCT / 100);
+            const improving = pos.side === "LONG" ? newSl > (pos.sl || 0) : newSl < (pos.sl || Infinity);
+            if (improving) {
+              const moved = await updateTrailSL(pos, newSl);
+              if (moved) {
+                const allPos = loadPositions(pid);
+                const idx    = allPos.findIndex(p => p.symbol === pos.symbol && p.side === pos.side);
+                if (idx >= 0) { allPos[idx].trailPeak = peak; allPos[idx].sl = newSl; savePositions(pid, allPos); }
+                pos.trailPeak = peak; pos.sl = newSl;
+                console.log(`  📈 [TRAIL] ${pos.symbol} ${pos.side} — peak ${fmtPrice(peak)} → trail SL: ${fmtPrice(newSl)}`);
               }
             }
           }
@@ -3605,7 +3653,7 @@ export async function run() {
 
     const openPositions = loadPositions(pid);
     const openSymbols   = openPositions.map(p => p.symbol);
-    const BTC_EXCEPTION = "BTCUSDT";  // BTC uvijek može otvoriti kao 6. trade
+    const BTC_EXCEPTION = "BTCUSDT";  // BTC uvijek može otvoriti kao bonus slot (4. trade)
 
     if (openPositions.length >= MAX_OPEN_PER_PORTFOLIO) {
       // Ako su svi slotovi puni, skeniramo samo BTC (specijalni slot)
@@ -3729,6 +3777,66 @@ export async function run() {
       console.log(`  📊 [BREADTH] ▲${_marketBreadth.bullish} ▼${_marketBreadth.bearish} —${_marketBreadth.neutral} / ${_marketBreadth.total} simbola`);
     }
 
+    // ── B) Sweep Detektor — BTC 15m volume spike + wick analiza ─────────────────
+    // Logika: MM sweep se vidi na grafovima — velika svjećica s dugim wickom i 3×+ volumenom.
+    // Gledamo zadnjih 6 BTC 15m svjećica (~90min). Bez eksternog API-ja, koristimo Bitget.
+    // Sweep candle: volumen ≥ 3× avg20 I wick ≥ 50% cijelog ranga svjećice
+    if (pDef.strategy === "synapse_t") {
+      const _sweepFile = `${DATA_DIR}/sweep_pause_${pid}.json`;
+      const _sweepState = existsSync(_sweepFile) ? JSON.parse(readFileSync(_sweepFile, "utf8")) : {};
+      if (_sweepState.until && Date.now() < _sweepState.until) {
+        const _remainH = ((_sweepState.until - Date.now()) / 3600000).toFixed(1);
+        console.log(`  🛡️  [SWEEP] Pauza aktivna — sweep detektiran @ ${_sweepState.detected?.slice(0,16)} UTC, još ${_remainH}h`);
+        continue;
+      }
+      try {
+        // Dohvati BTC 15m svjećice — 26 komada (20 za avg + 6 za provjeru)
+        const _btcKlines = await fetchKlines("BTCUSDT", "15m", 26);
+        if (_btcKlines && _btcKlines.length >= 22) {
+          const _vols   = _btcKlines.map(c => parseFloat(c[5]));
+          const _avg20  = _vols.slice(0, 20).reduce((a, b) => a + b, 0) / 20;
+          // Zadnjih 6 svjećica = ~90min
+          const _recent6 = _btcKlines.slice(-6);
+          let _sweepCandle = null;
+          for (const _c of _recent6) {
+            const [, _o, _h, _l, _cl, _v] = _c.map(Number);
+            const _vol     = _v;
+            const _range   = _h - _l;
+            if (_range === 0) continue;
+            const _body    = Math.abs(_cl - _o);
+            const _wick    = _range - _body;         // gornji + donji wick zajedno
+            const _wickPct = _wick / _range;         // koliko range je wick (> 0.5 = sweep candle)
+            const _volRat  = _vol / _avg20;
+            // Sweep: vol ≥ 3× avg I wick ≥ 50% ranga
+            if (_volRat >= 3.0 && _wickPct >= 0.50) {
+              const _dir = (_cl < _o) ? "LONG sweep (bull trap)" : "SHORT sweep (bear trap)";
+              _sweepCandle = { volRat: _volRat.toFixed(1), wickPct: (_wickPct*100).toFixed(0), dir: _dir };
+              break;
+            }
+          }
+          if (_sweepCandle) {
+            const _until = Date.now() + 6 * 3600 * 1000;
+            writeFileSync(_sweepFile, JSON.stringify({
+              until: _until,
+              detected: new Date().toISOString(),
+              volRat: _sweepCandle.volRat,
+              wickPct: _sweepCandle.wickPct,
+              dir: _sweepCandle.dir,
+            }));
+            console.log(`  🛡️  [SWEEP] BTC sweep candle! Vol ${_sweepCandle.volRat}×avg, wick ${_sweepCandle.wickPct}% — ${_sweepCandle.dir} → pauza 6h`);
+            await tg(`🛡️ <b>MM SWEEP DETEKTIRAN</b>\n📊 BTC sweep candle (15m)\n💥 Vol: ${_sweepCandle.volRat}× prosjeka | Wick: ${_sweepCandle.wickPct}% ranga\n📍 ${_sweepCandle.dir}\n⏸️ Novi ulazi pauzirani 6h\n▶️ Nastavak: ${new Date(_until).toISOString().slice(0,16)} UTC`);
+            continue;
+          } else {
+            // Log najjače svjećice za monitoring
+            const _maxVol = Math.max(..._recent6.map(c => parseFloat(c[5])));
+            console.log(`  🌊 [SWEEP] BTC 90min — max vol ${(_maxVol/_avg20).toFixed(1)}×avg (prag: 3×) — OK`);
+          }
+        }
+      } catch (e) {
+        console.log(`  ⚠️  [SWEEP] Greška pri dohvatu BTC klines: ${e.message}`);
+      }
+    }
+
     let _newEntriesThisScan = 0;  // Reset po portfoliju, ne dopuštamo simultano previše ulaza
     for (const symbol of pDef.symbols) {
       // ── Pyramid (DCA) logika: dopuštamo max MAX_PYRAMID adicija u ISTOM smjeru ──
@@ -3777,6 +3885,10 @@ export async function run() {
           continue;
         }
 
+        // ── A) MM Blackout — UKLONJEN 25.05.2026 ────────────────────────────
+        // Bio temeljen na našim lošim trejdovima, ne na tržišnim podacima.
+        // Zamijenjen s Coinglass sweep detektorom koji gleda stvarne tržišne likvide.
+
         // ── 1H Trend Filter ─────────────────────────────────────────────────
         const trend1h = pDef.strategy === "synapse_t" ? await calcTrend1H(symbol) : { trend: 'UNKNOWN' };
 
@@ -3824,6 +3936,46 @@ export async function run() {
         if (signal === "NEUTRAL") {
           console.log(`  🚫 [${pDef.name}] ${symbol} — ${reason}`);
           continue;
+        }
+
+        // ── D) Quiet Pullback filter — ulazimo samo na tihim svjećama ──────────
+        // MM akumulira na nisko vol (0.3–1.0×). Visok vol = distribucija ili markup.
+        // PBK signal: max 1.0× (čisti pullback mora biti tih)
+        // MOM signal: max 1.5× (momentum smije imati veći vol, VOL_EXH blokira ekstremes)
+        // Pyramid (existingPos): preskačemo filter — već smo u poziciji
+        if (pDef.strategy === "synapse_t" && !existingPos) {
+          const _isPbk   = !result.isMomentum;
+          const _volMax  = _isPbk ? 1.0 : 1.5;
+          if (volAnomaly.ratio > _volMax) {
+            console.log(`  🔇 [QUIET] ${symbol} ${signal} (${_isPbk?"PBK":"MOM"}) — volRatio ${volAnomaly.ratio}× > ${_volMax}× → distribucija/markup zona, preskačem`);
+            continue;
+          }
+        }
+
+        // ── C) Per-simbol Liq Zone Filter ────────────────────────────────────────────
+        // Svaki simbol provjerava VLASTITE liq zone iz već dohvaćenih 1H candles.
+        // DANGER  (< 1%): MM ima razlog sweepnuti baš ovaj simbol → skip
+        // CAUTION (< 2.5%): traži score ≥ 6/7 (umjesto 4/7 PBK ili 5/7 MOM)
+        // CLEAR   (≥ 2.5%): normalno
+        if (pDef.strategy === "synapse_t" && !existingPos) {
+          const _liqStatus = calcLiqZones(candles);
+          if (_liqStatus.danger !== "CLEAR") {
+            const _icon = _liqStatus.danger === "DANGER" ? "🔴" : "🟡";
+            if (_liqStatus.danger === "DANGER") {
+              console.log(`  ${_icon} [LIQ] ${symbol} — DANGER (${_liqStatus.minDist.toFixed(1)}% do liq · LONG $${_liqStatus.closestLong?.price.toFixed(0)||"?"} · SHORT $${_liqStatus.closestShort?.price.toFixed(0)||"?"}) → preskačem`);
+              continue;
+            }
+            if (_liqStatus.danger === "CAUTION") {
+              const _scoreNow = Math.max(result.bullScore ?? 0, result.bearScore ?? 0);
+              if (_scoreNow < 6) {
+                console.log(`  ${_icon} [LIQ] ${symbol} — CAUTION (${_liqStatus.minDist.toFixed(1)}%), score ${_scoreNow}/7 < 6 → preskačem`);
+                continue;
+              }
+              console.log(`  ${_icon} [LIQ] ${symbol} — CAUTION ali score ${_scoreNow}/7 ≥ 6 → dopuštam`);
+            }
+          } else {
+            console.log(`  🟢 [LIQ] ${symbol} — CLEAR (${_liqStatus.minDist.toFixed(1)}% do liq)`);
+          }
         }
 
         // ── Pyramid provjera smjera: ako postoji pozicija, signal mora biti ISTI smjer ──

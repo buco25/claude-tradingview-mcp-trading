@@ -5059,75 +5059,66 @@ function _sqParseVol(s) {
   return parseFloat(s) || 0;
 }
 
+// squeezeStocksMonitor — šalje JEDNU jutarnju poruku sa svim setupovima
+// Poziva se jednom dnevno (~07:00 UTC), ne po ticker-u
+let _lastSqDailyDate = "";
+
 async function squeezeStocksMonitor() {
+  const dateStr = new Date().toISOString().slice(0, 10);
+  if (_lastSqDailyDate === dateStr) return; // već poslano danas
+
+  const rows = [];
   for (const cfg of SQUEEZE_STOCKS) {
     try {
       const cache = _squeezeCache[cfg.ticker];
       if (!cache?.data || cache.data.error) continue;
-      const d = cache.data;
+      const d  = cache.data;
       const sq = d.squeeze;
       if (!sq) continue;
 
-      const score   = sq.score ?? 0;
-      const level   = score >= 75 ? "explosive" : score >= 60 ? "high" : score >= 45 ? "moderate" : "low";
-      const now     = Date.now();
-      const state   = _sqAlertStatePersist[cfg.ticker] || { lastLevel: "", lastAlertTs: 0 };
-      const cooldownMs = 24 * 3600 * 1000;  // max 1 alert dnevno po dionici — preživi restart
-      const levelRaised = (level === "explosive" && state.lastLevel !== "explosive")
-                       || (level === "high"      && ["moderate","low",""].includes(state.lastLevel));
-      const cooldownExpired = (now - state.lastAlertTs) >= cooldownMs;
+      const score  = sq.score ?? 0;
+      if (score < 10) continue; // ignoriraj niski score (isti filter kao na dashboardu)
 
-      // Relative volume
+      const siPct = parseFloat(d.shortPctFloat ?? "0") || 0;
+      const dtc   = parseFloat(d.shortRatio   ?? "0") || 0;
+      const ctb   = d.borrowFee?.fee ?? 0;
       const relVol = (() => {
         const v = _sqParseVol(d.volume), a = _sqParseVol(d.avgVolume);
         return a > 0 ? v / a : 1;
       })();
 
-      const ctb    = d.borrowFee?.fee ?? 0;
-      const siPct  = parseFloat(d.shortPctFloat ?? "0") || 0;
-      const dtc    = parseFloat(d.shortRatio ?? "0") || 0;
-      const avail  = d.borrowFee?.available ?? Infinity;
-      const availStr = avail === Infinity ? "N/A" : avail >= 1e6 ? (avail/1e6).toFixed(1)+"M" : (avail/1e3).toFixed(0)+"K";
-
-      // Trigger: score ≥ 60 + (visok volume ILI CTB raste)
-      const trigger = score >= 60 && (relVol >= 1.4 || ctb >= 3 || dtc >= 8);
-      if (!trigger) continue;
-      if (!levelRaised && !cooldownExpired) continue;
-
-      const borrow = d.borrowFee;
-      const si     = { pct: siPct, daysToCover: dtc, shares: 0 };
-      const rec    = squeezeRecommendation(sq, borrow, si);
-
-      const ftdStr = d.ftd ? `${_sqParseVol(d.ftd.qty) >= 1e6 ? (_sqParseVol(d.ftd.qty)/1e6).toFixed(2)+"M" : d.ftd.qty} (${d.ftd.date})` : "N/A";
-      const chgStr = d.changePct ? ` ${d.changePct}` : "";
-
-      const msg = `🧨 <b>${cfg.emoji} ${cfg.ticker} — Short Squeeze Alert!</b>\n`
-        + "━━━━━━━━━━━━━━━━━━━━\n"
-        + `<b>Score: ${score}/100 — ${sq.label}</b>\n`
-        + `💵 Cijena: $${d.price?.toFixed(2) ?? "?"} (${chgStr})\n\n`
-        + "📊 <b>Ključni podaci:</b>\n"
-        + `• Short Float: ${siPct.toFixed(1)}%\n`
-        + `• Days to Cover: ${dtc.toFixed(1)} dana\n`
-        + `• Cost to Borrow: ${ctb.toFixed(2)}% god.\n`
-        + `• Dostupno: ${availStr} dionica\n`
-        + `• Rel. Volume: ${relVol.toFixed(2)}x prosjeka\n`
-        + `• FTD: ${ftdStr}\n\n`
-        + `🎯 <b>${rec.action}</b>\n\n`
-        + `🏦 <b>Dionice:</b> ${rec.shares}\n\n`
-        + `📈 <b>Opcije:</b> ${rec.options}`
-        + rec.compare
-        + `\n\n⚠️ <b>Rizik:</b> ${rec.risk}\n\n`
-        + `⏰ ${new Date().toLocaleString("hr-HR", { timeZone: "Europe/Zagreb" })}`;
-
-      await tgDash(msg);
-      _sqAlertStatePersist[cfg.ticker] = { lastLevel: level, lastAlertTs: now };
-      saveSqueezeAlertState(_sqAlertStatePersist);
-      console.log(`🧨 ${cfg.ticker} squeeze alert poslan — score ${score}, relVol ${relVol.toFixed(2)}x`);
-
+      rows.push({ cfg, d, sq, score, siPct, dtc, ctb, relVol });
     } catch (e) {
       console.error(`squeezeStocksMonitor(${cfg.ticker}) greška:`, e.message);
     }
   }
+
+  if (!rows.length) {
+    console.log("📊 Squeeze jutarnji report: nema setupa iznad praga");
+    return;
+  }
+
+  // Sortiraj po scoreu (najviši prvi)
+  rows.sort((a, b) => b.score - a.score);
+
+  const dateDisp = new Date().toLocaleDateString("hr-HR", { timeZone: "Europe/Zagreb", day: "2-digit", month: "2-digit", year: "numeric" });
+  let msg = `🧨 <b>Short Squeeze — Jutarnji Report ${dateDisp}</b>\n`
+          + "━━━━━━━━━━━━━━━━━━━━\n\n";
+
+  for (const { cfg, d, sq, score, siPct, dtc, ctb, relVol } of rows) {
+    const priceStr = d.price != null ? `$${d.price.toFixed(2)}` : "—";
+    const chg      = d.changePct ? ` ${d.changePct}` : "";
+    const ctbStr   = ctb > 0 ? `${ctb.toFixed(1)}% CTB` : "CTB N/A";
+    const volStr   = relVol >= 1.5 ? ` 📈 ${relVol.toFixed(1)}x vol` : "";
+    msg += `${cfg.emoji} <b>${cfg.ticker}</b> — Score <b>${score}/100</b> ${sq.label}\n`
+         + `  ${priceStr}${chg} | SI: ${siPct.toFixed(1)}% | DTC: ${dtc.toFixed(1)}d | ${ctbStr}${volStr}\n\n`;
+  }
+
+  msg += `⏰ ${new Date().toLocaleString("hr-HR", { timeZone: "Europe/Zagreb" })}`;
+
+  await tgDash(msg);
+  _lastSqDailyDate = dateStr;
+  console.log(`🧨 Squeeze jutarnji report poslan — ${rows.length} setupa`);
 }
 
 // ─── Bot scheduler (svakih 5 min) ─────────────────────────────────────────────
@@ -5162,6 +5153,7 @@ setInterval(async () => {
   try {
     console.log("📋 [Daily Report] Pokretanje jutarnje analize...");
     await generateDailyReport();
+    await squeezeStocksMonitor(); // jutarnji squeeze report — jednom dnevno
   } catch (e) {
     console.error("Daily Report greška:", e.message);
   } finally {
@@ -5200,21 +5192,19 @@ server.listen(PORT, () => {
     }, 30 * 60 * 1000);           // svakih 30 min
   }, 90 * 1000); // pričekaj 90s da se server stabilizira pri startu
 
-  // ─── Squeeze Stocks background fetch + monitor — svakih 60 min ───────────────
+  // ─── Squeeze Stocks background fetch — svakih 60 min (samo fetch, bez alerta) ─
+  // Alert se šalje jednom dnevno u 07:00 UTC zajedno s daily reportom
   setTimeout(async () => {
-    // Sekvencijalno da ne preopteretimo Finviz/CMC (svaki ~10s)
     for (const cfg of SQUEEZE_STOCKS) {
       try { await fetchSqueezeStock(cfg); } catch {}
       await new Promise(r => setTimeout(r, 10000));
     }
-    await squeezeStocksMonitor(); // provjeri triggere odmah nakon fetchanja
     setInterval(async () => {
       for (const cfg of SQUEEZE_STOCKS) {
         try { await fetchSqueezeStock(cfg); } catch {}
         await new Promise(r => setTimeout(r, 10000));
       }
-      await squeezeStocksMonitor(); // provjeri svaki sat
-    }, 60 * 60 * 1000); // svakih 60 min
-  }, 45 * 1000); // pričekaj 45s (nakon AMC fetcha)
+    }, 60 * 60 * 1000); // refresh svakih 60 min
+  }, 45 * 1000);
 
 });

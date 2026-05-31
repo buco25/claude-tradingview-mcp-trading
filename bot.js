@@ -2285,6 +2285,125 @@ async function fetchBitgetClosedPnl(symbol, pos, attempt = 1) {
   }
 }
 
+/**
+ * Automatski cross-referencira CSV s Bitget fill historijom i ispravlja
+ * sve trades gdje je exit cijena = SL cijena (znak buga fetchBitgetClosedPnl).
+ * Exportirano za poziv iz dashboard.js admin endpointa.
+ */
+export async function autoFixCsvFromBitget(pid = "synapse_t") {
+  const f = csvFilePath(pid);
+  if (!existsSync(f)) return { error: "CSV not found" };
+
+  const lines   = readFileSync(f, "utf8").split("\n");
+  const header  = lines[0];
+  const results = { checked: 0, fixed: 0, skipped: 0, errors: 0, details: [] };
+
+  const newLines = [header];
+
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.trim()) { newLines.push(line); continue; }
+
+    // Parsiraj red uz podršku za navodne znakove
+    const cols = [];
+    let cur = "", inQ = false;
+    for (const ch of line) {
+      if (ch === '"') { inQ = !inQ; }
+      else if (ch === ',' && !inQ) { cols.push(cur); cur = ""; }
+      else cur += ch;
+    }
+    cols.push(cur);
+
+    const side = cols[4] || "";
+    if (side !== "CLOSE_LONG" && side !== "CLOSE_SHORT") { newLines.push(line); continue; }
+
+    const exitPrice = parseFloat(cols[6]) || 0;
+    const slPrice   = parseFloat(cols[10]) || 0;
+    const curPnl    = parseFloat(cols[9]) || 0;
+
+    // Provjeri je li exit = SL (bug indikator)
+    const isSuspect = slPrice > 0 && Math.abs(exitPrice - slPrice) < 0.0001 * slPrice; // 0.01% tolerancija
+    if (!isSuspect) { newLines.push(line); continue; }
+
+    results.checked++;
+
+    // Rekonstruiraj pos objekt za fetchBitgetClosedPnl
+    const symbol    = cols[3] || "";
+    const tradeSide = side === "CLOSE_LONG" ? "LONG" : "SHORT";
+    const entryRow  = lines.slice(1, i).reverse().find(l => {
+      const c = l.split(",");
+      return c[3] === symbol && (c[4] === "LONG" || c[4] === "SHORT");
+    });
+    const entryPrice = entryRow ? parseFloat(entryRow.split(",")[6]) || 0 : 0;
+    const quantity   = parseFloat(cols[5]) || 0;
+    const totalUSD   = parseFloat(cols[7]) || 0;
+    const margin     = totalUSD / (quantity > 0 ? 1 : 1); // aproksimacija
+    const openedAt   = `${cols[0]}T${cols[1] || "00:00:00"}Z`;
+    const openTs     = new Date(openedAt).getTime();
+
+    const pos = {
+      symbol, side: tradeSide, entryPrice, quantity, totalUSD,
+      margin: totalUSD * 0.02, // aproksimacija (2% margine)
+      sl: slPrice, openTs, openedAt,
+    };
+
+    console.log(`  🔍 [autoFix] ${symbol} ${cols[0]} — exit=${exitPrice} sl=${slPrice} curPnl=${curPnl} — dohvaćam Bitget...`);
+
+    try {
+      // Čekaj 2s između poziva da ne preopteretimo API
+      await new Promise(r => setTimeout(r, 2000));
+      const closed = await fetchBitgetClosedPnl(symbol, pos);
+
+      if (!closed) {
+        console.log(`  ⚠️  [autoFix] ${symbol} ${cols[0]} — fill nije dohvaćen, preskačem`);
+        results.skipped++;
+        newLines.push(line);
+        continue;
+      }
+
+      const newPnl      = closed.realizedPnl;
+      const newExitPrice = closed.exitPrice;
+
+      // Ako je P&L isti (< 0.5% razlika) — nije bug, preskači
+      if (Math.abs(newPnl - curPnl) < 0.05 && Math.abs(newExitPrice - exitPrice) < exitPrice * 0.001) {
+        console.log(`  ✅ [autoFix] ${symbol} ${cols[0]} — P&L ok (${curPnl.toFixed(4)} ≈ ${newPnl.toFixed(4)}), preskačem`);
+        results.skipped++;
+        newLines.push(line);
+        continue;
+      }
+
+      // Ispravi red
+      cols[6]  = String(newExitPrice);
+      cols[9]  = String(newPnl);
+      // Ispravi Notes (WIN/LOSS + exit cijena)
+      const notesIdx = cols.length - 1;
+      if (cols[notesIdx]) {
+        cols[notesIdx] = cols[notesIdx]
+          .replace(/^"?LOSS:/, newPnl >= 0 ? '"WIN:' : '"LOSS:')
+          .replace(/^"?WIN:/,  newPnl >= 0 ? '"WIN:' : '"LOSS:')
+          .replace(/Izlaz [0-9.]+/, `Izlaz ${newExitPrice}`);
+      }
+
+      newLines.push(cols.join(","));
+      results.fixed++;
+      results.details.push({
+        symbol, date: cols[0], side: tradeSide,
+        oldPnl: curPnl, newPnl, oldExit: exitPrice, newExit: newExitPrice,
+      });
+      console.log(`  ✏️  [autoFix] ${symbol} ${cols[0]} — P&L ${curPnl.toFixed(4)} → ${newPnl.toFixed(4)} | exit ${exitPrice} → ${newExitPrice}`);
+
+    } catch (e) {
+      console.error(`  ❌ [autoFix] ${symbol} ${cols[0]} greška: ${e.message}`);
+      results.errors++;
+      newLines.push(line);
+    }
+  }
+
+  writeFileSync(f, newLines.join("\n"));
+  console.log(`  🏁 [autoFix] Završeno: ${results.checked} provjereno, ${results.fixed} ispravljeno, ${results.skipped} preskočeno, ${results.errors} grešaka`);
+  return results;
+}
+
 async function checkPortfolioPositions(pid) {
   const positions = loadPositions(pid);
   if (positions.length === 0) return;

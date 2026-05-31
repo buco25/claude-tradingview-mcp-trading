@@ -12,7 +12,7 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, check5mSRTest, 
   getSessionInfo, calcAtrTrend, getSp500Data, calcSymbolCorrelation,
   getDeribitPutCall, getLiquidationRisk, getEconEvents, isEconBlocked, calcVWAP,
   getLongShortRatio, getStablecoinInflow, getBtcPerpBasis, getAltcoinSeason,
-  generateDailyReport } from "./bot.js";
+  generateDailyReport, autoFixCsvFromBitget } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -3922,6 +3922,26 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ cb, now: new Date().toISOString() }));
     }
+    return;
+  }
+
+  // Auto-fix P&L iz Bitget fill historije — POST /api/admin/fix-pnl
+  // Pronalazi sve trades gdje exit = SL (bug), dohvaća stvarni P&L s Bitgeta i ispravlja CSV
+  if (url.pathname === "/api/admin/fix-pnl" && req.method === "POST") {
+    let body = "";
+    req.on("data", d => { body += d; });
+    req.on("end", async () => {
+      try {
+        const { pid = "synapse_t" } = JSON.parse(body || "{}");
+        console.log(`🔧 [admin/fix-pnl] Pokretanje auto-fixa za pid=${pid}...`);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        // Pokreće se async — može trajati nekoliko minuta (24 trades × 2s + 3 retry-a)
+        const result = await autoFixCsvFromBitget(pid);
+        res.end(JSON.stringify(result, null, 2));
+      } catch (e) {
+        res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
+      }
+    });
     return;
   }
 

@@ -3930,17 +3930,16 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === "/api/admin/fix-pnl" && req.method === "POST") {
     let body = "";
     req.on("data", d => { body += d; });
-    req.on("end", async () => {
-      try {
-        const { pid = "synapse_t" } = JSON.parse(body || "{}");
-        console.log(`🔧 [admin/fix-pnl] Pokretanje auto-fixa za pid=${pid}...`);
-        res.writeHead(200, { "Content-Type": "application/json" });
-        // Pokreće se async — može trajati nekoliko minuta (24 trades × 2s + 3 retry-a)
-        const result = await autoFixCsvFromBitget(pid);
-        res.end(JSON.stringify(result, null, 2));
-      } catch (e) {
-        res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
-      }
+    req.on("end", () => {
+      const { pid = "synapse_t" } = JSON.parse(body || "{}");
+      console.log(`🔧 [admin/fix-pnl] Pokretanje auto-fixa za pid=${pid} (background)...`);
+      // Odmah vrati 202 — fix radi u backgroundu (može trajati nekoliko minuta)
+      res.writeHead(202, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ started: true, pid, msg: "Auto-fix pokrenut u backgroundu. Provjeri logove ili /api/csv za rezultate." }));
+      // Pokreni async u backgroundu bez čekanja
+      autoFixCsvFromBitget(pid)
+        .then(r => console.log(`✅ [admin/fix-pnl] Završeno: ${r.fixed} ispravljeno od ${r.checked} provjerenih`))
+        .catch(e => console.error(`❌ [admin/fix-pnl] Greška: ${e.message}`));
     });
     return;
   }

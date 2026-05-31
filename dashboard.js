@@ -3957,9 +3957,21 @@ const server = http.createServer(async (req, res) => {
             console.log(`🗑️  fix-csv: obrisano — ${rowDate} ${rowSymbol} ${rowSide}`);
             // ne dodajem u newLines = brisanje
           } else if (action === "fix") {
-            // Ispravi Net P&L (col 9) i Price (col 6)
-            if (pnl    !== undefined) cols[9] = String(pnl);
+            // Ispravi Net P&L (col 9), Price (col 6), i Notes (zadnji col)
+            if (pnl       !== undefined) cols[9] = String(pnl);
             if (exitPrice !== undefined) cols[6] = String(exitPrice);
+            // Automatski ispravi WIN/LOSS u Notes koloni na temelju novog P&L
+            const notesIdx = cols.length - 1;
+            if (cols[notesIdx]) {
+              const newPnl = parseFloat(cols[9]);
+              cols[notesIdx] = cols[notesIdx]
+                .replace(/^"?LOSS:/, newPnl >= 0 ? '"WIN:' : '"LOSS:')
+                .replace(/^"?WIN:/,  newPnl >= 0 ? '"WIN:' : '"LOSS:');
+              // Ispravi i exitPrice u tekstu bilješke ako piše "Izlaz X.XX"
+              if (exitPrice !== undefined) {
+                cols[notesIdx] = cols[notesIdx].replace(/Izlaz [0-9.]+/, `Izlaz ${exitPrice}`);
+              }
+            }
             newLines.push(cols.join(","));
             console.log(`✏️  fix-csv: ispravljeno — ${rowDate} ${rowSymbol} P&L=${cols[9]} Price=${cols[6]}`);
           } else {

@@ -906,6 +906,7 @@ function saveSymStats(st) {
   try { writeFileSync(getSymStatsFile(), JSON.stringify(st, null, 2)); } catch {}
 }
 function recordSymbolOutcome(symbol, won) {
+  if (won === null || won === undefined) return; // P&L nepoznat — ne kvari statistiku
   const st = loadSymStats();
   if (!st[symbol]) st[symbol] = { wins: 0, total: 0 };
   st[symbol].total++;
@@ -1102,6 +1103,7 @@ function saveSigStats(st) {
 }
 
 function recordSignalOutcome(sigMask, won) {
+  if (won === null || won === undefined) return; // P&L nepoznat — ne kvari statistiku
   const st = loadSigStats();
   for (let i = 0; i < SIG_NAMES.length; i++) {
     if (!((sigMask >> i) & 1)) continue;
@@ -2185,7 +2187,8 @@ export async function fetchBitgetOpenPositions() {
 }
 
 // Dohvati stvarni P&L zatvorene pozicije iz Bitget historije
-async function fetchBitgetClosedPnl(symbol, pos) {
+// Retry: do 3 pokušaja × 3s razmak (Bitget fill može kasniti par sekundi)
+async function fetchBitgetClosedPnl(symbol, pos, attempt = 1) {
   try {
     const path = `/api/v2/mix/order/fill-history?symbol=${symbol}&productType=USDT-FUTURES&limit=50`;
     const ts   = Date.now().toString();
@@ -2198,10 +2201,16 @@ async function fetchBitgetClosedPnl(symbol, pos) {
       },
     });
     const d = await r.json();
-    if (d.code !== "00000" || !d.data?.fillList?.length) return null;
+    if (d.code !== "00000" || !d.data?.fillList?.length) {
+      if (attempt < 3) {
+        console.log(`  ⏳ [fetchBitgetClosedPnl] ${symbol} — pokušaj ${attempt}/3, čekam 3s...`);
+        await new Promise(res => setTimeout(res, 3000));
+        return fetchBitgetClosedPnl(symbol, pos, attempt + 1);
+      }
+      return null;
+    }
 
     // Filtriraj samo CLOSE fillove NAKON otvaranja pozicije
-    // openedAt je ISO string ("2026-05-10T12:34:56.789Z"), openTs je ms timestamp
     const openTs = pos?.openTs
       || (pos?.openedAt ? new Date(pos.openedAt).getTime() : 0)
       || (pos?.ts       ? new Date(pos.ts).getTime()       : 0);
@@ -2209,7 +2218,7 @@ async function fetchBitgetClosedPnl(symbol, pos) {
 
     const closeFills = d.data.fillList.filter(f => {
       const fillTs = parseInt(f.cTime || f.uTime || f.time || 0);
-      const isAfterOpen = !openTs || fillTs >= openTs - 60_000;  // dopusti 1min toleranciju
+      const isAfterOpen = !openTs || fillTs >= openTs - 60_000;  // 1min tolerancija
       const isClose = f.side === expectedCloseSide
         || f.tradeSide === "close"
         || f.tradeSide === "burst_close"   // likvidacija
@@ -2218,36 +2227,51 @@ async function fetchBitgetClosedPnl(symbol, pos) {
     });
 
     if (!closeFills.length) {
-      console.log(`  ⚠️  [fetchBitgetClosedPnl] ${symbol} — nema close fillova nakon openTs=${openTs}`);
+      if (attempt < 3) {
+        console.log(`  ⏳ [fetchBitgetClosedPnl] ${symbol} — nema close fillova, pokušaj ${attempt}/3, čekam 3s...`);
+        await new Promise(res => setTimeout(res, 3000));
+        return fetchBitgetClosedPnl(symbol, pos, attempt + 1);
+      }
+      console.log(`  ⚠️  [fetchBitgetClosedPnl] ${symbol} — nema close fillova ni nakon 3 pokušaja (openTs=${openTs})`);
       return null;
     }
 
-    // Sumej sve close fillove (može biti parcijalno zatvaranje)
+    // Bitget direktno vraća `profit` po fillu — to je najtočniji izvor
+    const bitgetPnlSum = closeFills.reduce((s, f) => s + parseFloat(f.profit || f.realizedProfits || 0), 0);
+    const hasBitgetPnl = closeFills.some(f => f.profit != null || f.realizedProfits != null);
+
+    // Sumej sve close fillove za exit cijenu i fee
     const totalQty     = closeFills.reduce((s, f) => s + parseFloat(f.size  || 0), 0);
     const avgExitPrice = closeFills.reduce((s, f) => s + parseFloat(f.price || 0) * parseFloat(f.size || 0), 0) / (totalQty || 1);
     const totalFee     = closeFills.reduce((s, f) => s + Math.abs(parseFloat(f.fee || 0)), 0);
 
-    // Sanity check: avgExitPrice mora biti >0
     if (!avgExitPrice || avgExitPrice <= 0) {
       console.log(`  ⚠️  [fetchBitgetClosedPnl] ${symbol} — avgExitPrice=${avgExitPrice} je nevažeći`);
       return null;
     }
 
-    // P&L = razlika cijene × količina
-    const qty     = pos?.quantity ?? (pos?.totalUSD / pos?.entryPrice) ?? totalQty;
+    // P&L: prefer Bitget direktni profit (najtočniji), fallback na ručni izračun
     const entryPx = pos?.entryPrice ?? parseFloat(closeFills[0].price);
-    const rawPnl  = pos?.side === "LONG"
+    const qty     = pos?.quantity ?? (pos?.totalUSD / pos?.entryPrice) ?? totalQty;
+    const calcPnl = pos?.side === "LONG"
       ? (avgExitPrice - entryPx) * qty
       : (entryPx - avgExitPrice) * qty;
 
-    // Sanity cap: P&L ne može biti gori od gubitka cijele margine
-    const maxLoss = pos?.margin ? pos.margin * 1.1 : (pos?.totalUSD ?? 999);  // +10% za fees
-    const pnlCapped = Math.max(rawPnl, -maxLoss);
-    if (pnlCapped !== rawPnl) {
-      console.log(`  ⚠️  [fetchBitgetClosedPnl] ${symbol} — P&L capped ${rawPnl.toFixed(2)} → ${pnlCapped.toFixed(2)} (maxLoss=${maxLoss.toFixed(2)})`);
+    const rawPnl = hasBitgetPnl ? bitgetPnlSum : calcPnl;
+
+    // Sanity check: ako Bitget PnL i ručni izračun imaju različit predznak — warn
+    if (hasBitgetPnl && Math.sign(bitgetPnlSum) !== Math.sign(calcPnl) && Math.abs(calcPnl) > 0.01) {
+      console.warn(`  ⚠️  [fetchBitgetClosedPnl] ${symbol} — predznak razlika! Bitget=${bitgetPnlSum.toFixed(4)} Ručni=${calcPnl.toFixed(4)} → koristim Bitget`);
     }
 
-    console.log(`  📊 [fetchBitgetClosedPnl] ${symbol} ${pos?.side} | exit=${avgExitPrice.toFixed(6)} entry=${entryPx.toFixed(6)} qty=${qty.toFixed(4)} fills=${closeFills.length} pnl=${pnlCapped.toFixed(4)}`);
+    // Sanity cap: maksimalni gubitak = margina × 1.1
+    const maxLoss = pos?.margin ? pos.margin * 1.1 : (pos?.totalUSD ?? 999);
+    const pnlCapped = Math.max(rawPnl, -maxLoss);
+    if (pnlCapped !== rawPnl) {
+      console.log(`  ⚠️  [fetchBitgetClosedPnl] ${symbol} — P&L capped ${rawPnl.toFixed(2)} → ${pnlCapped.toFixed(2)}`);
+    }
+
+    console.log(`  📊 [fetchBitgetClosedPnl] ${symbol} ${pos?.side} | exit=${avgExitPrice.toFixed(6)} entry=${entryPx.toFixed(6)} qty=${qty.toFixed(4)} fills=${closeFills.length} pnl=${pnlCapped.toFixed(4)} src=${hasBitgetPnl?"bitget":"calc"}`);
 
     return {
       exitPrice:    avgExitPrice,
@@ -2283,40 +2307,33 @@ async function checkPortfolioPositions(pid) {
         if (!bitgetOpen.has(bitgetKey)) {
           // Pozicija zatvorena na Bitgetu (SL/TP/likvidacija) — dohvati stvarni P&L
           const closed = await fetchBitgetClosedPnl(pos.symbol, pos);
-          // exitPrice fallback: nikad 0 — koristi sl, pa procijenjeni SL od entry cijene (per-symbol)
-          const _closedRules   = JSON.parse(readFileSync("rules.json", "utf8"));
-          const _symSltp       = _closedRules.symbol_sltp?.[pos.symbol] || {};
-          const _slPctFallback = pos.slPct ?? _symSltp.slPct ?? pDef?.slPct ?? SL_PCT;
-          const estimatedSl = pos.side === "LONG"
-            ? pos.entryPrice * (1 - _slPctFallback / 100)
-            : pos.entryPrice * (1 + _slPctFallback / 100);
-          const exitPrice  = (closed?.exitPrice  > 0) ? closed.exitPrice
-                           : (pos.sl             > 0) ? pos.sl
-                           : estimatedSl;
-          const realPnl    = closed?.realizedPnl ?? null;
-          const fee        = closed?.fee         ?? 0;
 
-          // Odredi razlog zatvaranja
-          let exitReason = "Zatvoreno na Bitgetu";
-          if (closed?.side?.includes("close")) {
-            const priceDiff = pos.side === "LONG"
-              ? exitPrice - pos.entryPrice
-              : pos.entryPrice - exitPrice;
-            exitReason = priceDiff > 0 ? "TP dostignut" : "SL/Likvidacija";
+          // Ako fill fetch potpuno nije uspio — nemamo pouzdane podatke
+          // Ne reportamo lažni gubitak; logujemo warning i preskačemo
+          if (!closed) {
+            console.warn(`  ⚠️  [${pid}] ${pos.symbol} — fill fetch nije uspio ni nakon 3 pokušaja. Pozicija uklonjena iz trackera bez P&L reporta.`);
+            await tg(`⚠️ <b>[ULTRA]</b> ${pos.symbol} ${pos.side} zatvoreno na Bitgetu\nNisu dohvaćeni fill podaci — P&L nepoznat\nUlaz: ${fmtPrice(pos.entryPrice)}`);
+            writeExitCsv(pid, pos, pos.sl || pos.entryPrice, "Zatvoreno — P&L nepoznat", 0);
+            if (pos.sigMask != null) recordSignalOutcome(pos.sigMask, null);
+            recordSymbolOutcome(pos.symbol, null);
+            continue;
           }
 
-          // P&L: koristi stvarni Bitget P&L ako dostupan, inače kalkuliraj
-          const qty = pos.quantity ?? (pos.totalUSD / pos.entryPrice);
-          const rawCalcPnl = pos.side === "LONG"
-            ? (exitPrice - pos.entryPrice) * qty
-            : (pos.entryPrice - exitPrice) * qty;
-          const calcPnl = realPnl !== null ? realPnl : rawCalcPnl;
+          const exitPrice  = closed.exitPrice;
+          const realPnl    = closed.realizedPnl;
+          const fee        = closed.fee ?? 0;
 
-          // Sanity cap: maksimalni gubitak = margina × 1.1 (uključuje fees/funding)
+          // Odredi razlog zatvaranja
+          const priceDiff = pos.side === "LONG"
+            ? exitPrice - pos.entryPrice
+            : pos.entryPrice - exitPrice;
+          const exitReason = priceDiff > 0 ? "TP/Trail dostignut" : "SL/Likvidacija";
+
+          // Sanity cap: maksimalni gubitak = margina × 1.1
           const maxLoss = pos.margin ? pos.margin * 1.1 : pos.totalUSD * 0.02;
-          const pnl = Math.max(calcPnl, -maxLoss);
-          if (pnl !== calcPnl) {
-            console.log(`  ⚠️  P&L capped: ${calcPnl.toFixed(4)} → ${pnl.toFixed(4)} (maxLoss=${maxLoss.toFixed(2)}) — mogući problem s fill fetchom`);
+          const pnl = Math.max(realPnl, -maxLoss);
+          if (pnl !== realPnl) {
+            console.log(`  ⚠️  P&L capped: ${realPnl.toFixed(4)} → ${pnl.toFixed(4)} (maxLoss=${maxLoss.toFixed(2)})`);
           }
 
           console.log(`  ${pnl >= 0 ? "✅ WIN" : "❌ LOSS"} [${pid}] ${pos.symbol} ${pos.side} | P&L ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(4)} | ${exitReason} | exit@${fmtPrice(exitPrice)}`);

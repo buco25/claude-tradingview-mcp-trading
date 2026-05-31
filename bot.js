@@ -2295,8 +2295,8 @@ async function fetchBitgetClosedPnl(symbol, pos, attempt = 1) {
  * Vraća Map: closeTime_ms → { openAvgPrice, closeAvgPrice, achievedProfits, holdTime }
  */
 async function fetchBitgetPositionHistory(symbol, startMs, endMs) {
-  // Bitget v2: fill-history s timerange — vraća sve fillove za period (ne samo zadnjih 50)
-  const path = `/api/v2/mix/order/fill-history?symbol=${symbol}&productType=USDT-FUTURES&startTime=${startMs}&endTime=${endMs}&limit=100`;
+  // Bitget v2: order/history s timerange — vraća zatvorene ordere s profit poljem
+  const path = `/api/v2/mix/order/history?symbol=${symbol}&productType=USDT-FUTURES&startTime=${startMs}&endTime=${endMs}&limit=100`;
   try {
     const ts   = Date.now().toString();
     const sign = signBitGet(ts, "GET", path);
@@ -2309,36 +2309,23 @@ async function fetchBitgetPositionHistory(symbol, startMs, endMs) {
       signal: AbortSignal.timeout(15000),
     });
     const d = await r.json();
-    console.log(`  📡 [posHistory] ${symbol} → code=${d.code} fills=${d.data?.fillList?.length ?? 0}`);
-    if (d.code !== "00000" || !d.data?.fillList?.length) return [];
+    const orderList = d.data?.orderList ?? d.data?.list ?? (Array.isArray(d.data) ? d.data : []);
+    console.log(`  📡 [posHistory] ${symbol} → code=${d.code} msg=${d.msg} orders=${orderList.length}`);
+    if (d.code !== "00000" || !orderList.length) return [];
 
-    // Grupiraj CLOSE fillove po vremenskom klasteru (unutar 10 min = jedna pozicija)
-    const closeFills = d.data.fillList.filter(f =>
-      f.tradeSide === "close" || f.tradeSide === "burst_close" || f.tradeSide === "forced_close"
-      || f.side === "close_long" || f.side === "close_short"
+    // Filtriraj samo CLOSE ordere koji su executed
+    const closes = orderList.filter(o =>
+      (o.tradeSide === "close" || o.side === "close_long" || o.side === "close_short"
+       || o.reduceOnly === "YES" || o.reduceOnly === true)
+      && (o.state === "filled" || o.status === "filled" || o.orderStatus === "full_fill")
     );
-    if (!closeFills.length) return [];
+    console.log(`  📡 [posHistory] ${symbol} → close orders=${closes.length}`);
 
-    // Sortiraj po vremenu
-    closeFills.sort((a, b) => parseInt(a.cTime || 0) - parseInt(b.cTime || 0));
-
-    // Klasteriraj u grupe (ako su unutar 10 min → ista pozicija)
-    const clusters = [];
-    let group = [closeFills[0]];
-    for (let i = 1; i < closeFills.length; i++) {
-      const dt = parseInt(closeFills[i].cTime || 0) - parseInt(closeFills[i-1].cTime || 0);
-      if (dt < 10 * 60 * 1000) { group.push(closeFills[i]); }
-      else { clusters.push(group); group = [closeFills[i]]; }
-    }
-    clusters.push(group);
-
-    return clusters.map(g => {
-      const totalQty = g.reduce((s, f) => s + parseFloat(f.size || 0), 0);
-      const avgExit  = g.reduce((s, f) => s + parseFloat(f.price || 0) * parseFloat(f.size || 0), 0) / (totalQty || 1);
-      const pnlSum   = g.reduce((s, f) => s + parseFloat(f.profit || f.realizedProfits || 0), 0);
-      const closeTime = parseInt(g[g.length-1].cTime || 0);
-      return { closeTime, closeAvgPrice: avgExit, achievedProfits: pnlSum, totalQty };
-    });
+    return closes.map(o => ({
+      closeTime:       parseInt(o.uTime || o.updateTime || o.cTime || o.createTime || 0),
+      closeAvgPrice:   parseFloat(o.priceAvg || o.avgPrice || o.price || 0),
+      achievedProfits: parseFloat(o.profit || o.realizedPnl || o.achievedProfits || 0),
+    }));
   } catch (e) {
     console.error(`  ⚠️  fetchBitgetPositionHistory(${symbol}) greška: ${e.message}`);
     return [];

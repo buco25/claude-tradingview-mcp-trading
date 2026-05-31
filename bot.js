@@ -2290,6 +2290,39 @@ async function fetchBitgetClosedPnl(symbol, pos, attempt = 1) {
  * sve trades gdje je exit cijena = SL cijena (znak buga fetchBitgetClosedPnl).
  * Exportirano za poziv iz dashboard.js admin endpointa.
  */
+/**
+ * Dohvati position history s Bitgeta za određeni simbol i vremenski period.
+ * Vraća Map: closeTime_ms → { openAvgPrice, closeAvgPrice, achievedProfits, holdTime }
+ */
+async function fetchBitgetPositionHistory(symbol, startMs, endMs) {
+  try {
+    const path = `/api/v2/mix/position/history?symbol=${symbol}&productType=USDT-FUTURES&startTime=${startMs}&endTime=${endMs}&limit=100`;
+    const ts   = Date.now().toString();
+    const sign = signBitGet(ts, "GET", path);
+    const r    = await fetch(`${BITGET.baseUrl}${path}`, {
+      headers: {
+        "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": sign,
+        "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET.passphrase,
+        "Content-Type": "application/json",
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+    const d = await r.json();
+    if (d.code !== "00000" || !d.data?.list?.length) return [];
+    return d.data.list.map(p => ({
+      closeTime:      parseInt(p.cTime || p.closeTime || 0),
+      openAvgPrice:   parseFloat(p.openAvgPrice || 0),
+      closeAvgPrice:  parseFloat(p.closeAvgPrice || 0),
+      achievedProfits: parseFloat(p.achievedProfits ?? p.realizedPnl ?? 0),
+      holdTime:       parseInt(p.holdTime || 0),
+      side:           p.holdSide || "",
+    }));
+  } catch (e) {
+    console.error(`  ⚠️  fetchBitgetPositionHistory(${symbol}) greška: ${e.message}`);
+    return [];
+  }
+}
+
 export async function autoFixCsvFromBitget(pid = "synapse_t") {
   const f = csvFilePath(pid);
   if (!existsSync(f)) return { error: "CSV not found" };
@@ -2297,8 +2330,10 @@ export async function autoFixCsvFromBitget(pid = "synapse_t") {
   const lines   = readFileSync(f, "utf8").split("\n");
   const header  = lines[0];
   const results = { checked: 0, fixed: 0, skipped: 0, errors: 0, details: [] };
-
   const newLines = [header];
+
+  // Cache za position history po simbolu da ne pozivamo API više puta za isti simbol
+  const posHistoryCache = {};
 
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i];
@@ -2321,51 +2356,52 @@ export async function autoFixCsvFromBitget(pid = "synapse_t") {
     const slPrice   = parseFloat(cols[10]) || 0;
     const curPnl    = parseFloat(cols[9]) || 0;
 
-    // Provjeri je li exit = SL (bug indikator)
-    const isSuspect = slPrice > 0 && Math.abs(exitPrice - slPrice) < 0.0001 * slPrice; // 0.01% tolerancija
+    // Provjeri je li exit = SL (bug indikator) — tolerancija 0.01%
+    const isSuspect = slPrice > 0 && Math.abs(exitPrice - slPrice) < 0.0001 * slPrice;
     if (!isSuspect) { newLines.push(line); continue; }
 
     results.checked++;
-
-    // Rekonstruiraj pos objekt za fetchBitgetClosedPnl
     const symbol    = cols[3] || "";
     const tradeSide = side === "CLOSE_LONG" ? "LONG" : "SHORT";
-    const entryRow  = lines.slice(1, i).reverse().find(l => {
-      const c = l.split(",");
-      return c[3] === symbol && (c[4] === "LONG" || c[4] === "SHORT");
-    });
-    const entryPrice = entryRow ? parseFloat(entryRow.split(",")[6]) || 0 : 0;
-    const quantity   = parseFloat(cols[5]) || 0;
-    const totalUSD   = parseFloat(cols[7]) || 0;
-    const margin     = totalUSD / (quantity > 0 ? 1 : 1); // aproksimacija
-    const openedAt   = `${cols[0]}T${cols[1] || "00:00:00"}Z`;
-    const openTs     = new Date(openedAt).getTime();
+    const closeTs   = new Date(`${cols[0]}T${cols[1] || "00:00:00"}Z`).getTime();
 
-    const pos = {
-      symbol, side: tradeSide, entryPrice, quantity, totalUSD,
-      margin: totalUSD * 0.02, // aproksimacija (2% margine)
-      sl: slPrice, openTs, openedAt,
-    };
-
-    console.log(`  🔍 [autoFix] ${symbol} ${cols[0]} — exit=${exitPrice} sl=${slPrice} curPnl=${curPnl} — dohvaćam Bitget...`);
+    console.log(`  🔍 [autoFix] ${symbol} ${cols[0]} ${cols[1]} — curPnl=${curPnl.toFixed(4)} exit=${exitPrice}`);
 
     try {
-      // Čekaj 2s između poziva da ne preopteretimo API
-      await new Promise(r => setTimeout(r, 2000));
-      const closed = await fetchBitgetClosedPnl(symbol, pos);
+      // Dohvati position history ± 1 dan oko datuma zatvaranja
+      const cacheKey = `${symbol}_${cols[0]}`;
+      if (!posHistoryCache[cacheKey]) {
+        await new Promise(r => setTimeout(r, 1500)); // rate limit zaštita
+        const startMs = closeTs - 2 * 24 * 60 * 60 * 1000; // -2 dana
+        const endMs   = closeTs + 2 * 24 * 60 * 60 * 1000; // +2 dana
+        posHistoryCache[cacheKey] = await fetchBitgetPositionHistory(symbol, startMs, endMs);
+      }
+      const history = posHistoryCache[cacheKey];
 
-      if (!closed) {
-        console.log(`  ⚠️  [autoFix] ${symbol} ${cols[0]} — fill nije dohvaćen, preskačem`);
+      if (!history.length) {
+        console.log(`  ⚠️  [autoFix] ${symbol} ${cols[0]} — position history prazan, preskačem`);
         results.skipped++;
         newLines.push(line);
         continue;
       }
 
-      const newPnl      = closed.realizedPnl;
-      const newExitPrice = closed.exitPrice;
+      // Pronađi najbliži zapis u historiji po closeTime (tolerancija ±4h)
+      const match = history
+        .filter(p => Math.abs(p.closeTime - closeTs) < 4 * 60 * 60 * 1000)
+        .sort((a, b) => Math.abs(a.closeTime - closeTs) - Math.abs(b.closeTime - closeTs))[0];
 
-      // Ako je P&L isti (< 0.5% razlika) — nije bug, preskači
-      if (Math.abs(newPnl - curPnl) < 0.05 && Math.abs(newExitPrice - exitPrice) < exitPrice * 0.001) {
+      if (!match) {
+        console.log(`  ⚠️  [autoFix] ${symbol} ${cols[0]} — nema matching zapisa u ±4h, preskačem`);
+        results.skipped++;
+        newLines.push(line);
+        continue;
+      }
+
+      const newPnl       = match.achievedProfits;
+      const newExitPrice = match.closeAvgPrice || exitPrice;
+
+      // Ako je razlika zanemariva — nije bug
+      if (Math.abs(newPnl - curPnl) < 0.05) {
         console.log(`  ✅ [autoFix] ${symbol} ${cols[0]} — P&L ok (${curPnl.toFixed(4)} ≈ ${newPnl.toFixed(4)}), preskačem`);
         results.skipped++;
         newLines.push(line);
@@ -2373,24 +2409,19 @@ export async function autoFixCsvFromBitget(pid = "synapse_t") {
       }
 
       // Ispravi red
-      cols[6]  = String(newExitPrice);
-      cols[9]  = String(newPnl);
-      // Ispravi Notes (WIN/LOSS + exit cijena)
+      cols[6] = String(newExitPrice > 0 ? newExitPrice : exitPrice);
+      cols[9] = String(newPnl);
       const notesIdx = cols.length - 1;
       if (cols[notesIdx]) {
         cols[notesIdx] = cols[notesIdx]
           .replace(/^"?LOSS:/, newPnl >= 0 ? '"WIN:' : '"LOSS:')
           .replace(/^"?WIN:/,  newPnl >= 0 ? '"WIN:' : '"LOSS:')
-          .replace(/Izlaz [0-9.]+/, `Izlaz ${newExitPrice}`);
+          .replace(/Izlaz [0-9.]+/, `Izlaz ${cols[6]}`);
       }
-
       newLines.push(cols.join(","));
       results.fixed++;
-      results.details.push({
-        symbol, date: cols[0], side: tradeSide,
-        oldPnl: curPnl, newPnl, oldExit: exitPrice, newExit: newExitPrice,
-      });
-      console.log(`  ✏️  [autoFix] ${symbol} ${cols[0]} — P&L ${curPnl.toFixed(4)} → ${newPnl.toFixed(4)} | exit ${exitPrice} → ${newExitPrice}`);
+      results.details.push({ symbol, date: cols[0], oldPnl: curPnl, newPnl, oldExit: exitPrice, newExit: parseFloat(cols[6]) });
+      console.log(`  ✏️  [autoFix] ${symbol} ${cols[0]} — P&L ${curPnl.toFixed(4)} → ${newPnl.toFixed(4)} | exit ${exitPrice} → ${cols[6]}`);
 
     } catch (e) {
       console.error(`  ❌ [autoFix] ${symbol} ${cols[0]} greška: ${e.message}`);

@@ -2295,43 +2295,54 @@ async function fetchBitgetClosedPnl(symbol, pos, attempt = 1) {
  * Vraća Map: closeTime_ms → { openAvgPrice, closeAvgPrice, achievedProfits, holdTime }
  */
 async function fetchBitgetPositionHistory(symbol, startMs, endMs) {
-  // Pokušaj više endpointa — Bitget v2 ima različite nazive ovisno o verziji
-  const endpoints = [
-    `/api/v2/mix/position/history-position?symbol=${symbol}&productType=USDT-FUTURES&startTime=${startMs}&endTime=${endMs}&limit=100`,
-    `/api/v2/mix/position/history?symbol=${symbol}&productType=USDT-FUTURES&startTime=${startMs}&endTime=${endMs}&limit=100`,
-  ];
-  for (const path of endpoints) {
-    try {
-      const ts   = Date.now().toString();
-      const sign = signBitGet(ts, "GET", path);
-      const r    = await fetch(`${BITGET.baseUrl}${path}`, {
-        headers: {
-          "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": sign,
-          "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET.passphrase,
-          "Content-Type": "application/json",
-        },
-        signal: AbortSignal.timeout(15000),
-      });
-      const d = await r.json();
-      console.log(`  📡 [posHistory] ${symbol} ${path.split("?")[0]} → code=${d.code} dataKeys=${Object.keys(d.data || {}).join(",") || "null"}`);
-      if (d.code !== "00000") continue;
+  // Bitget v2: fill-history s timerange — vraća sve fillove za period (ne samo zadnjih 50)
+  const path = `/api/v2/mix/order/fill-history?symbol=${symbol}&productType=USDT-FUTURES&startTime=${startMs}&endTime=${endMs}&limit=100`;
+  try {
+    const ts   = Date.now().toString();
+    const sign = signBitGet(ts, "GET", path);
+    const r    = await fetch(`${BITGET.baseUrl}${path}`, {
+      headers: {
+        "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": sign,
+        "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET.passphrase,
+        "Content-Type": "application/json",
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+    const d = await r.json();
+    console.log(`  📡 [posHistory] ${symbol} → code=${d.code} fills=${d.data?.fillList?.length ?? 0}`);
+    if (d.code !== "00000" || !d.data?.fillList?.length) return [];
 
-      // Bitget može vratiti list u d.data.list, d.data.result ili direktno d.data (array)
-      const list = d.data?.list ?? d.data?.result ?? (Array.isArray(d.data) ? d.data : []);
-      if (!list.length) continue;
+    // Grupiraj CLOSE fillove po vremenskom klasteru (unutar 10 min = jedna pozicija)
+    const closeFills = d.data.fillList.filter(f =>
+      f.tradeSide === "close" || f.tradeSide === "burst_close" || f.tradeSide === "forced_close"
+      || f.side === "close_long" || f.side === "close_short"
+    );
+    if (!closeFills.length) return [];
 
-      return list.map(p => ({
-        closeTime:       parseInt(p.closeTime || p.cTime || p.uTime || 0),
-        openAvgPrice:    parseFloat(p.openAvgPrice  || p.openPrice  || 0),
-        closeAvgPrice:   parseFloat(p.closeAvgPrice || p.closePrice || 0),
-        achievedProfits: parseFloat(p.achievedProfits ?? p.realizedPnl ?? p.netProfit ?? p.profit ?? 0),
-        side:            p.holdSide || p.side || "",
-      }));
-    } catch (e) {
-      console.error(`  ⚠️  fetchBitgetPositionHistory(${symbol}, ${path.split("?")[0]}) greška: ${e.message}`);
+    // Sortiraj po vremenu
+    closeFills.sort((a, b) => parseInt(a.cTime || 0) - parseInt(b.cTime || 0));
+
+    // Klasteriraj u grupe (ako su unutar 10 min → ista pozicija)
+    const clusters = [];
+    let group = [closeFills[0]];
+    for (let i = 1; i < closeFills.length; i++) {
+      const dt = parseInt(closeFills[i].cTime || 0) - parseInt(closeFills[i-1].cTime || 0);
+      if (dt < 10 * 60 * 1000) { group.push(closeFills[i]); }
+      else { clusters.push(group); group = [closeFills[i]]; }
     }
+    clusters.push(group);
+
+    return clusters.map(g => {
+      const totalQty = g.reduce((s, f) => s + parseFloat(f.size || 0), 0);
+      const avgExit  = g.reduce((s, f) => s + parseFloat(f.price || 0) * parseFloat(f.size || 0), 0) / (totalQty || 1);
+      const pnlSum   = g.reduce((s, f) => s + parseFloat(f.profit || f.realizedProfits || 0), 0);
+      const closeTime = parseInt(g[g.length-1].cTime || 0);
+      return { closeTime, closeAvgPrice: avgExit, achievedProfits: pnlSum, totalQty };
+    });
+  } catch (e) {
+    console.error(`  ⚠️  fetchBitgetPositionHistory(${symbol}) greška: ${e.message}`);
+    return [];
   }
-  return [];
 }
 
 export async function autoFixCsvFromBitget(pid = "synapse_t") {

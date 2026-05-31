@@ -2295,32 +2295,43 @@ async function fetchBitgetClosedPnl(symbol, pos, attempt = 1) {
  * Vraća Map: closeTime_ms → { openAvgPrice, closeAvgPrice, achievedProfits, holdTime }
  */
 async function fetchBitgetPositionHistory(symbol, startMs, endMs) {
-  try {
-    const path = `/api/v2/mix/position/history?symbol=${symbol}&productType=USDT-FUTURES&startTime=${startMs}&endTime=${endMs}&limit=100`;
-    const ts   = Date.now().toString();
-    const sign = signBitGet(ts, "GET", path);
-    const r    = await fetch(`${BITGET.baseUrl}${path}`, {
-      headers: {
-        "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": sign,
-        "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET.passphrase,
-        "Content-Type": "application/json",
-      },
-      signal: AbortSignal.timeout(15000),
-    });
-    const d = await r.json();
-    if (d.code !== "00000" || !d.data?.list?.length) return [];
-    return d.data.list.map(p => ({
-      closeTime:      parseInt(p.cTime || p.closeTime || 0),
-      openAvgPrice:   parseFloat(p.openAvgPrice || 0),
-      closeAvgPrice:  parseFloat(p.closeAvgPrice || 0),
-      achievedProfits: parseFloat(p.achievedProfits ?? p.realizedPnl ?? 0),
-      holdTime:       parseInt(p.holdTime || 0),
-      side:           p.holdSide || "",
-    }));
-  } catch (e) {
-    console.error(`  ⚠️  fetchBitgetPositionHistory(${symbol}) greška: ${e.message}`);
-    return [];
+  // Pokušaj više endpointa — Bitget v2 ima različite nazive ovisno o verziji
+  const endpoints = [
+    `/api/v2/mix/position/history-position?symbol=${symbol}&productType=USDT-FUTURES&startTime=${startMs}&endTime=${endMs}&limit=100`,
+    `/api/v2/mix/position/history?symbol=${symbol}&productType=USDT-FUTURES&startTime=${startMs}&endTime=${endMs}&limit=100`,
+  ];
+  for (const path of endpoints) {
+    try {
+      const ts   = Date.now().toString();
+      const sign = signBitGet(ts, "GET", path);
+      const r    = await fetch(`${BITGET.baseUrl}${path}`, {
+        headers: {
+          "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": sign,
+          "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET.passphrase,
+          "Content-Type": "application/json",
+        },
+        signal: AbortSignal.timeout(15000),
+      });
+      const d = await r.json();
+      console.log(`  📡 [posHistory] ${symbol} ${path.split("?")[0]} → code=${d.code} dataKeys=${Object.keys(d.data || {}).join(",") || "null"}`);
+      if (d.code !== "00000") continue;
+
+      // Bitget može vratiti list u d.data.list, d.data.result ili direktno d.data (array)
+      const list = d.data?.list ?? d.data?.result ?? (Array.isArray(d.data) ? d.data : []);
+      if (!list.length) continue;
+
+      return list.map(p => ({
+        closeTime:       parseInt(p.closeTime || p.cTime || p.uTime || 0),
+        openAvgPrice:    parseFloat(p.openAvgPrice  || p.openPrice  || 0),
+        closeAvgPrice:   parseFloat(p.closeAvgPrice || p.closePrice || 0),
+        achievedProfits: parseFloat(p.achievedProfits ?? p.realizedPnl ?? p.netProfit ?? p.profit ?? 0),
+        side:            p.holdSide || p.side || "",
+      }));
+    } catch (e) {
+      console.error(`  ⚠️  fetchBitgetPositionHistory(${symbol}, ${path.split("?")[0]}) greška: ${e.message}`);
+    }
   }
+  return [];
 }
 
 export async function autoFixCsvFromBitget(pid = "synapse_t") {

@@ -2295,8 +2295,8 @@ async function fetchBitgetClosedPnl(symbol, pos, attempt = 1) {
  * Vraća Map: closeTime_ms → { openAvgPrice, closeAvgPrice, achievedProfits, holdTime }
  */
 async function fetchBitgetPositionHistory(symbol, startMs, endMs) {
-  // Bitget v2: order/history s timerange — vraća zatvorene ordere s profit poljem
-  const path = `/api/v2/mix/order/history?symbol=${symbol}&productType=USDT-FUTURES&startTime=${startMs}&endTime=${endMs}&limit=100`;
+  // Bitget v2: position/history-position — zatvorene pozicije s achievedProfits i closeAvgPrice
+  const path = `/api/v2/mix/position/history-position?productType=USDT-FUTURES&symbol=${symbol}&startTime=${startMs}&endTime=${endMs}&limit=100`;
   try {
     const ts   = Date.now().toString();
     const sign = signBitGet(ts, "GET", path);
@@ -2309,22 +2309,15 @@ async function fetchBitgetPositionHistory(symbol, startMs, endMs) {
       signal: AbortSignal.timeout(15000),
     });
     const d = await r.json();
-    const orderList = d.data?.orderList ?? d.data?.list ?? (Array.isArray(d.data) ? d.data : []);
-    console.log(`  📡 [posHistory] ${symbol} → code=${d.code} msg=${d.msg} orders=${orderList.length}`);
-    if (d.code !== "00000" || !orderList.length) return [];
+    const list = d.data?.list ?? d.data?.result ?? (Array.isArray(d.data) ? d.data : []);
+    console.log(`  📡 [posHistory] ${symbol} → code=${d.code} msg=${d.msg} positions=${list.length}`);
+    if (d.code !== "00000" || !list.length) return [];
 
-    // Filtriraj samo CLOSE ordere koji su executed
-    const closes = orderList.filter(o =>
-      (o.tradeSide === "close" || o.side === "close_long" || o.side === "close_short"
-       || o.reduceOnly === "YES" || o.reduceOnly === true)
-      && (o.state === "filled" || o.status === "filled" || o.orderStatus === "full_fill")
-    );
-    console.log(`  📡 [posHistory] ${symbol} → close orders=${closes.length}`);
-
-    return closes.map(o => ({
-      closeTime:       parseInt(o.uTime || o.updateTime || o.cTime || o.createTime || 0),
-      closeAvgPrice:   parseFloat(o.priceAvg || o.avgPrice || o.price || 0),
-      achievedProfits: parseFloat(o.profit || o.realizedPnl || o.achievedProfits || 0),
+    return list.map(p => ({
+      closeTime:       parseInt(p.closeTime || p.cTime || p.uTime || 0),
+      closeAvgPrice:   parseFloat(p.closeAvgPrice || p.avgClosePrice || 0),
+      openAvgPrice:    parseFloat(p.openAvgPrice  || p.avgOpenPrice  || 0),
+      achievedProfits: parseFloat(p.achievedProfits ?? p.netProfit ?? p.realizedPnl ?? 0),
     }));
   } catch (e) {
     console.error(`  ⚠️  fetchBitgetPositionHistory(${symbol}) greška: ${e.message}`);

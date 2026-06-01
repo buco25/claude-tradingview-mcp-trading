@@ -2290,11 +2290,11 @@ async function fetchBitgetClosedPnl(symbol, pos, attempt = 1) {
  * sve trades gdje je exit cijena = SL cijena (znak buga fetchBitgetClosedPnl).
  * Exportirano za poziv iz dashboard.js admin endpointa.
  */
-/**
- * Dohvati position history s Bitgeta za određeni simbol i vremenski period.
- * Vraća Map: closeTime_ms → { openAvgPrice, closeAvgPrice, achievedProfits, holdTime }
- */
+// NOTE: fetchBitgetPositionHistory — privremeno onemogućeno.
+// Bitget position/history-position closeTime=0 sprječava pouzdan matching.
+// Alternativa: koristiti ručni fix-csv endpoint s podacima s Bitget UI-a.
 async function fetchBitgetPositionHistory(symbol, startMs, endMs) {
+  return []; // onemogućeno
   // Bitget v2: position/history-position — zatvorene pozicije s achievedProfits i closeAvgPrice
   const path = `/api/v2/mix/position/history-position?productType=USDT-FUTURES&symbol=${symbol}&startTime=${startMs}&endTime=${endMs}&limit=100`;
   try {

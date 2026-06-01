@@ -2387,13 +2387,41 @@ export async function autoFixCsvFromBitget(pid = "synapse_t") {
         continue;
       }
 
-      // Pronađi najbliži zapis u historiji po closeTime (tolerancija ±4h)
-      const match = history
-        .filter(p => Math.abs(p.closeTime - closeTs) < 4 * 60 * 60 * 1000)
-        .sort((a, b) => Math.abs(a.closeTime - closeTs) - Math.abs(b.closeTime - closeTs))[0];
+      // Dohvati entry cijenu iz prethodnog OPEN reda za ovaj simbol
+      const entryPrice = (() => {
+        for (let j = i - 1; j >= 1; j--) {
+          const prev = lines[j].split(",");
+          if (prev[3] === symbol && (prev[4] === "LONG" || prev[4] === "SHORT")) {
+            return parseFloat(prev[6]) || 0;
+          }
+        }
+        return 0;
+      })();
+
+      // Matching strategija (od najpouzdanije do najmanje):
+      // 1. Pokušaj matching po entry cijeni (openAvgPrice) — najtočniji
+      // 2. Fallback: closest po closeTime (±24h prošireno)
+      let match = null;
+      if (entryPrice > 0) {
+        match = history
+          .filter(p => p.openAvgPrice > 0 && Math.abs(p.openAvgPrice - entryPrice) / entryPrice < 0.005) // 0.5% tolerancija
+          .sort((a, b) => Math.abs(a.openAvgPrice - entryPrice) - Math.abs(b.openAvgPrice - entryPrice))[0];
+      }
+      if (!match) {
+        // Fallback: najbliži po closeTime (±24h)
+        match = history
+          .filter(p => Math.abs(p.closeTime - closeTs) < 24 * 60 * 60 * 1000)
+          .sort((a, b) => Math.abs(a.closeTime - closeTs) - Math.abs(b.closeTime - closeTs))[0];
+      }
+
+      // Debug: ispiši što je pronađeno za prvih par pokušaja
+      if (history.length) {
+        const sample = history[0];
+        console.log(`  🔎 [autoFix] ${symbol} ${cols[0]} entry=${entryPrice} | Bitget: openAvg=${sample.openAvgPrice} closeAvg=${sample.closeAvgPrice} achievedPnl=${sample.achievedProfits} closeTime=${new Date(sample.closeTime).toISOString()}`);
+      }
 
       if (!match) {
-        console.log(`  ⚠️  [autoFix] ${symbol} ${cols[0]} — nema matching zapisa u ±4h, preskačem`);
+        console.log(`  ⚠️  [autoFix] ${symbol} ${cols[0]} — nema matching (entry=${entryPrice}), preskačem`);
         results.skipped++;
         newLines.push(line);
         continue;

@@ -58,7 +58,7 @@ const PARTIAL_CLOSE_PCT  = 50;   // % pozicije koji se zatvara na TP
 
 // ─── ULTRA strategija — zaštitni parametri ────────────────────────────────────
 const LONG_ONLY      = false;         // SHORT dozvoljeni kada BTC regime BEAR/NEUTRAL
-const ADX_MIN        = 30;            // ADX prag — bazni (dinamički raste ako WR pada)
+const ADX_MIN        = 25;            // ADX prag — bazni (dinamički raste ako WR pada)
 const SL_COOLDOWN_MS = 4 * 60 * 60 * 1000;  // 4h cooldown po simbolu nakon SL-a
 
 // ─── Trailing stop — aktivira se nakon dovoljnog profita ─────────────────────

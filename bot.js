@@ -1938,21 +1938,11 @@ function analyzeUltra(candles, cfg) {
     console.log(`  ⚡ [VOL_EXH bypass] ${_sym} — 7/7 score, ignoriramo VOL_EXH (${volRatioNow.toFixed(2)}x)`);
   }
 
-  // 5. VWAP gate — obvezni smjer (institucijski referentni nivo)
-  // LONG: cijena mora biti iznad VWAP (kupci dominiraju)
-  // SHORT: cijena mora biti ispod VWAP (prodavači dominiraju)
+  // 5. VWAP gate — samo za MOMENTUM signale (PBK i bounce kupuje ispod VWAP = povlačenje prema fair value)
+  // MOM LONG: cijena mora biti iznad VWAP (breakout potvrđen)
+  // MOM SHORT: cijena mora biti ispod VWAP (breakdown potvrđen)
+  // PBK: preskačemo VWAP gate — pullback ispod/iznad VWAP je točno taj setup
   const vwapVal = calcVWAP(candles);
-  if (vwapVal && vwapVal > 0) {
-    const vwapDistPct = (price - vwapVal) / vwapVal * 100;
-    if (bullCnt >= 1 && price < vwapVal) {  // LONG signal ali ispod VWAP
-      return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
-        reason: `VWAP gate: cijena ${vwapDistPct.toFixed(1)}% ispod VWAP ${vwapVal.toFixed(4)} — čekamo da cijena prijeđe VWAP za LONG` };
-    }
-    if (bearCnt >= 1 && price > vwapVal) {  // SHORT signal ali iznad VWAP
-      return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
-        reason: `VWAP gate: cijena ${vwapDistPct.toFixed(1)}% iznad VWAP ${vwapVal.toFixed(4)} — čekamo da cijena padne ispod VWAP za SHORT` };
-    }
-  }
 
   // ── Min MIN_CONFIRM/7 potvrđujućih signala ─────────────────────────────────
   const MIN_CONFIRM = minSig;  // čita iz rules.json (trebalo bi biti 4)
@@ -1961,12 +1951,12 @@ function analyzeUltra(candles, cfg) {
   if (bullScore >= MIN_CONFIRM && rsiLongOk) {
     const sigMask = sigs.reduce((mask, v, i) => v === 1 ? mask | (1 << i) : mask, 0);
     return { price, signal: "LONG", bullScore, bearScore, sigMask,
-      nearSup, nearRes,
+      nearSup, nearRes, vwap: vwapVal,
       reason: `ULTRA LONG ↑${bullCnt}/7${_premiumBonusBull?"+1bonus":""} | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ RSI:${rsi.toFixed(0)}<${_strongTrend?85:72}✓${bonusTag}` };
   }
   if (!LONG_ONLY && bearScore >= MIN_CONFIRM && rsiShortOk) {
     return { price, signal: "SHORT", bullScore, bearScore,
-      nearSup, nearRes,
+      nearSup, nearRes, vwap: vwapVal,
       reason: `ULTRA SHORT ↓${bearCnt}/7${_premiumBonusBear?"+1bonus":""} | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ RSI:${rsi.toFixed(0)}>${_strongTrendS?15:30}✓${bonusTag}` };
   }
   if (LONG_ONLY && bearScore >= MIN_CONFIRM && rsiShortOk) {
@@ -2000,14 +1990,26 @@ function analyzeUltra(candles, cfg) {
   const MOM_ADX_MIN = 20;
 
   if (momBull >= MOM_MIN && rsiLongOk && adx >= MOM_ADX_MIN) {
+    // VWAP gate za MOM LONG: cijena mora biti iznad VWAP (breakout potvrđen)
+    if (vwapVal && price < vwapVal) {
+      const vd = ((price - vwapVal) / vwapVal * 100).toFixed(1);
+      return { price, signal: "NEUTRAL", bullScore: momBull, bearScore: momBear, vwap: vwapVal,
+        reason: `MOM LONG blokiran: cijena ${vd}% ispod VWAP ${vwapVal.toFixed(4)} — nema breakout potvrde` };
+    }
     return { price, signal: "LONG", bullScore: momBull, bearScore: momBear,
-      nearSup, nearRes, isMomentum: true,
-      reason: `MOMENTUM LONG ↑${momBull}/7 | ADX:${adx.toFixed(0)}≥${MOM_ADX_MIN}✓ RSI:${rsi.toFixed(0)}<${_strongTrend?85:72}✓${_strongTrend?" [STRONG]":""}${sigRsiDiv===1?" RDIV✓":""}` };
+      nearSup, nearRes, isMomentum: true, vwap: vwapVal,
+      reason: `MOMENTUM LONG ↑${momBullBase}/7 | ADX:${adx.toFixed(0)}≥${MOM_ADX_MIN}✓ RSI:${rsi.toFixed(0)}<${_strongTrend?85:72}✓${_strongTrend?" [STRONG]":""}${sigRsiDiv===1?" RDIV✓":""}` };
   }
   if (!LONG_ONLY && momBear >= MOM_MIN && rsiShortOk && adx >= MOM_ADX_MIN) {
+    // VWAP gate za MOM SHORT: cijena mora biti ispod VWAP (breakdown potvrđen)
+    if (vwapVal && price > vwapVal) {
+      const vd = ((price - vwapVal) / vwapVal * 100).toFixed(1);
+      return { price, signal: "NEUTRAL", bullScore: momBull, bearScore: momBear, vwap: vwapVal,
+        reason: `MOM SHORT blokiran: cijena +${vd}% iznad VWAP ${vwapVal.toFixed(4)} — nema breakdown potvrde` };
+    }
     return { price, signal: "SHORT", bullScore: momBull, bearScore: momBear,
-      nearSup, nearRes, isMomentum: true,
-      reason: `MOMENTUM SHORT ↓${momBear}/7 | ADX:${adx.toFixed(0)}≥${MOM_ADX_MIN}✓ RSI:${rsi.toFixed(0)}>${_strongTrendS?15:30}✓${_strongTrendS?" [STRONG]":""}${sigRsiDiv===-1?" RDIV✓":""}` };
+      nearSup, nearRes, isMomentum: true, vwap: vwapVal,
+      reason: `MOMENTUM SHORT ↓${momBearBase}/7 | ADX:${adx.toFixed(0)}≥${MOM_ADX_MIN}✓ RSI:${rsi.toFixed(0)}>${_strongTrendS?15:30}✓${_strongTrendS?" [STRONG]":""}${sigRsiDiv===-1?" RDIV✓":""}` };
   }
 
   // Dijagnoza zašto nema signala

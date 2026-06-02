@@ -80,24 +80,24 @@ const GHOST_STOP_BUFFER = 0.005; // 0.5% buffer između pravog SL i ghost SL na 
 // Tanki alti (TAO/HYPE/JUP/ENA) distribuiraju već pri 1.3× → niži threshold
 // Izvor: MM/Algo analiza 23.05.2026 — docs/MM_Algo_Analysis.xlsx
 const VOL_EXH_TIERS = {
-  "BTCUSDT":  2.5,  // Tier 0 — najefikasniji market, tek 2.5× je pouzdan signal
-  "ETHUSDT":  2.0,  // Tier 1 — visoka likvidnost, trend nastavlja pri 1.5-2×
-  "SOLUSDT":  2.0,  // Tier 1 — bull barei nastavljaju u trendu, threshold viši
-  "XRPUSDT":  2.0,  // Tier 1 — likvidan altcoin
-  "ADAUSDT":  1.7,  // Tier 2 — srednja likvidnost
-  "LINKUSDT": 1.7,  // Tier 2
-  "DOGEUSDT": 1.7,  // Tier 2 — MEME vol spiky ali likvidno
-  "NEARUSDT": 1.4,  // Tier 3 — tanje knjige, MM distribuira ranije
-  "SUIUSDT":  1.4,  // Tier 3
-  "APTUSDT":  1.4,  // Tier 3
-  "SEIUSDT":  1.4,  // Tier 3
-  "INJUSDT":  1.4,  // Tier 3
-  "TAOUSDT":  1.3,  // Tier 4 — tanko tržište, reversal 80% pri 1.3×
-  "HYPEUSDT": 1.3,  // Tier 4 — pump/dump pattern, MM dominira
-  "JUPUSDT":  1.3,  // Tier 4 — tanak DEFI token
-  "ENAUSDT":  1.3,  // Tier 4 — tanak DEFI token
+  "BTCUSDT":  5.0,  // Tier 0
+  "ETHUSDT":  4.0,  // Tier 1
+  "SOLUSDT":  4.0,  // Tier 1
+  "XRPUSDT":  4.0,  // Tier 1
+  "ADAUSDT":  3.5,  // Tier 2
+  "LINKUSDT": 3.5,  // Tier 2
+  "DOGEUSDT": 3.5,  // Tier 2
+  "NEARUSDT": 3.0,  // Tier 3
+  "SUIUSDT":  3.0,  // Tier 3
+  "APTUSDT":  3.0,  // Tier 3
+  "SEIUSDT":  3.0,  // Tier 3
+  "INJUSDT":  3.0,  // Tier 3
+  "TAOUSDT":  2.5,  // Tier 4
+  "HYPEUSDT": 2.5,  // Tier 4
+  "JUPUSDT":  2.5,  // Tier 4
+  "ENAUSDT":  2.5,  // Tier 4
 };
-const VOL_EXH_DEFAULT = 1.5; // fallback za nepoznate simbole
+const VOL_EXH_DEFAULT = 3.0; // fallback za nepoznate simbole
 
 // ─── Ekonomski kalendar ───────────────────────────────────────────────────────
 const ECON_BLOCK_MIN = 15;  // blokiraj ±15min oko HIGH impact USD eventa

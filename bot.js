@@ -218,10 +218,57 @@ async function recordSymbolSl(pid, symbol) {
 // BULL = 6Sc ≥ 4/6 parova UP + cijena > EMA55
 // NEUTRAL/BEAR = čekamo bolji trenutak
 
-let _regimeCache = { regime: "UNKNOWN", ts: 0 };
+let _regimeCache   = { regime: "UNKNOWN", ts: 0 };
+let _regime1hCache = { regime: "UNKNOWN", btcRsi1h: null, ts: 0 };
 const REGIME_TTL = 15 * 60 * 1000;  // osvježi svakih 15min
 
+// ─── BTC dnevni high tracker (za bounce mode) ─────────────────────────────────
+let _btcDailyHigh = 0;
+let _btcDailyHighDate = "";
+function updateBtcDailyHigh(price) {
+  const today = new Date().toISOString().slice(0, 10);
+  if (_btcDailyHighDate !== today) { _btcDailyHigh = price; _btcDailyHighDate = today; }
+  else if (price > _btcDailyHigh) _btcDailyHigh = price;
+}
+function getBtcDrawdownPct(price) {
+  return _btcDailyHigh > 0 ? (price - _btcDailyHigh) / _btcDailyHigh * 100 : 0;
+}
+
 export async function getBtcRegimeExport() { return getBtcRegime(); }
+
+// ─── BTC 1H regime — brži od 4H ───────────────────────────────────────────────
+async function getBtcRegime1H() {
+  if (Date.now() - _regime1hCache.ts < REGIME_TTL) return _regime1hCache;
+  try {
+    const url = `https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1H&limit=60`;
+    const r = await fetch(url);
+    const d = await r.json();
+    if (d.code !== "00000" || !d.data?.length) return _regime1hCache;
+    const closes = d.data.map(k => parseFloat(k[4])).reverse();
+    const n = closes.length - 1;
+    // EMA20 i EMA50 na 1H
+    const ema = (period) => {
+      const k = 2/(period+1);
+      let e = closes.slice(0,period).reduce((a,b)=>a+b,0)/period;
+      for (let i=period; i<=n; i++) e = closes[i]*k + e*(1-k);
+      return e;
+    };
+    const e20 = ema(20), e50 = ema(50);
+    const price = closes[n];
+    // RSI14 na 1H
+    let g=0, l=0;
+    for (let i=n-14; i<n; i++) { const d=closes[i+1]-closes[i]; d>0?g+=d:l-=d; }
+    const btcRsi1h = l===0 ? 100 : 100 - 100/(1+(g/14)/(l/14));
+    const regime = (price > e20 && e20 > e50) ? "BULL"
+                 : (price < e20 && e20 < e50) ? "BEAR"
+                 : "NEUTRAL";
+    updateBtcDailyHigh(price);
+    _regime1hCache = { regime, btcRsi1h, currentPrice: price, ts: Date.now() };
+    return _regime1hCache;
+  } catch(e) {
+    return _regime1hCache;
+  }
+}
 
 async function getBtcRegime() {
   if (Date.now() - _regimeCache.ts < REGIME_TTL) return _regimeCache.regime;
@@ -1839,6 +1886,17 @@ function analyzeUltra(candles, cfg) {
   const bullCnt = sigs.filter(s => s === 1).length;
   const bearCnt = sigs.filter(s => s === -1).length;
 
+  // ── Težinski bonus: CVD + E145 su "premium" signali ─────────────────────────
+  // Ako oba ukazuju na isti smjer, dodaj +1 bonus bod (efektivni max = 8)
+  const cvdBull  = sigs[1] === 1;   // CVD reversal bullish
+  const e145Bull = sigs[3] === 1;   // EMA145 bullish
+  const cvdBear  = sigs[1] === -1;
+  const e145Bear = sigs[3] === -1;
+  const _premiumBonusBull = (cvdBull && e145Bull) ? 1 : 0;
+  const _premiumBonusBear = (cvdBear && e145Bear) ? 1 : 0;
+  const bullScore = bullCnt + _premiumBonusBull;
+  const bearScore = bearCnt + _premiumBonusBear;
+
   // ══ OBAVEZNI GATEVI (3) ══
 
   // 1. ADX ≥ effectiveAdx — tržište mora biti u jasnom trendu
@@ -1864,28 +1922,32 @@ function analyzeUltra(candles, cfg) {
   const VOL_EXH_THRESHOLD = VOL_EXH_TIERS[_sym] ?? VOL_EXH_DEFAULT;
   const volRatioNow = volAvg20 > 0 ? volLast / volAvg20 : 1;
   const volExhOk = volRatioNow < VOL_EXH_THRESHOLD;
-  if (!volExhOk) {
+  const _isMaxScore = bullCnt === 7 || bearCnt === 7; // svi signali zeleni
+  if (!volExhOk && !_isMaxScore) {
     return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
       reason: `VOL_EXH: ${volRatioNow.toFixed(2)}x avg ≥ ${VOL_EXH_THRESHOLD}× (${_sym||"def"}) — high-vol svjeća, čekamo pullback` };
+  }
+  if (!volExhOk && _isMaxScore) {
+    console.log(`  ⚡ [VOL_EXH bypass] ${_sym} — 7/7 score, ignoriramo VOL_EXH (${volRatioNow.toFixed(2)}x)`);
   }
 
   // ── Min MIN_CONFIRM/7 potvrđujućih signala ─────────────────────────────────
   const MIN_CONFIRM = minSig;  // čita iz rules.json (trebalo bi biti 4)
 
-  if (bullCnt >= MIN_CONFIRM && rsiLongOk) {
-    // Bitmask aktivnih BULL signala za signal analizu
+  const bonusTag = _premiumBonusBull ? " [CVD+E145 bonus]" : _premiumBonusBear ? " [CVD+E145 bonus]" : "";
+  if (bullScore >= MIN_CONFIRM && rsiLongOk) {
     const sigMask = sigs.reduce((mask, v, i) => v === 1 ? mask | (1 << i) : mask, 0);
-    return { price, signal: "LONG",  bullScore: bullCnt, bearScore: bearCnt, sigMask,
+    return { price, signal: "LONG", bullScore, bearScore, sigMask,
       nearSup, nearRes,
-      reason: `ULTRA LONG ↑${bullCnt}/7 | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ 6Sc:${scaleUp}/6(info) RSI:${rsi.toFixed(0)}<${_strongTrend?85:72}✓${_strongTrend?" [STRONG]":""} [${MIN_CONFIRM}/7]` };
+      reason: `ULTRA LONG ↑${bullCnt}/7${_premiumBonusBull?"+1bonus":""} | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ RSI:${rsi.toFixed(0)}<${_strongTrend?85:72}✓${bonusTag}` };
   }
-  if (!LONG_ONLY && bearCnt >= MIN_CONFIRM && rsiShortOk) {
-    return { price, signal: "SHORT", bullScore: bullCnt, bearScore: bearCnt,
+  if (!LONG_ONLY && bearScore >= MIN_CONFIRM && rsiShortOk) {
+    return { price, signal: "SHORT", bullScore, bearScore,
       nearSup, nearRes,
-      reason: `ULTRA SHORT ↓${bearCnt}/7 | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ 6Sc:${scaleDn}/6(info) RSI:${rsi.toFixed(0)}>${_strongTrendS?15:30}✓${_strongTrendS?" [STRONG]":""} [${MIN_CONFIRM}/7]` };
+      reason: `ULTRA SHORT ↓${bearCnt}/7${_premiumBonusBear?"+1bonus":""} | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ RSI:${rsi.toFixed(0)}>${_strongTrendS?15:30}✓${bonusTag}` };
   }
-  if (LONG_ONLY && bearCnt >= MIN_CONFIRM && rsiShortOk) {
-    return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
+  if (LONG_ONLY && bearScore >= MIN_CONFIRM && rsiShortOk) {
+    return { price, signal: "NEUTRAL", bullScore, bearScore,
       reason: `SHORT↓${bearCnt}/7 blokiran — LONG_ONLY mod aktivan` };
   }
 
@@ -1903,8 +1965,13 @@ function analyzeUltra(candles, cfg) {
     sig18bk,                                            //  6. SRB: isti
     sigRsiDiv,                                          //  7. RDIV: isti (divergencija potvrđuje smjer)
   ];
-  const momBull = momSigs.filter(s => s === 1).length;
-  const momBear = momSigs.filter(s => s === -1).length;
+  const momBullBase = momSigs.filter(s => s === 1).length;
+  const momBearBase = momSigs.filter(s => s === -1).length;
+  // CVD + E145 bonus za momentum signal
+  const momCvdBull  = momSigs[1] === 1, momE145Bull = momSigs[3] === 1;
+  const momCvdBear  = momSigs[1] === -1, momE145Bear = momSigs[3] === -1;
+  const momBull = momBullBase + (momCvdBull && momE145Bull ? 1 : 0);
+  const momBear = momBearBase + (momCvdBear && momE145Bear ? 1 : 0);
 
   // Za momentum: bez 6SC gate (breakout sam potvrđuje smjer), ADX ≥ 20
   const MOM_ADX_MIN = 20;
@@ -3883,12 +3950,26 @@ export async function run() {
     const dailyWarnActive = dailyPnl < -(DAILY_LOSS_LIMIT * DAILY_WARN_PCT / 100);
     if (dailyWarnActive) console.log(`  ⚠️  [${pDef.name}] Dnevni P&L upozorenje: $${dailyPnl.toFixed(2)} (${(Math.abs(dailyPnl)/DAILY_LOSS_LIMIT*100).toFixed(0)}% od $${DAILY_LOSS_LIMIT.toFixed(0)} limita)`);
 
-    // ── 3. Market Regime: BTC 4H — LONG samo kad BULL, SHORT samo kad BEAR/NEUTRAL ─
+    // ── 3. Market Regime: BTC 4H + 1H ────────────────────────────────────────────
     let _btcRegime = "UNKNOWN";
+    let _btcRegime1h = "UNKNOWN";
+    let _btcRsi1h = null;
+    let _bounceMode = false;
     if (pDef.strategy === "synapse_t") {
       _btcRegime = await getBtcRegime();
       if (_btcRegime === "UNKNOWN") console.log(`  ⚠️  [${pDef.name}] BTC regime: UNKNOWN — nastavljamo oprezno`);
-      else console.log(`  📊 [${pDef.name}] BTC regime: ${_btcRegime}`);
+      else console.log(`  📊 [${pDef.name}] BTC 4H regime: ${_btcRegime}`);
+
+      // BTC 1H regime — brži signal
+      const r1h = await getBtcRegime1H();
+      _btcRegime1h = r1h.regime;
+      _btcRsi1h    = r1h.btcRsi1h;
+      console.log(`  📊 [${pDef.name}] BTC 1H regime: ${_btcRegime1h} | RSI1H: ${_btcRsi1h?.toFixed(1)}`);
+
+      // Bounce mode: BTC 1H RSI < 30 ILI dnevni drawdown > 8%
+      const _drawdown = getBtcDrawdownPct(r1h.currentPrice || 0);
+      _bounceMode = (_btcRsi1h !== null && _btcRsi1h < 30) || _drawdown < -8;
+      if (_bounceMode) console.log(`  🔄 [BOUNCE MODE] BTC 1H RSI=${_btcRsi1h?.toFixed(1)} drawdown=${_drawdown.toFixed(1)}% — tražimo LONG signale`);
     }
 
     // ── SP500 Risk-Off gate — blokira LONG, ali dozvoljava SHORT ─────────────
@@ -4151,9 +4232,13 @@ export async function run() {
         if (pDef.strategy === "synapse_t" && !existingPos) {
           const _isPbk   = !result.isMomentum;
           const _volMax  = _isPbk ? 2.0 : 3.0;
-          if (volAnomaly.ratio > _volMax) {
+          const _isMax7  = (result.bullScore >= 7 || result.bearScore >= 7);
+          if (volAnomaly.ratio > _volMax && !_isMax7) {
             console.log(`  🔇 [QUIET] ${symbol} ${signal} (${_isPbk?"PBK":"MOM"}) — volRatio ${volAnomaly.ratio}× > ${_volMax}× → preskačem`);
             continue;
+          }
+          if (volAnomaly.ratio > _volMax && _isMax7) {
+            console.log(`  ⚡ [QUIET bypass] ${symbol} — 7/7+ score, QUIET ignoriran`);
           }
         }
 
@@ -4200,35 +4285,48 @@ export async function run() {
 
         // ── Regime + SP500 + 1H trend filter — po smjeru signala ─────────────
         if (pDef.strategy === "synapse_t") {
-          // Capitulation bounce bypass: BTC 4H RSI < 15 → preskačemo BEAR/F&G/SP500 blokade za LONG
+          // ── Bypass uvjeti ──────────────────────────────────────────────────────
+          // 1. Kapitulacija: BTC 4H RSI < 15
           const _btcRsi4h = _regimeCache.btcRsi4h ?? null;
           const _capitulation = signal === "LONG" && _btcRsi4h !== null && _btcRsi4h < 15;
-          if (_capitulation) {
-            console.log(`  🔄 [BOUNCE] ${symbol} — BTC 4H RSI ${_btcRsi4h?.toFixed(1)} < 15 → kapitulacija, LONG bypass aktivan`);
-          }
+          // 2. Bounce mode: BTC 1H RSI < 30 ili dnevni drawdown > 8%
+          const _bounceBypass = signal === "LONG" && _bounceMode;
+          const _anyLongBypass = _capitulation || _bounceBypass;
+          if (_capitulation) console.log(`  🔄 [BOUNCE] ${symbol} — BTC 4H RSI ${_btcRsi4h?.toFixed(1)} < 15 → kapitulacija bypass`);
+          if (_bounceBypass && !_capitulation) console.log(`  🔄 [BOUNCE] ${symbol} — bounce mode aktivan (1H RSI < 30) → LONG bypass`);
 
-          // BTC BEAR → blokira LONG (NEUTRAL prolazi), osim u kapitulaciji
-          if (signal === "LONG" && _btcRegime === "BEAR" && !_capitulation) {
-            console.log(`  🌧️  [REGIME] ${symbol} — BTC BEAR → LONG blokiran`);
+          // BTC 4H BEAR → blokira LONG, osim u bounce/capitulation modu
+          // BTC 1H BEAR override: ako je 1H BEAR ali 4H BULL, uzimamo 1H (brži signal)
+          if (signal === "LONG" && _btcRegime === "BEAR" && _btcRegime1h === "BEAR" && !_anyLongBypass) {
+            console.log(`  🌧️  [REGIME] ${symbol} — BTC 4H+1H BEAR → LONG blokiran`);
             continue;
           }
-          // BTC BULL → blokira SHORT, OSIM ako je simbol 1H trend BEAR
-          // Per-simbol override: ako alt pada na 1H, short je validan čak i u BTC BULL
+          if (signal === "LONG" && _btcRegime === "BEAR" && _btcRegime1h !== "BEAR" && !_anyLongBypass) {
+            console.log(`  🌤️  [REGIME] ${symbol} — BTC 4H BEAR ali 1H ${_btcRegime1h} → LONG dopušten (1H override)`);
+          }
+
+          // BTC BULL → blokira SHORT, OSIM ako je simbol 1H BEAR (per-simbol override)
           const _sym1hTrend = result?.trend1h || null;
           if (signal === "SHORT" && _btcRegime === "BULL" && _sym1hTrend !== "BEAR") {
             console.log(`  ☀️  [REGIME] ${symbol} — BTC BULL + 1H ${_sym1hTrend||"?"} → SHORT blokiran`);
             continue;
           }
           if (signal === "SHORT" && _btcRegime === "BULL" && _sym1hTrend === "BEAR") {
-            console.log(`  ⚡ [REGIME] ${symbol} — BTC BULL ali 1H BEAR → SHORT dopušten (per-simbol override)`);
+            console.log(`  ⚡ [REGIME] ${symbol} — BTC BULL ali 1H BEAR → SHORT dopušten`);
           }
-          // SP500 RISK_OFF → blokira LONG, ali SHORT prolazi (osim kapitulacija)
-          if (signal === "LONG" && _sp500Regime === "RISK_OFF" && !_capitulation) {
+          // Bounce mode: blokira SHORT (tražimo samo LONG reversal)
+          if (signal === "SHORT" && _bounceMode) {
+            console.log(`  🔄 [BOUNCE MODE] ${symbol} — bounce mode, SHORT blokiran`);
+            continue;
+          }
+
+          // SP500 RISK_OFF → blokira LONG, ali SHORT prolazi (osim bypass)
+          if (signal === "LONG" && _sp500Regime === "RISK_OFF" && !_anyLongBypass) {
             console.log(`  🚨 [SP500] ${symbol} — RISK_OFF → LONG blokiran`);
             continue;
           }
-          // Fear & Greed: ekstremni strah (≤20) → blokira LONG (osim kapitulacija)
-          if (signal === "LONG" && _fearGreed !== null && _fearGreed <= 20 && !_capitulation) {
+          // Fear & Greed: ekstremni strah → blokira LONG (osim bypass)
+          if (signal === "LONG" && _fearGreed !== null && _fearGreed <= 20 && !_anyLongBypass) {
             console.log(`  😱 [F&G] ${symbol} — Extreme Fear (${_fearGreed}) → LONG blokiran`);
             continue;
           }

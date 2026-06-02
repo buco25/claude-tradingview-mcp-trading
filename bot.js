@@ -261,8 +261,18 @@ async function getBtcRegime() {
                  : (upPairs <= 2 && price < e55) ? "BEAR"
                  : "NEUTRAL";
 
-    _regimeCache = { regime, ts: Date.now() };
-    console.log(`  📊 [REGIME] BTC 4H: ${regime} | 6Sc=${upPairs}/6 | Price${price>e55?">":"<"}EMA55`);
+    // RSI14 na 4H BTC — za capitulation bounce detekciju
+    const rsiPeriod = 14;
+    let gains = 0, losses = 0;
+    for (let i = n - rsiPeriod; i < n; i++) {
+      const diff = closes[i+1] - closes[i];
+      if (diff > 0) gains += diff; else losses -= diff;
+    }
+    const avgG = gains / rsiPeriod, avgL = losses / rsiPeriod;
+    const btcRsi4h = avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL);
+
+    _regimeCache = { regime, btcRsi4h, ts: Date.now() };
+    console.log(`  📊 [REGIME] BTC 4H: ${regime} | 6Sc=${upPairs}/6 | Price${price>e55?">":"<"}EMA55 | RSI=${btcRsi4h.toFixed(1)}`);
     return regime;
   } catch(e) {
     console.log(`  ⚠️  [REGIME] Greška: ${e.message}`);
@@ -4192,8 +4202,15 @@ export async function run() {
 
         // ── Regime + SP500 + 1H trend filter — po smjeru signala ─────────────
         if (pDef.strategy === "synapse_t") {
-          // BTC BEAR → blokira LONG (NEUTRAL prolazi)
-          if (signal === "LONG" && _btcRegime === "BEAR") {
+          // Capitulation bounce bypass: BTC 4H RSI < 15 → preskačemo BEAR/F&G/SP500 blokade za LONG
+          const _btcRsi4h = _regimeCache.btcRsi4h ?? null;
+          const _capitulation = signal === "LONG" && _btcRsi4h !== null && _btcRsi4h < 15;
+          if (_capitulation) {
+            console.log(`  🔄 [BOUNCE] ${symbol} — BTC 4H RSI ${_btcRsi4h?.toFixed(1)} < 15 → kapitulacija, LONG bypass aktivan`);
+          }
+
+          // BTC BEAR → blokira LONG (NEUTRAL prolazi), osim u kapitulaciji
+          if (signal === "LONG" && _btcRegime === "BEAR" && !_capitulation) {
             console.log(`  🌧️  [REGIME] ${symbol} — BTC BEAR → LONG blokiran`);
             continue;
           }
@@ -4202,13 +4219,13 @@ export async function run() {
             console.log(`  ☀️  [REGIME] ${symbol} — BTC BULL → SHORT blokiran`);
             continue;
           }
-          // SP500 RISK_OFF → blokira LONG, ali SHORT prolazi
-          if (signal === "LONG" && _sp500Regime === "RISK_OFF") {
+          // SP500 RISK_OFF → blokira LONG, ali SHORT prolazi (osim kapitulacija)
+          if (signal === "LONG" && _sp500Regime === "RISK_OFF" && !_capitulation) {
             console.log(`  🚨 [SP500] ${symbol} — RISK_OFF → LONG blokiran`);
             continue;
           }
-          // Fear & Greed: ekstremni strah (≤20) → blokira LONG (panika, ne ulazimo long)
-          if (signal === "LONG" && _fearGreed !== null && _fearGreed <= 20) {
+          // Fear & Greed: ekstremni strah (≤20) → blokira LONG (osim kapitulacija)
+          if (signal === "LONG" && _fearGreed !== null && _fearGreed <= 20 && !_capitulation) {
             console.log(`  😱 [F&G] ${symbol} — Extreme Fear (${_fearGreed}) → LONG blokiran`);
             continue;
           }

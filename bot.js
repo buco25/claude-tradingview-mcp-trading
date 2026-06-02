@@ -4212,10 +4212,15 @@ export async function run() {
             console.log(`  🌧️  [REGIME] ${symbol} — BTC BEAR → LONG blokiran`);
             continue;
           }
-          // BTC BULL → blokira SHORT (trend suprotan shortu)
-          if (signal === "SHORT" && _btcRegime === "BULL") {
-            console.log(`  ☀️  [REGIME] ${symbol} — BTC BULL → SHORT blokiran`);
+          // BTC BULL → blokira SHORT, OSIM ako je simbol 1H trend BEAR
+          // Per-simbol override: ako alt pada na 1H, short je validan čak i u BTC BULL
+          const _sym1hTrend = result?.trend1h || null;
+          if (signal === "SHORT" && _btcRegime === "BULL" && _sym1hTrend !== "BEAR") {
+            console.log(`  ☀️  [REGIME] ${symbol} — BTC BULL + 1H ${_sym1hTrend||"?"} → SHORT blokiran`);
             continue;
+          }
+          if (signal === "SHORT" && _btcRegime === "BULL" && _sym1hTrend === "BEAR") {
+            console.log(`  ⚡ [REGIME] ${symbol} — BTC BULL ali 1H BEAR → SHORT dopušten (per-simbol override)`);
           }
           // SP500 RISK_OFF → blokira LONG, ali SHORT prolazi (osim kapitulacija)
           if (signal === "LONG" && _sp500Regime === "RISK_OFF" && !_capitulation) {

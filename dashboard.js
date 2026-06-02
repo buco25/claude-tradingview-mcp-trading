@@ -2197,11 +2197,34 @@ async function doScan() {
       const volIcon = volR === null ? '' : s.volHigh ? ' 🚫' : s.volLow ? ' ⚠️' : '';
       const volStr  = volR !== null ? volR.toFixed(2) + '×' + volIcon : '—';
       const rsiAdxInfo = '<div style="font-size:10px;color:#6b7280;margin-top:2px">RSI <span style="color:' + rsiCol + '">' + (s.rsi||'—') + '</span> · ADX <span style="color:' + adxCol + '">' + (s.adx||'—') + '</span> · Vol <span style="color:' + volCol + '" title="Vol/Avg20: ' + volStr + ' | VOL_EXH threshold: ' + volThr + '×">' + volStr + '</span></div>';
+
+      // Procjena ulaza — SL i TP razine na temelju trenutne cijene
+      const _sig7 = s.synapse7Sig || '';
+      const _sigDir = _sig7 === 'LONG' ? 'LONG' : _sig7 === 'SHORT' ? 'SHORT' : null;
+      const _p = s.price || 0;
+      const _sl = s.slPct || 2.0;
+      const _tp = s.tpPct || 3.0;
+      let entryInfo = '';
+      if (_sigDir && _p > 0) {
+        const slPrice = _sigDir === 'LONG' ? _p * (1 - _sl/100) : _p * (1 + _sl/100);
+        const tpPrice = _sigDir === 'LONG' ? _p * (1 + _tp/100) : _p * (1 - _tp/100);
+        const fmt4 = v => v >= 1000 ? v.toFixed(1) : v >= 100 ? v.toFixed(2) : v >= 10 ? v.toFixed(3) : v >= 1 ? v.toFixed(4) : v.toFixed(5);
+        const entryCol = _sigDir === 'LONG' ? '#10b981' : '#ef4444';
+        const arrow = _sigDir === 'LONG' ? '▲' : '▼';
+        entryInfo = '<div style="font-size:9px;margin-top:3px;line-height:1.6">'
+          + '<span style="color:' + entryCol + ';font-weight:700">' + arrow + ' ' + fmt4(_p) + '</span>'
+          + '<span style="color:#6b7280"> → </span>'
+          + '<span style="color:#ef4444" title="Stop Loss">SL ' + fmt4(slPrice) + '</span>'
+          + '<span style="color:#6b7280"> | </span>'
+          + '<span style="color:#10b981" title="Take Profit">TP ' + fmt4(tpPrice) + '</span>'
+          + '</div>';
+      }
+
       return '<tr style="' + rowBg + '">' +
         '<td style="color:#94a3b8;font-size:11px;text-align:center;padding:6px 4px">' + (i+1) + '</td>' +
         '<td style="font-weight:800;font-size:13px;white-space:nowrap;padding:6px 8px">' + s.symbol.replace("USDT","") + '<span style="color:#94a3b8;font-size:10px;font-weight:400">USDT</span>' +
           '<div style="font-size:9px;color:' + slTpCol + ';font-weight:500;margin-top:1px">' + slTp + '</div>' + rsiAdxInfo + '</td>' +
-        '<td style="font-weight:600;white-space:nowrap;font-size:12px;padding:6px 8px">' + fmtLive(s.price) + '</td>' +
+        '<td style="font-weight:600;white-space:nowrap;font-size:12px;padding:6px 8px">' + fmtLive(s.price) + entryInfo + '</td>' +
         '<td style="text-align:center;font-weight:800;color:' + t1hCol + ';font-size:13px;padding:6px 4px" title="1H EMA20: ' + t1h + '">' + t1hIcon + '</td>' +
         '<td style="padding:4px 6px;border-right:1px solid #d9770633">' + mandatoryBoxes(s) + '</td>' +
         '<td style="padding:4px 4px">' + sigBoxes(s.ultraSigs16) + '</td>' +

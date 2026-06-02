@@ -4200,9 +4200,14 @@ export async function run() {
         }
         if (volAnomaly.high) console.log(`  📈 [VOL] ${symbol} — visok volumen ${volAnomaly.ratio}x! (breakout signal)`);
 
+        // Bounce mode: smanji minSig na 3 (tržište oversold, manji prag za LONG)
+        const _bounceParams = _bounceMode
+          ? { ...pDef.params, minSig: Math.min(pDef.params?.minSig ?? 4, 3) }
+          : pDef.params;
+
         let result;
         switch (pDef.strategy) {
-          case "synapse_t":   result = await analyzeUltraPullback(symbol, candles, pDef.params);      break;
+          case "synapse_t":   result = await analyzeUltraPullback(symbol, candles, _bounceParams);      break;
           default:            result = { signal: "NEUTRAL", reason: "Nepoznata strategija" };         break;
         }
 
@@ -4212,7 +4217,7 @@ export async function run() {
         if (signal === "NEUTRAL" && pDef.strategy === "synapse_t") {
           try {
             const candles15m = await fetchCandles(symbol, "15m", 250);
-            const result15m  = await analyzeUltraPullback(symbol, candles15m, pDef.params);
+            const result15m  = await analyzeUltraPullback(symbol, candles15m, _bounceParams);
             if (result15m.signal !== "NEUTRAL" && result15m.isMomentum) {
               Object.assign(result, result15m);
               ({ signal } = result);

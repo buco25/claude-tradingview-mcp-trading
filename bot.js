@@ -1915,20 +1915,33 @@ function analyzeUltra(candles, cfg) {
   const rsiLongOk  = rsi < (_strongTrend  ? 85 : 72);
   const rsiShortOk = rsi > (_strongTrendS ? 15 : 30);
 
-  // 4. VOL EXHAUSTION gate — ne ulazi na high-volume svjeće (= distribucija/akumulacija MM-a)
-  // Tiered threshold: BTC/ETH/SOL (2.0-2.5×) vs tanki alts (1.3-1.4×)
-  // Izvor: MM/Algo analiza 23.05.2026 — docs/MM_Algo_Analysis.xlsx
-  // SOL nastavlja trend pri 1.5-2×, TAO/HYPE distribuiraju već pri 1.3×
+  // 4. VOL EXHAUSTION gate
   const VOL_EXH_THRESHOLD = VOL_EXH_TIERS[_sym] ?? VOL_EXH_DEFAULT;
   const volRatioNow = volAvg20 > 0 ? volLast / volAvg20 : 1;
   const volExhOk = volRatioNow < VOL_EXH_THRESHOLD;
-  const _isMaxScore = bullCnt === 7 || bearCnt === 7; // svi signali zeleni
+  const _isMaxScore = bullCnt === 7 || bearCnt === 7;
   if (!volExhOk && !_isMaxScore) {
     return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
       reason: `VOL_EXH: ${volRatioNow.toFixed(2)}x avg ≥ ${VOL_EXH_THRESHOLD}× (${_sym||"def"}) — high-vol svjeća, čekamo pullback` };
   }
   if (!volExhOk && _isMaxScore) {
     console.log(`  ⚡ [VOL_EXH bypass] ${_sym} — 7/7 score, ignoriramo VOL_EXH (${volRatioNow.toFixed(2)}x)`);
+  }
+
+  // 5. VWAP gate — obvezni smjer (institucijski referentni nivo)
+  // LONG: cijena mora biti iznad VWAP (kupci dominiraju)
+  // SHORT: cijena mora biti ispod VWAP (prodavači dominiraju)
+  const vwapVal = calcVWAP(candles);
+  if (vwapVal && vwapVal > 0) {
+    const vwapDistPct = (price - vwapVal) / vwapVal * 100;
+    if (bullCnt >= 1 && price < vwapVal) {  // LONG signal ali ispod VWAP
+      return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
+        reason: `VWAP gate: cijena ${vwapDistPct.toFixed(1)}% ispod VWAP ${vwapVal.toFixed(4)} — čekamo da cijena prijeđe VWAP za LONG` };
+    }
+    if (bearCnt >= 1 && price > vwapVal) {  // SHORT signal ali iznad VWAP
+      return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
+        reason: `VWAP gate: cijena ${vwapDistPct.toFixed(1)}% iznad VWAP ${vwapVal.toFixed(4)} — čekamo da cijena padne ispod VWAP za SHORT` };
+    }
   }
 
   // ── Min MIN_CONFIRM/7 potvrđujućih signala ─────────────────────────────────

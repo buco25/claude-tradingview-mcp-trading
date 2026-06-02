@@ -1640,7 +1640,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <th>Symbol</th>
             <th>Cijena</th>
             <th style="color:#d97706;text-align:center">1H</th>
-            <th style="color:#d97706;text-align:center">3OB <span style="font-weight:400;font-size:10px;color:#94a3b8">ADX·RSI·VOL_EXH</span></th>
+            <th style="color:#d97706;text-align:center">4OB <span style="font-weight:400;font-size:10px;color:#94a3b8">ADX·6Sc·RSI·VWAP</span></th>
             <th style="color:#db2777;text-align:center">7 Signala</th>
             <th style="color:#db2777;text-align:center;width:60px">↑↓</th>
             <th style="min-width:160px">Status</th>
@@ -1970,6 +1970,19 @@ function mandatoryBoxes(s) {
                                  '5m S/R test ? — nema S/R razina u lookbacku → pullback blokiran (MOM preskače)';
   const srLbl = srOk === true ? '5mSR✓' : srOk === false ? '5mSR✗' : '5mSR?';
 
+  // 5. VWAP gate — LONG iznad VWAP, SHORT ispod VWAP
+  const vwapDist = s.vwapDistPct ?? null;
+  const isLongSig  = sig === "LONG"  || sig === "SETUP↑";
+  const isShortSig = sig === "SHORT" || sig === "SETUP↓";
+  const vwapLongOk  = vwapDist === null || vwapDist >= 0;   // cijena iznad VWAP
+  const vwapShortOk = vwapDist === null || vwapDist <= 0;   // cijena ispod VWAP
+  const vwapOk = isShortSig ? vwapShortOk : vwapLongOk;
+  const vwapCol = vwapDist === null ? '#94a3b8' : vwapOk ? '#059669' : '#dc2626';
+  const vwapBg  = vwapDist === null ? '#1c2128' : vwapOk ? '#0d3d26' : '#3d0d0d';
+  const vwapDistStr = vwapDist !== null ? (vwapDist >= 0 ? '+' : '') + vwapDist.toFixed(1) + '%' : '?';
+  const vwapTip = 'VWAP gate: cijena ' + vwapDistStr + ' od VWAP' +
+    (vwapOk ? ' ✓ — ispravna strana' : ' ✗ — pogrešna strana, BLOKIRAN');
+
   function badge(label, col, bg, tip) {
     return '<span title="' + tip + '" style="display:inline-flex;flex-direction:column;align-items:center;background:' + bg +
       ';color:' + col + ';border:1px solid ' + col + '44;padding:2px 5px;font-size:10px;font-weight:700;border-radius:3px;margin:1px;min-width:36px;text-align:center">' +
@@ -1979,6 +1992,7 @@ function mandatoryBoxes(s) {
   return badge('ADX', adxCol, adxBg, adxTip) +
          badge('6Sc', scaleCol, scaleBg, scaleTip) +
          badge('RSI', rsiCol, rsiBg, rsiTip) +
+         badge('VWAP', vwapCol, vwapBg, vwapTip) +
          badge(srLbl, srCol, srBg, srTip);
 }
 

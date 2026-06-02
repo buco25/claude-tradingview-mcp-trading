@@ -388,9 +388,19 @@ function isFundingTrendRising(symbol) {
   return hist[0] < hist[1] && hist[1] < hist[2] && hist[2] > 0.02;
 }
 
-// ─── VWAP (Volume Weighted Average Price) ────────────────────────────────────
-export function calcVWAP(candles, periods = 96) {
-  const slice = candles.slice(-periods);
+// ─── VWAP (Volume Weighted Average Price) — dnevni, resetira u ponoć UTC ─────
+export function calcVWAP(candles) {
+  // Dnevni VWAP: samo svjeće od ponoći UTC do sad
+  const now = Date.now();
+  const midnight = new Date(now);
+  midnight.setUTCHours(0, 0, 0, 0);
+  const midnightMs = midnight.getTime();
+
+  const todayCandles = candles.filter(c => c.time >= midnightMs);
+
+  // Fallback: ako nema dovoljno dnevnih svjeća (< 3), uzmi zadnjih 24 × 1H
+  const slice = todayCandles.length >= 3 ? todayCandles : candles.slice(-24);
+
   let sumPV = 0, sumV = 0;
   for (const c of slice) {
     const typical = (c.high + c.low + c.close) / 3;

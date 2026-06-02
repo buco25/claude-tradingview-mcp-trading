@@ -4146,15 +4146,13 @@ export async function run() {
         }
 
         // ── D) Quiet Pullback filter — ulazimo samo na tihim svjećama ──────────
-        // MM akumulira na nisko vol (0.3–1.0×). Visok vol = distribucija ili markup.
-        // PBK signal: max 1.0× (čisti pullback mora biti tih)
-        // MOM signal: max 1.5× (momentum smije imati veći vol, VOL_EXH blokira ekstremes)
+        // PBK signal: max 2.0× | MOM signal: max 3.0×
         // Pyramid (existingPos): preskačemo filter — već smo u poziciji
         if (pDef.strategy === "synapse_t" && !existingPos) {
           const _isPbk   = !result.isMomentum;
-          const _volMax  = _isPbk ? 1.0 : 1.5;
+          const _volMax  = _isPbk ? 2.0 : 3.0;
           if (volAnomaly.ratio > _volMax) {
-            console.log(`  🔇 [QUIET] ${symbol} ${signal} (${_isPbk?"PBK":"MOM"}) — volRatio ${volAnomaly.ratio}× > ${_volMax}× → distribucija/markup zona, preskačem`);
+            console.log(`  🔇 [QUIET] ${symbol} ${signal} (${_isPbk?"PBK":"MOM"}) — volRatio ${volAnomaly.ratio}× > ${_volMax}× → preskačem`);
             continue;
           }
         }

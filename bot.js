@@ -4346,7 +4346,7 @@ export async function run() {
           }
 
           // SHORT blokiran samo ako je 1H BULL, osim ako simbol ima 1H BEAR trend
-          const _sym1hTrend = result?.trend1h || null;
+          const _sym1hTrend = result?.trend1h || trend1h?.trend || null;
           if (signal === "SHORT" && _effectiveRegime === "BULL" && _sym1hTrend !== "BEAR") {
             console.log(`  ☀️  [REGIME] ${symbol} — BTC 1H BULL + simbol 1H ${_sym1hTrend||"?"} → SHORT blokiran`);
             continue;

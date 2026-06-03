@@ -4249,6 +4249,20 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Scan log — GET /api/scan-log?hours=24
+  if (url.pathname === "/api/scan-log") {
+    const hours = parseInt(url.searchParams.get("hours") || "24");
+    const f = `${DATA_DIR}/scan_log.csv`;
+    if (!existsSync(f)) { res.writeHead(404); res.end("Scan log not found"); return; }
+    const cutoffTs = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString().slice(0, 16).replace("T", " ");
+    const lines = readFileSync(f, "utf8").split("\n");
+    const header = lines[0];
+    const filtered = lines.slice(1).filter(l => l && l >= cutoffTs);
+    res.writeHead(200, { "Content-Type": "text/csv; charset=utf-8" });
+    res.end(header + "\n" + filtered.join("\n"));
+    return;
+  }
+
   // CSV download — GET /api/csv?pid=synapse_t
   if (url.pathname === "/api/csv") {
     const pid = url.searchParams.get("pid") || "synapse_t";

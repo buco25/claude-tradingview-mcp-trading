@@ -1241,6 +1241,40 @@ const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" 
 if (DATA_DIR !== "." && !existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
 
 const HEARTBEAT_FILE = `${DATA_DIR}/heartbeat.json`;
+const SCAN_LOG_FILE  = `${DATA_DIR}/scan_log.csv`;
+
+// ─── Scan Log — bilježi zašto je svaki simbol preskočen ili ušao ─────────────
+function initScanLog() {
+  if (!existsSync(SCAN_LOG_FILE)) {
+    writeFileSync(SCAN_LOG_FILE, "Timestamp,Symbol,Signal,Score,RSI,ADX,VwapDist%,Blocker,Reason\n");
+  }
+}
+
+function writeScanLog(entries) {
+  initScanLog();
+  const lines = entries.map(e => {
+    const ts    = new Date().toISOString().slice(0, 16).replace("T", " ");
+    const score = e.score ?? "—";
+    const rsi   = e.rsi   != null ? parseFloat(e.rsi).toFixed(1)  : "—";
+    const adx   = e.adx   != null ? parseFloat(e.adx).toFixed(1)  : "—";
+    const vwap  = e.vwapDist != null ? parseFloat(e.vwapDist).toFixed(2) : "—";
+    const reason = (e.reason || "").replace(/,/g, ";").slice(0, 120);
+    return `${ts},${e.symbol},${e.signal || "NEUTRAL"},${score},${rsi},${adx},${vwap},${e.blocker || "—"},"${reason}"`;
+  }).join("\n");
+  appendFileSync(SCAN_LOG_FILE, lines + "\n");
+}
+
+// Čisti stare scan log retke (drži samo zadnjih 7 dana)
+function cleanScanLog() {
+  try {
+    if (!existsSync(SCAN_LOG_FILE)) return;
+    const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const lines  = readFileSync(SCAN_LOG_FILE, "utf8").split("\n");
+    const header = lines[0];
+    const kept   = lines.slice(1).filter(l => !l || l >= cutoff);
+    writeFileSync(SCAN_LOG_FILE, header + "\n" + kept.join("\n"));
+  } catch (_) {}
+}
 
 // Učitaj SL cooldown s diska (preživi restart) — pozvan ovdje jer DATA_DIR sad postoji
 loadSlCooldown();
@@ -4177,6 +4211,8 @@ export async function run() {
     }
 
     let _newEntriesThisScan = 0;  // Reset po portfoliju, ne dopuštamo simultano previše ulaza
+    const _scanLogEntries = [];  // skuplja log entries za ovaj scan ciklus
+
     for (const symbol of pDef.symbols) {
       // ── Pyramid (DCA) logika: dopuštamo max MAX_PYRAMID adicija u ISTOM smjeru ──
       const existingPosList = openPositions.filter(p => p.symbol === symbol);
@@ -4195,14 +4231,14 @@ export async function run() {
       }
 
       // Provjeri limit otvorenih pozicija
-      // RE-ENTRY iznimka: ako simbol ima WIN re-entry queue u 45min → +1 bonus slot
       const currentOpen = loadPositions(pid).length;
       const _reEntry = _winReEntry.get(symbol);
       const _reEntryActive = _reEntry && (Date.now() - _reEntry.ts) < REENTRY_WINDOW_MS;
-      if (!_reEntryActive && _reEntry) _winReEntry.delete(symbol);  // istekao prozor
+      if (!_reEntryActive && _reEntry) _winReEntry.delete(symbol);
       const _maxOpen = _reEntryActive ? MAX_OPEN_PER_PORTFOLIO + 1 : MAX_OPEN_PER_PORTFOLIO;
       if (currentOpen >= _maxOpen && symbol !== BTC_EXCEPTION) {
         console.log(`  🔒 [${pDef.name}] Max ${MAX_OPEN_PER_PORTFOLIO}${_reEntryActive?" (re-entry +1)":""} dostignut — preskačem ${symbol}`);
+        _scanLogEntries.push({ symbol, signal: "SKIP", blocker: `MAX_POS(${currentOpen}/${_maxOpen})`, reason: "Max otvorenih pozicija dostignut" });
         continue;
       }
 
@@ -4221,6 +4257,7 @@ export async function run() {
         const sess = getSessionInfo();
         if (sess.dead) {
           console.log(`  🌙 [SESSION] ${symbol} — dead zone (${sess.utcHour}:00 UTC, 01-06 UTC blokiran) → preskačem`);
+          _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "DEAD_ZONE", reason: `Dead zone ${sess.utcHour}:00 UTC` });
           continue;
         }
 
@@ -4279,6 +4316,13 @@ export async function run() {
 
         if (signal === "NEUTRAL") {
           console.log(`  🚫 [${pDef.name}] ${symbol} — ${reason}`);
+          _scanLogEntries.push({
+            symbol, signal: "NEUTRAL",
+            score: Math.max(result.bullScore || 0, result.bearScore || 0),
+            rsi: result.price != null ? null : null,  // rsi u reason stringu
+            adx: null, vwapDist: result.vwap ? ((result.price - result.vwap) / result.vwap * 100).toFixed(2) : null,
+            blocker: "SIGNAL", reason,
+          });
           continue;
         }
 
@@ -4309,6 +4353,7 @@ export async function run() {
             const _icon = _liqStatus.danger === "DANGER" ? "🔴" : "🟡";
             if (_liqStatus.danger === "DANGER") {
               console.log(`  ${_icon} [LIQ] ${symbol} — DANGER (${_liqStatus.minDist.toFixed(1)}% do liq · LONG $${_liqStatus.closestLong?.price.toFixed(0)||"?"} · SHORT $${_liqStatus.closestShort?.price.toFixed(0)||"?"}) → preskačem`);
+              _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: `LIQ_DANGER(${_liqStatus.minDist.toFixed(1)}%)`, reason: `Liq zona ${_liqStatus.minDist.toFixed(1)}% od cijene` });
               continue;
             }
             if (_liqStatus.danger === "CAUTION") {
@@ -4358,6 +4403,7 @@ export async function run() {
           // LONG blokiran samo ako je 1H BEAR (ne 4H)
           if (signal === "LONG" && _effectiveRegime === "BEAR" && !_anyLongBypass) {
             console.log(`  🌧️  [REGIME] ${symbol} — BTC 1H BEAR → LONG blokiran`);
+            _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: `BTC_REGIME(${_effectiveRegime})`, reason: "BTC 1H BEAR → LONG blokiran", vwapDist: result.vwap ? ((result.price-result.vwap)/result.vwap*100).toFixed(2) : null });
             continue;
           }
 
@@ -4365,6 +4411,7 @@ export async function run() {
           const _sym1hTrend = result?.trend1h || trend1h?.trend || null;
           if (signal === "SHORT" && _effectiveRegime === "BULL" && _sym1hTrend !== "BEAR") {
             console.log(`  ☀️  [REGIME] ${symbol} — BTC 1H BULL + simbol 1H ${_sym1hTrend||"?"} → SHORT blokiran`);
+            _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: `BTC_REGIME(${_effectiveRegime})`, reason: `BTC 1H BULL, simbol 1H ${_sym1hTrend||"?"} → SHORT blokiran` });
             continue;
           }
           if (signal === "SHORT" && _effectiveRegime === "BULL" && _sym1hTrend === "BEAR") {
@@ -4655,6 +4702,7 @@ export async function run() {
           addPosition(pid, entry);
           writeEntryCsv(pid, entry);
           _newEntriesThisScan++;
+          _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: "ENTERED", reason: `${result.isMomentum?"MOM":"PBK"} ulaz @ ${fmtPrice(price)} SL ${fmtPrice(sl)} TP ${fmtPrice(tp)}`, vwapDist: result.vwap ? ((price-result.vwap)/result.vwap*100).toFixed(2) : null });
           await tg(`📋 PAPER [${pDef.name}/${pDef.timeframe}] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b> ${_strengthEmoji}\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} (${slPct.toFixed(1)}%) | TP: ${fmtPrice(tp)} (${tpPct.toFixed(1)}%) | ${_rrLabel}\nEquity: $${equity.toFixed(2)} | Risk: $${riskAmount.toFixed(2)} | Notional: $${tradeSize.toFixed(0)} | Margin: $${margin.toFixed(2)} | ${symSltp.leverage ?? LEVERAGE}x`);
         } else {
           try {
@@ -4676,8 +4724,19 @@ export async function run() {
 
       } catch (err) {
         console.log(`  ❌ [${pDef.name}] ${symbol}: ${err.message}`);
+        _scanLogEntries.push({ symbol, signal: "ERROR", blocker: "ERROR", reason: err.message });
       }
     }
+
+    // Piši scan log jednom po scan ciklusu
+    if (_scanLogEntries.length > 0) {
+      try { writeScanLog(_scanLogEntries); } catch (_) {}
+    }
+  }
+
+  // Čisti stari log jednom dnevno (ujutro)
+  if (new Date().getUTCHours() === 6 && new Date().getUTCMinutes() < 10) {
+    try { cleanScanLog(); } catch (_) {}
   }
 
   writeHeartbeat("ok", { portfolios: nPort, symbols: totalSymbols, leverage: LEVERAGE });

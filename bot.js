@@ -1982,16 +1982,42 @@ function analyzeUltra(candles, cfg) {
   if (!vwapVal || vwapVal <= 0) {
     console.log(`  ⚠️  [VWAP] ${_sym} — VWAP nije dostupan, blokiran`);
   }
-  // Detekcija crossovera (zadnje 3 svjeće)
+  // ── VWAP entry detekcija: Cross ILI Rejection ────────────────────────────────
+  // 1. Cross + potvrda: probijena VWAP + iduća svjeća potvrđuje
   const _vwapCrossUp   = vwapVal && n >= 3
-    && closes[n-3] < vwapVal   // N-2: bio ispod
-    && closes[n-2] > vwapVal   // N-1: probio iznad
-    && closes[n-1] > vwapVal;  // N:   potvrdio iznad → LONG
+    && closes[n-3] < vwapVal        // N-2: bio ispod
+    && closes[n-2] > vwapVal        // N-1: probio iznad
+    && closes[n-1] > vwapVal;       // N:   potvrdio → LONG
   const _vwapCrossDown = vwapVal && n >= 3
-    && closes[n-3] > vwapVal   // N-2: bio iznad
-    && closes[n-2] < vwapVal   // N-1: probio ispod
-    && closes[n-1] < vwapVal;  // N:   potvrdio ispod → SHORT
-  const _vwapCrossOk = _vwapCrossUp || _vwapCrossDown;
+    && closes[n-3] > vwapVal        // N-2: bio iznad
+    && closes[n-2] < vwapVal        // N-1: probio ispod
+    && closes[n-1] < vwapVal;       // N:   potvrdio → SHORT
+
+  // 2. Rejection: cijena ispod VWAP, zelena svjeća ne probije, slijedeća crvena → SHORT
+  //              cijena iznad VWAP, crvena svjeća ne padne ispod, slijedeća zelena → LONG
+  const _prevOpen  = candles[n-2]?.open  ?? closes[n-2];
+  const _prevClose = candles[n-2]?.close ?? closes[n-2];
+  const _currOpen  = candles[n-1]?.open  ?? closes[n-1];
+  const _currClose = candles[n-1]?.close ?? closes[n-1];
+  const _prevGreen = _prevClose > _prevOpen;  // zelena svjeća
+  const _prevRed   = _prevClose < _prevOpen;  // crvena svjeća
+  const _currGreen = _currClose > _currOpen;
+  const _currRed   = _currClose < _currOpen;
+
+  const _vwapRejectShort = vwapVal && n >= 2
+    && _currClose < vwapVal    // trenutno ispod VWAP
+    && _prevGreen              // prethodna zelena (pokušala gore)
+    && _prevClose < vwapVal    // ali nije prešla VWAP
+    && _currRed;               // ova crvena = odbijanje → SHORT
+
+  const _vwapRejectLong = vwapVal && n >= 2
+    && _currClose > vwapVal    // trenutno iznad VWAP
+    && _prevRed                // prethodna crvena (pokušala dolje)
+    && _prevClose > vwapVal    // ali nije prešla VWAP
+    && _currGreen;             // ova zelena = odbijanje → LONG
+
+  const _vwapLongOk  = _vwapCrossUp   || _vwapRejectLong;
+  const _vwapShortOk = _vwapCrossDown || _vwapRejectShort;
 
   // ── Min MIN_CONFIRM/7 potvrđujućih signala ─────────────────────────────────
   const MIN_CONFIRM = minSig;  // čita iz rules.json (trebalo bi biti 4)
@@ -2002,7 +2028,7 @@ function analyzeUltra(candles, cfg) {
       return { price, signal: "NEUTRAL", bullScore, bearScore,
         reason: `PBK LONG blokiran: VWAP nedostupan` };
     }
-    if (!_vwapCrossUp) {
+    if (!_vwapLongOk) {
       const vd = ((price - vwapVal) / vwapVal * 100).toFixed(1);
       return { price, signal: "NEUTRAL", bullScore, bearScore, vwap: vwapVal,
         reason: `PBK LONG blokiran: nema VWAP crossover potvrde (cijena ${vd}% od VWAP)` };
@@ -2017,7 +2043,7 @@ function analyzeUltra(candles, cfg) {
       return { price, signal: "NEUTRAL", bullScore, bearScore,
         reason: `PBK SHORT blokiran: VWAP nedostupan` };
     }
-    if (!_vwapCrossDown) {
+    if (!_vwapShortOk) {
       const vd = ((price - vwapVal) / vwapVal * 100).toFixed(1);
       return { price, signal: "NEUTRAL", bullScore, bearScore, vwap: vwapVal,
         reason: `PBK SHORT blokiran: nema VWAP crossover potvrde (cijena ${vd}% od VWAP)` };
@@ -2061,7 +2087,7 @@ function analyzeUltra(candles, cfg) {
       return { price, signal: "NEUTRAL", bullScore: momBull, bearScore: momBear,
         reason: `MOM LONG blokiran: VWAP nedostupan` };
     }
-    if (!_vwapCrossUp) {
+    if (!_vwapLongOk) {
       const _mvd = ((price - vwapVal) / vwapVal * 100).toFixed(1);
       return { price, signal: "NEUTRAL", bullScore: momBull, bearScore: momBear, vwap: vwapVal,
         reason: `MOM LONG blokiran: nema VWAP crossover potvrde (cijena ${_mvd}% od VWAP)` };
@@ -2075,7 +2101,7 @@ function analyzeUltra(candles, cfg) {
       return { price, signal: "NEUTRAL", bullScore: momBull, bearScore: momBear,
         reason: `MOM SHORT blokiran: VWAP nedostupan` };
     }
-    if (!_vwapCrossDown) {
+    if (!_vwapShortOk) {
       const _svd = ((price - vwapVal) / vwapVal * 100).toFixed(1);
       return { price, signal: "NEUTRAL", bullScore: momBull, bearScore: momBear, vwap: vwapVal,
         reason: `MOM SHORT blokiran: nema VWAP crossover potvrde (cijena ${_svd}% od VWAP)` };

@@ -3342,10 +3342,14 @@ var _sqSavedTab = sessionStorage.getItem('sqActiveTab');
 _sqLoad();
 setInterval(_sqLoad, 60 * 60 * 1000);
 
-// Restore active tab after reload
+// Restore active tab after reload — bez scrolla (ostajemo na vrhu)
 if (_sqSavedTab) {
   sessionStorage.removeItem('sqActiveTab');
-  setTimeout(function() { squeezeShowTab(_sqSavedTab); }, 200);
+  setTimeout(function() {
+    _sqActive = _sqSavedTab;
+    sqRenderGrid();
+    if (_sqData[_sqSavedTab]) sqRenderDetail(_sqSavedTab);
+  }, 200);
 }
 </script>
 

@@ -2060,9 +2060,9 @@ function analyzeUltra(candles, cfg) {
       return { price, signal: "NEUTRAL", bullScore: momBull, bearScore: momBear, vwap: vwapVal,
         reason: `MOM LONG blokiran: cijena ${_mvd.toFixed(1)}% ispod VWAP — nema breakout potvrde` };
     }
-    if (_mvd > 3.0) {
+    if (_mvd > 1.5) {
       return { price, signal: "NEUTRAL", bullScore: momBull, bearScore: momBear, vwap: vwapVal,
-        reason: `MOM LONG blokiran: cijena +${_mvd.toFixed(1)}% od VWAP — predaleko` };
+        reason: `MOM LONG blokiran: cijena +${_mvd.toFixed(1)}% od VWAP — predaleko (max +1.5%)` };
     }
     return { price, signal: "LONG", bullScore: momBull, bearScore: momBear,
       nearSup, nearRes, isMomentum: true, vwap: vwapVal,
@@ -2079,9 +2079,9 @@ function analyzeUltra(candles, cfg) {
       return { price, signal: "NEUTRAL", bullScore: momBull, bearScore: momBear, vwap: vwapVal,
         reason: `MOM SHORT blokiran: cijena +${_svd.toFixed(1)}% iznad VWAP — nema breakdown potvrde` };
     }
-    if (_svd < -3.0) {
+    if (_svd < -1.5) {
       return { price, signal: "NEUTRAL", bullScore: momBull, bearScore: momBear, vwap: vwapVal,
-        reason: `MOM SHORT blokiran: cijena ${_svd.toFixed(1)}% od VWAP — predaleko` };
+        reason: `MOM SHORT blokiran: cijena ${_svd.toFixed(1)}% od VWAP — predaleko (max -1.5%)` };
     }
     return { price, signal: "SHORT", bullScore: momBull, bearScore: momBear,
       nearSup, nearRes, isMomentum: true, vwap: vwapVal,

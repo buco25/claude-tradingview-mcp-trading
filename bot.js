@@ -735,7 +735,7 @@ export async function calcSymbolCorrelation(symbols) {
 // Crypto dead zone: 01:00–06:00 UTC = azijska mirna sesija, niski volumen, choppy
 // NY sesija (13-21 UTC) i London (08-16 UTC) = visoki volumen, bolji trendovi
 const SESSION_DEAD_START = 1;   // UTC sat (inclusive)
-const SESSION_DEAD_END   = 6;   // UTC sat (exclusive) — 01:00-05:59 UTC blokiran
+const SESSION_DEAD_END   = 5;   // UTC sat (exclusive) — 01:00-04:59 UTC blokiran (07:00 Zagreb)
 
 export function getSessionInfo() {
   const h = new Date().getUTCHours();

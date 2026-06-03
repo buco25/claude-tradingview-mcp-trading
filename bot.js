@@ -1990,22 +1990,32 @@ function analyzeUltra(candles, cfg) {
   const MOM_ADX_MIN = 20;
 
   if (momBull >= MOM_MIN && rsiLongOk && adx >= MOM_ADX_MIN) {
-    // VWAP gate za MOM LONG: cijena mora biti iznad VWAP (breakout potvrđen)
+    // VWAP gate za MOM LONG: cijena mora biti iznad VWAP ali ne predaleko
     if (vwapVal && price < vwapVal) {
       const vd = ((price - vwapVal) / vwapVal * 100).toFixed(1);
       return { price, signal: "NEUTRAL", bullScore: momBull, bearScore: momBear, vwap: vwapVal,
-        reason: `MOM LONG blokiran: cijena ${vd}% ispod VWAP ${vwapVal.toFixed(4)} — nema breakout potvrde` };
+        reason: `MOM LONG blokiran: cijena ${vd}% ispod VWAP — nema breakout potvrde` };
+    }
+    if (vwapVal && ((price - vwapVal) / vwapVal * 100) > 3.0) {
+      const vd = ((price - vwapVal) / vwapVal * 100).toFixed(1);
+      return { price, signal: "NEUTRAL", bullScore: momBull, bearScore: momBear, vwap: vwapVal,
+        reason: `MOM LONG blokiran: cijena +${vd}% od VWAP — predaleko, čekamo pullback prema VWAP` };
     }
     return { price, signal: "LONG", bullScore: momBull, bearScore: momBear,
       nearSup, nearRes, isMomentum: true, vwap: vwapVal,
       reason: `MOMENTUM LONG ↑${momBullBase}/7 | ADX:${adx.toFixed(0)}≥${MOM_ADX_MIN}✓ RSI:${rsi.toFixed(0)}<${_strongTrend?85:72}✓${_strongTrend?" [STRONG]":""}${sigRsiDiv===1?" RDIV✓":""}` };
   }
   if (!LONG_ONLY && momBear >= MOM_MIN && rsiShortOk && adx >= MOM_ADX_MIN) {
-    // VWAP gate za MOM SHORT: cijena mora biti ispod VWAP (breakdown potvrđen)
+    // VWAP gate za MOM SHORT: cijena mora biti ispod VWAP ali ne predaleko
     if (vwapVal && price > vwapVal) {
       const vd = ((price - vwapVal) / vwapVal * 100).toFixed(1);
       return { price, signal: "NEUTRAL", bullScore: momBull, bearScore: momBear, vwap: vwapVal,
-        reason: `MOM SHORT blokiran: cijena +${vd}% iznad VWAP ${vwapVal.toFixed(4)} — nema breakdown potvrde` };
+        reason: `MOM SHORT blokiran: cijena +${vd}% iznad VWAP — nema breakdown potvrde` };
+    }
+    if (vwapVal && ((price - vwapVal) / vwapVal * 100) < -3.0) {
+      const vd = ((price - vwapVal) / vwapVal * 100).toFixed(1);
+      return { price, signal: "NEUTRAL", bullScore: momBull, bearScore: momBear, vwap: vwapVal,
+        reason: `MOM SHORT blokiran: cijena ${vd}% od VWAP — predaleko, čekamo bounce prema VWAP` };
     }
     return { price, signal: "SHORT", bullScore: momBull, bearScore: momBear,
       nearSup, nearRes, isMomentum: true, vwap: vwapVal,

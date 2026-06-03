@@ -1949,12 +1949,28 @@ function analyzeUltra(candles, cfg) {
 
   const bonusTag = _premiumBonusBull ? " [CVD+E145 bonus]" : _premiumBonusBear ? " [CVD+E145 bonus]" : "";
   if (bullScore >= MIN_CONFIRM && rsiLongOk) {
+    // PBK LONG VWAP proximity: cijena mora biti unutar +1.5% od VWAP (bounce od VWAP, ne extended)
+    if (vwapVal && vwapVal > 0) {
+      const vd = (price - vwapVal) / vwapVal * 100;
+      if (vd > 1.5) {
+        return { price, signal: "NEUTRAL", bullScore, bearScore, vwap: vwapVal,
+          reason: `PBK LONG blokiran: cijena +${vd.toFixed(1)}% od VWAP — predaleko, čekamo pullback do VWAP` };
+      }
+    }
     const sigMask = sigs.reduce((mask, v, i) => v === 1 ? mask | (1 << i) : mask, 0);
     return { price, signal: "LONG", bullScore, bearScore, sigMask,
       nearSup, nearRes, vwap: vwapVal,
       reason: `ULTRA LONG ↑${bullCnt}/7${_premiumBonusBull?"+1bonus":""} | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ RSI:${rsi.toFixed(0)}<${_strongTrend?85:72}✓${bonusTag}` };
   }
   if (!LONG_ONLY && bearScore >= MIN_CONFIRM && rsiShortOk) {
+    // PBK SHORT VWAP proximity: cijena mora biti unutar -1.5% od VWAP
+    if (vwapVal && vwapVal > 0) {
+      const vd = (price - vwapVal) / vwapVal * 100;
+      if (vd < -1.5) {
+        return { price, signal: "NEUTRAL", bullScore, bearScore, vwap: vwapVal,
+          reason: `PBK SHORT blokiran: cijena ${vd.toFixed(1)}% od VWAP — predaleko, čekamo bounce do VWAP` };
+      }
+    }
     return { price, signal: "SHORT", bullScore, bearScore,
       nearSup, nearRes, vwap: vwapVal,
       reason: `ULTRA SHORT ↓${bearCnt}/7${_premiumBonusBear?"+1bonus":""} | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ RSI:${rsi.toFixed(0)}>${_strongTrendS?15:30}✓${bonusTag}` };

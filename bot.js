@@ -4335,24 +4335,24 @@ export async function run() {
           if (_capitulation) console.log(`  🔄 [BOUNCE] ${symbol} — BTC 4H RSI ${_btcRsi4h?.toFixed(1)} < 15 → kapitulacija bypass`);
           if (_bounceBypass && !_capitulation) console.log(`  🔄 [BOUNCE] ${symbol} — bounce mode aktivan (1H RSI < 30) → LONG bypass`);
 
-          // BTC 4H BEAR → blokira LONG, osim u bounce/capitulation modu
-          // BTC 1H BEAR override: ako je 1H BEAR ali 4H BULL, uzimamo 1H (brži signal)
-          if (signal === "LONG" && _btcRegime === "BEAR" && _btcRegime1h === "BEAR" && !_anyLongBypass) {
-            console.log(`  🌧️  [REGIME] ${symbol} — BTC 4H+1H BEAR → LONG blokiran`);
+          // BTC 1H je primarni regime filter (brži od 4H)
+          // 4H ostaje samo kao kontekst za TP dinamiku
+          const _effectiveRegime = _btcRegime1h !== "UNKNOWN" ? _btcRegime1h : _btcRegime;
+
+          // LONG blokiran samo ako je 1H BEAR (ne 4H)
+          if (signal === "LONG" && _effectiveRegime === "BEAR" && !_anyLongBypass) {
+            console.log(`  🌧️  [REGIME] ${symbol} — BTC 1H BEAR → LONG blokiran`);
             continue;
-          }
-          if (signal === "LONG" && _btcRegime === "BEAR" && _btcRegime1h !== "BEAR" && !_anyLongBypass) {
-            console.log(`  🌤️  [REGIME] ${symbol} — BTC 4H BEAR ali 1H ${_btcRegime1h} → LONG dopušten (1H override)`);
           }
 
-          // BTC BULL → blokira SHORT, OSIM ako je simbol 1H BEAR (per-simbol override)
+          // SHORT blokiran samo ako je 1H BULL, osim ako simbol ima 1H BEAR trend
           const _sym1hTrend = result?.trend1h || null;
-          if (signal === "SHORT" && _btcRegime === "BULL" && _sym1hTrend !== "BEAR") {
-            console.log(`  ☀️  [REGIME] ${symbol} — BTC BULL + 1H ${_sym1hTrend||"?"} → SHORT blokiran`);
+          if (signal === "SHORT" && _effectiveRegime === "BULL" && _sym1hTrend !== "BEAR") {
+            console.log(`  ☀️  [REGIME] ${symbol} — BTC 1H BULL + simbol 1H ${_sym1hTrend||"?"} → SHORT blokiran`);
             continue;
           }
-          if (signal === "SHORT" && _btcRegime === "BULL" && _sym1hTrend === "BEAR") {
-            console.log(`  ⚡ [REGIME] ${symbol} — BTC BULL ali 1H BEAR → SHORT dopušten`);
+          if (signal === "SHORT" && _effectiveRegime === "BULL" && _sym1hTrend === "BEAR") {
+            console.log(`  ⚡ [REGIME] ${symbol} — BTC 1H BULL ali simbol 1H BEAR → SHORT dopušten`);
           }
           // Bounce mode: blokira SHORT (tražimo samo LONG reversal)
           if (signal === "SHORT" && _bounceMode) {

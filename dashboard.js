@@ -1311,7 +1311,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
 
       <!-- Market Regime -->
       <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px" id="regime-card">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">🌍 BTC 4H Regime</div>
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">🌍 BTC 1H Regime</div>
         <div style="font-size:22px;font-weight:800;color:#9ca3af" id="regime-val">…</div>
         <div style="font-size:11px;color:#9ca3af;margin-top:2px" id="regime-sub">učitavam…</div>
       </div>
@@ -1373,7 +1373,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
 
       <!-- BTC Regime -->
       <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">📊 BTC Regime (4H)</div>
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">📊 BTC Regime (1H)</div>
         <div style="font-size:22px;font-weight:800" id="mi-regime-val">…</div>
         <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="mi-regime-sub">BULL=LONG ok · BEAR=LONG blokiran</div>
       </div>
@@ -3682,7 +3682,7 @@ const server = http.createServer(async (req, res) => {
   // BTC Regime — bez auth, za debug
   if (url.pathname === "/api/regime") {
     try {
-      const rUrl = "https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=4H&limit=60";
+      const rUrl = "https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1H&limit=60";
       const rD   = await fetch(rUrl).then(r => r.json());
       let regime = "UNKNOWN";
       if (rD.code === "00000" && rD.data?.length >= 20) {

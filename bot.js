@@ -1972,42 +1972,52 @@ function analyzeUltra(candles, cfg) {
     console.log(`  ⚡ [VOL_EXH bypass] ${_sym} — 7/7 score, ignoriramo VOL_EXH (${volRatioNow.toFixed(2)}x)`);
   }
 
-  // 5. VWAP gate — samo za MOMENTUM signale (PBK i bounce kupuje ispod VWAP = povlačenje prema fair value)
-  // MOM LONG: cijena mora biti iznad VWAP (breakout potvrđen)
-  // MOM SHORT: cijena mora biti ispod VWAP (breakdown potvrđen)
-  // PBK: preskačemo VWAP gate — pullback ispod/iznad VWAP je točno taj setup
+  // 5. VWAP gate
+  // PBK LONG: unutar +1.5% od VWAP (bounce od VWAP)
+  // PBK SHORT: unutar -1.5% od VWAP (bounce od VWAP)
+  // MOM LONG: 0% do +3% iznad VWAP (breakout)
+  // MOM SHORT: -3% do 0% ispod VWAP (breakdown)
+  // Ako VWAP nije dostupan → blokira (ne bypassa!)
   const vwapVal = calcVWAP(candles);
+  if (!vwapVal || vwapVal <= 0) {
+    // VWAP nedostupan — ne možemo provjeriti, blokiramo kao sigurnosna mjera
+    console.log(`  ⚠️  [VWAP] ${_sym} — VWAP nije dostupan, preskačem`);
+  }
 
   // ── Min MIN_CONFIRM/7 potvrđujućih signala ─────────────────────────────────
   const MIN_CONFIRM = minSig;  // čita iz rules.json (trebalo bi biti 4)
 
   const bonusTag = _premiumBonusBull ? " [CVD+E145 bonus]" : _premiumBonusBear ? " [CVD+E145 bonus]" : "";
   if (bullScore >= MIN_CONFIRM && rsiLongOk) {
-    // PBK LONG VWAP proximity: cijena mora biti unutar +1.5% od VWAP (bounce od VWAP, ne extended)
-    if (vwapVal && vwapVal > 0) {
-      const vd = (price - vwapVal) / vwapVal * 100;
-      if (vd > 1.5) {
-        return { price, signal: "NEUTRAL", bullScore, bearScore, vwap: vwapVal,
-          reason: `PBK LONG blokiran: cijena +${vd.toFixed(1)}% od VWAP — predaleko, čekamo pullback do VWAP` };
-      }
+    // PBK LONG VWAP: mora biti unutar +1.5% od VWAP | null VWAP blokira
+    if (!vwapVal || vwapVal <= 0) {
+      return { price, signal: "NEUTRAL", bullScore, bearScore,
+        reason: `PBK LONG blokiran: VWAP nedostupan` };
+    }
+    const vd = (price - vwapVal) / vwapVal * 100;
+    if (vd > 1.5) {
+      return { price, signal: "NEUTRAL", bullScore, bearScore, vwap: vwapVal,
+        reason: `PBK LONG blokiran: cijena +${vd.toFixed(1)}% od VWAP — predaleko, čekamo pullback do VWAP` };
     }
     const sigMask = sigs.reduce((mask, v, i) => v === 1 ? mask | (1 << i) : mask, 0);
     return { price, signal: "LONG", bullScore, bearScore, sigMask,
       nearSup, nearRes, vwap: vwapVal,
-      reason: `ULTRA LONG ↑${bullCnt}/7${_premiumBonusBull?"+1bonus":""} | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ RSI:${rsi.toFixed(0)}<${_strongTrend?85:72}✓${bonusTag}` };
+      reason: `ULTRA LONG ↑${bullCnt}/7${_premiumBonusBull?"+1bonus":""} | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ RSI:${rsi.toFixed(0)}<${_strongTrend?85:72}✓ VWAP${vd>=0?"+":""}${vd.toFixed(1)}%${bonusTag}` };
   }
   if (!LONG_ONLY && bearScore >= MIN_CONFIRM && rsiShortOk) {
-    // PBK SHORT VWAP proximity: cijena mora biti unutar -1.5% od VWAP
-    if (vwapVal && vwapVal > 0) {
-      const vd = (price - vwapVal) / vwapVal * 100;
-      if (vd < -1.5) {
-        return { price, signal: "NEUTRAL", bullScore, bearScore, vwap: vwapVal,
-          reason: `PBK SHORT blokiran: cijena ${vd.toFixed(1)}% od VWAP — predaleko, čekamo bounce do VWAP` };
-      }
+    // PBK SHORT VWAP: mora biti unutar -1.5% od VWAP | null VWAP blokira
+    if (!vwapVal || vwapVal <= 0) {
+      return { price, signal: "NEUTRAL", bullScore, bearScore,
+        reason: `PBK SHORT blokiran: VWAP nedostupan` };
+    }
+    const vd = (price - vwapVal) / vwapVal * 100;
+    if (vd < -1.5) {
+      return { price, signal: "NEUTRAL", bullScore, bearScore, vwap: vwapVal,
+        reason: `PBK SHORT blokiran: cijena ${vd.toFixed(1)}% od VWAP — predaleko, čekamo bounce do VWAP` };
     }
     return { price, signal: "SHORT", bullScore, bearScore,
       nearSup, nearRes, vwap: vwapVal,
-      reason: `ULTRA SHORT ↓${bearCnt}/7${_premiumBonusBear?"+1bonus":""} | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ RSI:${rsi.toFixed(0)}>${_strongTrendS?15:30}✓${bonusTag}` };
+      reason: `ULTRA SHORT ↓${bearCnt}/7${_premiumBonusBear?"+1bonus":""} | ADX:${adx.toFixed(0)}≥${ADX_MIN}✓ RSI:${rsi.toFixed(0)}>${_strongTrendS?15:30}✓ VWAP${vd>=0?"+":""}${vd.toFixed(1)}%${bonusTag}` };
   }
   if (LONG_ONLY && bearScore >= MIN_CONFIRM && rsiShortOk) {
     return { price, signal: "NEUTRAL", bullScore, bearScore,
@@ -2040,32 +2050,38 @@ function analyzeUltra(candles, cfg) {
   const MOM_ADX_MIN = 20;
 
   if (momBull >= MOM_MIN && rsiLongOk && adx >= MOM_ADX_MIN) {
-    // VWAP gate za MOM LONG: cijena mora biti iznad VWAP ali ne predaleko
-    if (vwapVal && price < vwapVal) {
-      const vd = ((price - vwapVal) / vwapVal * 100).toFixed(1);
-      return { price, signal: "NEUTRAL", bullScore: momBull, bearScore: momBear, vwap: vwapVal,
-        reason: `MOM LONG blokiran: cijena ${vd}% ispod VWAP — nema breakout potvrde` };
+    // VWAP gate za MOM LONG: 0% do +3% iznad VWAP | null blokira
+    if (!vwapVal || vwapVal <= 0) {
+      return { price, signal: "NEUTRAL", bullScore: momBull, bearScore: momBear,
+        reason: `MOM LONG blokiran: VWAP nedostupan` };
     }
-    if (vwapVal && ((price - vwapVal) / vwapVal * 100) > 3.0) {
-      const vd = ((price - vwapVal) / vwapVal * 100).toFixed(1);
+    const _mvd = (price - vwapVal) / vwapVal * 100;
+    if (_mvd < 0) {
       return { price, signal: "NEUTRAL", bullScore: momBull, bearScore: momBear, vwap: vwapVal,
-        reason: `MOM LONG blokiran: cijena +${vd}% od VWAP — predaleko, čekamo pullback prema VWAP` };
+        reason: `MOM LONG blokiran: cijena ${_mvd.toFixed(1)}% ispod VWAP — nema breakout potvrde` };
+    }
+    if (_mvd > 3.0) {
+      return { price, signal: "NEUTRAL", bullScore: momBull, bearScore: momBear, vwap: vwapVal,
+        reason: `MOM LONG blokiran: cijena +${_mvd.toFixed(1)}% od VWAP — predaleko` };
     }
     return { price, signal: "LONG", bullScore: momBull, bearScore: momBear,
       nearSup, nearRes, isMomentum: true, vwap: vwapVal,
       reason: `MOMENTUM LONG ↑${momBullBase}/7 | ADX:${adx.toFixed(0)}≥${MOM_ADX_MIN}✓ RSI:${rsi.toFixed(0)}<${_strongTrend?85:72}✓${_strongTrend?" [STRONG]":""}${sigRsiDiv===1?" RDIV✓":""}` };
   }
   if (!LONG_ONLY && momBear >= MOM_MIN && rsiShortOk && adx >= MOM_ADX_MIN) {
-    // VWAP gate za MOM SHORT: cijena mora biti ispod VWAP ali ne predaleko
-    if (vwapVal && price > vwapVal) {
-      const vd = ((price - vwapVal) / vwapVal * 100).toFixed(1);
-      return { price, signal: "NEUTRAL", bullScore: momBull, bearScore: momBear, vwap: vwapVal,
-        reason: `MOM SHORT blokiran: cijena +${vd}% iznad VWAP — nema breakdown potvrde` };
+    // VWAP gate za MOM SHORT: -3% do 0% ispod VWAP | null blokira
+    if (!vwapVal || vwapVal <= 0) {
+      return { price, signal: "NEUTRAL", bullScore: momBull, bearScore: momBear,
+        reason: `MOM SHORT blokiran: VWAP nedostupan` };
     }
-    if (vwapVal && ((price - vwapVal) / vwapVal * 100) < -3.0) {
-      const vd = ((price - vwapVal) / vwapVal * 100).toFixed(1);
+    const _svd = (price - vwapVal) / vwapVal * 100;
+    if (_svd > 0) {
       return { price, signal: "NEUTRAL", bullScore: momBull, bearScore: momBear, vwap: vwapVal,
-        reason: `MOM SHORT blokiran: cijena ${vd}% od VWAP — predaleko, čekamo bounce prema VWAP` };
+        reason: `MOM SHORT blokiran: cijena +${_svd.toFixed(1)}% iznad VWAP — nema breakdown potvrde` };
+    }
+    if (_svd < -3.0) {
+      return { price, signal: "NEUTRAL", bullScore: momBull, bearScore: momBear, vwap: vwapVal,
+        reason: `MOM SHORT blokiran: cijena ${_svd.toFixed(1)}% od VWAP — predaleko` };
     }
     return { price, signal: "SHORT", bullScore: momBull, bearScore: momBear,
       nearSup, nearRes, isMomentum: true, vwap: vwapVal,

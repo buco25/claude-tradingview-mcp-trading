@@ -3992,7 +3992,7 @@ const server = http.createServer(async (req, res) => {
     req.on("data", d => { body += d; });
     req.on("end", () => {
       try {
-        const { pid = "synapse_t", symbol, date, action = "delete", pnl, exitPrice } = JSON.parse(body || "{}");
+        const { pid = "synapse_t", symbol, date, action = "delete", pnl, exitPrice, orderId, time } = JSON.parse(body || "{}");
         const f = `${DATA_DIR}/trades_${pid}.csv`;
         if (!existsSync(f)) { res.writeHead(404); res.end(JSON.stringify({ error: "CSV not found" })); return; }
         const lines = readFileSync(f, "utf8").split("\n");
@@ -4003,14 +4003,18 @@ const server = http.createServer(async (req, res) => {
           const l = lines[i];
           if (!l.trim()) { newLines.push(l); continue; }
           const cols = l.split(",");
-          const rowDate   = cols[0] || "";
-          const rowSymbol = cols[3] || "";
-          const rowSide   = cols[4] || "";
+          const rowDate    = cols[0] || "";
+          const rowTime    = cols[1] || "";
+          const rowSymbol  = cols[3] || "";
+          const rowSide    = cols[4] || "";
+          const rowOrderId = cols[12] || "";
           const isClosed  = rowSide === "CLOSE_LONG" || rowSide === "CLOSE_SHORT";
-          // Provjeri je li ovo krivi red
+          // Provjeri je li ovo krivi red — podržava orderId i time filter
           const match = isClosed
-            && (!symbol || rowSymbol === symbol)
-            && (!date   || rowDate === date);
+            && (!symbol  || rowSymbol  === symbol)
+            && (!date    || rowDate    === date)
+            && (!orderId || rowOrderId === orderId)
+            && (!time    || rowTime.startsWith(time));
           if (!match) { newLines.push(l); continue; }
           affected++;
           if (action === "delete") {

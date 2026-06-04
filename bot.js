@@ -2689,14 +2689,29 @@ async function checkPortfolioPositions(pid) {
           // Pozicija zatvorena na Bitgetu (SL/TP/likvidacija) — dohvati stvarni P&L
           const closed = await fetchBitgetClosedPnl(pos.symbol, pos);
 
-          // Ako fill fetch potpuno nije uspio — nemamo pouzdane podatke
-          // Ne reportamo lažni gubitak; logujemo warning i preskačemo
+          // Ako fill fetch nije uspio — izračunaj P&L iz SL/TP cijene koju znamo
           if (!closed) {
-            console.warn(`  ⚠️  [${pid}] ${pos.symbol} — fill fetch nije uspio ni nakon 3 pokušaja. Pozicija uklonjena iz trackera bez P&L reporta.`);
-            await tg(`⚠️ <b>[ULTRA]</b> ${pos.symbol} ${pos.side} zatvoreno na Bitgetu\nNisu dohvaćeni fill podaci — P&L nepoznat\nUlaz: ${fmtPrice(pos.entryPrice)}`);
-            writeExitCsv(pid, pos, pos.sl || pos.entryPrice, "Zatvoreno — P&L nepoznat", 0);
-            if (pos.sigMask != null) recordSignalOutcome(pos.sigMask, null);
-            recordSymbolOutcome(pos.symbol, null);
+            console.warn(`  ⚠️  [${pid}] ${pos.symbol} — fill fetch nije uspio, računam P&L iz SL/TP cijene`);
+            // Određujemo exit cijenu: SL ili TP (ovisno o smjeru pomaka)
+            const _fallbackExit = pos.sl || pos.entryPrice;
+            const _fallbackQty  = pos.quantity ?? (pos.totalUSD / pos.entryPrice);
+            const _fallbackPnl  = pos.side === "LONG"
+              ? (_fallbackExit - pos.entryPrice) * _fallbackQty
+              : (pos.entryPrice - _fallbackExit) * _fallbackQty;
+            const _maxLoss = pos.margin ? pos.margin * 1.1 : pos.totalUSD * 0.02;
+            const _pnl = Math.max(_fallbackPnl, -_maxLoss);
+            const _exitReason = _pnl >= 0 ? "TP/Trail" : "SL dostignut";
+            console.log(`  ${_pnl >= 0 ? "✅" : "❌"} [${pid}] ${pos.symbol} — fallback P&L: ${_pnl.toFixed(4)} @ ${fmtPrice(_fallbackExit)} (${_exitReason})`);
+            writeExitCsv(pid, pos, _fallbackExit, _exitReason + " (est.)", _pnl);
+            await tg(`${_pnl >= 0 ? "✅" : "❌"} [ULTRA] ${pos.symbol} ${pos.side}\nP&L: ${_pnl >= 0?"+":""}$${_pnl.toFixed(2)} | ${_exitReason} (procjena)\nUlaz: ${fmtPrice(pos.entryPrice)} → Izlaz: ${fmtPrice(_fallbackExit)}\n⚠️ Fill podaci nisu dohvaćeni — P&L je procjena`);
+            if (pos.sigMask != null) recordSignalOutcome(pos.sigMask, _pnl >= 0);
+            recordSymbolOutcome(pos.symbol, _pnl >= 0);
+            if (_pnl < 0) {
+              symbolSlCooldown.set(pos.symbol, Date.now());
+              saveSlCooldown();
+              await recordSymbolSl(pid, pos.symbol);
+              await checkAndRemoveSymbol(pid, pos.symbol);
+            }
             continue;
           }
 
@@ -3034,7 +3049,7 @@ export function writeExitCsv(pid, pos, exitPrice, reason, pnl) {
   const feeEntry = pos.totalUSD * 0.0006;              // Bitget taker 0.06% — ulaz
   const feeTotal = (feeExit + feeEntry).toFixed(4);    // roundtrip provizija
   const netPnl   = (pnl - feeExit - feeEntry).toFixed(4);
-  const icon    = pnl >= 0 ? "WIN" : "LOSS";
+  const icon    = pnl > 0 ? "WIN" : pnl < 0 ? "LOSS" : "CLOSED";
 
   const row = [
     date, time, "BitGet", pos.symbol,

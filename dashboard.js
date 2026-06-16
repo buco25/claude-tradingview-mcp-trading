@@ -1483,27 +1483,6 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div style="font-size:11px;color:#9ca3af" id="cb-sub">učitavam…</div>
       </div>
 
-      <!-- MM Sweep Detektor -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px" id="sweep-card">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">🛡️ MM Sweep Aktivnost</div>
-        <div style="font-size:18px;font-weight:800" id="sweep-status">…</div>
-        <div style="background:#374151;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
-          <div id="sweep-bar" style="height:100%;border-radius:4px;background:#059669;transition:width .5s,background .5s;width:0%"></div>
-        </div>
-        <div style="font-size:11px;color:#9ca3af" id="sweep-sub">Učitavam likvide…</div>
-        <div style="font-size:10px;margin-top:6px;display:flex;gap:8px;flex-wrap:wrap" id="sweep-liq-row"></div>
-      </div>
-
-      <!-- MM Filteri Status -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px;grid-column:span 2" id="mm-filters-card">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:8px;text-transform:uppercase">📊 MM/Algo Indikatori — <span style="color:#f59e0b">samo info, NE blokiraju trejdove</span></div>
-        <div id="mm-filters-grid" style="display:flex;flex-wrap:wrap;gap:6px">
-          <span style="color:#6b7280;font-size:12px">Pokreni scan za prikaz MM indikatora…</span>
-        </div>
-        <div style="margin-top:8px;font-size:10px;color:#6b7280">
-          🪝 MANIP = wick manipulacija &nbsp;·&nbsp; 🎯 RNDUP = blizu round numbera &nbsp;·&nbsp; 📉 VOLDIV = lažni pokret (slab vol) &nbsp;|&nbsp; <span style="color:#f59e0b">⚠️ deaktivirani u botu — prikazano samo kao kontekst</span>
-        </div>
-      </div>
 
       <!-- Daily P&L Budget -->
       <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
@@ -1531,19 +1510,6 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div style="font-size:10px;color:#9ca3af;margin-top:4px">&lt;20=Extreme Fear, &gt;80=Greed</div>
       </div>
 
-      <!-- BTC Dominance -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">₿ BTC Dominance</div>
-        <div style="font-size:22px;font-weight:800;color:#d97706" id="dom-val">…</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:2px" id="dom-sub">Raste = altovi slabe</div>
-      </div>
-
-      <!-- DXY -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">💵 DXY (4H promjena)</div>
-        <div style="font-size:22px;font-weight:800" id="dxy-val">…</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:2px" id="dxy-sub">&gt;+0.3% = LONG risk</div>
-      </div>
 
       <!-- Session Filter -->
       <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
@@ -1552,47 +1518,6 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="session-sub">01-06 UTC = dead zone blokiran</div>
       </div>
 
-      <!-- ATR Trend -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">📊 ATR Volatilnost (BTC 1H)</div>
-        <div style="font-size:16px;font-weight:800" id="atr-trend-val">…</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="atr-trend-sub">EXPANDING = size ×0.7</div>
-      </div>
-
-      <!-- SP500 -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">📉 S&P500 (4H)</div>
-        <div style="font-size:18px;font-weight:800" id="sp500-val">…</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="sp500-sub">&lt;-1% = RISK OFF → blokira LONG</div>
-      </div>
-
-      <!-- Long/Short Ratio -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">⚖️ Long/Short Ratio (BTC)</div>
-        <div style="font-size:18px;font-weight:800" id="ls-val">…</div>
-        <div style="background:#374151;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
-          <div id="ls-bar" style="height:100%;border-radius:4px;background:#3b82f6;transition:width .5s;width:50%"></div>
-        </div>
-        <div style="font-size:11px;color:#9ca3af" id="ls-sub">&gt;70% long = contrarian SHORT signal</div>
-      </div>
-
-      <!-- Market Breadth -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">🌊 Market Breadth</div>
-        <div style="font-size:22px;font-weight:800" id="breadth-val">…</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="breadth-sub">simbola s ADX≥30 u trendu</div>
-      </div>
-
-      <!-- Liquidation Risk + OI trend -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">💥 Liquidation Risk + OI</div>
-        <div style="font-size:16px;font-weight:800" id="liq-val">…</div>
-        <div style="background:#374151;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
-          <div id="liq-bar" style="height:100%;border-radius:4px;background:#00c48c;transition:width .5s,background .5s;width:0%"></div>
-        </div>
-        <div style="font-size:11px;color:#9ca3af" id="liq-sub">Funding + OI analiza</div>
-        <div style="font-size:11px;margin-top:6px" id="oi-trend-val"></div>
-      </div>
 
       <!-- VWAP Status -->
       <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
@@ -1613,13 +1538,6 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div style="font-size:10px;color:#6b7280;margin-top:2px" id="countdown-time"></div>
       </div>
 
-      <!-- Ekonomski kalendar -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px;grid-column:span 2">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">📅 Ekonomski kalendar (HIGH impact USD)</div>
-        <div style="font-size:16px;font-weight:800" id="econ-val">…</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="econ-sub">FOMC · CPI · NFP · ±15min blokada</div>
-        <div id="econ-list" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px"></div>
-      </div>
     </div>
 
   </div>

@@ -34,18 +34,16 @@ const STRONG_SIGNAL_SCORE = 9;    // nekorišten za TP (zadržan za eventualne f
 const STRONG_TP_MULT      = 3.0;  // jako tržište → TP = SL × 3 (1:3 R:R)
 const NORMAL_TP_MULT      = 1.5;  // konsolidacija / neutralno → TP = SL × 1.5 (1:1.5 R:R)
 const MAX_TRADES_PER_DAY = 100;
-const MAX_OPEN_PER_PORTFOLIO = 3;  // max otvorenih pozicija po portfoliju (rebalans 26.05.2026)
+const MAX_OPEN_PER_PORTFOLIO = 3;  // max otvorenih pozicija po portfoliju
 const MAX_PYRAMID           = 0;   // pyramid onemogućen (26.05.2026) — jedna pozicija po simbolu
 const MAX_NEW_ENTRIES_PER_SCAN = 3; // max NOVIH ulaza po scan ciklusu (sprječava 8 simultanih gubitaka)
 
 // ─── 7. Korelacijski filter — sektori ─────────────────────────────────────────
 const SYMBOL_SECTORS = {
   "BTCUSDT":  "BTC",
-  "ETHUSDT":  "OG_L1",  "SOLUSDT":  "OG_L1",  "ADAUSDT":  "OG_L1", "XRPUSDT":  "OG_L1",
-  "NEARUSDT": "ALT_L1", "SUIUSDT":  "ALT_L1", "APTUSDT":  "ALT_L1","SEIUSDT":  "ALT_L1", "INJUSDT": "ALT_L1",
-  "LINKUSDT": "DEFI",   "JUPUSDT":  "DEFI",   "ENAUSDT":  "DEFI",
-  "TAOUSDT":  "AI",     "HYPEUSDT": "AI",
-  "DOGEUSDT": "MEME",
+  "ETHUSDT":  "OG_L1", "SOLUSDT": "OG_L1",
+  "TAOUSDT":  "AI",
+  "AAVEUSDT": "DEFI",
 };
 const MAX_PER_SECTOR = 2;  // max otvorenih pozicija istog sektora
 
@@ -58,7 +56,7 @@ const PARTIAL_CLOSE_PCT  = 50;   // % pozicije koji se zatvara na TP
 
 // ─── ULTRA strategija — zaštitni parametri ────────────────────────────────────
 const LONG_ONLY      = false;         // SHORT dozvoljeni kada BTC regime BEAR/NEUTRAL
-const ADX_MIN        = 25;            // ADX prag — bazni (dinamički raste ako WR pada)
+const ADX_MIN        = 22;            // ADX prag — bazni (dinamički raste ako WR pada)
 const SL_COOLDOWN_MS = 4 * 60 * 60 * 1000;  // 4h cooldown po simbolu nakon SL-a
 
 // ─── Trailing stop — aktivira se nakon dovoljnog profita ─────────────────────
@@ -99,6 +97,16 @@ const VOL_EXH_TIERS = {
 };
 const VOL_EXH_DEFAULT = 3.0; // fallback za nepoznate simbole
 
+// ─── Per-simbol signal kombinacije (backtest optimizirano 16.06.2026) ──────────
+// Indeksi odgovaraju sigs[] u analyzeUltra: 0=E50↑ 1=CVD↑ 2=MACD 3=E145 4=PWHL 5=RDIV 6=MSTR 7=FVG
+const SYMBOL_COMBOS = {
+  "BTCUSDT":  { sigIdx: [0,1,2,3,7], minSig: 4 }, // E50↑+CVD↑+MACD+E145+FVG  WR68%
+  "ETHUSDT":  { sigIdx: [0,1,2,3,7], minSig: 4 }, // E50↑+CVD↑+MACD+E145+FVG  WR68%
+  "SOLUSDT":  { sigIdx: [0,1,3,5,6], minSig: 4 }, // E50↑+CVD↑+E145+RDIV+MSTR WR73%
+  "TAOUSDT":  { sigIdx: [0,1,3,5,6], minSig: 4 }, // E50↑+CVD↑+E145+RDIV+MSTR WR59%
+  "AAVEUSDT": { sigIdx: [0,1,2,3,7], minSig: 4 }, // E50↑+CVD↑+MACD+E145+FVG  WR63%
+};
+
 // ─── Ekonomski kalendar ───────────────────────────────────────────────────────
 const ECON_BLOCK_MIN = 15;  // blokiraj ±15min oko HIGH impact USD eventa
 
@@ -130,10 +138,10 @@ function saveSlCooldown() {
 
 // ─── 1. DINAMIČKI ADX — raste kad je WR loš ──────────────────────────────────
 // Čita zadnjih 10 trejdova iz CSV-a i računa trenutni WR.
-// WR < 35% → ADX +5 | WR < 25% → ADX +10 + pauza 2h
+// WR < 35% → ADX +3 (25) | WR < 25% → ADX +5 (27) + pauza 2h | baza ADX_MIN=22
 const DYN_ADX_LOOKBACK  = 10;   // zadnjih N trejdova za WR procjenu
-const DYN_ADX_BOOST_1   =  5;   // +5 kad WR < 35%
-const DYN_ADX_BOOST_2   = 10;   // +10 kad WR < 25%
+const DYN_ADX_BOOST_1   =  3;   // +3 kad WR < 35%  → ADX 25
+const DYN_ADX_BOOST_2   =  5;   // +5 kad WR < 25%  → ADX 27
 const DYN_PAUSE_WR      = 20;   // ispod ovog WR% → 2h pauza
 const DYN_PAUSE_MS      = 2 * 60 * 60 * 1000;
 
@@ -157,9 +165,9 @@ function getDynamicAdx(pid) {
         console.log(`  ⚠️  [DYN] WR=${wr.toFixed(0)}% (danas: ${exits.length} trejdova) — 2h pauza aktivirana`);
       }
     }
-    if (wr < 25) return ADX_MIN + DYN_ADX_BOOST_2;  // ADX 40
-    if (wr < 35) return ADX_MIN + DYN_ADX_BOOST_1;  // ADX 35
-    return ADX_MIN;                                   // ADX 30 (normalno)
+    if (wr < 25) return ADX_MIN + DYN_ADX_BOOST_2;  // ADX 27 (22+5)
+    if (wr < 35) return ADX_MIN + DYN_ADX_BOOST_1;  // ADX 25 (22+3)
+    return ADX_MIN;                                   // ADX 22 (normalno)
   } catch { return ADX_MIN; }
 }
 
@@ -308,6 +316,12 @@ async function getBtcRegime() {
                  : (upPairs <= 2 && price < e55) ? "BEAR"
                  : "NEUTRAL";
 
+    // EMA50 na 4H — za BTC Regime SHORT filter
+    const k50 = 2/(50+1);
+    let e50 = closes.slice(0,50).reduce((a,b)=>a+b,0)/50;
+    for (let i=50; i<=n; i++) e50 = closes[i]*k50 + e50*(1-k50);
+    const btcAboveEma50_4h = price > e50;
+
     // RSI14 na 4H BTC — za capitulation bounce detekciju
     const rsiPeriod = 14;
     let gains = 0, losses = 0;
@@ -318,12 +332,58 @@ async function getBtcRegime() {
     const avgG = gains / rsiPeriod, avgL = losses / rsiPeriod;
     const btcRsi4h = avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL);
 
-    _regimeCache = { regime, btcRsi4h, ts: Date.now() };
-    console.log(`  📊 [REGIME] BTC 4H: ${regime} | 6Sc=${upPairs}/6 | Price${price>e55?">":"<"}EMA55 | RSI=${btcRsi4h.toFixed(1)}`);
+    // BTC Weekly Low — za MM Filter 4 (bounce protection)
+    // Dohvati tjedni low iz zadnjih 2 tjedna (iz 4H candles — aproksimacija 2 tjedna = 84 bara)
+    const weekBars = Math.min(84, candles.length);
+    const btcWeeklyLow  = Math.min(...candles.slice(-weekBars).map(c => c.low));
+    const btcWeeklyLowDist = btcWeeklyLow > 0 ? (price - btcWeeklyLow) / price : 1;
+
+    _regimeCache = { regime, btcRsi4h, btcAboveEma50_4h, btcEma50_4h: e50,
+      btcWeeklyLow, btcWeeklyLowDist, ts: Date.now() };
+    console.log(`  📊 [REGIME] BTC 4H: ${regime} | 6Sc=${upPairs}/6 | Price${price>e55?">":"<"}EMA55 | EMA50=${e50.toFixed(0)} (${btcAboveEma50_4h?"IZNAD":"ISPOD"}) | RSI=${btcRsi4h.toFixed(1)} | WklyLow=${btcWeeklyLow.toFixed(0)} (${(btcWeeklyLowDist*100).toFixed(1)}% away)`);
     return regime;
   } catch(e) {
     console.log(`  ⚠️  [REGIME] Greška: ${e.message}`);
     return "UNKNOWN";
+  }
+}
+
+// ─── BTC Spike Detector — Correlated Exit trigger ────────────────────────────
+// Vraća { spike: bool, pct: number, direction: "UP"|"DOWN"|null }
+// Spike UP = SHORT pozicije u opasnosti (BTC naglo skočio)
+// Spike DOWN = LONG pozicije u opasnosti
+let _btcSpikeCache = { spike: false, pct: 0, direction: null, ts: 0 };
+const BTC_SPIKE_TTL  = 3 * 60 * 1000;   // osvježi svake 3 minute
+const BTC_SPIKE_PCT  = 1.2;             // +1.2% u zadnja 2×15m = spike UP
+const BTC_SPIKE_BARS = 2;               // gledamo zadnje 2 svjećice (30min)
+
+async function checkBtcSpike() {
+  if (Date.now() - _btcSpikeCache.ts < BTC_SPIKE_TTL) return _btcSpikeCache;
+  try {
+    const url = `https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=15m&limit=6`;
+    const r   = await fetch(url);
+    const d   = await r.json();
+    if (d.code !== "00000" || !d.data?.length) return _btcSpikeCache;
+
+    const candles = d.data.map(k => ({
+      open: parseFloat(k[1]), close: parseFloat(k[4]),
+    })).reverse();  // najnoviji zadnji
+
+    const n    = candles.length;
+    const base = candles[n - 1 - BTC_SPIKE_BARS].close;  // cijena prije 30min
+    const now  = candles[n - 1].close;
+    const pct  = (now - base) / base * 100;
+
+    const spike     = Math.abs(pct) >= BTC_SPIKE_PCT;
+    const direction = pct >  BTC_SPIKE_PCT ? "UP"
+                    : pct < -BTC_SPIKE_PCT ? "DOWN" : null;
+
+    _btcSpikeCache = { spike, pct: parseFloat(pct.toFixed(2)), direction, ts: Date.now() };
+    if (spike) console.log(`  ⚡ [BTC SPIKE] ${pct > 0 ? "+" : ""}${pct.toFixed(2)}% u 30min → spike ${direction}`);
+    return _btcSpikeCache;
+  } catch(e) {
+    console.log(`  ⚠️  [BTC SPIKE] Greška: ${e.message}`);
+    return _btcSpikeCache;
   }
 }
 
@@ -1140,8 +1200,10 @@ export function getConsecutiveLossCount(pid) {
   const f = csvFilePath(pid);
   if (!existsSync(f)) return 0;
   try {
+    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
     const lines = readFileSync(f, "utf8").trim().split("\n");
     const exits = lines.slice(1)
+      .filter(l => l.startsWith(today))  // samo danas
       .filter(l => l.includes("CLOSE_LONG") || l.includes("CLOSE_SHORT"))
       .reverse();
     let count = 0;
@@ -1696,7 +1758,7 @@ function analyzeSynapseT(candles, cfg) {
 // SL 1% / TP 2%
 
 function analyzeUltra(candles, cfg) {
-  const { minSig = 8, _dynAdx, symbol: _sym } = cfg;
+  const { minSig = 8, _dynAdx, symbol: _sym, _pwh = null, _pwl = null } = cfg;
   const effectiveAdx = _dynAdx ?? ADX_MIN;  // koristi dinamički ADX ako dostupan
   const closes = candles.map(c => c.close);
   const vols   = candles.map(c => c.volume || 0);
@@ -1899,6 +1961,90 @@ function analyzeUltra(candles, cfg) {
     }
   }
 
+  // ── sig20: Previous Weekly High/Low (PWH/PWL) — POST-SWEEP potvrda ──────────────
+  // MM pattern: cijena proba ispod PWL (hvata SL-ove), zatim se vrati iznad = LONG
+  //             cijena proba iznad PWH (hvata SL-ove), zatim se vrati ispod = SHORT
+  // Čekamo SWEEP (low/high prošao razinu) + ZATVORENA svjeća natrag = potvrđen reversal
+  let sigPWHL = 0;
+  {
+    const PWHL_ZONE  = 0.015;  // 1.5% zona oko PWH/PWL
+    const SWEEP_BARS = 4;      // gledaj zadnjih 4 bara za sweep
+    const recentLows  = candles.slice(-SWEEP_BARS - 1, -1).map(c => c.low);
+    const recentHighs = candles.slice(-SWEEP_BARS - 1, -1).map(c => c.high);
+    const sweptPWL = _pwl !== null && recentLows.some(l => l < _pwl);    // proba ispod PWL
+    const sweptPWH = _pwh !== null && recentHighs.some(h => h > _pwh);   // proba iznad PWH
+    // Bullish: sweep ispod PWL → zatvorena svjeća natrag iznad PWL → LONG
+    if (sweptPWL && price > _pwl && (price - _pwl) / price < PWHL_ZONE && rsiRising)  sigPWHL =  1;
+    // Bearish: sweep iznad PWH → zatvorena svjeća natrag ispod PWH → SHORT
+    if (sweptPWH && price < _pwh && (_pwh - price) / price < PWHL_ZONE && rsiFalling) sigPWHL = -1;
+  }
+
+  // ── sig21: Market Structure — HH/HL (uptrend) vs LL/LH (downtrend) ──────────
+  // Gleda zadnjih 60 bara, traži swing highs/lows (3 bara sa svake strane)
+  // HH + HL = uptrend = +1 | LL + LH = downtrend = -1
+  let sigMktStr = 0;
+  {
+    const MS_LOOKBACK = 60, MS_WING = 3;
+    const msStart = Math.max(MS_WING, n - MS_LOOKBACK);
+    const msEnd   = n - MS_WING - 1;
+    const msHighs = [], msLows = [];
+    for (let i = msStart; i <= msEnd; i++) {
+      let isH = true, isL = true;
+      for (let j = i - MS_WING; j <= i + MS_WING; j++) {
+        if (j === i) continue;
+        if (candles[j].high >= candles[i].high) isH = false;
+        if (candles[j].low  <= candles[i].low)  isL = false;
+      }
+      if (isH) msHighs.push(candles[i].high);
+      if (isL) msLows.push(candles[i].low);
+    }
+    if (msHighs.length >= 2 && msLows.length >= 2) {
+      const lastH = msHighs[msHighs.length - 1], prevH = msHighs[msHighs.length - 2];
+      const lastL = msLows[msLows.length - 1],   prevL = msLows[msLows.length - 2];
+      if (lastH > prevH && lastL > prevL) sigMktStr =  1;  // HH + HL = uptrend
+      if (lastH < prevH && lastL < prevL) sigMktStr = -1;  // LH + LL = downtrend
+    }
+  }
+
+  // ── sig22: Fair Value Gap (FVG) — 3-svjećički imbalance ──────────────────────
+  // Bullish FVG: low[i] > high[i-2] → gap gore, cijena u njemu = support
+  // Bearish FVG: high[i] < low[i-2] → gap dolje, cijena u njemu = resistance
+  // Tražimo unmitigated FVG u zadnjih 30 bara koji cijena trenutno respektira
+  let sigFVG = 0;
+  {
+    const FVG_LOOKBACK = 30, FVG_MIN_PCT = 0.003;
+    for (let i = Math.max(2, n - FVG_LOOKBACK); i < n - 1 && sigFVG === 0; i++) {
+      const c0h = candles[i-2].high, c0l = candles[i-2].low;
+      const c2h = candles[i].high,   c2l = candles[i].low;
+      // Bullish FVG: c2.low > c0.high
+      if (c2l > c0h) {
+        const gapPct = (c2l - c0h) / c0h;
+        if (gapPct >= FVG_MIN_PCT && price >= c0h * 0.999 && price <= c2l * 1.005) sigFVG =  1;
+      }
+      // Bearish FVG: c0.low > c2.high
+      if (c0l > c2h) {
+        const gapPct = (c0l - c2h) / c2h;
+        if (gapPct >= FVG_MIN_PCT && price <= c0l * 1.001 && price >= c2h * 0.995) sigFVG = -1;
+      }
+    }
+  }
+
+  // ── FIB 0.702 kontekstualni gate (soft) — Golden Ratio ───────────────────────
+  // Iz videa: 0.702 je non-tradicionalni FIB. Ako cijena pada ispod 0.702 razine,
+  // veliki je signal promjene trenda → blokiramo LONG (ne SHORT)
+  // Računamo od recentnog swing high/low (zadnjih 100 bara)
+  let _fib702Level = null, _fib702Bearish = false;
+  {
+    const FIB_LOOKBACK = 100;
+    const fibStart = Math.max(0, n - FIB_LOOKBACK);
+    const swHigh = Math.max(...candles.slice(fibStart).map(c => c.high));
+    const swLow  = Math.min(...candles.slice(fibStart).map(c => c.low));
+    if (swHigh > swLow) {
+      _fib702Level = swHigh - (swHigh - swLow) * 0.702;
+      _fib702Bearish = price < _fib702Level;
+    }
+  }
+
   // Volume vs average
   const volAvg20 = vols.slice(-20).reduce((a,b)=>a+b,0) / 20;
   const volLast  = vols[n-1];
@@ -1912,34 +2058,43 @@ function analyzeUltra(candles, cfg) {
     }
   }
 
-  // ── 7 signala: +1 = bullish, -1 = bearish, 0 = neutral ──
+  // ── 9 signala: +1 = bullish, -1 = bearish, 0 = neutral ──
   // OBAVEZNI GATING (3 gateva): ADX≥dynamic, RSI asimetričan, VOL_EXH
-  // Maknuti gatevi: 6Sc (redundantan s E145 signalom), 5mSR (prekompleksan, lažni negativi)
-  // Maknuti signali: RSI REV (redundantan s RSI gate-om), CHP (redundantan s ADX gate-om)
   // REVERSANI (logika invertirana za pullback): E50, CVD
+  // NOVO (06.06.2026): PWH/PWL (weekly S/R), MktStr (market structure), FVG (fair value gap)
   const sigs = [
-    price > ema50 ? -1 : 1,                           //  1. E50  REV: ispod EMA50 = pullback = +1
-    cvdSum > 0 ? -1 : 1,                              //  2. CVD  REV: prodajni vol = potenc. dno = +1
-    macdHist !== null ? (macdHist > 0 ? 1 : -1) : 0, //  3. MCD: MACD histogram momentum
-    price > ema145 ? 1 : -1,                           //  4. E145: dugoročni trend
-    sig17sr,                                            //  5. SRS: S/R bounce
-    sig18bk,                                            //  6. SRB: S/R breakout
-    sigRsiDiv,                                          //  7. RDIV: RSI divergencija
+    price > ema50 ? 1 : -1,                            //  1. E50   TREND: iznad EMA50 = bullish
+    cvdSum > 0 ? 1 : -1,                              //  2. CVD   TREND: kupci dominiraju = bullish
+    macdHist !== null ? (macdHist > 0 ? 1 : -1) : 0, //  3. MACD  MOM: histogram momentum
+    price > ema145 ? 1 : -1,                          //  4. E145  TREND: dugoročni trend
+    sigPWHL,                                           //  5. PWHL  Weekly: bounce PWL/rejection PWH
+    sigRsiDiv,                                         //  6. RDIV  RSI divergencija
+    sigMktStr,                                         //  7. MSTR  Market Structure HH/HL vs LL/LH
+    sigFVG,                                            //  8. FVG   Fair Value Gap imbalance
   ];
 
-  const bullCnt = sigs.filter(s => s === 1).length;
-  const bearCnt = sigs.filter(s => s === -1).length;
+  // Per-simbol combo filter — koristi samo signale iz SYMBOL_COMBOS
+  const _combo    = SYMBOL_COMBOS[_sym];
+  const _comboIdx = _combo?.sigIdx ?? [0,1,2,3,4,5,6,7];
+  const _activeSigs = _comboIdx.map(i => sigs[i]);
+  const bullCnt = _activeSigs.filter(s => s === 1).length;
+  const bearCnt = _activeSigs.filter(s => s === -1).length;
 
-  // ── Težinski bonus: CVD + E145 su "premium" signali ─────────────────────────
-  // Ako oba ukazuju na isti smjer, dodaj +1 bonus bod (efektivni max = 8)
-  const cvdBull  = sigs[1] === 1;   // CVD reversal bullish
-  const e145Bull = sigs[3] === 1;   // EMA145 bullish
-  const cvdBear  = sigs[1] === -1;
-  const e145Bear = sigs[3] === -1;
+  // ── Težinski bonus: CVD + E145 su "premium" signali (samo ako su u combu) ────
+  const cvdBull  = sigs[1] === 1  && _comboIdx.includes(1);
+  const e145Bull = sigs[3] === 1  && _comboIdx.includes(3);
+  const cvdBear  = sigs[1] === -1 && _comboIdx.includes(1);
+  const e145Bear = sigs[3] === -1 && _comboIdx.includes(3);
   const _premiumBonusBull = (cvdBull && e145Bull) ? 1 : 0;
   const _premiumBonusBear = (cvdBear && e145Bear) ? 1 : 0;
-  const bullScore = bullCnt + _premiumBonusBull;
-  const bearScore = bearCnt + _premiumBonusBear;
+  // Bonus 2: PWHL + MSTR u istom smjeru (samo ako oba u combu)
+  const _pwhInCombo  = _comboIdx.includes(4);
+  const _mstrInCombo = _comboIdx.includes(6);
+  const _pwhMstrBonusBull = (_pwhInCombo && _mstrInCombo && sigs[4] === 1  && sigs[6] === 1)  ? 1 : 0;
+  const _pwhMstrBonusBear = (_pwhInCombo && _mstrInCombo && sigs[4] === -1 && sigs[6] === -1) ? 1 : 0;
+  const bullScore = bullCnt + _premiumBonusBull + _pwhMstrBonusBull;
+  const bearScore = bearCnt + _premiumBonusBear + _pwhMstrBonusBear;
+  const MIN_CONFIRM = _combo?.minSig ?? minSig;
 
   // ══ OBAVEZNI GATEVI (3) ══
 
@@ -1953,11 +2108,11 @@ function analyzeUltra(candles, cfg) {
   const scaleOkLong  = scaleUp >= 4;
   const scaleOkShort = scaleDn >= 4;
 
-  // 2. RSI filter — asimetričan po smjeru
+  // RSI — info only, više nije obavezan gate
   const _strongTrend = adx > 50 && scaleUp === 6;
   const _strongTrendS = adx > 50 && scaleDn === 6;
-  const rsiLongOk  = rsi < (_strongTrend  ? 85 : 72);
-  const rsiShortOk = rsi > (_strongTrendS ? 15 : 30);
+  const rsiLongOk  = true;
+  const rsiShortOk = true;
 
   // 4. VOL EXHAUSTION gate
   const VOL_EXH_THRESHOLD = VOL_EXH_TIERS[_sym] ?? VOL_EXH_DEFAULT;
@@ -1969,10 +2124,23 @@ function analyzeUltra(candles, cfg) {
       reason: `VOL_EXH: ${volRatioNow.toFixed(2)}x avg ≥ ${VOL_EXH_THRESHOLD}× (${_sym||"def"}) — high-vol svjeća, čekamo pullback` };
   }
   if (!volExhOk && _isMaxScore) {
-    console.log(`  ⚡ [VOL_EXH bypass] ${_sym} — 7/7 score, ignoriramo VOL_EXH (${volRatioNow.toFixed(2)}x)`);
+    console.log(`  ⚡ [VOL_EXH bypass] ${_sym} — max score, ignoriramo VOL_EXH (${volRatioNow.toFixed(2)}x)`);
   }
 
-  // 5. VWAP crossover + potvrda
+  // 5. FIB 0.702 Golden Ratio — soft gate za LONG
+  // Iz SMC edukacije: ako cijena ispod 0.702 FIB razine, trend je promijenjen → blokira LONG
+  // SHORT i dalje dozvoljen (breakdowns su validni ispod 0.702)
+  if (_fib702Bearish && _fib702Level !== null) {
+    const fibPct = ((_fib702Level - price) / price * 100).toFixed(1);
+    console.log(`  📐 [FIB702] ${_sym} — cijena ${fibPct}% ispod Golden Ratio (${_fib702Level?.toFixed(2)}) → LONG blokiran`);
+    // Blokira samo LONG pullback — SHORT i momentum SHORT i dalje prolaze
+    if (bullScore >= minSig && (bearScore < minSig)) {
+      return { price, signal: "NEUTRAL", bullScore, bearScore,
+        reason: `FIB702 LONG blokiran: cijena ${fibPct}% ispod Golden Ratio ${_fib702Level?.toFixed(2)}` };
+    }
+  }
+
+  // 6. VWAP crossover + potvrda
   // Ulaz SAMO kad je:
   //   - Svjeća N-2: bila na suprotnoj strani VWAP
   //   - Svjeća N-1: probila VWAP (zatvorila na novoj strani)
@@ -2019,10 +2187,21 @@ function analyzeUltra(candles, cfg) {
   const _vwapLongOk  = _vwapCrossUp   || _vwapRejectLong;
   const _vwapShortOk = _vwapCrossDown || _vwapRejectShort;
 
-  // ── Min MIN_CONFIRM/7 potvrđujućih signala ─────────────────────────────────
-  const MIN_CONFIRM = minSig;  // čita iz rules.json (trebalo bi biti 4)
+  const _bonusBullTag = [
+    _premiumBonusBull   ? "CVD+E145" : "",
+    _pwhMstrBonusBull   ? "PWH+MSTR" : "",
+  ].filter(Boolean).join(",");
+  const _bonusBearTag = [
+    _premiumBonusBear   ? "CVD+E145" : "",
+    _pwhMstrBonusBear   ? "PWH+MSTR" : "",
+  ].filter(Boolean).join(",");
+  const bonusTag = _bonusBullTag ? ` [+${_premiumBonusBull+_pwhMstrBonusBull}:${_bonusBullTag}]`
+                : _bonusBearTag ? ` [+${_premiumBonusBear+_pwhMstrBonusBear}:${_bonusBearTag}]` : "";
 
-  const bonusTag = _premiumBonusBull ? " [CVD+E145 bonus]" : _premiumBonusBear ? " [CVD+E145 bonus]" : "";
+  // Dodaj extra info za nove signale u reason
+  const _newSigsBull = [sigPWHL===1?"PWL✓":"", sigMktStr===1?"MSTR✓":"", sigFVG===1?"FVG✓":""].filter(Boolean).join(" ");
+  const _newSigsBear = [sigPWHL===-1?"PWH✓":"", sigMktStr===-1?"MSTR✓":"", sigFVG===-1?"FVG✓":""].filter(Boolean).join(" ");
+
   if (bullScore >= MIN_CONFIRM && rsiLongOk) {
     if (!vwapVal || vwapVal <= 0) {
       return { price, signal: "NEUTRAL", bullScore, bearScore,
@@ -2036,7 +2215,7 @@ function analyzeUltra(candles, cfg) {
     const sigMask = sigs.reduce((mask, v, i) => v === 1 ? mask | (1 << i) : mask, 0);
     return { price, signal: "LONG", bullScore, bearScore, sigMask,
       nearSup, nearRes, vwap: vwapVal,
-      reason: `ULTRA LONG ↑${bullCnt}/7${_premiumBonusBull?"+1bonus":""} | VWAP cross✓ ADX:${adx.toFixed(0)}✓ RSI:${rsi.toFixed(0)}✓${bonusTag}` };
+      reason: `ULTRA LONG ↑${bullCnt}/8 ADX:${adx.toFixed(0)}✓ RSI:${rsi.toFixed(0)}✓ VWAP✓${bonusTag}${_newSigsBull?" "+_newSigsBull:""}` };
   }
   if (!LONG_ONLY && bearScore >= MIN_CONFIRM && rsiShortOk) {
     if (!vwapVal || vwapVal <= 0) {
@@ -2050,34 +2229,41 @@ function analyzeUltra(candles, cfg) {
     }
     return { price, signal: "SHORT", bullScore, bearScore,
       nearSup, nearRes, vwap: vwapVal,
-      reason: `ULTRA SHORT ↓${bearCnt}/7${_premiumBonusBear?"+1bonus":""} | VWAP cross✓ ADX:${adx.toFixed(0)}✓ RSI:${rsi.toFixed(0)}✓${bonusTag}` };
+      reason: `ULTRA SHORT ↓${bearCnt}/8 ADX:${adx.toFixed(0)}✓ RSI:${rsi.toFixed(0)}✓ VWAP✓${bonusTag}${_newSigsBear?" "+_newSigsBear:""}` };
   }
   if (LONG_ONLY && bearScore >= MIN_CONFIRM && rsiShortOk) {
     return { price, signal: "NEUTRAL", bullScore, bearScore,
-      reason: `SHORT↓${bearCnt}/7 blokiran — LONG_ONLY mod aktivan` };
+      reason: `SHORT↓${bearCnt}/8 blokiran — LONG_ONLY mod aktivan` };
   }
 
   // ── MOMENTUM fallback (hibrid) ──────────────────────────────────────────────
   // Ako pullback signal nije dostigao prag, provjeri momentum/breakout logiku:
   // Isti 13 signala ali 6 reversanih vraćamo u originalnu (trend-following) logiku.
   // Viši prag (MOM_MIN) jer su momentum ulazi rizičniji od pullback ulaza.
-  const MOM_MIN = 5;  // 5/7 = 71.4% (Option C — isti set signala kao pullback, ali trend-following logika)
+  const MOM_MIN = _combo?.minSig ?? 5;  // = combo minSig (4/5 za optimizirane simbole)
   const momSigs = [
-    price > ema50  ?  1 : -1,                          //  1. E50  MOM: >EMA50 = trend gore = +1
-    cvdSum > 0 ?  1 : -1,                              //  2. CVD  MOM: kupni vol = potvrda pumpa = +1
-    macdHist !== null ? (macdHist > 0 ? 1 : -1) : 0,  //  3. MCD: isti
-    price > ema145 ?  1 : -1,                          //  4. E145: isti
-    sig17sr,                                            //  5. SRS: isti
-    sig18bk,                                            //  6. SRB: isti
-    sigRsiDiv,                                          //  7. RDIV: isti (divergencija potvrđuje smjer)
+    price > ema50  ?  1 : -1,                          //  1. E50   MOM: >EMA50 = trend gore = +1
+    cvdSum > 0 ?  1 : -1,                              //  2. CVD   MOM: kupni vol = potvrda pumpa = +1
+    macdHist !== null ? (macdHist > 0 ? 1 : -1) : 0,  //  3. MACD  MOM: isti
+    price > ema145 ?  1 : -1,                          //  4. E145  TREND: isti
+    sigPWHL,                                            //  5. PWHL  Weekly: isti
+    sigRsiDiv,                                          //  6. RDIV  RSI div: isti
+    sigMktStr,                                          //  7. MSTR  Market Structure: isti
+    sigFVG,                                             //  8. FVG   Fair Value Gap: isti
   ];
-  const momBullBase = momSigs.filter(s => s === 1).length;
-  const momBearBase = momSigs.filter(s => s === -1).length;
-  // CVD + E145 bonus za momentum signal
-  const momCvdBull  = momSigs[1] === 1, momE145Bull = momSigs[3] === 1;
-  const momCvdBear  = momSigs[1] === -1, momE145Bear = momSigs[3] === -1;
-  const momBull = momBullBase + (momCvdBull && momE145Bull ? 1 : 0);
-  const momBear = momBearBase + (momCvdBear && momE145Bear ? 1 : 0);
+  const _momActiveSigs = _comboIdx.map(i => momSigs[i]);
+  const momBullBase = _momActiveSigs.filter(s => s === 1).length;
+  const momBearBase = _momActiveSigs.filter(s => s === -1).length;
+  // Bonus 1: CVD + E145 za momentum (samo ako u combu)
+  const momCvdBull  = momSigs[1] === 1  && _comboIdx.includes(1);
+  const momE145Bull = momSigs[3] === 1  && _comboIdx.includes(3);
+  const momCvdBear  = momSigs[1] === -1 && _comboIdx.includes(1);
+  const momE145Bear = momSigs[3] === -1 && _comboIdx.includes(3);
+  // Bonus 2: PWHL + MSTR za momentum (samo ako oba u combu)
+  const momPwhMstrBull = (_pwhInCombo && _mstrInCombo && momSigs[4] === 1  && momSigs[6] === 1)  ? 1 : 0;
+  const momPwhMstrBear = (_pwhInCombo && _mstrInCombo && momSigs[4] === -1 && momSigs[6] === -1) ? 1 : 0;
+  const momBull = momBullBase + (momCvdBull && momE145Bull ? 1 : 0) + momPwhMstrBull;
+  const momBear = momBearBase + (momCvdBear && momE145Bear ? 1 : 0) + momPwhMstrBear;
 
   // Za momentum: bez 6SC gate (breakout sam potvrđuje smjer), ADX ≥ 20
   const MOM_ADX_MIN = 20;
@@ -2094,7 +2280,7 @@ function analyzeUltra(candles, cfg) {
     }
     return { price, signal: "LONG", bullScore: momBull, bearScore: momBear,
       nearSup, nearRes, isMomentum: true, vwap: vwapVal,
-      reason: `MOMENTUM LONG ↑${momBullBase}/7 | VWAP cross✓ ADX:${adx.toFixed(0)}✓ RSI:${rsi.toFixed(0)}✓${_strongTrend?" [STRONG]":""}${sigRsiDiv===1?" RDIV✓":""}` };
+      reason: `MOMENTUM LONG ↑${momBullBase}/8 | VWAP cross✓ ADX:${adx.toFixed(0)}✓ RSI:${rsi.toFixed(0)}✓${_strongTrend?" [STRONG]":""}${sigRsiDiv===1?" RDIV✓":""}${sigMktStr===1?" MSTR✓":""}${sigFVG===1?" FVG✓":""}` };
   }
   if (!LONG_ONLY && momBear >= MOM_MIN && rsiShortOk && adx >= MOM_ADX_MIN) {
     if (!vwapVal || vwapVal <= 0) {
@@ -2108,7 +2294,7 @@ function analyzeUltra(candles, cfg) {
     }
     return { price, signal: "SHORT", bullScore: momBull, bearScore: momBear,
       nearSup, nearRes, isMomentum: true, vwap: vwapVal,
-      reason: `MOMENTUM SHORT ↓${momBearBase}/7 | VWAP cross✓ ADX:${adx.toFixed(0)}✓ RSI:${rsi.toFixed(0)}✓${_strongTrendS?" [STRONG]":""}${sigRsiDiv===-1?" RDIV✓":""}` };
+      reason: `MOMENTUM SHORT ↓${momBearBase}/8 | VWAP cross✓ ADX:${adx.toFixed(0)}✓ RSI:${rsi.toFixed(0)}✓${_strongTrendS?" [STRONG]":""}${sigRsiDiv===-1?" RDIV✓":""}${sigMktStr===-1?" MSTR✓":""}${sigFVG===-1?" FVG✓":""}` };
   }
 
   // Dijagnoza zašto nema signala
@@ -2116,76 +2302,18 @@ function analyzeUltra(candles, cfg) {
   const _rsiLongPrag  = _strongTrend  ? 85 : 72;
   const _rsiShortPrag = _strongTrendS ? 15 : 30;
   const whyNot = bullCnt >= bearCnt
-    ? `↑${bullCnt}/7 ${dirStr}${!rsiLongOk  ? ` RSI${rsi.toFixed(0)}≥${_rsiLongPrag}✗`  : ""} | MOM:${momBull}/7`
-    : `↓${bearCnt}/7 ${dirStr}${!rsiShortOk ? ` RSI${rsi.toFixed(0)}≤${_rsiShortPrag}✗` : ""} | MOM:${momBear}/7`;
+    ? `↑${bullCnt}/9 ${dirStr}${!rsiLongOk  ? ` RSI${rsi.toFixed(0)}≥${_rsiLongPrag}✗`  : ""} | MOM:${momBull}/9`
+    : `↓${bearCnt}/9 ${dirStr}${!rsiShortOk ? ` RSI${rsi.toFixed(0)}≤${_rsiShortPrag}✗` : ""} | MOM:${momBear}/9`;
   return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
     momBull, momBear,
-    reason: `ULTRA: ${whyNot} (treba ${MIN_CONFIRM}/7 pullback ili ${MOM_MIN}/7 momentum)` };
+    reason: `ULTRA: ${whyNot} (treba ${MIN_CONFIRM}/9 pullback ili ${MOM_MIN}/9 momentum)` };
 }
 
 // ─── ULTRA Immediate Entry ─────────────────────────────────────────────────────
 // Ulaz odmah na close signal-svjećice — bez čekanja H/L breakouta.
 // Signal pali → trade se otvara na trenutnoj cijeni (close zadnje svjećice).
 
-// ── 5m S/R test helper ────────────────────────────────────────────────────────
-// Vraća true ako je cijena u zadnjih 10 svjećica na 5m testirala S/R razinu
-// i odbila se u smjeru signala (LONG = testirala support, SHORT = testirala resistance)
-export async function check5mSRTest(symbol, signalSide) {
-  try {
-    const url = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=5m&limit=80`;
-    const res  = await fetch(url);
-    const json = await res.json();
-    if (json.code !== "00000" || !json.data?.length) return false;
-
-    const c5 = json.data.map(k => ({
-      high: parseFloat(k[2]), low: parseFloat(k[3]), close: parseFloat(k[4]),
-    }));
-    const n5    = c5.length;
-    const price = c5[n5 - 1].close;
-
-    // Pivot S/R na 5m (N=3, lookback 60 bara)
-    const pivN = 3, srLookback = 60;
-    const srStart = Math.max(pivN, n5 - srLookback);
-    const srEnd   = n5 - pivN - 1;
-    const resistances5 = [], supports5 = [];
-    for (let i = srStart; i <= srEnd; i++) {
-      let ph = true, pl = true;
-      for (let j = i - pivN; j <= i + pivN; j++) {
-        if (j === i || j < 0 || j >= n5) continue;
-        if (c5[j].high >= c5[i].high) ph = false;
-        if (c5[j].low  <= c5[i].low)  pl = false;
-      }
-      if (ph) resistances5.push(c5[i].high);
-      if (pl) supports5.push(c5[i].low);
-    }
-
-    const srZone = 0.015; // 1.5% zona oko S/R razine
-
-    // Provjeri zadnjih 10 svjećica: je li cijena bila u S/R zoni?
-    const lookback10 = c5.slice(n5 - 10);
-
-    if (signalSide === "LONG") {
-      // Tražimo: wick/close dodirnuo support, ali se current close vratio gore
-      const supBelow = supports5.filter(s => s < price * 1.01).sort((a, b) => b - a);
-      const nearSup  = supBelow[0] ?? null;
-      if (!nearSup) return false;
-      const touched = lookback10.some(bar => bar.low <= nearSup * (1 + srZone));
-      const recovered = price > nearSup * (1 + srZone * 0.3);
-      return touched && recovered;
-    } else {
-      // SHORT: tražimo: wick/close dodirnuo resistance, ali se vratio dolje
-      const resAbove = resistances5.filter(r => r > price * 0.99).sort((a, b) => a - b);
-      const nearRes  = resAbove[0] ?? null;
-      if (!nearRes) return false;
-      const touched  = lookback10.some(bar => bar.high >= nearRes * (1 - srZone));
-      const rejected = price < nearRes * (1 - srZone * 0.3);
-      return touched && rejected;
-    }
-  } catch (e) {
-    console.log(`  ⚠️  [5m SR] ${symbol}: ${e.message}`);
-    return false;
-  }
-}
+// check5mSRTest — uklonjeno 06.06.2026 (bio samo logging, nije blokirao trade)
 
 async function analyzeUltraPullback(symbol, candles, cfg) {
   const last  = candles[candles.length - 1];
@@ -2197,14 +2325,26 @@ async function analyzeUltraPullback(symbol, candles, cfg) {
   pending = pending.filter(p => p.symbol !== symbol);
   savePending(pid, pending);
 
-  // Pokreni analizu (proslijedi symbol za tiered VOL_EXH threshold)
-  const result = analyzeUltra(candles, { ...cfg, symbol });
+  // ── Dohvati Previous Weekly High/Low (PWH/PWL) ────────────────────────────
+  // Bitget: granularity=1W, limit=3 → data[0]=tekući tjedan, data[1]=prethodni
+  let _pwh = null, _pwl = null;
+  try {
+    const wUrl = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=1W&limit=3`;
+    const wd = await fetch(wUrl).then(r => r.json());
+    if (wd.code === "00000" && wd.data?.length >= 2) {
+      const prevWeek = wd.data[1];  // index 1 = prethodni (dovršeni) tjedan
+      _pwh = parseFloat(prevWeek[2]);  // high
+      _pwl = parseFloat(prevWeek[3]);  // low
+    }
+  } catch(e) {
+    console.log(`  ⚠️  [PWH/PWL] ${symbol} — ne mogu dohvatiti weekly candle: ${e.message}`);
+  }
+
+  // Pokreni analizu (proslijedi symbol + PWH/PWL za tiered VOL_EXH threshold)
+  const result = analyzeUltra(candles, { ...cfg, symbol, _pwh, _pwl });
 
   if (result.signal === "LONG" || result.signal === "SHORT") {
-    // 5m S/R test — OBAVEZAN za pullback ulaze (blokira u run() ako srOk !== true)
-    const srOk = await check5mSRTest(symbol, result.signal).catch(() => null);
-    const srLabel = srOk === true ? "5mSR✓" : srOk === false ? "5mSR✗" : "5mSR?";
-    console.log(`  ✅ [ULTRA] ${symbol} ${result.signal} @ ${fmtPrice(price)} — 3 uvjeta OK (${result.bullScore ?? 0}↑/${result.bearScore ?? 0}↓ | ${srLabel})`);
+    console.log(`  ✅ [ULTRA] ${symbol} ${result.signal} @ ${fmtPrice(price)} — (${result.bullScore ?? 0}↑/${result.bearScore ?? 0}↓)`);
   }
 
   return result;
@@ -3839,7 +3979,7 @@ function checkDailyLimit(pid) {
 const CB_LOSSES   = 7;                     // uzastopnih gubitaka → circuit breaker
 const CB_COOLDOWN = 8 * 60 * 60 * 1000;   // 8h pauza
 
-const CB_DRAWDOWN_MIN = 200;      // minimalni equity ($) — ispod = stop trading
+const CB_DRAWDOWN_MIN = 100;      // minimalni equity ($) — ispod = stop trading
 const CB_DRAWDOWN_PCT = 25;       // % gubitak od stvarnog BitGet stanja → stop (backup)
 const SYM_CONSEC_LOSSES = 5;      // uzastopni gubici po simbolu → suspendiraj sa liste
 const CB_FILE      = `${DATA_DIR}/circuit_breaker.json`;
@@ -3873,12 +4013,15 @@ async function checkCircuitBreaker(pid, pName) {
   try {
     const manualResetAt = cb[pid]?.manualResetAt || 0;
     const lines = readFileSync(f, "utf8").trim().split("\n");
+    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
     const exits = lines.slice(1)
       .filter(l => l.includes("CLOSE_LONG") || l.includes("CLOSE_SHORT"))
       .filter(l => {
+        const cols = l.split(",");
+        // Samo danas
+        if (!l.startsWith(today)) return false;
         // Ignoriraj trade-ove prije ručnog reseta
         if (!manualResetAt) return true;
-        const cols = l.split(",");
         const ts = new Date(`${cols[0]}T${cols[1]}Z`).getTime();
         return ts > manualResetAt;
       })
@@ -4089,6 +4232,45 @@ export async function run() {
     const dailyWarnActive = dailyPnl < -(DAILY_LOSS_LIMIT * DAILY_WARN_PCT / 100);
     if (dailyWarnActive) console.log(`  ⚠️  [${pDef.name}] Dnevni P&L upozorenje: $${dailyPnl.toFixed(2)} (${(Math.abs(dailyPnl)/DAILY_LOSS_LIMIT*100).toFixed(0)}% od $${DAILY_LOSS_LIMIT.toFixed(0)} limita)`);
 
+    // ── 2b. Correlated Exit — BTC spike zatvara sve SHORT pozicije ──────────────
+    if (pDef.strategy === "synapse_t") {
+      const _spike = await checkBtcSpike();
+      if (_spike.spike && _spike.direction === "UP") {
+        // BTC naglo skočio → sve open SHORT pozicije su u opasnosti
+        const _openShorts = pDef.positions.filter(p => p.side === "SHORT");
+        if (_openShorts.length > 0) {
+          console.log(`  🚨 [CORR EXIT] BTC +${_spike.pct}% u 30min (spike UP) → zatvaramo ${_openShorts.length} SHORT pozicija`);
+          for (const _sp of _openShorts) {
+            try {
+              const _isLiveCe = pDef.live === true && !PAPER_TRADING;
+              if (_isLiveCe) await closeBitGetOrder(_sp);
+              const _pnlEst = _sp.entry > 0 ? ((_sp.entry - _sp.lastPrice) / _sp.entry * 100).toFixed(2) : "?";
+              const _exitPx  = _sp.lastPrice ?? _sp.entryPrice ?? _sp.entry;
+              const _qty     = _sp.qty ?? _sp.size ?? 0;
+              const _pnlUsd  = _sp.side === "SHORT"
+                ? (_sp.entryPrice - _exitPx) * _qty
+                : (_exitPx - _sp.entryPrice) * _qty;
+              writeExitCsv(pid, _sp, _exitPx, `CORR EXIT: BTC spike +${_spike.pct}% u 30min`, _pnlUsd);
+              if (_pnlUsd < 0) { symbolSlCooldown.set(_sp.symbol, Date.now()); saveSlCooldown(); }
+              await tg(`⚡ [CORR EXIT] ${_sp.symbol} SHORT\nBTC spike +${_spike.pct}% u 30min → zatvoren preventivno\nP&L: ${_pnlUsd >= 0?"+":""}$${_pnlUsd.toFixed(2)}`).catch(()=>{});
+              pDef.positions = pDef.positions.filter(p => p.symbol !== _sp.symbol || p.side !== "SHORT");
+              console.log(`  ✅ [CORR EXIT] ${_sp.symbol} SHORT zatvoren (est. ${_pnlEst}%)`);
+            } catch(e) {
+              console.log(`  ⚠️  [CORR EXIT] ${_sp.symbol} greška: ${e.message}`);
+            }
+          }
+        } else {
+          console.log(`  ⚡ [CORR EXIT] BTC +${_spike.pct}% spike — nema otvorenih SHORT-ova`);
+        }
+      } else if (_spike.spike && _spike.direction === "DOWN") {
+        // BTC naglo pao → sve open LONG pozicije su u opasnosti (upozorenje)
+        const _openLongs = pDef.positions.filter(p => p.side === "LONG");
+        if (_openLongs.length > 0) {
+          console.log(`  ⚠️  [CORR WARN] BTC ${_spike.pct}% u 30min (spike DOWN) — ${_openLongs.length} LONG pozicija pod pritiskom`);
+        }
+      }
+    }
+
     // ── 3. Market Regime: BTC 4H + 1H ────────────────────────────────────────────
     let _btcRegime = "UNKNOWN";
     let _btcRegime1h = "UNKNOWN";
@@ -4267,7 +4449,24 @@ export async function run() {
     let _newEntriesThisScan = 0;  // Reset po portfoliju, ne dopuštamo simultano previše ulaza
     const _scanLogEntries = [];  // skuplja log entries za ovaj scan ciklus
 
+    // ── Dohvati stvarno otvorene pozicije na Bitgetu (jednom po scan ciklusu) ──
+    // Ako Bitget već ima poziciju za neki simbol (ručno ili izvana), ne ulazimo
+    const _isLive = pDef.live === true && !PAPER_TRADING;
+    const _bitgetLivePositions = _isLive ? await fetchBitgetOpenPositions() : null;
+
     for (const symbol of pDef.symbols) {
+      // ── Provjera: postoji li već nalog na Bitgetu za ovaj simbol ──────────────
+      if (_bitgetLivePositions !== null) {
+        const _hasBitgetLong  = _bitgetLivePositions.has(`${symbol}:long`);
+        const _hasBitgetShort = _bitgetLivePositions.has(`${symbol}:short`);
+        if (_hasBitgetLong || _hasBitgetShort) {
+          const _side = _hasBitgetLong ? "LONG" : "SHORT";
+          console.log(`  🚫 [${pDef.name}] ${symbol} — Bitget već ima otvorenu ${_side} poziciju → preskačem`);
+          _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "BITGET_OPEN", reason: `Bitget već ima ${_side} poziciju` });
+          continue;
+        }
+      }
+
       // ── Pyramid (DCA) logika: dopuštamo max MAX_PYRAMID adicija u ISTOM smjeru ──
       const existingPosList = openPositions.filter(p => p.symbol === symbol);
       const existingPos     = existingPosList[0];  // prva/primarna pozicija
@@ -4461,15 +4660,26 @@ export async function run() {
             continue;
           }
 
-          // SHORT blokiran samo ako je 1H BULL, osim ako simbol ima 1H BEAR trend
+          // SHORT filter — tri razine zaštite:
+          // 1. BTC 4H EMA50: ako cijena IZNAD EMA50 → tržište u recovery/bull fazi → SHORT blokiran
+          // 2. BTC 1H BULL + simbol nije bearish → SHORT blokiran
+          // 3. BTC 1H NEUTRAL + BTC 4H iznad EMA50 → SHORT blokiran (NEUTRAL ne znači da možemo SHORT)
+          const _btcAboveEma50 = _regimeCache.btcAboveEma50_4h ?? false;
           const _sym1hTrend = result?.trend1h || trend1h?.trend || null;
+
+          if (signal === "SHORT" && _btcAboveEma50 && _sym1hTrend !== "BEAR") {
+            const _ema50str = _regimeCache.btcEma50_4h ? ` (EMA50=$${_regimeCache.btcEma50_4h.toFixed(0)})` : "";
+            console.log(`  ☀️  [REGIME EMA50] ${symbol} — BTC 4H iznad EMA50${_ema50str} + simbol 1H ${_sym1hTrend||"?"} → SHORT blokiran`);
+            _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: `BTC_EMA50_ABOVE`, reason: `BTC 4H iznad EMA50, simbol 1H ${_sym1hTrend||"?"} → SHORT blokiran` });
+            continue;
+          }
           if (signal === "SHORT" && _effectiveRegime === "BULL" && _sym1hTrend !== "BEAR") {
             console.log(`  ☀️  [REGIME] ${symbol} — BTC 1H BULL + simbol 1H ${_sym1hTrend||"?"} → SHORT blokiran`);
             _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: `BTC_REGIME(${_effectiveRegime})`, reason: `BTC 1H BULL, simbol 1H ${_sym1hTrend||"?"} → SHORT blokiran` });
             continue;
           }
-          if (signal === "SHORT" && _effectiveRegime === "BULL" && _sym1hTrend === "BEAR") {
-            console.log(`  ⚡ [REGIME] ${symbol} — BTC 1H BULL ali simbol 1H BEAR → SHORT dopušten`);
+          if (signal === "SHORT" && (_effectiveRegime === "BULL" || _btcAboveEma50) && _sym1hTrend === "BEAR") {
+            console.log(`  ⚡ [REGIME] ${symbol} — BTC BULL/Recovery ali simbol 1H BEAR → SHORT dopušten (divergencija)`);
           }
           // Bounce mode: blokira SHORT (tražimo samo LONG reversal)
           if (signal === "SHORT" && _bounceMode) {
@@ -4482,14 +4692,13 @@ export async function run() {
             console.log(`  🚨 [SP500] ${symbol} — RISK_OFF → LONG blokiran`);
             continue;
           }
-          // Fear & Greed: ekstremni strah → blokira LONG (osim bypass)
-          if (signal === "LONG" && _fearGreed !== null && _fearGreed <= 20 && !_anyLongBypass) {
-            console.log(`  😱 [F&G] ${symbol} — Extreme Fear (${_fearGreed}) → LONG blokiran`);
+          // Fear & Greed: samo ekstremni rubovi blokiraju
+          if (signal === "SHORT" && _fearGreed !== null && _fearGreed <= 15) {
+            console.log(`  😱 [F&G] ${symbol} — Extreme Fear (${_fearGreed} ≤ 15) → SHORT blokiran (bounce rizik)`);
             continue;
           }
-          // Fear & Greed: ekstremna pohlepa (≥80) → blokira SHORT (euforija, ne shortamo)
-          if (signal === "SHORT" && _fearGreed !== null && _fearGreed >= 80) {
-            console.log(`  🤑 [F&G] ${symbol} — Extreme Greed (${_fearGreed}) → SHORT blokiran`);
+          if (signal === "LONG" && _fearGreed !== null && _fearGreed >= 85) {
+            console.log(`  🤑 [F&G] ${symbol} — Extreme Greed (${_fearGreed} ≥ 85) → LONG blokiran (reversal rizik)`);
             continue;
           }
           // DXY: jaki dolar (>+0.3% na 4H) → blokira LONG na crypto
@@ -4813,10 +5022,7 @@ export async function checkBreakouts() {
 // Sprema se u DATA_DIR/daily_reports/YYYY-MM-DD.md i latest.md
 // Šalje se na Telegram kao jutarnji brief.
 
-const REPORT_SYMBOLS = [
-  "BTCUSDT","ETHUSDT","SOLUSDT","XRPUSDT","ADAUSDT","LINKUSDT","DOGEUSDT",
-  "NEARUSDT","HYPEUSDT","SUIUSDT","SEIUSDT","APTUSDT","TAOUSDT","JUPUSDT","ENAUSDT","INJUSDT",
-];
+const REPORT_SYMBOLS = ["BTCUSDT","ETHUSDT","SOLUSDT","TAOUSDT","AAVEUSDT"];
 
 function _parseTradeCsv(days = 7) {
   const pid = "synapse_t";
@@ -5036,7 +5242,7 @@ function _buildReport(dateStr, stats, symReports) {
 
   md += `## ⚖️ Zaključak\n\n`;
   md += `**Strategija: ${verdict}** — ${verdictReason}\n\n`;
-  md += `---\n*Generirano automatski od ULTRA Bot v2 | ${dateStr} | Option C (3 gates + 7 signals)*\n`;
+  md += `---\n*Generirano automatski od ULTRA Bot v3 | ${dateStr} | 8 signala min 6/8 + BTC EMA50 4H filter*\n`;
 
   return { md, tg: tgMsg };
 }

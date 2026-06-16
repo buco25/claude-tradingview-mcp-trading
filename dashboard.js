@@ -6,7 +6,7 @@
 import "dotenv/config";
 import http from "http";
 import { readFileSync, writeFileSync, existsSync } from "fs";
-import { run as botRun, checkBreakouts, syncPositionsFromBitget, check5mSRTest, checkBeStopAll,
+import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   getAllFundingRates, getDailyPnlExport, getSymbolStats, getOIForSymbols,
   getFearGreed, getBtcDominance, getDxyData, getConsecutiveLossCount,
   getSessionInfo, calcAtrTrend, getSp500Data, calcSymbolCorrelation,
@@ -46,13 +46,13 @@ let ALL_SYMBOLS = [];
 // ─── VOL_EXH tiered threshold (mora biti identično bot.js VOL_EXH_TIERS) ─────
 // Izvor: MM/Algo analiza 23.05.2026 — docs/MM_Algo_Analysis.xlsx
 const VOL_EXH_TIERS_D = {
-  "BTCUSDT":  2.5,
-  "ETHUSDT":  2.0, "SOLUSDT":  2.0, "XRPUSDT":  2.0,
-  "ADAUSDT":  1.7, "LINKUSDT": 1.7, "DOGEUSDT": 1.7,
-  "NEARUSDT": 1.4, "SUIUSDT":  1.4, "APTUSDT":  1.4, "SEIUSDT":  1.4, "INJUSDT":  1.4,
-  "TAOUSDT":  1.3, "HYPEUSDT": 1.3, "JUPUSDT":  1.3, "ENAUSDT":  1.3,
+  "BTCUSDT":  5.0,
+  "ETHUSDT":  4.0, "SOLUSDT":  4.0, "XRPUSDT":  4.0,
+  "ADAUSDT":  3.5, "LINKUSDT": 3.5, "DOGEUSDT": 3.5,
+  "NEARUSDT": 3.0, "SUIUSDT":  3.0, "APTUSDT":  3.0, "SEIUSDT":  3.0, "INJUSDT":  3.0,
+  "TAOUSDT":  2.5, "HYPEUSDT": 2.5, "JUPUSDT":  2.5, "ENAUSDT":  2.5,
 };
-const VOL_EXH_DEFAULT_D = 1.5;
+const VOL_EXH_DEFAULT_D = 3.0;
 
 // ─── Scanner indicator helpers ─────────────────────────────────────────────────
 
@@ -215,7 +215,7 @@ function hadCross(e9, e21, bars = 5) {
   return { up, dn };
 }
 
-function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}) {
+function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}, _pwh = null, _pwl = null) {
   const closes = candles.map(c => c.close);
   const opens  = candles.map(c => c.open);
   const vols   = candles.map(c => c.volume || 0);
@@ -402,69 +402,117 @@ function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}
     else if (synapse7Bear === minSig - 1 && scaleDn >= 3) synapse7Sig = "SETUP↓";
   }
 
-  // ── ULTRA — 9 signala (identično bot.js analyzeUltra) ──
-  // OBAVEZNI GATING: ADX≥30, 6Sc≥4, RSI asimetričan, 5mSR (obavezan za pullback, preskočen za MOM)
-  // Maknuti iz signala: CRS (WR 14%), ADXsn (obavezan), 6Sc (obavezan), EMA smjer (nije obavezan)
-  // Maknuti 2025-05: E55⟳ (duplikat E50), VOL⟳ (asimetričan — nikad +1 za LONG)
-  // Dodato 2025-05: RDIV (RSI divergencija — bullish/bearish)
+  // ── ULTRA v3 — 8 signala + 3 gateva (identično bot.js analyzeUltra) ──
+  // Signali: E50↑, CVD↑, MACD, E145, PWHL, RDIV, MSTR, FVG
+  // Gatevi (obvezni, ne broje se u score): ADX≥22, VOL_EXH, VWAP
+
+  // PWHL signal (Previous Weekly High/Low)
+  let sigPWHLD = 0;
+  {
+    const PWHL_ZONE = 0.015;
+    if (_pwl !== null && (price - _pwl) / price < PWHL_ZONE && price > _pwl && rsiRising)  sigPWHLD =  1;
+    if (_pwh !== null && (_pwh - price) / price < PWHL_ZONE && price < _pwh && rsiFalling) sigPWHLD = -1;
+  }
+
+  // MSTR signal (Market Structure HH/HL vs LL/LH)
+  let sigMktStrD = 0;
+  {
+    const MS_LOOKBACK = 60, MS_WING = 3;
+    const msHighs = [], msLows = [];
+    const mStart = Math.max(MS_WING, n - MS_LOOKBACK);
+    const mEnd   = n - MS_WING - 1;
+    for (let i = mStart; i <= mEnd; i++) {
+      let isH = true, isL = true;
+      for (let j = i - MS_WING; j <= i + MS_WING; j++) {
+        if (j === i) continue;
+        if (candles[j].high >= candles[i].high) isH = false;
+        if (candles[j].low  <= candles[i].low)  isL = false;
+      }
+      if (isH) msHighs.push(candles[i].high);
+      if (isL) msLows.push(candles[i].low);
+    }
+    if (msHighs.length >= 2 && msLows.length >= 2) {
+      const lastH = msHighs[msHighs.length-1], prevH = msHighs[msHighs.length-2];
+      const lastL = msLows[msLows.length-1],   prevL = msLows[msLows.length-2];
+      if (lastH > prevH && lastL > prevL) sigMktStrD =  1;
+      if (lastH < prevH && lastL < prevL) sigMktStrD = -1;
+    }
+  }
+
+  // FVG signal (Fair Value Gap)
+  let sigFVGD = 0;
+  {
+    const FVG_LOOKBACK = 30, FVG_MIN_PCT = 0.003;
+    for (let i = Math.max(2, n - FVG_LOOKBACK); i < n - 1 && sigFVGD === 0; i++) {
+      const c0h = candles[i-2].high, c0l = candles[i-2].low;
+      const c2h = candles[i].high,   c2l = candles[i].low;
+      if (c2l > c0h && (c2l - c0h) / c0h >= FVG_MIN_PCT && price >= c0h * 0.999 && price <= c2l * 1.005) sigFVGD =  1;
+      if (c0l > c2h && (c0l - c2h) / c2h >= FVG_MIN_PCT && price <= c0l * 1.001 && price >= c2h * 0.995) sigFVGD = -1;
+    }
+  }
+
   let ultraSig = "—";
   let ultraBull = 0, ultraBear = 0;
-  let ultraSigs16 = new Array(7).fill(0);
-  let ultraMinSig = 5;  // default, ažurira se ispod
+  let ultraSigs16 = new Array(8).fill(0);
+  const SYMBOL_COMBOS_D = {
+    "BTCUSDT":  { sigIdx: [0,1,2,3,7], minSig: 4 },
+    "ETHUSDT":  { sigIdx: [0,1,2,3,7], minSig: 4 },
+    "SOLUSDT":  { sigIdx: [0,1,3,5,6], minSig: 4 },
+    "TAOUSDT":  { sigIdx: [0,1,3,5,6], minSig: 4 },
+    "AAVEUSDT": { sigIdx: [0,1,2,3,7], minSig: 4 },
+  };
+  let ultraMinSig = 4;  // default
   {
-    const { minSig = 5 } = ultraCfg;
+    const _symCombo = SYMBOL_COMBOS_D[symbol];
+    const _comboIdxD = _symCombo?.sigIdx ?? [0,1,2,3,4,5,6,7];
+    const { minSig = 4 } = _symCombo ?? {};
     ultraMinSig = minSig;
     if (n >= 200 && ema9 && ema21) {
       const rsiV  = rsi ?? 50;
       const adxV  = adx ?? 0;
-      const chopV = chop ?? 100;
 
-      // REVERSANI signali (WR<31.5% kada ▲ → logika invertirana, contrarian/pullback):
-      // Option C: 7 signala — maknuti RSI signal (redundantan s RSI gate-om) i CHP (redundantan s ADX gate-om)
-      // Dodan: VOL_EXH gate (ne broji se u signal, blokira ulaz)
+      // 8 signala: E50rev, CVDrev, MACD, E145, PWHL, RDIV, MSTR, FVG
       ultraSigs16 = [
-        ema50 ? (price > ema50 ? -1 : 1) : 0,                           //  1. E50  REV: >EMA50=previsoko=-1, ispod=pullback=+1
-        cvdSum > 0 ? -1 : 1,                                             //  2. CVD  REV: kupni vol=već uđeni=-1, prodajni=+1
-        macdH !== null ? (macdH > 0 ? 1 : -1) : 0,                      //  3. MCD: MACD histogram (normalan)
-        ema145 ? (price > ema145 ? 1 : -1) : 0,                         //  4. E145: dugoročni trend (normalan)
-        srsBounce,                                                        //  5. SRS: S/R bounce (normalan)
-        srbBreak,                                                         //  6. SRB: S/R breakout (normalan)
-        sigRsiDivD,                                                       //  7. RDIV: RSI divergencija (bullish=+1, bearish=-1)
+        ema50 ? (price > ema50 ? 1 : -1) : 0,             //  1. E50  TREND
+        cvdSum > 0 ? 1 : -1,                              //  2. CVD  TREND
+        macdH !== null ? (macdH > 0 ? 1 : -1) : 0,       //  3. MACD
+        ema145 ? (price > ema145 ? 1 : -1) : 0,          //  4. E145
+        sigPWHLD,                                          //  5. PWHL Weekly
+        sigRsiDivD,                                        //  6. RDIV
+        sigMktStrD,                                        //  7. MSTR
+        sigFVGD,                                           //  8. FVG
       ];
 
-      ultraBull = ultraSigs16.filter(s => s === 1).length;
-      ultraBear = ultraSigs16.filter(s => s === -1).length;
+      const _activeSigsD = _comboIdxD.map(i => ultraSigs16[i]);
+      ultraBull = _activeSigsD.filter(s => s === 1).length;
+      ultraBear = _activeSigsD.filter(s => s === -1).length;
 
-      // 3+1 obavezna gating uvjeta: ADX≥30, 6Sc≥4, RSI asimetričan, 5mSR (pullback obavezan)
-      const adxOk       = adxV >= 30;
-      const scaleOkLong  = scaleUp >= 4;
-      const scaleOkShort = scaleDn >= 4;
-      const rsiLongOk   = rsiV < 72;
-      const rsiShortOk  = rsiV > 30;
+      const adxOk = adxV >= 22;
 
-      // Pullback signali (reversed logika)
-      if      (adxOk && scaleOkLong  && rsiLongOk  && ultraBull >= minSig) ultraSig = "LONG";
-      else if (adxOk && scaleOkShort && rsiShortOk && ultraBear >= minSig) ultraSig = "SHORT";
-      else if (adxOk && scaleOkLong  && rsiLongOk  && ultraBull === minSig - 1) ultraSig = "SETUP↑";
-      else if (adxOk && scaleOkShort && rsiShortOk && ultraBear === minSig - 1) ultraSig = "SETUP↓";
+      // Pullback signali — bez RSI gate (uklonjen iz bota)
+      if      (adxOk && ultraBull >= minSig)          ultraSig = "LONG";
+      else if (adxOk && ultraBear >= minSig)          ultraSig = "SHORT";
+      else if (adxOk && ultraBull === minSig - 1)     ultraSig = "SETUP↑";
+      else if (adxOk && ultraBear === minSig - 1)     ultraSig = "SETUP↓";
 
-      // Momentum signali (non-reversed, hibrid fallback) — prag 5/7
+      // Momentum fallback
       if (ultraSig === "—") {
-        var momSigsD = [
-          ema50  ? (price > ema50  ?  1 : -1) : 0,       //  1. E50  MOM: >EMA50=+1
-          cvdSum > 0 ?  1 : -1,                           //  2. CVD  MOM: kupni vol=+1
-          macdH !== null ? (macdH > 0 ? 1 : -1) : 0,    //  3. MCD: isti
-          ema145 ? (price > ema145 ?  1 : -1) : 0,       //  4. E145: isti
-          ultraSigs16[4],                                  //  5. SRS: isti
-          ultraSigs16[5],                                  //  6. SRB: isti
-          ultraSigs16[6],                                  //  7. RDIV: isti
+        const momSigsD = [
+          ema50  ? (price > ema50  ?  1 : -1) : 0,
+          cvdSum > 0 ?  1 : -1,
+          macdH !== null ? (macdH > 0 ? 1 : -1) : 0,
+          ema145 ? (price > ema145 ?  1 : -1) : 0,
+          sigPWHLD,
+          sigRsiDivD,
+          sigMktStrD,
+          sigFVGD,
         ];
-        var momBullD = momSigsD.filter(function(s){return s===1;}).length;
-        var momBearD = momSigsD.filter(function(s){return s===-1;}).length;
-        // Momentum: bez 6SC gate, ADX >= 20, prag 5/7
-        var momAdxOk = adxV >= 20;
-        if (momAdxOk && rsiLongOk  && momBullD >= 5) { ultraSig = "MOM↑"; ultraBull = momBullD; }
-        else if (momAdxOk && rsiShortOk && momBearD >= 5) { ultraSig = "MOM↓"; ultraBear = momBearD; }
+        const _momActiveSigsD = _comboIdxD.map(i => momSigsD[i]);
+        const momBullD = _momActiveSigsD.filter(s => s === 1).length;
+        const momBearD = _momActiveSigsD.filter(s => s === -1).length;
+        const momAdxOk = adxV >= 18;
+        if (momAdxOk && momBullD >= minSig)      { ultraSig = "MOM↑"; ultraBull = momBullD; }
+        else if (momAdxOk && momBearD >= minSig) { ultraSig = "MOM↓"; ultraBear = momBearD; }
       }
     }
   }
@@ -522,7 +570,18 @@ async function runScan(rules) {
           high: parseFloat(k[2]), low: parseFloat(k[3]), close: parseFloat(k[4]),
           volume: parseFloat(k[5] || 0),
         }));
-        const s       = scanSymbol(candles, {}, {}, {}, ultraCfg);
+        // Fetch weekly candles za PWHL signal
+        let _pwh = null, _pwl = null;
+        try {
+          const wUrl = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=1W&limit=3`;
+          const wd   = await fetch(wUrl).then(r2 => r2.json());
+          if (wd.code === "00000" && wd.data?.length >= 2) {
+            const prevWeek = wd.data[1];
+            _pwh = parseFloat(prevWeek[2]);
+            _pwl = parseFloat(prevWeek[3]);
+          }
+        } catch(e) { /* ignoriraj — PWHL ostaje 0 */ }
+        const s       = scanSymbol(candles, {}, {}, {}, ultraCfg, _pwh, _pwl);
         const pending = pendingList.find(p => p.symbol === sym) || null;
         const symSltp = rules.symbol_sltp?.[sym] || {};
         const slPct   = symSltp.slPct ?? 1.5;
@@ -539,14 +598,6 @@ async function runScan(rules) {
           volHigh          = volRatio >= volExhThreshold; // VOL_EXH bi blokirao ulaz
         }
 
-        // 5m S/R test — samo za simbole koji imaju aktivan LONG/SHORT signal
-        let srOk = null;  // null = nije primjenjivo / nije provjeravano
-        const activeSig = s.ultraSig === "LONG" || s.ultraSig === "SHORT"
-                       || (s.ultraSig || "").startsWith("SETUP");
-        if (activeSig) {
-          const side = s.ultraSig === "SHORT" || s.ultraSig === "SETUP↓" ? "SHORT" : "LONG";
-          srOk = await check5mSRTest(sym, side).catch(() => null);
-        }
 
         // 1H trend (EMA20)
         let trend1h = 'UNKNOWN';
@@ -565,7 +616,51 @@ async function runScan(rules) {
 
         const vwap = calcVWAP(candles);
         const vwapDistPct = vwap ? parseFloat(((candles[candles.length-1].close - vwap) / vwap * 100).toFixed(2)) : null;
-        results.push({ symbol: sym, ...s, pending, slPct, tpPct, srOk, trend1h, vwap: vwap ? parseFloat(vwap.toFixed(6)) : null, vwapDistPct, volRatio: parseFloat(volRatio.toFixed(2)), volLow, volHigh, volExhThreshold });
+
+        // ── MM/Algo filter detekcija (preview — identična logika bot.js) ──────
+        const mmFilters = [];
+        const nC = candles.length;
+        const curPrice = candles[nC - 1].close;
+        if (nC >= 5) {
+          // Filter 1: Manipulation Candle (wick >60% ranga, body <25%)
+          const lc = candles[nC - 2];
+          const lcRange = lc.high - lc.low;
+          if (lcRange > 0) {
+            const lcBody   = Math.abs(lc.close - lc.open);
+            const upperWck = lc.high - Math.max(lc.close, lc.open);
+            const lowerWck = Math.min(lc.close, lc.open) - lc.low;
+            const isManip  = lcBody < lcRange * 0.25;
+            if (isManip && upperWck > lcRange * 0.60) mmFilters.push({ code: 'MANIP↑', label: '🪝 MANIP↑', tip: 'Gornja wick manipulacija — LONG blokiran' });
+            if (isManip && lowerWck > lcRange * 0.60) mmFilters.push({ code: 'MANIP↓', label: '🪝 MANIP↓', tip: 'Donja wick manipulacija — SHORT blokiran' });
+          }
+          // Filter 2: Round Number Proximity (±0.25%)
+          const RN_PROX = 0.0025;
+          const mag = Math.pow(10, Math.floor(Math.log10(curPrice)));
+          for (const mult of [1, 2, 5, 10]) {
+            const rnStep = mag * mult / 10;
+            const nearest = Math.round(curPrice / rnStep) * rnStep;
+            if (nearest > 0 && Math.abs(curPrice - nearest) / curPrice < RN_PROX) {
+              mmFilters.push({ code: 'RNDUP', label: '🎯 RNDUP', tip: `Blizu round numbera ${nearest.toFixed(nearest >= 100 ? 0 : nearest >= 1 ? 2 : 4)} — blokiran` });
+              break;
+            }
+          }
+          // Filter 3: Volume Divergence — identično bot.js (nizak vol + smjer cijene)
+          if (nC >= 12) {
+            const recentVols = candles.slice(-12, -2).map(c => c.volume);
+            const avgVol10 = recentVols.reduce((a, b) => a + b, 0) / recentVols.length;
+            const lastVol  = candles[nC - 2].volume;
+            const volDecline = avgVol10 > 0 && lastVol < avgVol10 * 0.6;
+            if (volDecline) {
+              const p3 = candles.slice(-4, -1).map(c => c.close);
+              const priceRise3 = p3[2] > p3[0];
+              const priceFall3 = p3[2] < p3[0];
+              if (priceRise3)  mmFilters.push({ code: 'VOLDIV↑', label: '📉 VOLDIV↑', tip: 'Lažni pump — cijena raste + slab vol → LONG blokiran' });
+              if (priceFall3)  mmFilters.push({ code: 'VOLDIV↓', label: '📉 VOLDIV↓', tip: 'Lažni dump — cijena pada + slab vol → SHORT blokiran' });
+            }
+          }
+        }
+
+        results.push({ symbol: sym, ...s, pending, slPct, tpPct, trend1h, vwap: vwap ? parseFloat(vwap.toFixed(6)) : null, vwapDistPct, volRatio: parseFloat(volRatio.toFixed(2)), volLow, volHigh, volExhThreshold, mmFilters });
       } catch (e) {
         results.push({ symbol: sym, error: e.message });
       }
@@ -855,7 +950,10 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <div><label>Otvoreno</label><span>${fmtLocalTs(p.openedAt)}</span></div>
           </div>
           <div class="pos-pnl-row">
-            <div id="pnl-${posUid}" style="font-size:14px;font-weight:700;color:#9ca3af">—</div>
+            <div style="display:flex;flex-direction:column;gap:2px">
+              <div id="pnl-${posUid}" style="font-size:14px;font-weight:700;color:#9ca3af">—</div>
+              <div id="roe-${posUid}" style="font-size:18px;font-weight:800;color:#9ca3af;letter-spacing:-0.5px">ROE —</div>
+            </div>
             <div style="flex:1;min-width:0">
               <div class="range-bar"><div id="bar-${posUid}" class="range-fill"></div></div>
               <div class="range-labels">
@@ -875,15 +973,19 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
           (function(){
             const uid="${posUid}", sym="${p.symbol}", side="${p.side}";
             const entry=${p.entryPrice}, qty=${p.quantity}, notional=${p.totalUSD};
+            const margin=${(p.margin ?? p.totalUSD / 40).toFixed(4)};
             const sl=${p.sl}, tp=${p.tp};
             function fmtLive(v){if(v>=1000)return "$"+v.toFixed(2);if(v>=1)return "$"+v.toFixed(4);if(v>=0.001)return "$"+v.toFixed(6);return "$"+v.toFixed(10);}
             function update(price){
               document.getElementById("lp-"+uid).textContent=fmtLive(price);
               const pnl=side==="LONG"?(price-entry)*qty:(entry-price)*qty;
               const pct=(pnl/notional*100).toFixed(2);
+              const roe=margin>0?(pnl/margin*100).toFixed(2):null;
               const el=document.getElementById("pnl-"+uid);
               el.textContent=(pnl>=0?"+":"")+"$"+pnl.toFixed(4)+" ("+pct+"%)";
               el.style.color=pnl>=0?"#059669":"#dc2626";
+              const roeEl=document.getElementById("roe-"+uid);
+              if(roeEl&&roe!==null){roeEl.textContent="ROE "+(pnl>=0?"+":"")+roe+"%";roeEl.style.color=pnl>=0?"#059669":"#dc2626";}
               const range=Math.abs(tp-sl);
               const pos2=side==="LONG"?(price-sl)/range:(sl-price)/range;
               const pct2=Math.max(0,Math.min(100,pos2*100));
@@ -1122,7 +1224,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="logo">🎯</div>
       <div>
         <div class="title">ULTRA Trading Bot</div>
-        <div class="subtitle">Pullback: ADX·RSI·VOL_EXH min 4/7 (1H) · Momentum: ADX≥20·RSI min 5/7 · LONG+SHORT · BTC regime · rizik 1.5%</div>
+        <div class="subtitle">Gatevi: ADX≥22 · VOL_EXH · VWAP &nbsp;|&nbsp; 5 simbola · min 4/5 signala (1H) &nbsp;|&nbsp; BTC/ETH/AAVE: E50↑+CVD↑+MACD+E145+FVG &nbsp;|&nbsp; SOL/TAO: E50↑+CVD↑+E145+RDIV+MSTR &nbsp;|&nbsp; rizik 1.5%</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -1144,21 +1246,18 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="stat-sub" id="bitget-unr" style="color:#9ca3af"></div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Start kapital</div>
-      <div class="stat-value" style="color:#9ca3af">$${def.startCapital.toFixed(2)}</div>
-    </div>
-    <div class="stat-card">
       <div class="stat-label">Net P&amp;L</div>
       <div class="stat-value" style="color:${pnlCol}">${s.totalPnl >= 0 ? "+" : ""}$${s.totalPnl.toFixed(2)}</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Win Rate</div>
+      <div class="stat-label">Win Rate <span style="font-size:10px;color:#9ca3af">(CSV)</span></div>
       <div class="stat-value" style="color:${s.winRate !== null && parseFloat(s.winRate) >= 50 ? "#059669" : "#dc2626"}">${s.winRate !== null ? s.winRate + "%" : "—"}</div>
       <div class="stat-sub">${s.wins.length}W / ${s.losses.length}L</div>
     </div>
-    <div class="stat-card">
-      <div class="stat-label">Zatvoreni tradovi</div>
-      <div class="stat-value">${s.exits.length}</div>
+    <div class="stat-card" style="border-top:3px solid #8b5cf6">
+      <div class="stat-label">Win Rate <span style="font-size:10px;color:#9ca3af">(Bitget live)</span></div>
+      <div class="stat-value" id="bitget-wr" style="color:#8b5cf6">…</div>
+      <div class="stat-sub" id="bitget-wr-sub" style="color:#9ca3af"></div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Otvoreno</div>
@@ -1299,16 +1398,6 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     <div style="font-size:11px;color:#9ca3af;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">⚙️ Adaptivni Status</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
 
-      <!-- Dinamički ADX -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">📊 Dinamički ADX</div>
-        <div style="font-size:22px;font-weight:800;color:${adxCol}">${dynAdxVal}</div>
-        <div style="font-size:11px;color:${adxCol};margin-top:2px">${adxLbl}</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px">
-          ${recentWr !== null ? `Zadnjih ${recentN}: WR <b style="color:${wrCol}">${recentWr}%</b>` : "Premalo podataka"}
-        </div>
-      </div>
-
       <!-- Market Regime -->
       <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px" id="regime-card">
         <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">🌍 BTC 1H Regime</div>
@@ -1405,15 +1494,15 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div style="font-size:10px;margin-top:6px;display:flex;gap:8px;flex-wrap:wrap" id="sweep-liq-row"></div>
       </div>
 
-      <!-- Liq Zone Scanner — svi simboli -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px;grid-column:span 2" id="liq-card">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <div style="font-size:10px;color:#9ca3af;text-transform:uppercase">💥 Liq Zone Scanner (16 simbola)</div>
-          <div style="font-size:10px;color:#6b7280" id="liq-ts">učitavam…</div>
+      <!-- MM Filteri Status -->
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px;grid-column:span 2" id="mm-filters-card">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:8px;text-transform:uppercase">📊 MM/Algo Indikatori — <span style="color:#f59e0b">samo info, NE blokiraju trejdove</span></div>
+        <div id="mm-filters-grid" style="display:flex;flex-wrap:wrap;gap:6px">
+          <span style="color:#6b7280;font-size:12px">Pokreni scan za prikaz MM indikatora…</span>
         </div>
-        <div id="liq-danger-row" style="margin-bottom:6px"></div>
-        <div id="liq-caution-row" style="margin-bottom:6px"></div>
-        <div id="liq-clear-row"></div>
+        <div style="margin-top:8px;font-size:10px;color:#6b7280">
+          🪝 MANIP = wick manipulacija &nbsp;·&nbsp; 🎯 RNDUP = blizu round numbera &nbsp;·&nbsp; 📉 VOLDIV = lažni pokret (slab vol) &nbsp;|&nbsp; <span style="color:#f59e0b">⚠️ deaktivirani u botu — prikazano samo kao kontekst</span>
+        </div>
       </div>
 
       <!-- Daily P&L Budget -->
@@ -1477,24 +1566,6 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="sp500-sub">&lt;-1% = RISK OFF → blokira LONG</div>
       </div>
 
-      <!-- Korelacijska matrica -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px;grid-column:span 2">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-          <div style="font-size:10px;color:#9ca3af;text-transform:uppercase">🔗 Korelacijska matrica (1H)</div>
-          <button onclick="document.getElementById('corr-heatmap').style.display=document.getElementById('corr-heatmap').style.display==='none'?'block':'none'" style="background:none;border:1px solid #cbd5e1;color:#9ca3af;border-radius:4px;padding:2px 8px;font-size:10px;cursor:pointer">toggle</button>
-        </div>
-        <div style="font-size:18px;font-weight:800" id="corr-val">…</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="corr-sub">&gt;0.85 = visok zajednički rizik</div>
-        <div id="corr-heatmap" style="display:none;margin-top:10px;overflow-x:auto"></div>
-      </div>
-
-      <!-- Deribit Put/Call -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">🎯 Put/Call Ratio (Deribit)</div>
-        <div style="font-size:16px;font-weight:800" id="pc-val">…</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="pc-sub">&gt;1.5=Fear · &lt;0.5=Greed</div>
-      </div>
-
       <!-- Long/Short Ratio -->
       <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
         <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">⚖️ Long/Short Ratio (BTC)</div>
@@ -1534,32 +1605,6 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div id="vwap-list" style="margin-top:6px;font-size:10px;color:#ef4444"></div>
       </div>
 
-      <!-- Stablecoin Inflow -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">💵 Stablecoin Inflow (7d)</div>
-        <div style="font-size:20px;font-weight:800" id="stable-val">…</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="stable-sub">DefiLlama · USDT+USDC supply</div>
-        <div style="font-size:11px;margin-top:4px" id="stable-change"></div>
-      </div>
-
-      <!-- BTC Perp Basis -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">📐 BTC Perp Basis</div>
-        <div style="font-size:20px;font-weight:800" id="basis-val">…</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="basis-sub">Futures premium vs Spot</div>
-        <div style="font-size:11px;margin-top:4px" id="basis-detail"></div>
-      </div>
-
-      <!-- Altcoin Season Index -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">🌊 Altcoin Season Index</div>
-        <div style="font-size:20px;font-weight:800" id="altseason-val">…</div>
-        <div style="background:#374151;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
-          <div id="altseason-bar" style="height:100%;border-radius:4px;background:#3b82f6;transition:width .5s;width:0%"></div>
-        </div>
-        <div style="font-size:11px;color:#9ca3af" id="altseason-sub">BTC dominance · CoinGecko global</div>
-      </div>
-
       <!-- Countdown do sljedećeg eventa -->
       <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
         <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">⏱️ Sljedeći Econ Event</div>
@@ -1577,11 +1622,6 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       </div>
     </div>
 
-    <!-- Per-Symbol WR Table -->
-    <div style="margin-top:16px">
-      <div style="font-size:11px;color:#9ca3af;font-weight:700;text-transform:uppercase;margin-bottom:8px">📊 Per-Simbol Win Rate</div>
-      <div id="sym-wr-table" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px"></div>
-    </div>
   </div>
 
   <!-- Period P&L -->
@@ -1618,10 +1658,10 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <div class="scan-card">
     <div class="scan-header">
       <div>
-        <div class="chart-title" style="margin-bottom:2px">🎯 ULTRA Scanner — ${ALL_SYMBOLS.length} simbola | 3OB + 7SIG | min ${rules.strategies?.synapse_t?.params?.minSig ?? 4}/7 | ulaz odmah</div>
+        <div class="chart-title" style="margin-bottom:2px">🎯 ULTRA Scanner — ${ALL_SYMBOLS.length} simbola | min 4/5 signala po simbolu | ulaz odmah</div>
         <div style="font-size:12px;color:var(--text-muted)">
-          E50 · CVD · MCD · E145 · SRS · SRB · RDIV
-          &nbsp;|&nbsp; 🟡 Čeka breakout &nbsp; 🟢 Signal &nbsp; Cache 90s &nbsp;|&nbsp;
+          BTC/ETH/AAVE: E50↑+CVD↑+MACD+E145+FVG &nbsp;·&nbsp; SOL/TAO: E50↑+CVD↑+E145+RDIV+MSTR
+          &nbsp;|&nbsp; 🟡 SETUP &nbsp; 🟢 Signal &nbsp; 🚀 Momentum &nbsp; Cache 90s &nbsp;|&nbsp;
           <button onclick="toggleLegend()" style="background:none;border:1px solid #30363d;border-radius:4px;color:#9ca3af;font-size:11px;cursor:pointer;padding:2px 8px">📖 Legenda signala</button>
         </div>
       </div>
@@ -1641,7 +1681,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <th>Cijena</th>
             <th style="color:#d97706;text-align:center">1H</th>
             <th style="color:#d97706;text-align:center">4OB <span style="font-weight:400;font-size:10px;color:#94a3b8">ADX·6Sc·RSI·VWAP</span></th>
-            <th style="color:#db2777;text-align:center">7 Signala</th>
+            <th style="color:#db2777;text-align:center">8 Signala</th>
             <th style="color:#db2777;text-align:center;width:60px">↑↓</th>
             <th style="min-width:160px">Status</th>
           </tr>
@@ -1656,36 +1696,30 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <!-- Signal legend (collapsible) -->
   <div id="sig-legend" style="display:none;margin-top:12px">
     <div class="chart-card" style="padding:16px 20px">
-      <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — ULTRA (3 obavezna gating + 7 neovisnih signala, min 4/7 za ulaz)</div>
+      <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — ULTRA v3 · 3 gateva + 5 signala po simbolu · min 4/5 za ulaz</div>
+      <div style="margin-bottom:10px;font-size:11px;color:#f59e0b;background:#2d2000;border:1px solid #d97706;border-radius:6px;padding:8px 12px">
+        ⚙️ <b>GATEVI (obvezni — blokiraju neovisno o score-u):</b>
+        &nbsp; ADX ≥ 22 (trend jačina) &nbsp;·&nbsp; VOL_EXH (volumen ispod threshold-a) &nbsp;·&nbsp; VWAP cross/rejection (cijena na ispravnoj strani)
+      </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:8px;font-size:12px">
         ${[
-          ['EMA', '▲ EMA9 > EMA21 → kratkoročni bull trend  |  ▼ EMA9 < EMA21 → bear'],
-          ['CRS', '▲ EMA9/21 cross gore zadnja 3 bara  |  ▼ cross dolje  |  · nema crossa'],
-          ['E50', '▲ Cijena > EMA50 → srednji trend gore  |  ▼ ispod EMA50'],
-          ['RSI', '▲ RSI < 45 → oversold, potencijalni bounce  |  ▼ RSI > 55 → overbought, opasnost  |  · RSI 45–55 neutralan'],
-          ['E55', '▲ Cijena > EMA55 → širi trend gore  |  ▼ ispod EMA55'],
-          ['ADX', '▲ ADX > 18 + EMA9 > EMA21 → trend potvrđen (bull)  |  ▼ trend potvrđen (bear)  |  · ADX ≤ 18 → nema trenda'],
-          ['CHP', '▲ Chop < 61.8 → tržište trenira  |  ▼ Chop > 61.8 → bočno kretanje'],
-          ['6Sc', '▲ 4+ od 6 EMA-para bull (3,11 / 7,15 / 13,21 / 19,29 / 29,47 / 45,55)  |  ▼ 4+ bear  |  · mješovito'],
-          ['CVD', '▲ CVD > 0 → kupci dominiraju volumenom (zadnjih 20 bara)  |  ▼ CVD < 0 → prodavači'],
-          ['R⟳', '▲ RSI bio < 35, sad > 35 i raste → izlaz iz oversold (bounce signal)  |  ▼ RSI bio > 65, sad < 65 i pada → exit overbought  |  · bez recovery'],
-          ['MCD', '▲ MACD histogram > 0 → momentum gore  |  ▼ histogram < 0 → momentum dolje'],
-          ['E145','▲ Cijena > EMA145 → dugoročni bull trend  |  ▼ ispod EMA145 → bear'],
-          ['VOL', '▲ Volumen > 20-bar prosjek → aktivnost potvrđena  |  · nizak volumen (ne daje -1, samo 0)'],
-          ['MCC', '▲ MACD histogram prošao 0 liniju (neg→poz) zadnja 3 bara  |  ▼ (poz→neg)  |  · bez crossa'],
-          ['R↗',  '▲ RSI raste 2+ uzastopna bara → momentum gore  |  ▼ RSI pada → momentum dolje  |  · neutralan'],
-          ['ADX+','▲ ADX > 25 + EMA9 > EMA21 → jak trend gore  |  ▼ jak trend dolje  |  · ADX ≤ 25'],
-          ['SRS', '▲ Bounce od S/R supporta (unutar 1.2%) + RSI raste  |  ▼ bounce od resistancea + RSI pada  |  · daleko od S/R'],
-          ['SRB', '▲ Proboj S/R resistancea gore (zadnja 3 bara)  |  ▼ proboj supporta dolje  |  · bez proboja'],
+          ['E50↑',  '▲ Cijena > EMA50 → trend bullish  |  ▼ Cijena < EMA50 → trend bearish'],
+          ['CVD↑',  '▲ CVD > 0 → kupci dominiraju volumenom (zadnjih 20 bara)  |  ▼ prodavači dominiraju'],
+          ['MACD',  '▲ MACD histogram > 0 → momentum gore  |  ▼ histogram < 0 → momentum dolje'],
+          ['E145',  '▲ Cijena > EMA145 → dugoročni bull trend  |  ▼ ispod EMA145 → bear'],
+          ['PWHL',  '▲ Sweep ispod prošlotjednog Low + zatvorena svjeća natrag iznad → LONG  |  ▼ Sweep iznad PWH + zatvorena ispod → SHORT  |  · van zone'],
+          ['RDIV',  '▲ RSI bullish divergencija (cijena LL, RSI HL) → iscrpljeni selleri  |  ▼ bearish div (cijena HH, RSI LH) → iscrpljeni buyeri'],
+          ['MSTR',  '▲ HH + HL = uptrend struktura (zadnjih 60 bara)  |  ▼ LL + LH = downtrend  |  · nejasna struktura'],
+          ['FVG',   '▲ Bullish Fair Value Gap — cijena u nezapunjenoj gap zoni  |  ▼ Bearish FVG — gap resistance  |  · nema FVG'],
         ].map(([k,v]) =>
           '<div style="background:#2d3748;border:1px solid #374151;border-radius:6px;padding:8px 10px">' +
-          '<span style="font-weight:800;color:#db2777;font-size:11px;display:inline-block;min-width:36px">' + k + '</span>' +
+          '<span style="font-weight:800;color:#db2777;font-size:11px;display:inline-block;min-width:44px">' + k + '</span>' +
           '<span style="color:#9ca3af">' + v + '</span></div>'
         ).join('')}
       </div>
       <div style="margin-top:10px;font-size:11px;color:#94a3b8">
         🟢 Zeleno = bullish signal aktiviran &nbsp;|&nbsp; 🔴 Crveno = bearish &nbsp;|&nbsp; ⬛ Sivo = neutral/nema signala &nbsp;|&nbsp;
-        Min <b style="color:#db2777">4/7</b> neovisnih signala + 3 obavezna gating (ADX≥30·RSI·VOL_EXH) · SL <b style="color:#d97706">2.5–7%</b> / TP <b style="color:#d97706">3.75–10.5%</b> po simbolu · rizik <b>1.5%</b> banke po tradeu
+        Min <b style="color:#db2777">6/8</b> signala · SL <b style="color:#d97706">1.5–3%</b> / TP <b style="color:#d97706">2.25–4.5%</b> po simbolu · rizik <b>1.5%</b> po tradeu
       </div>
     </div>
   </div>
@@ -1797,20 +1831,26 @@ function ultraHtml(s) {
 
   if (!s.ultraSigs16) return '<span style="color:#94a3b8;font-size:11px">—</span>';
 
-  // 7 signala (Option C) — RSI signal i CHP maknuti; VOL_EXH dodan kao gate
-  const names16 = ['E50','CVD','MACD','E145','SRS','SRB','RDIV'];
-  const tooltipText = names16.map((l,i)=>l+':'+(sig16[i]===1?'↑':sig16[i]===-1?'↓':'·')).join(' | ');
+  // 8 signala v3 (bez SRB) + SMC: E50rev, CVDrev, MACD, E145, PWHL, RDIV, MSTR, FVG
+  const names16 = ['E50↑','CVD↑','MACD','E145','PWHL','RDIV','MSTR','FVG'];
+  const COMBOS_BADGE = {
+    "BTCUSDT":[0,1,2,3,7],"ETHUSDT":[0,1,2,3,7],"AAVEUSDT":[0,1,2,3,7],
+    "SOLUSDT":[0,1,3,5,6],"TAOUSDT":[0,1,3,5,6],
+  };
+  const _activeIdx = COMBOS_BADGE[s.symbol] ?? [0,1,2,3,4,5,6,7];
+  const tooltipText = _activeIdx.map(i=>names16[i]+':'+(sig16[i]===1?'↑':sig16[i]===-1?'↓':'·')).join(' | ');
 
-  const dots = sig16.slice(0, 11).map((v, i) => {
+  const dots = _activeIdx.map(i => {
+    const v = sig16[i];
     const col = v===1?'#059669':v===-1?'#dc2626':'#94a3b8';
     return '<span title="'+names16[i]+'" style="color:'+col+';font-size:9px">'+(v===1?'▲':v===-1?'▼':'·')+'</span>';
   }).join('');
 
   const scoreStr = bull > bear
-    ? '<span style="color:#059669;font-weight:700">↑'+bull+'/7</span>'
+    ? '<span style="color:#059669;font-weight:700">↑'+bull+'/5</span>'
     : bear > bull
-    ? '<span style="color:#dc2626;font-weight:700">↓'+bear+'/7</span>'
-    : '<span style="color:#9ca3af">'+Math.max(bull,bear)+'/7</span>';
+    ? '<span style="color:#dc2626;font-weight:700">↓'+bear+'/5</span>'
+    : '<span style="color:#9ca3af">'+Math.max(bull,bear)+'/5</span>';
 
   const sigPart = sig==="LONG"   ? ' <span class="sig-long">▲ LONG</span>'
                 : sig==="SHORT"  ? ' <span class="sig-short">▼ SHORT</span>'
@@ -1891,38 +1931,38 @@ async function resetOne(pid) {
 // Maknuti: CRS (WR 14%), ADXsn (obavezan gate), 6Sc (obavezan gate), EMA smjer (nije obavezan)
 // Maknuti 2025-05: E55⟳ (duplikat E50), VOL⟳ (asimetričan — nikad +1 za LONG)
 // Maknuti Option C: RSI (redundantan s RSI gate-om), CHP (redundantan s ADX gate-om)
-const SIG_NAMES = ['E50','CVD','MCD','E145','SRS','SRB','RDIV'];
+// ULTRA v3 — 8 signala (bez SRB): E50rev, CVDrev, MACD, E145, PWHL, RDIV, MSTR, FVG
+const SIG_NAMES = ['E50','CVD','MACD','E145','PWHL','RDIV','MSTR','FVG'];
 
-// Uvjeti za tooltip — objasni zašto je signal zelen/crven
-// 7 genuinnih signala — 2 REVERSANO (E50, CVD — contrarian/pullback logika)
-// REV = contrarian/pullback: signal +1 kad je cijena NIŽE / momentum SLAB (potencijalni bounce)
-// Maknuti: RSI signal (redundantan s RSI gate-om), CHP (redundantan s ADX gate-om)
 const SIG_COND_BULL = [
-  '[REV] Cijena < EMA50 — pullback u trendu, potencijalni bounce',      //  1. E50 REV
-  '[REV] CVD prodajni — potencijalno dno, reversal gore',              //  2. CVD REV
-  'MACD histogram > 0 — bullish momentum potvrđen',                    //  3. MCD
-  'Cijena > EMA145 — dugoročni trend gore',                            //  4. E145
-  'Bounce od S/R supporta + RSI raste — reakcija na podršku',          //  5. SRS
-  'Proboj S/R resistance gore zadnja 3 bara',                          //  6. SRB
-  'RSI divergencija — niža cijena, viši RSI (bullish div)',            //  7. RDIV
+  '[REV] Cijena < EMA50 — pullback u trendu, potencijalni bounce',        //  1. E50 REV
+  '[REV] CVD prodajni — potencijalno dno, reversal gore',                //  2. CVD REV
+  'MACD histogram > 0 — bullish momentum potvrđen',                      //  3. MACD
+  'Cijena > EMA145 — dugoročni bull trend',                              //  4. E145
+  'Cijena blizu prošlotjednog Low-a + RSI raste — tjedni support zone',  //  5. PWHL
+  'RSI divergencija — niža cijena, viši RSI (bullish div)',              //  6. RDIV
+  'HH + HL — market structure uptrend potvrđen',                         //  7. MSTR
+  'Bullish FVG — cijena u nezapunjenoj gap zoni (imbalance support)',    //  8. FVG
 ];
 const SIG_COND_BEAR = [
-  '[REV] Cijena > EMA50 — previsoko, iscrpljen move',                  //  1. E50 REV
-  '[REV] CVD kupovni — svi već unutra, potencijalni vrh',              //  2. CVD REV
-  'MACD histogram < 0 — bearish momentum potvrđen',                   //  3. MCD
-  'Cijena < EMA145 — dugoročni trend dolje',                           //  4. E145
-  'Bounce od S/R resistancea + RSI pada — reakcija na otpor',          //  5. SRS
-  'Proboj S/R supporta dolje zadnja 3 bara',                           //  6. SRB
-  'RSI divergencija — viša cijena, niži RSI (bearish div)',            //  7. RDIV
+  '[REV] Cijena > EMA50 — previsoko, iscrpljen move',                    //  1. E50 REV
+  '[REV] CVD kupovni — svi već unutra, potencijalni vrh',               //  2. CVD REV
+  'MACD histogram < 0 — bearish momentum potvrđen',                     //  3. MACD
+  'Cijena < EMA145 — dugoročni bear trend',                             //  4. E145
+  'Cijena blizu prošlotjednog High-a + RSI pada — tjedni resistance',   //  5. PWHL
+  'RSI divergencija — viša cijena, niži RSI (bearish div)',             //  6. RDIV
+  'LL + LH — market structure downtrend potvrđen',                       //  7. MSTR
+  'Bearish FVG — cijena u nezapunjenoj gap resistance zoni',            //  8. FVG
 ];
 const SIG_COND_NEUT = [
-  'EMA50 nedostupan',                                    //  1. E50
-  'CVD = 0 — nema dominacije',                          //  2. CVD
-  'MACD nedostupan',                                     //  3. MCD
-  'EMA145 nedostupan',                                   //  4. E145
-  'Cijena nije blizu S/R razine',                       //  5. SRS
-  'Nema S/R proboja u zadnja 3 bara',                   //  6. SRB
-  'Nema RSI divergencije',                              //  7. RDIV
+  'Cijena na EMA50 — nema jasnog pullbacka',              //  1. E50
+  'CVD ≈ 0 — nema dominacije kupaca/prodavača',           //  2. CVD
+  'MACD nedostupan ili histogram = 0',                    //  3. MACD
+  'EMA145 nedostupan',                                    //  4. E145
+  'Cijena nije blizu prošlotjedne razine (van zone 1.5%)',//  5. PWHL
+  'Nema RSI divergencije',                                //  6. RDIV
+  'Nejasna market structure (nema dovoljno swingova)',    //  7. MSTR
+  'Nema aktivnog Fair Value Gapa u blizini',              //  8. FVG
 ];
 
 function mandatoryBoxes(s) {
@@ -1931,11 +1971,11 @@ function mandatoryBoxes(s) {
   const sig     = s.ultraSig;
   const sigs13  = s.ultraSigs16 || [];  // ultraSigs16 sada ima 9 elemenata
 
-  // 1. ADX ≥ 30 dynamic — jak trend (obavezan). Dashboard prikazuje ≥30 (bot koristi 30/35/40 ovisno o WR)
-  const adxOk  = adxNum >= 30;
+  // 1. ADX ≥ 22 — jak trend (obavezan). Bot koristi 22/27/32 ovisno o WR
+  const adxOk  = adxNum >= 22;
   const adxCol = adxOk ? '#059669' : '#dc2626';
   const adxBg  = adxOk ? '#0d3d26' : '#3d0d0d';
-  const adxTip = 'ADX ' + adxNum.toFixed(1) + (adxOk ? ' ≥ 30 ✓ — jak trend' : ' < 30 ✗ — slab trend, nema ulaza');
+  const adxTip = 'ADX ' + adxNum.toFixed(1) + (adxOk ? ' ≥ 22 ✓ — jak trend' : ' < 22 ✗ — slab trend, nema ulaza');
 
   // 2. 6Sc: 4/6 multi-EMA parova poravnato (obavezan, WR potvrđen 43.6%)
   //    Direktno iz scaleUp/scaleDn koji se sada vraćaju iz scanSymbol()
@@ -1951,29 +1991,20 @@ function mandatoryBoxes(s) {
     (scaleOkLong ? ' — LONG smjer ✓' : scaleOkShort ? ' — SHORT smjer ✓' : ' ✗ — nedovoljan smjer');
 
   // 3. RSI asimetričan — LONG: RSI<72, SHORT: RSI>30
+  const isLongSig  = sig === "LONG"  || sig === "SETUP↑" || sig === "MOM↑";
+  const isShortSig = sig === "SHORT" || sig === "SETUP↓" || sig === "MOM↓";
+
   const rsiLongOk  = rsiNum < 72;
   const rsiShortOk = rsiNum > 30;
-  const rsiOk  = sig === "SHORT" || sig === "SETUP↓" ? rsiShortOk : rsiLongOk;
+  const rsiOk  = isShortSig ? rsiShortOk : rsiLongOk;
   const rsiCol = rsiOk ? '#059669' : '#dc2626';
   const rsiBg  = rsiOk ? '#0d3d26' : '#3d0d0d';
-  const rsiTip = 'RSI ' + rsiNum.toFixed(1) + (sig === "SHORT" || sig === "SETUP↓"
-    ? (rsiShortOk ? ' > 30 ✓ (nije oversold)' : ' ≤ 30 ✗ — oversold, blokiran SHORT')
-    : (rsiLongOk  ? ' < 72 ✓ (nije overbought)' : ' ≥ 72 ✗ — overbought, blokiran LONG'));
+  const rsiTip = 'RSI ' + rsiNum.toFixed(1) + (isShortSig
+    ? (rsiShortOk ? ' > 30 ✓ (nije oversold)' : ' ≤ 30 ✗ — oversold')
+    : (rsiLongOk  ? ' < 72 ✓ (nije overbought)' : ' ≥ 72 ✗ — overbought'));
 
-  // 4. 5m S/R test — informativan, NE blokira ulaz
-  const srOk  = s.srOk;
-  // 5mSR je OBAVEZAN za pullback ulaze — crveno blokira (srOk=false ILI srOk=null)
-  const srCol = srOk === true ? '#059669' : srOk === false ? '#dc2626' : '#94a3b8';
-  const srBg  = srOk === true ? '#0d3d26' : srOk === false ? '#3d0d0d' : '#1c2128';
-  const srTip = srOk === true  ? '5m S/R test ✓ — cijena testirala S/R zonu (obavezan za pullback) ✓' :
-                srOk === false ? '5m S/R test ✗ — nema dodir S/R razine → pullback BLOKIRAN (MOM ulaz i dalje moguć)' :
-                                 '5m S/R test ? — nema S/R razina u lookbacku → pullback blokiran (MOM preskače)';
-  const srLbl = srOk === true ? '5mSR✓' : srOk === false ? '5mSR✗' : '5mSR?';
-
-  // 5. VWAP gate — LONG iznad VWAP, SHORT ispod VWAP
+  // 4. VWAP gate — LONG iznad VWAP, SHORT ispod VWAP
   const vwapDist = s.vwapDistPct ?? null;
-  const isLongSig  = sig === "LONG"  || sig === "SETUP↑";
-  const isShortSig = sig === "SHORT" || sig === "SETUP↓";
   const vwapLongOk  = vwapDist === null || vwapDist >= 0;   // cijena iznad VWAP
   const vwapShortOk = vwapDist === null || vwapDist <= 0;   // cijena ispod VWAP
   const vwapOk = isShortSig ? vwapShortOk : vwapLongOk;
@@ -1992,8 +2023,7 @@ function mandatoryBoxes(s) {
   return badge('ADX', adxCol, adxBg, adxTip) +
          badge('6Sc', scaleCol, scaleBg, scaleTip) +
          badge('RSI', rsiCol, rsiBg, rsiTip) +
-         badge('VWAP', vwapCol, vwapBg, vwapTip) +
-         badge(srLbl, srCol, srBg, srTip);
+         badge('VWAP', vwapCol, vwapBg, vwapTip);
 }
 
 function sigBoxes(sigs) {
@@ -2010,7 +2040,7 @@ function sigBoxes(sigs) {
 }
 
 function scoreBox(bull, bear, sig, minSig) {
-  const total = 11;
+  const total = 8;
   const minLabel = minSig ? '<br><span style="color:#444;font-size:9px">min:' + minSig + '</span>' : '';
   if (sig === "LONG")   return '<div style="background:rgba(5,150,105,0.15);border:1px solid #059669;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#059669;font-weight:800;font-size:16px">↑' + bull + '</span><span style="color:#94a3b8;font-size:11px">/' + total + '</span><br><span class="sig-long" style="font-size:11px">▲ LONG</span></div>';
   if (sig === "SHORT")  return '<div style="background:rgba(220,38,38,0.15);border:1px solid #dc2626;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#dc2626;font-weight:800;font-size:16px">↓' + bear + '</span><span style="color:#94a3b8;font-size:11px">/' + total + '</span><br><span class="sig-short" style="font-size:11px">▼ SHORT</span></div>';
@@ -2044,7 +2074,7 @@ function statusBox(s) {
     return '<div style="background:rgba(5,150,105,0.1);border:1px solid ' + (s.volLow ? '#f59e0b' : '#059669') + ';border-radius:8px;padding:8px 10px">' +
       '<div style="font-size:11px;color:#059669;font-weight:700;margin-bottom:4px">' + (s.volLow ? '⚠️ SIGNAL (vol nizak)' : '✅ SIGNAL AKTIVIRAN') + '</div>' +
       '<div style="font-size:13px;font-weight:700;color:#059669">▲ LONG</div>' +
-      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Ulaz odmah @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBull||0) + '/7</b></div>' +
+      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Ulaz odmah @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBull||0) + '/8</b></div>' +
       volWarning +
       '</div>';
   }
@@ -2052,7 +2082,7 @@ function statusBox(s) {
     return '<div style="background:rgba(220,38,38,0.1);border:1px solid ' + (s.volLow ? '#f59e0b' : '#dc2626') + ';border-radius:8px;padding:8px 10px">' +
       '<div style="font-size:11px;color:#dc2626;font-weight:700;margin-bottom:4px">' + (s.volLow ? '⚠️ SIGNAL (vol nizak)' : '✅ SIGNAL AKTIVIRAN') + '</div>' +
       '<div style="font-size:13px;font-weight:700;color:#dc2626">▼ SHORT</div>' +
-      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Ulaz odmah @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBear||0) + '/7</b></div>' +
+      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Ulaz odmah @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBear||0) + '/8</b></div>' +
       volWarning +
       '</div>';
   }
@@ -2062,14 +2092,14 @@ function statusBox(s) {
     return '<div style="background:rgba(59,130,246,0.1);border:1px solid #3b82f6;border-radius:8px;padding:8px 10px">' +
       '<div style="font-size:11px;color:#3b82f6;font-weight:700;margin-bottom:4px">🚀 MOMENTUM LONG</div>' +
       '<div style="font-size:13px;font-weight:700;color:#3b82f6">▲ LONG</div>' +
-      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Breakout ulaz @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBull||0) + '/7</b></div>' +
+      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Breakout ulaz @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBull||0) + '/8</b></div>' +
       '</div>';
   }
   if (sig === "MOM↓") {
     return '<div style="background:rgba(139,92,246,0.1);border:1px solid #8b5cf6;border-radius:8px;padding:8px 10px">' +
       '<div style="font-size:11px;color:#8b5cf6;font-weight:700;margin-bottom:4px">🚀 MOMENTUM SHORT</div>' +
       '<div style="font-size:13px;font-weight:700;color:#8b5cf6">▼ SHORT</div>' +
-      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Breakdown ulaz @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBear||0) + '/7</b></div>' +
+      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Breakdown ulaz @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBear||0) + '/8</b></div>' +
       '</div>';
   }
 
@@ -2234,10 +2264,18 @@ async function doScan() {
           + '</div>';
       }
 
+      // MM filter badges za ovu simbolu
+      const mmF = s.mmFilters || [];
+      const mmBadges = mmF.length > 0
+        ? '<div style="margin-top:3px;display:flex;flex-wrap:wrap;gap:3px">' +
+          mmF.map(f => '<span title="' + f.tip + '" style="display:inline-block;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);border-radius:3px;padding:1px 4px;font-size:9px;color:#fca5a5;font-weight:600">' + f.label + '</span>').join('') +
+          '</div>'
+        : '';
+
       return '<tr style="' + rowBg + '">' +
         '<td style="color:#94a3b8;font-size:11px;text-align:center;padding:6px 4px">' + (i+1) + '</td>' +
         '<td style="font-weight:800;font-size:13px;white-space:nowrap;padding:6px 8px">' + s.symbol.replace("USDT","") + '<span style="color:#94a3b8;font-size:10px;font-weight:400">USDT</span>' +
-          '<div style="font-size:9px;color:' + slTpCol + ';font-weight:500;margin-top:1px">' + slTp + '</div>' + rsiAdxInfo + '</td>' +
+          '<div style="font-size:9px;color:' + slTpCol + ';font-weight:500;margin-top:1px">' + slTp + '</div>' + rsiAdxInfo + mmBadges + '</td>' +
         '<td style="font-weight:600;white-space:nowrap;font-size:12px;padding:6px 8px">' + fmtLive(s.price) + entryInfo + '</td>' +
         '<td style="text-align:center;font-weight:800;color:' + t1hCol + ';font-size:13px;padding:6px 4px" title="1H EMA20: ' + t1h + '">' + t1hIcon + '</td>' +
         '<td style="padding:4px 6px;border-right:1px solid #d9770633">' + mandatoryBoxes(s) + '</td>' +
@@ -2246,6 +2284,24 @@ async function doScan() {
         '<td style="padding:4px 6px">' + statusBox(s) + '</td>' +
         '</tr>';
     }).join("");
+
+    // ── Ažuriraj MM Filteri karticu ─────────────────────────────────────────
+    const mmGrid = document.getElementById('mm-filters-grid');
+    if (mmGrid) {
+      const mmSymbols = results.filter(s => s.mmFilters && s.mmFilters.length > 0);
+      if (mmSymbols.length === 0) {
+        mmGrid.innerHTML = '<span style="color:#059669;font-size:12px">✓ Nema aktivnih MM blokatora na watchlisti</span>';
+      } else {
+        mmGrid.innerHTML = mmSymbols.map(s => {
+          const sym = s.symbol.replace('USDT','');
+          const badges = s.mmFilters.map(f =>
+            '<span title="' + f.tip + '" style="background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.4);border-radius:3px;padding:1px 5px;font-size:10px;color:#fca5a5;font-weight:600">' + f.label + '</span>'
+          ).join(' ');
+          return '<div style="background:#374151;border-radius:6px;padding:6px 10px;font-size:11px">' +
+            '<span style="color:#f9fafb;font-weight:700;margin-right:6px">' + sym + '</span>' + badges + '</div>';
+        }).join('');
+      }
+    }
 
     // ── Ažuriraj VWAP karticu ────────────────────────────────────────────────
     const withVwap = results.filter(s => s.vwapDistPct !== null && s.vwapDistPct !== undefined);
@@ -2305,6 +2361,30 @@ async function loadBitgetBalance() {
 loadBitgetBalance();
 setInterval(loadBitgetBalance, 30000);
 
+// Bitget live Win Rate (zadnjih 100 zatvorenih pozicija)
+async function loadBitgetWR() {
+  const el  = document.getElementById('bitget-wr');
+  const sub = document.getElementById('bitget-wr-sub');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/bitget-wr');
+    const d = await r.json();
+    if (d.ok && d.total > 0) {
+      const col = d.wr >= 50 ? '#059669' : d.wr >= 35 ? '#d97706' : '#dc2626';
+      el.textContent = d.wr.toFixed(1) + '%';
+      el.style.color = col;
+      sub.textContent = d.wins + 'W / ' + d.losses + 'L (' + d.total + ' trejdova)';
+    } else {
+      el.textContent = 'N/A';
+      sub.textContent = d.error || 'nema podataka';
+    }
+  } catch(e) {
+    el.textContent = 'err';
+  }
+}
+loadBitgetWR();
+setInterval(loadBitgetWR, 60000);
+
 // Auto-scan on load after 2s delay
 setTimeout(doScan, 2000);
 
@@ -2360,46 +2440,6 @@ async function loadMarketContext() {
       document.getElementById('ls-bar').style.width = d.ls.longRatio + '%';
       document.getElementById('ls-bar').style.background = lr > 70 ? '#dc2626' : lr < 40 ? '#059669' : '#3b82f6';
       document.getElementById('ls-sub').textContent = 'Trend: ' + (d.ls.trend || '—') + lsWarn;
-    }
-
-    // ── Stablecoin Inflow ─────────────────────────────────────────────────
-    if (d.stableInflow) {
-      var si = d.stableInflow;
-      var siDir  = si.direction;
-      var siCol  = siDir === 'INFLOW' ? '#059669' : siDir === 'OUTFLOW' ? '#dc2626' : '#9ca3af';
-      var siIcon = siDir === 'INFLOW' ? '📈 INFLOW' : siDir === 'OUTFLOW' ? '📉 OUTFLOW' : '➡️ NEUTRAL';
-      var siChg  = (si.changePct > 0 ? '+' : '') + si.changePct + '% · ' + (si.changeAbs > 0 ? '+' : '') + si.changeAbs + 'B $';
-      var siNote = siDir === 'INFLOW' ? '🟢 Bullish — novac ulazi' : siDir === 'OUTFLOW' ? '🔴 Bearish — novac izlazi' : '⚪ Stabilan supply';
-      document.getElementById('stable-val').textContent = siIcon;
-      document.getElementById('stable-val').style.color = siCol;
-      document.getElementById('stable-sub').textContent = 'Ukupno: $' + si.totalB + 'B · 7d promjena';
-      document.getElementById('stable-change').textContent = siChg + ' · ' + siNote;
-      document.getElementById('stable-change').style.color = siCol;
-    }
-
-    // ── BTC Perp Basis ────────────────────────────────────────────────────
-    if (d.perpBasis) {
-      var pb = d.perpBasis;
-      var pbVal = parseFloat(pb.basis);
-      var pbCol = pbVal > 0.05 ? '#059669' : pbVal < -0.05 ? '#dc2626' : '#9ca3af';
-      var pbIcon = pb.sentiment === 'CONTANGO' ? '📈 CONTANGO' : pb.sentiment === 'BACKWARDATION' ? '📉 BACKWARDATION' : '➡️ FLAT';
-      var pbNote = pb.sentiment === 'CONTANGO' ? 'Bullish — tržište očekuje rast' : pb.sentiment === 'BACKWARDATION' ? 'Bearish — tržište očekuje pad' : 'Neutralno';
-      document.getElementById('basis-val').textContent = (pbVal > 0 ? '+' : '') + pbVal.toFixed(4) + '%';
-      document.getElementById('basis-val').style.color = pbCol;
-      document.getElementById('basis-sub').textContent = pbIcon + ' · ' + pbNote;
-      document.getElementById('basis-detail').textContent = 'Spot: $' + pb.spot + ' · Futures: $' + pb.futures;
-      document.getElementById('basis-detail').style.color = '#6b7280';
-    }
-
-    // ── Altcoin Season Index ──────────────────────────────────────────────
-    if (d.altSeason) {
-      var as = d.altSeason;
-      var asCol = as.score >= 75 ? '#f59e0b' : as.score >= 50 ? '#10b981' : as.score >= 25 ? '#3b82f6' : '#f97316';
-      var asBar = document.getElementById('altseason-bar');
-      document.getElementById('altseason-val').textContent = as.score + '/100 · ' + as.season;
-      document.getElementById('altseason-val').style.color = asCol;
-      if (asBar) { asBar.style.width = as.score + '%'; asBar.style.background = asCol; }
-      document.getElementById('altseason-sub').textContent = 'BTC dominance: ' + as.btcDom + '% · score ' + as.score + '/100';
     }
 
     // ── Countdown — spremi econ evente za timer ───────────────────────────
@@ -2529,87 +2569,6 @@ async function loadMarketContext() {
         spIcon + ' ' + sp.regime + (sp.regime === 'RISK_OFF' ? ' — LONG ulazi blokirani!' : ' | ES=F @ ' + (sp.last || ''));
     }
 
-    // Korelacijska matrica
-    if (d.corr && d.corr.avgCorr !== null) {
-      const c = d.corr;
-      const corrColor = c.avgCorr > 0.85 ? '#dc2626' : c.avgCorr > 0.65 ? '#d97706' : '#059669';
-      const corrIcon  = c.avgCorr > 0.85 ? '⚠️' : c.avgCorr > 0.65 ? '🟡' : '🟢';
-      document.getElementById('corr-val').textContent = corrIcon + ' avg ' + c.avgCorr;
-      document.getElementById('corr-val').style.color = corrColor;
-      document.getElementById('corr-sub').textContent =
-        c.avgCorr > 0.85 ? '🚨 Visoka korelacija — sve pozicije kreću zajedno!' :
-        c.avgCorr > 0.65 ? 'Srednja korelacija — pazi na koncentraciju' :
-        'Niska korelacija — dobra diversifikacija (' + (c.syms ? c.syms.length : 0) + ' simbola)';
-
-      // Heatmap grid
-      const hm = document.getElementById('corr-heatmap');
-      if (hm && c.matrix && c.syms) {
-        const syms = c.syms.map(function(s){ return s.replace('USDT',''); });
-        const n = syms.length;
-        const cell = 28;
-        function corrColor2(v) {
-          if (v >= 0.9)  return '#dc2626';
-          if (v >= 0.75) return '#f7913a';
-          if (v >= 0.5)  return '#d97706';
-          if (v >= 0.25) return '#94a3b8';
-          if (v >= 0)    return '#21262d';
-          return '#388bfd';
-        }
-        let html = '<div style="display:inline-block;font-size:9px">';
-        // Header row
-        html += '<div style="display:flex;margin-left:' + (cell+2) + 'px">';
-        for (var j=0; j<n; j++) {
-          html += '<div style="width:' + cell + 'px;text-align:center;color:#9ca3af;overflow:hidden;white-space:nowrap;font-size:8px">' + syms[j] + '</div>';
-        }
-        html += '</div>';
-        // Data rows
-        for (var i=0; i<n; i++) {
-          html += '<div style="display:flex;align-items:center">';
-          html += '<div style="width:' + cell + 'px;text-align:right;padding-right:4px;color:#9ca3af;font-size:8px;white-space:nowrap">' + syms[i] + '</div>';
-          for (var j2=0; j2<n; j2++) {
-            var v = c.matrix[i] ? (c.matrix[i][j2] !== undefined ? c.matrix[i][j2] : 0) : 0;
-            var bg = corrColor2(v);
-            var txt = i===j2 ? '—' : (v >= 0 ? '+' : '') + v.toFixed(2);
-            var txtColor = (v > 0.5 || v < 0) ? '#fff' : '#94a3b8';
-            html += '<div title="' + syms[i] + '/' + syms[j2] + ': ' + v.toFixed(3) + '" style="width:' + cell + 'px;height:' + cell + 'px;background:' + bg + ';display:flex;align-items:center;justify-content:center;color:' + txtColor + ';font-size:7px;border:1px solid #0d1117;border-radius:2px">' + txt + '</div>';
-          }
-          html += '</div>';
-        }
-        // Legend
-        html += '<div style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:9px;color:#9ca3af">';
-        html += '<span>Korelacija:</span>';
-        var legend = [['#388bfd','<0'],['#21262d','0–0.25'],['#94a3b8','0.25–0.5'],['#d97706','0.5–0.75'],['#f7913a','0.75–0.9'],['#dc2626','>0.9']];
-        for (var l=0; l<legend.length; l++) {
-          html += '<span style="display:inline-flex;align-items:center;gap:2px"><span style="display:inline-block;width:10px;height:10px;background:' + legend[l][0] + ';border-radius:2px"></span>' + legend[l][1] + '</span>';
-        }
-        html += '</div></div>';
-        hm.innerHTML = html;
-        // Ostaje zatvoren — korisnik otvara toggle gumbom
-      }
-    }
-
-    // Deribit Put/Call Ratio
-    if (d.pc && d.pc.btc) {
-      const btc = d.pc.btc;
-      const pcColor = btc.sentiment === 'FEAR'    ? '#388bfd'
-                    : btc.sentiment === 'BEARISH'  ? '#94a3b8'
-                    : btc.sentiment === 'BULLISH'  ? '#d97706'
-                    : btc.sentiment === 'GREED'    ? '#dc2626'
-                    : '#94a3b8';
-      const pcIcon  = btc.sentiment === 'FEAR'  ? '😰'
-                    : btc.sentiment === 'GREED' ? '🤑' : '😐';
-      const pcEl = document.getElementById('pc-val');
-      if (pcEl) {
-        pcEl.textContent = 'BTC: ' + (btc.ratio ?? '—') + '  ETH: ' + (d.pc.eth?.ratio ?? '—');
-        pcEl.style.color = pcColor;
-        document.getElementById('pc-sub').textContent =
-          pcIcon + ' BTC ' + (btc.sentiment || '') +
-          (btc.sentiment === 'FEAR'  ? ' — institucije kupuju puts (zaštita)' :
-           btc.sentiment === 'GREED' ? ' — previše calls, euforija' :
-           ' · >1.5=Fear · <0.5=Greed');
-      }
-    }
-
     // Liquidation Risk + OI trend
     if (d.liq && d.liq.overall !== null) {
       const liq = d.liq;
@@ -2687,32 +2646,6 @@ async function loadMarketContext() {
       }
     }
 
-    // Per-Symbol WR
-    const symStats = d.symStats || {};
-    const symEntries = Object.entries(symStats)
-      .filter(([,v]) => v.total >= 2)
-      .map(([k,v]) => ({ sym: k, wr: v.wins/v.total*100, total: v.total }))
-      .sort((a, b) => b.total - a.total);
-
-    if (symEntries.length > 0) {
-      document.getElementById('sym-wr-table').innerHTML = symEntries.map(function(e) {
-        const color = e.wr >= 50 ? '#059669' : e.wr >= 35 ? '#d97706' : '#dc2626';
-        const bar = Math.round(e.wr);
-        return '<div style="background:#2d3748;border-radius:6px;padding:8px 10px">' +
-          '<div style="display:flex;justify-content:space-between;margin-bottom:4px">' +
-          '<span style="font-size:12px;font-weight:700">' + e.sym.replace('USDT','') + '</span>' +
-          '<span style="font-size:12px;color:' + color + ';font-weight:700">' + e.wr.toFixed(0) + '%</span>' +
-          '</div>' +
-          '<div style="background:#30363d;border-radius:2px;height:4px;overflow:hidden">' +
-          '<div style="width:' + bar + '%;height:100%;background:' + color + ';border-radius:2px"></div>' +
-          '</div>' +
-          '<div style="font-size:10px;color:#9ca3af;margin-top:3px">N=' + e.total + '</div>' +
-          '</div>';
-      }).join('');
-    } else {
-      document.getElementById('sym-wr-table').innerHTML = '<div style="font-size:12px;color:#9ca3af">Nema dovoljno podataka (treba 2+ tradova po simbolu)</div>';
-    }
-
   } catch(e) { console.error('market-context error:', e); }
 }
 
@@ -2759,70 +2692,6 @@ function updateCountdown() {
 }
 updateCountdown();
 setInterval(updateCountdown, 1000);
-
-// ── Liq Zone Scanner — svi simboli ───────────────────────────────────────────
-async function loadLiqZones() {
-  try {
-    const r = await fetch('/api/liqzones');
-    const d = await r.json();
-    const dangerEl  = document.getElementById('liq-danger-row');
-    const cautionEl = document.getElementById('liq-caution-row');
-    const clearEl   = document.getElementById('liq-clear-row');
-    const tsEl      = document.getElementById('liq-ts');
-    const cardEl    = document.getElementById('liq-card');
-    if (!dangerEl) return;
-
-    if (tsEl) tsEl.textContent = 'osvježeno ' + new Date().toLocaleTimeString('hr-HR', {hour:'2-digit',minute:'2-digit'});
-
-    // Boja kartice prema najgorem stanju
-    const hasDanger  = d.grouped.DANGER?.length  > 0;
-    const hasCaution = d.grouped.CAUTION?.length > 0;
-    cardEl.style.borderColor = hasDanger ? '#dc2626' : hasCaution ? '#d97706' : '#374151';
-    cardEl.style.boxShadow   = hasDanger ? '0 0 10px rgba(220,38,38,0.25)' : '';
-
-    function fmtChip(s, col) {
-      const sym   = s.symbol.replace('USDT','');
-      const dist  = s.minDist?.toFixed(1) ?? '?';
-      const title = (s.closestLong  ? 'LONG liq $'  + Math.round(s.closestLong.price)  + ' (' + s.closestLong.dist  + '%) ' : '')
-                  + (s.closestShort ? 'SHORT liq $' + Math.round(s.closestShort.price) + ' (' + s.closestShort.dist + '%)' : '');
-      return '<span title="' + title + '" style="display:inline-flex;align-items:center;gap:3px;background:' + col + ';border-radius:4px;padding:2px 6px;font-size:11px;font-weight:700;cursor:default">'
-           + sym + '<span style="font-weight:400;font-size:10px;opacity:.85">' + dist + '%</span></span>';
-    }
-
-    // DANGER row
-    if (d.grouped.DANGER?.length > 0) {
-      dangerEl.innerHTML = '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
-        + '<span style="font-size:10px;color:#dc2626;font-weight:700;min-width:60px">🔴 DANGER</span>'
-        + d.grouped.DANGER.map(s => fmtChip(s, 'rgba(220,38,38,0.25)')).join(' ')
-        + '</div>';
-    } else {
-      dangerEl.innerHTML = '<div style="font-size:10px;color:#4b5563">🔴 DANGER — nema simbola</div>';
-    }
-
-    // CAUTION row
-    if (d.grouped.CAUTION?.length > 0) {
-      cautionEl.innerHTML = '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
-        + '<span style="font-size:10px;color:#d97706;font-weight:700;min-width:60px">🟡 CAUTION</span>'
-        + d.grouped.CAUTION.map(s => fmtChip(s, 'rgba(217,119,6,0.2)')).join(' ')
-        + '</div>';
-    } else {
-      cautionEl.innerHTML = '<div style="font-size:10px;color:#4b5563">🟡 CAUTION — nema simbola</div>';
-    }
-
-    // CLEAR row — samo simboli, bez detalja (da ne zauzima puno mjesta)
-    if (d.grouped.CLEAR?.length > 0) {
-      clearEl.innerHTML = '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
-        + '<span style="font-size:10px;color:#059669;font-weight:700;min-width:60px">🟢 CLEAR</span>'
-        + d.grouped.CLEAR.map(s => fmtChip(s, 'rgba(5,150,105,0.15)')).join(' ')
-        + '</div>';
-    }
-  } catch(e) {
-    const el = document.getElementById('liq-danger-row');
-    if (el) el.innerHTML = '<span style="color:#6b7280;font-size:11px">Greška: ' + e.message + '</span>';
-  }
-}
-loadLiqZones();
-setInterval(loadLiqZones, 2 * 60 * 1000);
 
 // ── MM Sweep Detektor — live Coinglass liquidation data ───────────────────────
 async function loadSweepStatus() {
@@ -3683,6 +3552,22 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Reset dinamički ADX — briše SL cooldown i blacklist
+  if (url.pathname === "/api/reset-dyn") {
+    try {
+      const slFile = `${DATA_DIR}/sl_cooldown.json`;
+      const blFile = `${DATA_DIR}/symbol_blacklist.json`;
+      if (existsSync(slFile)) writeFileSync(slFile, "{}");
+      if (existsSync(blFile)) writeFileSync(blFile, "{}");
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, msg: "SL cooldown i blacklist resetirani" }));
+    } catch(e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+
   // BTC Regime — bez auth, za debug
   if (url.pathname === "/api/regime") {
     try {
@@ -3744,6 +3629,40 @@ const server = http.createServer(async (req, res) => {
     } catch (e) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+
+  // Bitget Win Rate iz zatvorenih pozicija (zadnjih 100)
+  if (url.pathname === "/api/bitget-wr") {
+    try {
+      const BITGET_KEY    = (process.env.BITGET_API_KEY    || "").trim();
+      const BITGET_SECRET = (process.env.BITGET_SECRET_KEY || "").trim();
+      const BITGET_PASS   = (process.env.BITGET_PASSPHRASE || "").trim();
+      const BITGET_BASE   = (process.env.BITGET_BASE_URL   || "https://api.bitget.com").trim();
+      const path = "/api/v2/mix/order/history?productType=USDT-FUTURES&limit=100";
+      const ts   = Date.now().toString();
+      const { createHmac } = await import("crypto");
+      const sign = createHmac("sha256", BITGET_SECRET).update(`${ts}GET${path}`).digest("base64");
+      const r = await fetch(`${BITGET_BASE}${path}`, {
+        headers: {
+          "ACCESS-KEY": BITGET_KEY, "ACCESS-SIGN": sign,
+          "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET_PASS,
+          "Content-Type": "application/json",
+        },
+      });
+      const d = await r.json();
+      const orders = d?.data?.entrustedList || d?.data?.orderList || d?.data || [];
+      const filled = Array.isArray(orders) ? orders.filter(o => o.state === "filled" || o.status === "filled") : [];
+      const wins   = filled.filter(o => parseFloat(o.pnl || o.realizedPl || 0) > 0).length;
+      const losses = filled.filter(o => parseFloat(o.pnl || o.realizedPl || 0) < 0).length;
+      const total  = wins + losses;
+      const wr     = total > 0 ? wins / total * 100 : 0;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: d.code === "00000", wins, losses, total, wr }));
+    } catch (e) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e.message, wins:0, losses:0, total:0, wr:0 }));
     }
     return;
   }

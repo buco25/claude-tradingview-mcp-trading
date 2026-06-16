@@ -1,157 +1,130 @@
 {
-  "all_symbols": [
-    "DOGEUSDT",
-    "NEARUSDT",
-    "ADAUSDT",
-    "ETHUSDT",
-    "SUIUSDT",
-    "TAOUSDT",
-    "SOLUSDT",
-    "HYPEUSDT",
-    "LINKUSDT",
-    "BTCUSDT",
-    "XRPUSDT",
-    "APTUSDT",
-    "SEIUSDT",
-    "ENAUSDT",
-    "INJUSDT",
-    "JUPUSDT"
-  ],
-  "watchlist_synapse_t": [
-    "DOGEUSDT",
-    "NEARUSDT",
-    "ADAUSDT",
-    "ETHUSDT",
-    "SUIUSDT",
-    "TAOUSDT",
-    "SOLUSDT",
-    "HYPEUSDT",
-    "LINKUSDT",
-    "BTCUSDT",
-    "XRPUSDT",
-    "APTUSDT",
-    "SEIUSDT",
-    "ENAUSDT",
-    "INJUSDT",
-    "JUPUSDT"
-  ],
+  "all_symbols": ["BTCUSDT","ETHUSDT","SOLUSDT","TAOUSDT","AAVEUSDT"],
+  "watchlist_synapse_t": ["BTCUSDT","ETHUSDT","SOLUSDT","TAOUSDT","AAVEUSDT"],
   "portfolio_timeframes": {
     "synapse_t": "15m"
   },
   "default_timeframe": "1H",
-  "_sltp_note": "Per-simbol SL/TP na osnovu 30-dnevnog dnevnog raspona (H-L)/mid analize (May 2026). Tier0=BTC, Tier1=niska vol 3-4.5%, Tier2=srednja 5-6%, Tier3=visoka 7%+. TP = SL × 1.5 (neutralni signal) ili SL × 3 (jak signal ≥9/13). Leverage: L=floor(1/(SL%+0.4%MMR)) → liq cijena = SL cijena. Tier0:34x Tier1:22x Tier2:16x Tier3:13x.",
+  "_sltp_note": "REBALANS 26.05.2026 — tješnji SL/TP za brži izlaz. Tier0=BTC SL1.5%/TP2.25%/52x, Tier1=ETH/SOL/XRP/LINK/ADA/DOGE SL2%/TP3%/41x, Tier2=NEAR/HYPE/SUI/SEI/APT/TAO SL2.5%/TP3.75%/34x, Tier3=JUP/ENA/INJ SL3%/TP4.5%/29x. 50% zatvara na TP, 50% trail. R:R 1:1.5 (normalno) ili 1:3 (jako tržište). Max 3 pozicije, bez pyramidinga.",
   "symbol_sltp": {
     "BTCUSDT": {
-      "slPct": 2.5,
-      "tpPct": 3.75,
+      "slPct": 1.5,
+      "tpPct": 2.25,
       "tier": 0,
-      "leverage": 34,
+      "leverage": 52,
       "avgRange": "2.57%"
     },
     "ETHUSDT": {
-      "slPct": 4.0,
-      "tpPct": 6.0,
+      "slPct": 2.0,
+      "tpPct": 3.0,
       "tier": 1,
-      "leverage": 22,
+      "leverage": 41,
       "avgRange": "3.25%"
     },
     "SOLUSDT": {
-      "slPct": 4.0,
-      "tpPct": 6.0,
+      "slPct": 2.0,
+      "tpPct": 3.0,
       "tier": 1,
-      "leverage": 22,
+      "leverage": 41,
       "avgRange": "3.47%"
     },
     "XRPUSDT": {
-      "slPct": 4.0,
-      "tpPct": 6.0,
+      "slPct": 2.0,
+      "tpPct": 3.0,
       "tier": 1,
-      "leverage": 22,
+      "leverage": 41,
       "avgRange": "3.18%"
     },
     "LINKUSDT": {
-      "slPct": 4.0,
-      "tpPct": 6.0,
+      "slPct": 2.0,
+      "tpPct": 3.0,
       "tier": 1,
-      "leverage": 22,
+      "leverage": 41,
       "avgRange": "3.95%"
     },
     "ADAUSDT": {
-      "slPct": 4.0,
-      "tpPct": 6.0,
+      "slPct": 2.0,
+      "tpPct": 3.0,
       "tier": 1,
-      "leverage": 22,
+      "leverage": 41,
       "avgRange": "3.96%"
     },
     "DOGEUSDT": {
-      "slPct": 4.0,
-      "tpPct": 6.0,
+      "slPct": 2.0,
+      "tpPct": 3.0,
       "tier": 1,
-      "leverage": 22,
+      "leverage": 41,
       "avgRange": "4.31%"
     },
-    "NEARUSDT": {
-      "slPct": 5.5,
-      "tpPct": 8.25,
-      "tier": 2,
-      "leverage": 16,
-      "avgRange": "5.35%"
-    },
     "HYPEUSDT": {
-      "slPct": 5.5,
-      "tpPct": 8.25,
+      "slPct": 2.5,
+      "tpPct": 3.75,
       "tier": 2,
-      "leverage": 16,
+      "leverage": 25,
       "avgRange": "5.36%"
     },
     "SUIUSDT": {
-      "slPct": 5.5,
-      "tpPct": 8.25,
+      "slPct": 2.5,
+      "tpPct": 3.75,
       "tier": 2,
-      "leverage": 16,
+      "leverage": 25,
       "avgRange": "5.71%"
     },
     "SEIUSDT": {
-      "slPct": 5.5,
-      "tpPct": 8.25,
+      "slPct": 2.5,
+      "tpPct": 3.75,
       "tier": 2,
-      "leverage": 16,
+      "leverage": 25,
       "avgRange": "5.71%"
     },
-    "APTUSDT": {
-      "slPct": 5.5,
-      "tpPct": 8.25,
-      "tier": 2,
-      "leverage": 16,
-      "avgRange": "5.79%"
-    },
     "TAOUSDT": {
-      "slPct": 5.5,
-      "tpPct": 8.25,
+      "slPct": 2.5,
+      "tpPct": 3.75,
       "tier": 2,
-      "leverage": 16,
+      "leverage": 25,
       "avgRange": "5.91%"
     },
     "JUPUSDT": {
-      "slPct": 7.0,
-      "tpPct": 10.5,
+      "slPct": 3.0,
+      "tpPct": 4.5,
       "tier": 3,
-      "leverage": 13,
+      "leverage": 20,
       "avgRange": "7.00%"
     },
-    "ENAUSDT": {
-      "slPct": 7.0,
-      "tpPct": 10.5,
-      "tier": 3,
-      "leverage": 13,
-      "avgRange": "7.26%"
+    "PEPEUSDT": {
+      "slPct": 2.0,
+      "tpPct": 3.0,
+      "tier": 1,
+      "leverage": 41,
+      "avgRange": "4.2%"
     },
-    "INJUSDT": {
-      "slPct": 7.0,
-      "tpPct": 10.5,
+    "FETUSDT": {
+      "slPct": 2.5,
+      "tpPct": 3.75,
+      "tier": 2,
+      "leverage": 25,
+      "avgRange": "5.5%"
+    },
+    "AAVEUSDT": {
+      "slPct": 2.5,
+      "tpPct": 3.75,
+      "tier": 2,
+      "leverage": 25,
+      "avgRange": "5.3%"
+    },
+    "BNBUSDT": {
+      "slPct": 1.5,
+      "tpPct": 2.25,
+      "tier": 0,
+      "leverage": 52,
+      "avgRange": "2.8%"
+    },
+    "WLDUSDT": {
+      "slPct": 3.0,
+      "tpPct": 4.5,
       "tier": 3,
-      "leverage": 13,
-      "avgRange": "8.19%"
+      "leverage": 20,
+      "avgRange": "7.5%"
     },
     "TIAUSDT": { "slPct": 2.5, "tpPct": 3.5 },
     "WIFUSDT": { "slPct": 2.5, "tpPct": 3.5 },
@@ -165,12 +138,12 @@
   },
   "strategies": {
     "synapse_t": {
-      "name": "ULTRA — Option C: 3 gates + 7 signals (ATR per-symbol SL/TP)",
-      "description": "Option C (23.05.2026): 3 obavezna gating (ADX≥30, RSI asimetričan, VOL_EXH tiered) + 7 neovisnih signala: E50(REV), CVD(REV), MCD, E145, SRS, SRB, RDIV. Maknuti: 6SC gate (redundantan), 5mSR gate (previše lažnih negativi), RSI signal (redundantan s gate-om), CHP (redundantan s ADX gate-om). Min 4/7 pullback, 5/7 momentum. Per-simbol SL/TP iz symbol_sltp. Tier0(BTC):SL2.5%/TP3.75%/34x | Tier1:SL4%/TP6%/22x | Tier2:SL5.5%/TP8.25%/16x | Tier3:SL7%/TP10.5%/13x. TP neutralni=1.5×SL, TP jak signal=3×SL.",
+      "name": "ULTRA v3 — 8 signala + SMC gates, minSig=6 + BTC EMA50 filter (07.06.2026)",
+      "description": "ULTRA v3 (07.06.2026): 8 signala: E50rev, CVDrev, MACD, E145, PWHL, RDIV, MSTR, FVG. Bonus: CVD+E145, PWHL+MSTR. Gates: ADX, RSI, VOL_EXH, VWAP, FIB0.702. BTC EMA50 4H SHORT filter + Correlated Exit (BTC spike +1.2%/30min). minSig=6 — backtest WR=48.1%, PF=1.39. Watchlist rebalans 07.06.2026: OUT=NEAR/APT/ENA/DOGE/INJ, IN=FET/AAVE/BNB/WLD/PEPE. Max 3 pozicije.",
       "params": {
         "minSig": 4,
-        "slPct": 4.0,
-        "tpPct": 6.0
+        "slPct": 2.0,
+        "tpPct": 3.0
       }
     }
   },
@@ -184,12 +157,14 @@
     "KRITIČNO: getSafeLeverage() = floor(1/(slPct+0.4%MMR)) → liq cijena = SL cijena. SL order je primarni izlaz, likvidacija je backup na istoj cijeni. Leverage iz symbol_sltp.leverage ima prednost.",
     "Dinamički TP (TODO): neutralni signal → TP=SL×1.5 | jak signal (Pine strength=strong) → TP=SL×3",
     "Samo jedna pozicija po simbolu istovremeno",
-    "Max 8 otvorenih pozicija istovremeno + BTC bonus slot",
-    "Max 3 novih ulaza po scan ciklusu (sprječava 8 simultanih gubitaka u lošem marketu)",
+    "Max 3 otvorenih pozicija istovremeno (rebalans 26.05.2026)",
+    "Bez pyramidinga — jedna pozicija po simbolu, nema dodavanja",
+    "Max 3 novih ulaza po scan ciklusu",
     "Dnevni limit: 100 tradova",
     "Circuit breaker: 7 uzastopnih gubitaka → 8h pauza",
     "Uklonjeni simboli (loš WR): ORDIUSDT, WLDUSDT, TRUMPUSDT, AAVEUSDT, RIVERUSDT, ZECUSDT, PEPEUSDT",
     "Uklonjeni simboli (mali volumen <10M USD/dan): ARBUSDT, WIFUSDT, TIAUSDT, FETUSDT",
-    "Uklonjeni simboli (WR 0% analiza): XAUUSDT, XAGUSDT, BNBUSDT, AVAXUSDT, DOTUSDT"
+    "Uklonjeni simboli (WR 0% analiza): XAUUSDT, XAGUSDT, AVAXUSDT, DOTUSDT",
+    "Rebalans 07.06.2026 (backtest 42 dana, 8sig min6/8): OUT=NEARUSDT(WR43.9%), APTUSDT(WR42%), ENAUSDT(WR38.9%), DOGEUSDT(WR34.1%), INJUSDT(WR30.8%) | IN=FETUSDT(WR55.6% PF1.88), AAVEUSDT(WR50% PF1.5), BNBUSDT(WR50% PF1.5), WLDUSDT(WR48.5% PF1.41), PEPEUSDT(WR50% PF1.5)"
   ]
 }

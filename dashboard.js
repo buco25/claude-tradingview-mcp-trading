@@ -1599,7 +1599,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <th>Cijena</th>
             <th style="color:#d97706;text-align:center">1H</th>
             <th style="color:#d97706;text-align:center">4OB <span style="font-weight:400;font-size:10px;color:#94a3b8">ADX·6Sc·RSI·VWAP</span></th>
-            <th style="color:#db2777;text-align:center">8 Signala</th>
+            <th style="color:#db2777;text-align:center">5 Signala</th>
             <th style="color:#db2777;text-align:center;width:60px">↑↓</th>
             <th style="min-width:160px">Status</th>
           </tr>
@@ -1944,9 +1944,15 @@ function mandatoryBoxes(s) {
          badge('VWAP', vwapCol, vwapBg, vwapTip);
 }
 
-function sigBoxes(sigs) {
+function sigBoxes(sigs, symbol) {
   if (!sigs || sigs.length === 0) return '<span style="color:#444">—</span>';
-  return sigs.map((v, i) => {
+  const _combos = {
+    "BTCUSDT":[0,1,2,3,7],"ETHUSDT":[0,1,2,3,7],"AAVEUSDT":[0,1,2,3,7],
+    "SOLUSDT":[0,1,3,5,6],"TAOUSDT":[0,1,3,5,6],
+  };
+  const activeIdx = _combos[symbol] ?? [0,1,2,3,4,5,6,7];
+  return activeIdx.map(i => {
+    const v    = sigs[i] ?? 0;
     const bg   = v === 1 ? '#0d3d26' : v === -1 ? '#3d0d0d' : '#1c2128';
     const col  = v === 1 ? '#059669' : v === -1 ? '#dc2626' : '#94a3b8';
     const bdr  = v === 1 ? '1px solid #00c48c44' : v === -1 ? '1px solid #ff4d4d44' : '1px solid #30363d';
@@ -1958,7 +1964,7 @@ function sigBoxes(sigs) {
 }
 
 function scoreBox(bull, bear, sig, minSig) {
-  const total = 8;
+  const total = 5;
   const minLabel = minSig ? '<br><span style="color:#444;font-size:9px">min:' + minSig + '</span>' : '';
   if (sig === "LONG")   return '<div style="background:rgba(5,150,105,0.15);border:1px solid #059669;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#059669;font-weight:800;font-size:16px">↑' + bull + '</span><span style="color:#94a3b8;font-size:11px">/' + total + '</span><br><span class="sig-long" style="font-size:11px">▲ LONG</span></div>';
   if (sig === "SHORT")  return '<div style="background:rgba(220,38,38,0.15);border:1px solid #dc2626;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#dc2626;font-weight:800;font-size:16px">↓' + bear + '</span><span style="color:#94a3b8;font-size:11px">/' + total + '</span><br><span class="sig-short" style="font-size:11px">▼ SHORT</span></div>';
@@ -2197,7 +2203,7 @@ async function doScan() {
         '<td style="font-weight:600;white-space:nowrap;font-size:12px;padding:6px 8px">' + fmtLive(s.price) + entryInfo + '</td>' +
         '<td style="text-align:center;font-weight:800;color:' + t1hCol + ';font-size:13px;padding:6px 4px" title="1H EMA20: ' + t1h + '">' + t1hIcon + '</td>' +
         '<td style="padding:4px 6px;border-right:1px solid #d9770633">' + mandatoryBoxes(s) + '</td>' +
-        '<td style="padding:4px 4px">' + sigBoxes(s.ultraSigs16) + '</td>' +
+        '<td style="padding:4px 4px">' + sigBoxes(s.ultraSigs16, s.symbol) + '</td>' +
         '<td style="padding:4px 6px;text-align:center">' + scoreBox(s.ultraBull||0, s.ultraBear||0, s.ultraSig, s.ultraMinSig) + '</td>' +
         '<td style="padding:4px 6px">' + statusBox(s) + '</td>' +
         '</tr>';

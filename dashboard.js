@@ -215,7 +215,7 @@ function hadCross(e9, e21, bars = 5) {
   return { up, dn };
 }
 
-function scanSymbol(candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}, _pwh = null, _pwl = null) {
+function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}, _pwh = null, _pwl = null) {
   const closes = candles.map(c => c.close);
   const opens  = candles.map(c => c.open);
   const vols   = candles.map(c => c.volume || 0);
@@ -581,7 +581,7 @@ async function runScan(rules) {
             _pwl = parseFloat(prevWeek[3]);
           }
         } catch(e) { /* ignoriraj — PWHL ostaje 0 */ }
-        const s       = scanSymbol(candles, {}, {}, {}, ultraCfg, _pwh, _pwl);
+        const s       = scanSymbol(sym, candles, {}, {}, {}, ultraCfg, _pwh, _pwl);
         const pending = pendingList.find(p => p.symbol === sym) || null;
         const symSltp = rules.symbol_sltp?.[sym] || {};
         const slPct   = symSltp.slPct ?? 1.5;

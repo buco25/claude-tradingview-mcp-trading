@@ -1261,7 +1261,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     </div>
     <div class="stat-card">
       <div class="stat-label">Otvoreno</div>
-      <div class="stat-value" style="color:#d97706">${positions.length}</div>
+      <div class="stat-value" style="color:#d97706">${positions.length}<span style="font-size:14px;color:#6b7280">/3</span></div>
       <div class="stat-sub">pozicija</div>
     </div>
     <div class="stat-card">

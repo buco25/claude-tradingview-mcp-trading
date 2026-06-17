@@ -1853,8 +1853,8 @@ async function resetOne(pid) {
 const SIG_NAMES = ['E50','CVD','MACD','E145','PWHL','RDIV','MSTR','FVG'];
 
 const SIG_COND_BULL = [
-  '[REV] Cijena < EMA50 — pullback u trendu, potencijalni bounce',        //  1. E50 REV
-  '[REV] CVD prodajni — potencijalno dno, reversal gore',                //  2. CVD REV
+  'Cijena > EMA50 — bullish trend potvrđen',                             //  1. E50 TREND
+  'CVD > 0 — kupci dominiraju volumenom',                                //  2. CVD TREND
   'MACD histogram > 0 — bullish momentum potvrđen',                      //  3. MACD
   'Cijena > EMA145 — dugoročni bull trend',                              //  4. E145
   'Cijena blizu prošlotjednog Low-a + RSI raste — tjedni support zone',  //  5. PWHL
@@ -1863,8 +1863,8 @@ const SIG_COND_BULL = [
   'Bullish FVG — cijena u nezapunjenoj gap zoni (imbalance support)',    //  8. FVG
 ];
 const SIG_COND_BEAR = [
-  '[REV] Cijena > EMA50 — previsoko, iscrpljen move',                    //  1. E50 REV
-  '[REV] CVD kupovni — svi već unutra, potencijalni vrh',               //  2. CVD REV
+  'Cijena < EMA50 — bearish trend potvrđen',                             //  1. E50 TREND
+  'CVD < 0 — prodavači dominiraju volumenom',                            //  2. CVD TREND
   'MACD histogram < 0 — bearish momentum potvrđen',                     //  3. MACD
   'Cijena < EMA145 — dugoročni bear trend',                             //  4. E145
   'Cijena blizu prošlotjednog High-a + RSI pada — tjedni resistance',   //  5. PWHL

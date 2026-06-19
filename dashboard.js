@@ -1299,6 +1299,31 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     </div>
   </div>
 
+  <!-- ── SWEEP + MSS Card ────────────────────────────────────────────────── -->
+  <div id="sweep-card" style="background:#1f2937;border:1px solid #374151;border-radius:12px;padding:16px 20px;margin-bottom:16px;transition:border-color .3s,box-shadow .3s">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#f59e0b">⚡ BTC Sweep Detektor + MSS</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span id="sweep-status" style="font-size:12px;font-weight:700;color:#9ca3af">učitavam…</span>
+        <span style="font-size:10px;color:#4b5563">BTC 15m · 90min</span>
+      </div>
+    </div>
+    <!-- Vol progress bar -->
+    <div style="background:#111827;border-radius:4px;height:6px;margin-bottom:8px;overflow:hidden">
+      <div id="sweep-bar" style="height:100%;width:0%;background:#059669;border-radius:4px;transition:width .4s,background .4s"></div>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <!-- 6 svjećica mini prikaz -->
+      <div id="sweep-liq-row" style="display:flex;align-items:flex-end;gap:6px;min-height:28px"></div>
+      <div id="sweep-sub" style="font-size:10px;color:#9ca3af;text-align:right"></div>
+    </div>
+    <!-- MSS per-simbol -->
+    <div style="border-top:1px solid #374151;margin-top:12px;padding-top:10px">
+      <div style="font-size:10px;color:#6b7280;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">MSS — Market Structure Shift po simbolu</div>
+      <div id="mss-row" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+    </div>
+  </div>
+
   <!-- Open positions — na vrhu za brzi pregled -->
   ${positionsSections}
 
@@ -2700,6 +2725,22 @@ async function loadSweepStatus() {
         barEl.style.width = '0%';
         subEl.textContent = 'Bitget nedostupan';
       }
+    }
+    // MSS per-simbol
+    const mssRow = document.getElementById('mss-row');
+    if (mssRow && d.mss) {
+      const SYM_SHORT = { BTCUSDT:'BTC', ETHUSDT:'ETH', SOLUSDT:'SOL', TAOUSDT:'TAO', AAVEUSDT:'AAVE' };
+      mssRow.innerHTML = Object.entries(d.mss).map(([sym, v]) => {
+        const label = SYM_SHORT[sym] || sym;
+        const bg  = v ===  1 ? '#0d3d26' : v === -1 ? '#3d0d0d' : '#111827';
+        const col = v ===  1 ? '#059669' : v === -1 ? '#dc2626' : '#4b5563';
+        const bdr = v ===  1 ? '1px solid #00c48c44' : v === -1 ? '1px solid #ff4d4d44' : '1px solid #374151';
+        const icon = v === 1 ? '▲ HH+HL' : v === -1 ? '▼ LH+LL' : '· NEUT';
+        return `<span title="${label} MSS: ${icon}" style="display:inline-flex;flex-direction:column;align-items:center;background:${bg};border:${bdr};border-radius:6px;padding:4px 10px;gap:2px">
+          <span style="font-size:11px;font-weight:700;color:#9ca3af">${label}</span>
+          <span style="font-size:11px;font-weight:800;color:${col}">${icon}</span>
+        </span>`;
+      }).join('');
     }
   } catch(e) {
     const el = document.getElementById('sweep-sub');
@@ -4185,8 +4226,48 @@ const server = http.createServer(async (req, res) => {
       }
     } catch (_) { /* Bitget timeout — ok */ }
 
+    // MSS per-simbol — swing high/low struktura iz 1H klines
+    const MSS_SYMBOLS = ["BTCUSDT","ETHUSDT","SOLUSDT","TAOUSDT","AAVEUSDT"];
+    const mssResults = {};
+    await Promise.all(MSS_SYMBOLS.map(async sym => {
+      try {
+        const mResp = await fetch(
+          `https://api.bitget.com/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=1H&limit=80`,
+          { signal: AbortSignal.timeout(5000) }
+        );
+        if (!mResp.ok) return;
+        const mJson = await mResp.json();
+        const klines = mJson?.data ?? [];
+        if (klines.length < 20) return;
+        const candles = klines.map(c => ({ high: +c[2], low: +c[3], close: +c[4] }));
+        const n = candles.length;
+        const MS_LOOKBACK = 60, MS_WING = 3;
+        const msStart = Math.max(MS_WING, n - MS_LOOKBACK);
+        const msEnd   = n - MS_WING - 1;
+        const msHighs = [], msLows = [];
+        for (let i = msStart; i <= msEnd; i++) {
+          let isH = true, isL = true;
+          for (let j = i - MS_WING; j <= i + MS_WING; j++) {
+            if (j === i) continue;
+            if (candles[j].high >= candles[i].high) isH = false;
+            if (candles[j].low  <= candles[i].low)  isL = false;
+          }
+          if (isH) msHighs.push(candles[i].high);
+          if (isL) msLows.push(candles[i].low);
+        }
+        let mss = 0;
+        if (msHighs.length >= 2 && msLows.length >= 2) {
+          const lastH = msHighs[msHighs.length-1], prevH = msHighs[msHighs.length-2];
+          const lastL = msLows[msLows.length-1],   prevL = msLows[msLows.length-2];
+          if (lastH > prevH && lastL > prevL) mss =  1;
+          if (lastH < prevH && lastL < prevL) mss = -1;
+        }
+        mssResults[sym] = mss;
+      } catch (_) {}
+    }));
+
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ paused, remainMs, sweepState, btcVol }));
+    res.end(JSON.stringify({ paused, remainMs, sweepState, btcVol, mss: mssResults }));
     return;
   }
 

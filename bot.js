@@ -4389,17 +4389,7 @@ export async function run() {
     const _bitgetLivePositions = _isLive ? await fetchBitgetOpenPositions() : null;
 
     for (const symbol of pDef.symbols) {
-      // ── Provjera: postoji li već nalog na Bitgetu za ovaj simbol ──────────────
-      if (_bitgetLivePositions !== null) {
-        const _hasBitgetLong  = _bitgetLivePositions.has(`${symbol}:long`);
-        const _hasBitgetShort = _bitgetLivePositions.has(`${symbol}:short`);
-        if (_hasBitgetLong || _hasBitgetShort) {
-          const _side = _hasBitgetLong ? "LONG" : "SHORT";
-          console.log(`  🚫 [${pDef.name}] ${symbol} — Bitget već ima otvorenu ${_side} poziciju → preskačem`);
-          _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "BITGET_OPEN", reason: `Bitget već ima ${_side} poziciju` });
-          continue;
-        }
-      }
+      // Bitget provjera otvorene pozicije — odgođena do nakon signal computation (vidi ispod)
 
       // ── Pyramid (DCA) logika: dopuštamo max MAX_PYRAMID adicija u ISTOM smjeru ──
       const existingPosList = openPositions.filter(p => p.symbol === symbol);
@@ -4511,6 +4501,23 @@ export async function run() {
             blocker: "SIGNAL", reason,
           });
           continue;
+        }
+
+        // ── Bitget provjera otvorene pozicije (smjer-svjesna) ────────────────────
+        // Ako drugi bot drži poziciju na Bitgetu u ISTOM smjeru → dopuštamo ulaz (adicija).
+        // Ako je SUPROTAN smjer → preskačemo (nema hedgea).
+        if (_bitgetLivePositions !== null) {
+          const _hasBitgetLong  = _bitgetLivePositions.has(`${symbol}:long`);
+          const _hasBitgetShort = _bitgetLivePositions.has(`${symbol}:short`);
+          if (_hasBitgetLong || _hasBitgetShort) {
+            const _bitgetSide = _hasBitgetLong ? "LONG" : "SHORT";
+            if (_bitgetSide !== signal) {
+              console.log(`  🚫 [${pDef.name}] ${symbol} — Bitget ima ${_bitgetSide}, signal je ${signal} (suprotan) → skip`);
+              _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: "BITGET_OPPOSITE", reason: `Bitget ${_bitgetSide} vs signal ${signal}` });
+              continue;
+            }
+            console.log(`  ✅ [${pDef.name}] ${symbol} — Bitget ima ${_bitgetSide}, signal isti (${signal}) → dopuštamo adiciju`);
+          }
         }
 
         // ── D) Quiet Pullback filter — ulazimo samo na tihim svjećama ──────────

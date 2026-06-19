@@ -455,11 +455,11 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
   let ultraBull = 0, ultraBear = 0;
   let ultraSigs16 = new Array(8).fill(0);
   const SYMBOL_COMBOS_D = {
-    "BTCUSDT":  { sigIdx: [0,1,2,3,7], minSig: 4 },
-    "ETHUSDT":  { sigIdx: [0,1,2,3,7], minSig: 4 },
-    "SOLUSDT":  { sigIdx: [0,1,3,5,6], minSig: 4 },
-    "TAOUSDT":  { sigIdx: [0,1,3,5,6], minSig: 4 },
-    "AAVEUSDT": { sigIdx: [0,1,2,3,7], minSig: 4 },
+    "BTCUSDT":  { sigIdx: [0,1,2,3,7,8], minSig: 4 },
+    "ETHUSDT":  { sigIdx: [0,1,2,3,7,8], minSig: 4 },
+    "SOLUSDT":  { sigIdx: [0,1,3,5,6,8], minSig: 4 },
+    "TAOUSDT":  { sigIdx: [0,1,3,5,6,8], minSig: 4 },
+    "AAVEUSDT": { sigIdx: [0,1,2,3,7,8], minSig: 4 },
   };
   let ultraMinSig = 4;  // default
   {
@@ -471,7 +471,34 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
       const rsiV  = rsi ?? 50;
       const adxV  = adx ?? 0;
 
-      // 8 signala: E50rev, CVDrev, MACD, E145, PWHL, RDIV, MSTR, FVG
+      // OB Order Block signal
+      let sigOBD = 0;
+      {
+        const OB_LOOKBACK = 50, OB_CANDLES = 3, OB_MOVE_PCT = 1.5, OB_BUFFER = 0.003;
+        const obsStart = Math.max(1, n - OB_LOOKBACK);
+        for (let i = obsStart; i < n - OB_CANDLES - 1 && sigOBD === 0; i++) {
+          if (candles[i].close < candles[i].open) {
+            let allGreen = true;
+            for (let j = i+1; j <= i+OB_CANDLES; j++) { if (candles[j].close <= candles[j].open) allGreen=false; }
+            const move = (candles[i+OB_CANDLES].close - candles[i].close) / candles[i].close * 100;
+            if (allGreen && move >= OB_MOVE_PCT) {
+              const inZone = price >= candles[i].low*(1-OB_BUFFER) && price <= candles[i].high*(1+OB_BUFFER);
+              if (inZone) sigOBD = 1;
+            }
+          }
+          if (candles[i].close > candles[i].open && sigOBD === 0) {
+            let allRed = true;
+            for (let j = i+1; j <= i+OB_CANDLES; j++) { if (candles[j].close >= candles[j].open) allRed=false; }
+            const move = (candles[i].close - candles[i+OB_CANDLES].close) / candles[i].close * 100;
+            if (allRed && move >= OB_MOVE_PCT) {
+              const inZone = price >= candles[i].low*(1-OB_BUFFER) && price <= candles[i].high*(1+OB_BUFFER);
+              if (inZone) sigOBD = -1;
+            }
+          }
+        }
+      }
+
+      // 9 signala: E50rev, CVDrev, MACD, E145, PWHL, RDIV, MSTR, FVG, OB
       ultraSigs16 = [
         ema50 ? (price > ema50 ? 1 : -1) : 0,             //  1. E50  TREND
         cvdSum > 0 ? 1 : -1,                              //  2. CVD  TREND
@@ -481,6 +508,7 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
         sigRsiDivD,                                        //  6. RDIV
         sigMktStrD,                                        //  7. MSTR
         sigFVGD,                                           //  8. FVG
+        sigOBD,                                            //  9. OB Order Block
       ];
 
       const _activeSigsD = _comboIdxD.map(i => ultraSigs16[i]);
@@ -506,6 +534,7 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
           sigRsiDivD,
           sigMktStrD,
           sigFVGD,
+          sigOBD,
         ];
         const _momActiveSigsD = _comboIdxD.map(i => momSigsD[i]);
         const momBullD = _momActiveSigsD.filter(s => s === 1).length;
@@ -1223,7 +1252,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="logo">🎯</div>
       <div>
         <div class="title">ULTRA Trading Bot</div>
-        <div class="subtitle">Gatevi: ADX≥22 · VOL_EXH · VWAP &nbsp;|&nbsp; 5 simbola · min 4/5 signala (1H) &nbsp;|&nbsp; BTC/ETH/AAVE: E50↑+CVD↑+MACD+E145+FVG &nbsp;|&nbsp; SOL/TAO: E50↑+CVD↑+E145+RDIV+MSTR &nbsp;|&nbsp; rizik 1.5%</div>
+        <div class="subtitle">Gatevi: ADX≥22 · VOL_EXH · VWAP &nbsp;|&nbsp; 5 simbola · min 4/6 signala (1H) &nbsp;|&nbsp; BTC/ETH/AAVE: E50↑+CVD↑+MACD+E145+FVG+OB &nbsp;|&nbsp; SOL/TAO: E50↑+CVD↑+E145+RDIV+MSTR+OB &nbsp;|&nbsp; rizik 1.5%</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -1575,7 +1604,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <div class="scan-card">
     <div class="scan-header">
       <div>
-        <div class="chart-title" style="margin-bottom:2px">🎯 ULTRA Scanner — ${ALL_SYMBOLS.length} simbola | min 4/5 signala po simbolu | ulaz odmah</div>
+        <div class="chart-title" style="margin-bottom:2px">🎯 ULTRA Scanner — ${ALL_SYMBOLS.length} simbola | min 4/6 signala po simbolu | ulaz odmah</div>
         <div style="font-size:12px;color:var(--text-muted)">
           BTC/ETH/AAVE: E50↑+CVD↑+MACD+E145+FVG &nbsp;·&nbsp; SOL/TAO: E50↑+CVD↑+E145+RDIV+MSTR
           &nbsp;|&nbsp; 🟡 SETUP &nbsp; 🟢 Signal &nbsp; 🚀 Momentum &nbsp; Cache 90s &nbsp;|&nbsp;
@@ -1598,7 +1627,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
             <th>Cijena</th>
             <th style="color:#d97706;text-align:center">1H</th>
             <th style="color:#d97706;text-align:center">4OB <span style="font-weight:400;font-size:10px;color:#94a3b8">ADX·6Sc·RSI·VWAP</span></th>
-            <th style="color:#db2777;text-align:center">5 Signala</th>
+            <th style="color:#db2777;text-align:center">6 Signala</th>
             <th style="color:#db2777;text-align:center;width:60px">↑↓</th>
             <th style="min-width:160px">Status</th>
           </tr>
@@ -1613,7 +1642,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <!-- Signal legend (collapsible) -->
   <div id="sig-legend" style="display:none;margin-top:12px">
     <div class="chart-card" style="padding:16px 20px">
-      <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — ULTRA v3 · 3 gateva + 5 signala po simbolu · min 4/5 za ulaz</div>
+      <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — ULTRA v3 · 3 gateva + 6 signala po simbolu · min 4/6 za ulaz</div>
       <div style="margin-bottom:10px;font-size:11px;color:#f59e0b;background:#2d2000;border:1px solid #d97706;border-radius:6px;padding:8px 12px">
         ⚙️ <b>GATEVI (obvezni — blokiraju neovisno o score-u):</b>
         &nbsp; ADX ≥ 22 (trend jačina) &nbsp;·&nbsp; VOL_EXH (volumen ispod threshold-a) &nbsp;·&nbsp; VWAP cross/rejection (cijena na ispravnoj strani)
@@ -1849,7 +1878,7 @@ async function resetOne(pid) {
 // Maknuti 2025-05: E55⟳ (duplikat E50), VOL⟳ (asimetričan — nikad +1 za LONG)
 // Maknuti Option C: RSI (redundantan s RSI gate-om), CHP (redundantan s ADX gate-om)
 // ULTRA v3 — 8 signala (bez SRB): E50rev, CVDrev, MACD, E145, PWHL, RDIV, MSTR, FVG
-const SIG_NAMES = ['E50','CVD','MACD','E145','PWHL','RDIV','MSTR','FVG'];
+const SIG_NAMES = ['E50','CVD','MACD','E145','PWHL','RDIV','MSTR','FVG','OB'];
 
 const SIG_COND_BULL = [
   'Cijena > EMA50 — bullish trend potvrđen',                             //  1. E50 TREND
@@ -1860,6 +1889,7 @@ const SIG_COND_BULL = [
   'RSI divergencija — niža cijena, viši RSI (bullish div)',              //  6. RDIV
   'HH + HL — market structure uptrend potvrđen',                         //  7. MSTR
   'Bullish FVG — cijena u nezapunjenoj gap zoni (imbalance support)',    //  8. FVG
+  'Bullish OB — cijena se vratila u zonu zadnje crvene svjećice prije 3+ uzlaznih (institucijska potpora)', //  9. OB
 ];
 const SIG_COND_BEAR = [
   'Cijena < EMA50 — bearish trend potvrđen',                             //  1. E50 TREND
@@ -1870,6 +1900,7 @@ const SIG_COND_BEAR = [
   'RSI divergencija — viša cijena, niži RSI (bearish div)',             //  6. RDIV
   'LL + LH — market structure downtrend potvrđen',                       //  7. MSTR
   'Bearish FVG — cijena u nezapunjenoj gap resistance zoni',            //  8. FVG
+  'Bearish OB — cijena se vratila u zonu zadnje zelene svjećice prije 3+ silaznih (institucijska rezistencija)', //  9. OB
 ];
 const SIG_COND_NEUT = [
   'Cijena na EMA50 — nema jasnog pullbacka',              //  1. E50
@@ -1880,6 +1911,7 @@ const SIG_COND_NEUT = [
   'Nema RSI divergencije',                                //  6. RDIV
   'Nejasna market structure (nema dovoljno swingova)',    //  7. MSTR
   'Nema aktivnog Fair Value Gapa u blizini',              //  8. FVG
+  'Cijena nije u Order Block zoni',                       //  9. OB
 ];
 
 function mandatoryBoxes(s) {
@@ -1946,8 +1978,8 @@ function mandatoryBoxes(s) {
 function sigBoxes(sigs, symbol) {
   if (!sigs || sigs.length === 0) return '<span style="color:#444">—</span>';
   const _combos = {
-    "BTCUSDT":[0,1,2,3,7],"ETHUSDT":[0,1,2,3,7],"AAVEUSDT":[0,1,2,3,7],
-    "SOLUSDT":[0,1,3,5,6],"TAOUSDT":[0,1,3,5,6],
+    "BTCUSDT":[0,1,2,3,7,8],"ETHUSDT":[0,1,2,3,7,8],"AAVEUSDT":[0,1,2,3,7,8],
+    "SOLUSDT":[0,1,3,5,6,8],"TAOUSDT":[0,1,3,5,6,8],
   };
   const activeIdx = _combos[symbol] ?? [0,1,2,3,4,5,6,7];
   return activeIdx.map(i => {
@@ -1963,7 +1995,7 @@ function sigBoxes(sigs, symbol) {
 }
 
 function scoreBox(bull, bear, sig, minSig) {
-  const total = 5;
+  const total = 6;
   const minLabel = minSig ? '<br><span style="color:#444;font-size:9px">min:' + minSig + '</span>' : '';
   if (sig === "LONG")   return '<div style="background:rgba(5,150,105,0.15);border:1px solid #059669;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#059669;font-weight:800;font-size:16px">↑' + bull + '</span><span style="color:#94a3b8;font-size:11px">/' + total + '</span><br><span class="sig-long" style="font-size:11px">▲ LONG</span></div>';
   if (sig === "SHORT")  return '<div style="background:rgba(220,38,38,0.15);border:1px solid #dc2626;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#dc2626;font-weight:800;font-size:16px">↓' + bear + '</span><span style="color:#94a3b8;font-size:11px">/' + total + '</span><br><span class="sig-short" style="font-size:11px">▼ SHORT</span></div>';

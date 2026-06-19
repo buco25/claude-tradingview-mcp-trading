@@ -100,11 +100,11 @@ const VOL_EXH_DEFAULT = 3.0; // fallback za nepoznate simbole
 // ─── Per-simbol signal kombinacije (backtest optimizirano 16.06.2026) ──────────
 // Indeksi odgovaraju sigs[] u analyzeUltra: 0=E50↑ 1=CVD↑ 2=MACD 3=E145 4=PWHL 5=RDIV 6=MSTR 7=FVG
 const SYMBOL_COMBOS = {
-  "BTCUSDT":  { sigIdx: [0,1,2,3,7], minSig: 4 }, // E50↑+CVD↑+MACD+E145+FVG  WR68%
-  "ETHUSDT":  { sigIdx: [0,1,2,3,7], minSig: 4 }, // E50↑+CVD↑+MACD+E145+FVG  WR68%
-  "SOLUSDT":  { sigIdx: [0,1,3,5,6], minSig: 4 }, // E50↑+CVD↑+E145+RDIV+MSTR WR73%
-  "TAOUSDT":  { sigIdx: [0,1,3,5,6], minSig: 4 }, // E50↑+CVD↑+E145+RDIV+MSTR WR59%
-  "AAVEUSDT": { sigIdx: [0,1,2,3,7], minSig: 4 }, // E50↑+CVD↑+MACD+E145+FVG  WR63%
+  "BTCUSDT":  { sigIdx: [0,1,2,3,7,8], minSig: 4 }, // E50↑+CVD↑+MACD+E145+FVG+OB  WR68%
+  "ETHUSDT":  { sigIdx: [0,1,2,3,7,8], minSig: 4 }, // E50↑+CVD↑+MACD+E145+FVG+OB  WR67%
+  "SOLUSDT":  { sigIdx: [0,1,3,5,6,8], minSig: 4 }, // E50↑+CVD↑+E145+RDIV+MSTR+OB WR67%
+  "TAOUSDT":  { sigIdx: [0,1,3,5,6,8], minSig: 4 }, // E50↑+CVD↑+E145+RDIV+MSTR+OB WR50%
+  "AAVEUSDT": { sigIdx: [0,1,2,3,7,8], minSig: 4 }, // E50↑+CVD↑+MACD+E145+FVG+OB  WR65%
 };
 
 // ─── Ekonomski kalendar ───────────────────────────────────────────────────────
@@ -2038,6 +2038,40 @@ function analyzeUltra(candles, cfg) {
     }
   }
 
+  // ── Order Block (OB) — SMC institucijski ulaz/izlaz zona ────────────────────
+  // Bullish OB: zadnja crvena svjeća prije snažnog bullish poteza → cijena se vratila = +1
+  // Bearish OB: zadnja zelena svjeća prije snažnog bearish poteza → cijena se vratila = -1
+  let sigOB = 0;
+  {
+    const OB_LOOKBACK  = 50;
+    const OB_CANDLES   = 3;    // min uzastopnih u smjeru za "snažan potez"
+    const OB_MOVE_PCT  = 1.5;  // min % poteza ukupno
+    const OB_BUFFER    = 0.003; // ±0.3% zone
+    const obsStart = Math.max(1, n - OB_LOOKBACK);
+    for (let i = obsStart; i < n - OB_CANDLES - 1 && sigOB === 0; i++) {
+      // Bullish OB: crvena svjeća + zatim OB_CANDLES uzastopno zelenih + ukupni potez ≥ OB_MOVE_PCT%
+      if (candles[i].close < candles[i].open) {
+        let allGreen = true;
+        for (let j = i+1; j <= i+OB_CANDLES; j++) { if (candles[j].close <= candles[j].open) allGreen=false; }
+        const move = (candles[i+OB_CANDLES].close - candles[i].close) / candles[i].close * 100;
+        if (allGreen && move >= OB_MOVE_PCT) {
+          const inZone = price >= candles[i].low*(1-OB_BUFFER) && price <= candles[i].high*(1+OB_BUFFER);
+          if (inZone) sigOB = 1;
+        }
+      }
+      // Bearish OB: zelena svjeća + zatim OB_CANDLES uzastopno crvenih
+      if (candles[i].close > candles[i].open && sigOB === 0) {
+        let allRed = true;
+        for (let j = i+1; j <= i+OB_CANDLES; j++) { if (candles[j].close >= candles[j].open) allRed=false; }
+        const move = (candles[i].close - candles[i+OB_CANDLES].close) / candles[i].close * 100;
+        if (allRed && move >= OB_MOVE_PCT) {
+          const inZone = price >= candles[i].low*(1-OB_BUFFER) && price <= candles[i].high*(1+OB_BUFFER);
+          if (inZone) sigOB = -1;
+        }
+      }
+    }
+  }
+
   // ── FIB 0.702 kontekstualni gate (soft) — Golden Ratio ───────────────────────
   // Iz videa: 0.702 je non-tradicionalni FIB. Ako cijena pada ispod 0.702 razine,
   // veliki je signal promjene trenda → blokiramo LONG (ne SHORT)
@@ -2080,6 +2114,7 @@ function analyzeUltra(candles, cfg) {
     sigRsiDiv,                                         //  6. RDIV  RSI divergencija
     sigMktStr,                                         //  7. MSTR  Market Structure HH/HL vs LL/LH
     sigFVG,                                            //  8. FVG   Fair Value Gap imbalance
+    sigOB,                                             //  9. OB    Order Block (SMC institucijska zona)
   ];
 
   // Per-simbol combo filter — koristi samo signale iz SYMBOL_COMBOS

@@ -5097,7 +5097,7 @@ server.listen(PORT, () => {
   setInterval(async () => {
     try { await softExitMonitor(); }
     catch (e) { console.error("Soft exit monitor greška:", e.message); }
-  }, 15 * 1000);
+  }, 5 * 1000);
 
   // ─── AMC background fetch — odmah pri startu, pa svakih 30 min ─────────────
   // fetchAmcData() puni _amcCache; amcSqueezeMonitor() šalje Telegram ako treba

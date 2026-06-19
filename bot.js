@@ -4342,65 +4342,8 @@ export async function run() {
       console.log(`  📊 [BREADTH] ▲${_marketBreadth.bullish} ▼${_marketBreadth.bearish} —${_marketBreadth.neutral} / ${_marketBreadth.total} simbola`);
     }
 
-    // ── B) Sweep Detektor — BTC 15m volume spike + wick analiza ─────────────────
-    // Logika: MM sweep se vidi na grafovima — velika svjećica s dugim wickom i 3×+ volumenom.
-    // Gledamo zadnjih 6 BTC 15m svjećica (~90min). Bez eksternog API-ja, koristimo Bitget.
-    // Sweep candle: volumen ≥ 3× avg20 I wick ≥ 50% cijelog ranga svjećice
-    if (pDef.strategy === "synapse_t") {
-      const _sweepFile = `${DATA_DIR}/sweep_pause_${pid}.json`;
-      const _sweepState = existsSync(_sweepFile) ? JSON.parse(readFileSync(_sweepFile, "utf8")) : {};
-      if (_sweepState.until && Date.now() < _sweepState.until) {
-        const _remainH = ((_sweepState.until - Date.now()) / 3600000).toFixed(1);
-        console.log(`  🛡️  [SWEEP] Pauza aktivna — sweep detektiran @ ${_sweepState.detected?.slice(0,16)} UTC, još ${_remainH}h`);
-        continue;
-      }
-      try {
-        // Dohvati BTC 15m svjećice — 26 komada (20 za avg + 6 za provjeru)
-        const _btcKlines = await fetchKlines("BTCUSDT", "15m", 26);
-        if (_btcKlines && _btcKlines.length >= 22) {
-          const _vols   = _btcKlines.map(c => parseFloat(c[5]));
-          const _avg20  = _vols.slice(0, 20).reduce((a, b) => a + b, 0) / 20;
-          // Zadnjih 6 svjećica = ~90min
-          const _recent6 = _btcKlines.slice(-6);
-          let _sweepCandle = null;
-          for (const _c of _recent6) {
-            const [, _o, _h, _l, _cl, _v] = _c.map(Number);
-            const _vol     = _v;
-            const _range   = _h - _l;
-            if (_range === 0) continue;
-            const _body    = Math.abs(_cl - _o);
-            const _wick    = _range - _body;         // gornji + donji wick zajedno
-            const _wickPct = _wick / _range;         // koliko range je wick (> 0.5 = sweep candle)
-            const _volRat  = _vol / _avg20;
-            // Sweep: vol ≥ 3× avg I wick ≥ 50% ranga
-            if (_volRat >= 3.0 && _wickPct >= 0.50) {
-              const _dir = (_cl < _o) ? "LONG sweep (bull trap)" : "SHORT sweep (bear trap)";
-              _sweepCandle = { volRat: _volRat.toFixed(1), wickPct: (_wickPct*100).toFixed(0), dir: _dir };
-              break;
-            }
-          }
-          if (_sweepCandle) {
-            const _until = Date.now() + 6 * 3600 * 1000;
-            writeFileSync(_sweepFile, JSON.stringify({
-              until: _until,
-              detected: new Date().toISOString(),
-              volRat: _sweepCandle.volRat,
-              wickPct: _sweepCandle.wickPct,
-              dir: _sweepCandle.dir,
-            }));
-            console.log(`  🛡️  [SWEEP] BTC sweep candle! Vol ${_sweepCandle.volRat}×avg, wick ${_sweepCandle.wickPct}% — ${_sweepCandle.dir} → pauza 6h`);
-            await tg(`🛡️ <b>MM SWEEP DETEKTIRAN</b>\n📊 BTC sweep candle (15m)\n💥 Vol: ${_sweepCandle.volRat}× prosjeka | Wick: ${_sweepCandle.wickPct}% ranga\n📍 ${_sweepCandle.dir}\n⏸️ Novi ulazi pauzirani 6h\n▶️ Nastavak: ${new Date(_until).toISOString().slice(0,16)} UTC`);
-            continue;
-          } else {
-            // Log najjače svjećice za monitoring
-            const _maxVol = Math.max(..._recent6.map(c => parseFloat(c[5])));
-            console.log(`  🌊 [SWEEP] BTC 90min — max vol ${(_maxVol/_avg20).toFixed(1)}×avg (prag: 3×) — OK`);
-          }
-        }
-      } catch (e) {
-        console.log(`  ⚠️  [SWEEP] Greška pri dohvatu BTC klines: ${e.message}`);
-      }
-    }
+    // SWEEP detektor uklonjen — backtest pokazao da 6h blok smanjuje P&L i WR
+    // (112t/60.7%/+$870 s blokom vs 119t/61.3%/+$953 bez bloka)
 
     let _newEntriesThisScan = 0;  // Reset po portfoliju, ne dopuštamo simultano previše ulaza
     const _scanLogEntries = [];  // skuplja log entries za ovaj scan ciklus

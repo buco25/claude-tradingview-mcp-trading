@@ -6,7 +6,7 @@
 import "dotenv/config";
 import http from "http";
 import { readFileSync, writeFileSync, existsSync } from "fs";
-import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
+import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll, softExitMonitor,
   getAllFundingRates, getDailyPnlExport, getSymbolStats, getOIForSymbols,
   getFearGreed, getBtcDominance, getDxyData, getConsecutiveLossCount,
   getSessionInfo, calcAtrTrend, getSp500Data, calcSymbolCorrelation,
@@ -5087,12 +5087,17 @@ server.listen(PORT, () => {
   }, 60 * 1000);
 
   // ─── BE-STOP fast monitor — svake 30 sekundi ──────────────────────────────
-  // Reagira brzo na pozicije koje dođu na 50% TP-a i pomiče SL na break-even.
-  // Ne čeka 5-min run() ciklus — PEPE situacija se više ne smije ponoviti.
   setInterval(async () => {
     try { await checkBeStopAll(); }
     catch (e) { console.error("BE-STOP monitor greška:", e.message); }
   }, 30 * 1000);
+
+  // ─── Soft Exit Monitor — svake 15 sekundi ─────────────────────────────────
+  // Prati SL i TP lokalno — nema ordere na Bitgetu, MM ne vidi razine.
+  setInterval(async () => {
+    try { await softExitMonitor(); }
+    catch (e) { console.error("Soft exit monitor greška:", e.message); }
+  }, 15 * 1000);
 
   // ─── AMC background fetch — odmah pri startu, pa svakih 30 min ─────────────
   // fetchAmcData() puni _amcCache; amcSqueezeMonitor() šalje Telegram ako treba

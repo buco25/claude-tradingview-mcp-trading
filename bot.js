@@ -3260,69 +3260,29 @@ const BE_TRIGGER_PCT = 50;   // % TP-a koji mora biti dostignut
 const BE_BUFFER_PCT  = 0.2;  // % iznad/ispod entry za SL (pokrije fees)
 
 async function moveSLtoBreakEven(pos) {
-  if (pos.beMoved) return;  // već pomaknuto
-  if (PAPER_TRADING) return;
+  if (pos.beMoved) return false;
+  if (PAPER_TRADING) return false;
 
-  const { symbol, side, entryPrice, slPct, tpPct } = pos;
-  const holdSide = side === "LONG" ? "long" : "short";
-
-  // Novi SL: entry ± buffer
-  // LONG:  SL malo IZNAD entry (ako cijena padne nazad na entry → izlaz s malim dobitkom)
-  // SHORT: SL malo IZNAD entry (ako cijena poraste nazad na entry → izlaz s malim gubitkom)
-  // Za SHORT, SL mora biti IZNAD trenutne cijene koja je ispod entry-ja (jer je u profitu)
-  // Dakle i LONG i SHORT: newSL = entry * (1 + buffer%) — IZNAD entry
-  // Razlika: za LONG to je dobitak, za SHORT je to minimalni gubitak (bolje od -2%)
+  const { symbol, side, entryPrice } = pos;
+  // Novi SL: entry + buffer (LONG: dobitak pri povratku, SHORT: minimalni gubitak)
   const newSlPrice = entryPrice * (1 + BE_BUFFER_PCT / 100);
 
-  try {
-    // Dohvati pending TPSL ordere da pronađemo orderId SL-a
-    const ts   = Date.now().toString();
-    const path = `/api/v2/mix/order/orders-plan-pending?symbol=${symbol}&productType=USDT-FUTURES&planType=pos_loss`;
-    const sign = signBitGet(ts, "GET", path);
-    const r    = await fetch(`${BITGET.baseUrl}${path}`, {
-      headers: {
-        "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": sign,
-        "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET.passphrase,
-        "Content-Type": "application/json",
-      },
-    });
-    const d = await r.json();
-    const orders = (d.data?.entrustedList || []).filter(o => o.holdSide === holdSide);
+  // Soft SL — samo ažuriraj lokalno, nema Bitget nalog
+  console.log(`  🔒 [BE-STOP] ${symbol} ${side} — soft SL pomaknut na ${fmtPrice(newSlPrice, symbol)} (+${BE_BUFFER_PCT}% od entry ${fmtPrice(entryPrice)})`);
+  await tg(`🔒 <b>BE-STOP [ULTRA]</b> ${symbol} ${side}\nSoft SL pomaknut na entry+${BE_BUFFER_PCT}%: ${fmtPrice(newSlPrice, symbol)}\nProfit zagarantiran pri povratku na entry.`);
 
-    if (orders.length > 0) {
-      // Modificiraj postojeći SL order
-      const orderId = orders[0].orderId;
-      const res = await bitgetPost("/api/v2/mix/order/modify-tpsl-order", {
-        symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
-        orderId, triggerPrice: fmtPrice(newSlPrice, symbol),
-      });
-      if (res.code === "00000") {
-        console.log(`  🔒 [BE-STOP] ${symbol} ${side} — SL pomaknut na ${fmtPrice(newSlPrice, symbol)} (+${BE_BUFFER_PCT}% od entry ${fmtPrice(entryPrice)})`);
-        await tg(`🔒 <b>BE-STOP [ULTRA]</b> ${symbol} ${side}\nSL pomaknut na entry+${BE_BUFFER_PCT}%: ${fmtPrice(newSlPrice, symbol)}\nProfit zagarantiran pri povratku na entry.`);
-      } else {
-        // Fallback: postavi novi SL direktno
-        await bitgetPost("/api/v2/mix/order/place-tpsl-order", {
-          symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
-          planType: "pos_loss", triggerPrice: fmtPrice(newSlPrice, symbol),
-          triggerType: "mark_price", holdSide,
-        });
-        console.log(`  🔒 [BE-STOP] ${symbol} ${side} — novi SL na ${fmtPrice(newSlPrice, symbol)} (fallback)`);
-      }
-    } else {
-      // Nema pending SL — postavi novi
-      await bitgetPost("/api/v2/mix/order/place-tpsl-order", {
-        symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
-        planType: "pos_loss", triggerPrice: fmtPrice(newSlPrice, symbol),
-        triggerType: "mark_price", holdSide,
-      });
-      console.log(`  🔒 [BE-STOP] ${symbol} ${side} — SL postavljen na ${fmtPrice(newSlPrice, symbol)}`);
+  // Ažuriraj pos.sl u JSON-u
+  for (const pid of PORTFOLIO_IDS) {
+    const allPos = loadPositions(pid);
+    const idx = allPos.findIndex(p => p.symbol === symbol && p.side === side);
+    if (idx >= 0) {
+      allPos[idx].sl     = newSlPrice;
+      allPos[idx].beMoved = true;
+      savePositions(pid, allPos);
+      return true;
     }
-
-    return true;
-  } catch(e) {
-    console.log(`  ⚠️  [BE-STOP] ${symbol} greška: ${e.message}`);
-    return false;
   }
+  return true;
 }
 
 // ─── 6. Partial TP — zatvori 50% pozicije kad je 50% TP puta dostignut ──────────
@@ -3392,6 +3352,77 @@ export async function checkBeStopAll() {
       }
     } catch(e) {
       console.log(`  ⚠️  [BE-STOP 30s] ${pid} greška: ${e.message}`);
+    }
+  }
+}
+
+// ─── Soft Exit Monitor — pozivati svakih 15s iz dashboard.js ─────────────────
+// Prati live cijenu za sve otvorene pozicije i zatvara tržišnim nalogom
+// kad cijena dostigne soft SL ili soft TP. Nema Bitget SL/TP ordere.
+export async function softExitMonitor() {
+  if (PAPER_TRADING) return;
+  for (const pid of PORTFOLIO_IDS) {
+    try {
+      const pDef = buildPortfolios(JSON.parse(readFileSync("rules.json", "utf8")))[pid];
+      if (!pDef?.live) continue;
+
+      const positions = loadPositions(pid);
+      if (!positions.length) continue;
+
+      const symbols = [...new Set(positions.map(p => p.symbol))];
+      const prices  = await fetchLivePrices(symbols);
+
+      for (const pos of positions) {
+        const liveP = prices[pos.symbol];
+        if (!liveP || !pos.sl || !pos.tp) continue;
+
+        const slHit = pos.side === "LONG" ? liveP <= pos.sl : liveP >= pos.sl;
+        const tpHit = pos.side === "LONG" ? liveP >= pos.tp : liveP <= pos.tp;
+
+        if (!slHit && !tpHit) continue;
+
+        const reason = slHit ? "SL" : "TP";
+        const level  = slHit ? pos.sl : pos.tp;
+        console.log(`  ${slHit ? "🛑" : "🎯"} [SOFT ${reason}] ${pos.symbol} ${pos.side} — cijena ${fmtPrice(liveP)} ${slHit ? "≤" : "≥"} ${reason} ${fmtPrice(level)} → zatvaramo`);
+
+        try {
+          const closeSide = pos.side === "LONG" ? "sell" : "buy";
+          const qty = (pos.quantity ?? (pos.totalUSD / pos.entryPrice)).toFixed(4);
+          const closeRes = await bitgetPost("/api/v2/mix/order/place-order", {
+            symbol: pos.symbol, productType: "USDT-FUTURES",
+            marginMode: "isolated", marginCoin: "USDT",
+            side: closeSide, tradeSide: "close",
+            orderType: "market", size: qty,
+          });
+          if (closeRes.code !== "00000") throw new Error(`${closeRes.code} ${closeRes.msg}`);
+
+          const pnl = pos.side === "LONG"
+            ? (liveP - pos.entryPrice) * parseFloat(qty)
+            : (pos.entryPrice - liveP) * parseFloat(qty);
+
+          // Ukloni poziciju iz trackinga
+          const allPos = loadPositions(pid);
+          savePositions(pid, allPos.filter(p => !(p.symbol === pos.symbol && p.side === pos.side)));
+
+          if (slHit) {
+            await tg(`🛑 <b>SOFT SL [ULTRA]</b> ${pos.symbol} ${pos.side}\nCijena: ${fmtPrice(liveP)} | SL: ${fmtPrice(pos.sl)}\nP&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}\n(Razina nije bila vidljiva na Bitgetu)`);
+            symbolSlCooldown.set(pos.symbol, Date.now());
+            saveSlCooldown();
+            await recordSymbolSl(pid, pos.symbol);
+            await checkAndRemoveSymbol(pid, pos.symbol);
+            if (pos.sigMask != null) recordSignalOutcome(pos.sigMask, false);
+            recordSymbolOutcome(pos.symbol, false);
+          } else {
+            await tg(`🎯 <b>SOFT TP [ULTRA]</b> ${pos.symbol} ${pos.side}\nCijena: ${fmtPrice(liveP)} | TP: ${fmtPrice(pos.tp)}\nP&L: +$${pnl.toFixed(2)}\n(Razina nije bila vidljiva na Bitgetu)`);
+            if (pos.sigMask != null) recordSignalOutcome(pos.sigMask, true);
+            recordSymbolOutcome(pos.symbol, true);
+          }
+        } catch (e) {
+          console.log(`  ❌ [SOFT ${reason}] ${pos.symbol} close greška: ${e.message}`);
+        }
+      }
+    } catch (e) {
+      console.log(`  ⚠️  [softExitMonitor] ${pid} greška: ${e.message}`);
     }
   }
 }
@@ -3556,75 +3587,12 @@ async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp, slPct, tpP
     ? fillPrice * (1 + _tpPct / 100)
     : fillPrice * (1 - _tpPct / 100);
 
-  // 1) Hard SL — ghost stop na BitGetu (0.5% dalje od pravog SL → teže za stop hunt)
-  // Pravi SL se čuva u pos.sl i prati ga bot svake minute (softSL u checkPortfolioPositions)
-  // BitGet ghost SL = emergency safety net ako bot padne (malo lošija egzekucija za 0.5%)
-  const ghostSlFromFill = side === "LONG"
-    ? slFromFill * (1 - GHOST_STOP_BUFFER)  // LONG: ghost je 0.5% NIŽE od pravog SL
-    : slFromFill * (1 + GHOST_STOP_BUFFER); // SHORT: ghost je 0.5% VIŠE od pravog SL
-  let slOk = false;
-  try {
-    const slRes = await bitgetPost("/api/v2/mix/order/place-tpsl-order", {
-      symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
-      planType: "pos_loss",
-      triggerPrice: fmtPrice(ghostSlFromFill, symbol),
-      triggerType: "mark_price", holdSide,
-    });
-    if (slRes.code === "00000") {
-      slOk = true;
-      console.log(`  🛡️  Ghost SL @ ${fmtPrice(ghostSlFromFill, symbol)} (pravi SL: ${fmtPrice(slFromFill, symbol)}) OK`);
-    } else {
-      console.log(`  🚨 Hard SL FAIL: code=${slRes.code} ${slRes.msg} — zatvaramo poziciju radi sigurnosti!`);
-    }
-  } catch (e) {
-    console.log(`  🚨 Hard SL greška: ${e.message} — zatvaramo poziciju radi sigurnosti!`);
-  }
+  // Soft SL/TP — NE postavljamo ordere na Bitgetu (MM ne vidi razine)
+  // Bot prati cijenu svakih 15s i zatvara tržišnim nalogom kad SL/TP bude dostignut.
+  // SL i TP razine čuvamo u pos.sl / pos.tp za softExitMonitor.
+  console.log(`  🛡️  Soft SL @ ${fmtPrice(slFromFill, symbol)} | Soft TP @ ${fmtPrice(tpFromFill, symbol)} (praćeno lokalno, nije na Bitgetu)`);
 
-  // Ako SL nije postavljen → zatvori poziciju odmah (ne možemo riskirati bez zaštite)
-  if (!slOk) {
-    try {
-      await bitgetPost("/api/v2/mix/order/place-order", {
-        symbol, productType: "USDT-FUTURES", marginMode: "isolated", marginCoin: "USDT",
-        side: holdSide === "long" ? "sell" : "buy", tradeSide: "close",
-        orderType: "market", size: quantity,
-      });
-      console.log(`  🔴 Pozicija ${symbol} zatvorena jer SL nije mogao biti postavljen`);
-      await tg(`🚨 <b>SL FAIL — ZATVORENO</b> ${symbol}\nNismo mogli postaviti SL → pozicija zatvorena radi sigurnosti!`);
-    } catch (e2) {
-      console.log(`  ❌ Emergency close fail: ${e2.message}`);
-    }
-    return { orderId, fillPrice, actualLeverage, slFailed: true };
-  }
-
-  // 2) Trailing stop — aktivira se na TP razini, zatim prati cijenu odozgo za SL%
-  //    Kada cijena dostigne tpFromFill, trailing stop se aktivira i prati peak - slPct%
-  //    Npr: entry $100, TP=$102.5, SL trail=1.5% → ako cijena ide na $105 → stop na $103.46
-  try {
-    const trailCallbackRatio = String((_slPct / 100).toFixed(4)); // npr "0.0150"
-    const trailRes = await bitgetPost("/api/v2/mix/order/place-tpsl-order", {
-      symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
-      planType: "track_stop",
-      triggerPrice: fmtPrice(tpFromFill, symbol),  // aktivira se kad dosegne TP
-      callbackRatio: trailCallbackRatio,             // trail za SL% od vrha
-      holdSide,
-    });
-    if (trailRes.code === "00000") {
-      console.log(`  🎯 Trailing stop: aktivacija @ ${fmtPrice(tpFromFill, symbol)}, trail ${_slPct}% OK`);
-    } else {
-      // Fallback: postavi fiksni TP ako trailing nije podržan
-      console.log(`  ⚠️  Trailing stop fail (${trailRes.code} ${trailRes.msg}) — fallback na fiksni TP`);
-      await bitgetPost("/api/v2/mix/order/place-tpsl-order", {
-        symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
-        planType: "pos_profit",
-        triggerPrice: fmtPrice(tpFromFill, symbol),
-        triggerType: "mark_price", holdSide,
-      });
-    }
-  } catch (e) {
-    console.log(`  ⚠️  Trailing stop greška: ${e.message}`);
-  }
-
-  return { orderId, fillPrice, actualLeverage };
+  return { orderId, fillPrice, actualLeverage, slFromFill, tpFromFill };
 }
 
 // Zatvori live poziciju na BitGetu — koristi close-positions (flash close) endpoint
@@ -3732,38 +3700,17 @@ export async function closeBitGetExcess(pid, target = MAX_OPEN_PER_PORTFOLIO) {
 async function updateTrailSL(pos, newSlPrice) {
   if (PAPER_TRADING) return false;
   const { symbol, side } = pos;
-  const holdSide = side === "LONG" ? "long" : "short";
-  // Ghost buffer: trail SL na BitGetu je 0.5% dalje (bot prati pravi SL u pos.sl)
-  const ghostTrailSl = side === "LONG"
-    ? newSlPrice * (1 - GHOST_STOP_BUFFER)
-    : newSlPrice * (1 + GHOST_STOP_BUFFER);
-  const slStr = fmtPrice(ghostTrailSl, symbol);
-  try {
-    const ts   = Date.now().toString();
-    const path = `/api/v2/mix/order/orders-plan-pending?symbol=${symbol}&productType=USDT-FUTURES&planType=pos_loss`;
-    const sign = signBitGet(ts, "GET", path);
-    const r    = await fetch(`${BITGET.baseUrl}${path}`, {
-      headers: { "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": sign,
-        "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET.passphrase, "Content-Type": "application/json" },
-    });
-    const d = await r.json();
-    const orders = (d.data?.entrustedList || []).filter(o => o.holdSide === holdSide);
-    if (orders.length > 0) {
-      await bitgetPost("/api/v2/mix/order/modify-tpsl-order", {
-        symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
-        orderId: orders[0].orderId, triggerPrice: slStr,
-      });
-    } else {
-      await bitgetPost("/api/v2/mix/order/place-tpsl-order", {
-        symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
-        planType: "pos_loss", triggerPrice: slStr, triggerType: "mark_price", holdSide,
-      });
+  // Soft trail SL — samo ažuriraj lokalno u JSON-u, nema Bitget nalog
+  for (const pid of PORTFOLIO_IDS) {
+    const allPos = loadPositions(pid);
+    const idx = allPos.findIndex(p => p.symbol === symbol && p.side === side);
+    if (idx >= 0) {
+      allPos[idx].sl = newSlPrice;
+      savePositions(pid, allPos);
+      return true;
     }
-    return true;
-  } catch (e) {
-    console.log(`  ⚠️  [TRAIL] updateTrailSL failed ${symbol}: ${e.message}`);
-    return false;
   }
+  return true;
 }
 
 // ─── Cancel TP nalog na BitGetu (koristi se kad trail preuzima izlaz) ─────────
@@ -4981,8 +4928,12 @@ export async function run() {
             const order = await placeBitGetOrder(symbol, signal, tradeSize, price, sl, tp, slPct, tpPct, symSltp.leverage ?? null);
             const usedLev    = order?.actualLeverage || LEVERAGE;
             const usedMargin = tradeSize / usedLev;
-            entry.orderId = order?.orderId || orderId;
-            entry.margin  = usedMargin;
+            entry.orderId    = order?.orderId || orderId;
+            entry.margin     = usedMargin;
+            // Koristi SL/TP izračunate od stvarne fill cijene (ne signal cijene)
+            if (order?.slFromFill) entry.sl = order.slFromFill;
+            if (order?.tpFromFill) entry.tp = order.tpFromFill;
+            if (order?.fillPrice)  entry.entryPrice = order.fillPrice;
             addPosition(pid, entry);
             writeEntryCsv(pid, entry);
             _newEntriesThisScan++;

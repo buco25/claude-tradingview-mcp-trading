@@ -1090,8 +1090,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       ${(() => {
         const allSyms = rules.all_symbols || [];
         const watchlist = rules.watchlist_synapse_t || [];
-        const suspended = allSyms.filter(s => !watchlist.includes(s) &&
-          !["ORDIUSDT","WLDUSDT","TRUMPUSDT","AVAXUSDT","AAVEUSDT"].includes(s));
+        const suspended = allSyms.filter(s => !watchlist.includes(s));
         if (!suspended.length) return "";
         return `<div class="section-label" style="color:#dc2626;margin-top:14px">🚫 Suspendirani coinovi (5+ uzastopnih gubitaka)</div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">

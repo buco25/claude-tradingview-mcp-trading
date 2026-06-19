@@ -1421,6 +1421,15 @@ async function fetchCandles(symbol, interval = TIMEFRAME, limit = 250) {
   }));
 }
 
+async function fetchKlines(symbol, interval = TIMEFRAME, limit = 250) {
+  const url = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=${interval}&limit=${limit}`;
+  const res  = await fetch(url);
+  if (!res.ok) throw new Error(`BitGet HTTP ${res.status}`);
+  const json = await res.json();
+  if (json.code !== "00000") throw new Error(`BitGet: ${json.msg}`);
+  return json.data; // raw arrays: [time, open, high, low, close, volume, ...]
+}
+
 // ─── Indikatori ────────────────────────────────────────────────────────────────
 
 function calcEMA(closes, period) {

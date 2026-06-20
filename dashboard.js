@@ -2736,10 +2736,10 @@ async function loadSweepStatus() {
         const col = v ===  1 ? '#059669' : v === -1 ? '#dc2626' : '#4b5563';
         const bdr = v ===  1 ? '1px solid #00c48c44' : v === -1 ? '1px solid #ff4d4d44' : '1px solid #374151';
         const icon = v === 1 ? '▲ HH+HL' : v === -1 ? '▼ LH+LL' : '· NEUT';
-        return `<span title="${label} MSS: ${icon}" style="display:inline-flex;flex-direction:column;align-items:center;background:${bg};border:${bdr};border-radius:6px;padding:4px 10px;gap:2px">
-          <span style="font-size:11px;font-weight:700;color:#9ca3af">${label}</span>
-          <span style="font-size:11px;font-weight:800;color:${col}">${icon}</span>
-        </span>`;
+        return '<span title="' + label + ' MSS: ' + icon + '" style="display:inline-flex;flex-direction:column;align-items:center;background:' + bg + ';border:' + bdr + ';border-radius:6px;padding:4px 10px;gap:2px">'
+          + '<span style="font-size:11px;font-weight:700;color:#9ca3af">' + label + '</span>'
+          + '<span style="font-size:11px;font-weight:800;color:' + col + '">' + icon + '</span>'
+          + '</span>';
       }).join('');
     }
   } catch(e) {

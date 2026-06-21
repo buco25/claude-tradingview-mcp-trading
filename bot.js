@@ -56,7 +56,7 @@ const PARTIAL_CLOSE_PCT  = 50;   // % pozicije koji se zatvara na TP
 
 // ─── ULTRA strategija — zaštitni parametri ────────────────────────────────────
 const LONG_ONLY      = false;         // SHORT dozvoljeni kada BTC regime BEAR/NEUTRAL
-const ADX_MIN        = 22;            // ADX prag — bazni (dinamički raste ako WR pada)
+const ADX_MIN        = 20;            // ADX prag — bazni (dinamički raste ako WR pada)
 const SL_COOLDOWN_MS = 4 * 60 * 60 * 1000;  // 4h cooldown po simbolu nakon SL-a
 
 // ─── Trailing stop — aktivira se nakon dovoljnog profita ─────────────────────
@@ -138,7 +138,7 @@ function saveSlCooldown() {
 
 // ─── 1. DINAMIČKI ADX — raste kad je WR loš ──────────────────────────────────
 // Čita zadnjih 10 trejdova iz CSV-a i računa trenutni WR.
-// WR < 35% → ADX +3 (25) | WR < 25% → ADX +5 (27) + pauza 2h | baza ADX_MIN=22
+// WR < 35% → ADX +3 (23) | WR < 25% → ADX +5 (25) + pauza 2h | baza ADX_MIN=20
 const DYN_ADX_LOOKBACK  = 10;   // zadnjih N trejdova za WR procjenu
 const DYN_ADX_BOOST_1   =  3;   // +3 kad WR < 35%  → ADX 25
 const DYN_ADX_BOOST_2   =  5;   // +5 kad WR < 25%  → ADX 27
@@ -1708,7 +1708,7 @@ function analyzeSynapse7(candles, cfg) {
 
 // ─── SYNAPSE-T: SYNAPSE-7 + obvezan ADX trend filter + minSig 4/5 ─────────────
 function analyzeSynapseT(candles, cfg) {
-  const { minSig = 4, adxMin = 22 } = cfg;
+  const { minSig = 4, adxMin = 20 } = cfg;
 
   // Obvezan pre-filter: ADX mora biti > adxMin (trend, ne konsolidacija)
   const closes = candles.map(c => c.close);
@@ -2228,8 +2228,11 @@ function analyzeUltra(candles, cfg) {
     && _prevClose > vwapVal    // ali nije prešla VWAP
     && _currGreen;             // ova zelena = odbijanje → LONG
 
-  const _vwapLongOk  = _vwapCrossUp   || _vwapRejectLong;
-  const _vwapShortOk = _vwapCrossDown || _vwapRejectShort;
+  // 3. Proximity fallback: cijena unutar ±0.5% od VWAP = na VWAP razini, ok za ulaz
+  const _vwapProximity = vwapVal && Math.abs(price - vwapVal) / vwapVal <= 0.005;
+
+  const _vwapLongOk  = _vwapCrossUp   || _vwapRejectLong  || _vwapProximity;
+  const _vwapShortOk = _vwapCrossDown || _vwapRejectShort || _vwapProximity;
 
   const _bonusBullTag = [
     _premiumBonusBull   ? "CVD+E145" : "",

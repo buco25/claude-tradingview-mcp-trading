@@ -2961,19 +2961,20 @@ async function checkPortfolioPositions(pid) {
         if (isLivePortfolio && pos.sl && !pos.trailActive && !pos.partialClosed) {
           const softSlHit = pos.side === "LONG" ? liveP <= pos.sl : liveP >= pos.sl;
           if (softSlHit) {
-            console.log(`  🛑 [SOFT SL] ${pos.symbol} ${pos.side} — cijena ${fmtPrice(liveP)} ≤ SL ${fmtPrice(pos.sl)} → tržišni izlaz (ghost bypass)`);
+            console.log(`  🛑 [SOFT SL] ${pos.symbol} ${pos.side} — cijena ${fmtPrice(liveP)} ≤ SL ${fmtPrice(pos.sl)} → tržišni izlaz`);
             try {
               const hSide = pos.side === "LONG" ? "long" : "short";
-              await bitgetPost("/api/v2/mix/order/place-order", {
+              const closeR = await bitgetPost("/api/v2/mix/order/place-order", {
                 symbol: pos.symbol, productType: "USDT-FUTURES", marginMode: "isolated", marginCoin: "USDT",
-                side: hSide === "long" ? "sell" : "buy", tradeSide: "close",
+                side: hSide === "long" ? "sell" : "buy", tradeSide: "close", holdSide: hSide,
                 orderType: "market", size: String(qty.toFixed(4)),
               });
+              if (closeR.code !== "00000") throw new Error(`Bitget: ${closeR.code} ${closeR.msg}`);
               const pnl = pos.side === "LONG"
                 ? (liveP - pos.entryPrice) * qty
                 : (pos.entryPrice - liveP) * qty;
               writeExitCsv(pid, pos, liveP, "Soft SL — bot izlaz", pnl);
-              await tg(`🛑 [SOFT SL] ${pos.symbol} ${pos.side}\nBot zatvorio na pravom SL ${fmtPrice(pos.sl)}\nEgzekucija: ${fmtPrice(liveP)} | P&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}\n(Ghost SL na BitGet ${pos.side === "LONG" ? "-" : "+"}0.5% nije bio vidljiv algoritmima)`);
+              await tg(`🛑 [SOFT SL] ${pos.symbol} ${pos.side}\nBot zatvorio na SL ${fmtPrice(pos.sl)}\nEgzekucija: ${fmtPrice(liveP)} | P&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}`);
               symbolSlCooldown.set(pos.symbol, Date.now());
               saveSlCooldown();
               await recordSymbolSl(pid, pos.symbol);
@@ -2982,7 +2983,7 @@ async function checkPortfolioPositions(pid) {
               recordSymbolOutcome(pos.symbol, false);
               continue;
             } catch (e) {
-              console.log(`  ⚠️  [SOFT SL] Greška zatvaranja ${pos.symbol}: ${e.message} — ostavljamo, ghost SL na BitGet aktivan`);
+              console.log(`  ❌ [SOFT SL] Greška zatvaranja ${pos.symbol}: ${e.message} — pozicija ostaje otvorena`);
             }
           }
         }
@@ -3424,12 +3425,13 @@ export async function softExitMonitor() {
         console.log(`  ${slHit ? "🛑" : "🎯"} [SOFT ${reason}] ${pos.symbol} ${pos.side} — cijena ${fmtPrice(liveP)} ${slHit ? "≤" : "≥"} ${reason} ${fmtPrice(level)} → zatvaramo`);
 
         try {
+          const holdSide  = pos.side === "LONG" ? "long" : "short";
           const closeSide = pos.side === "LONG" ? "sell" : "buy";
           const qty = (pos.quantity ?? (pos.totalUSD / pos.entryPrice)).toFixed(4);
           const closeRes = await bitgetPost("/api/v2/mix/order/place-order", {
             symbol: pos.symbol, productType: "USDT-FUTURES",
             marginMode: "isolated", marginCoin: "USDT",
-            side: closeSide, tradeSide: "close",
+            side: closeSide, tradeSide: "close", holdSide,
             orderType: "market", size: qty,
           });
           if (closeRes.code !== "00000") throw new Error(`${closeRes.code} ${closeRes.msg}`);
@@ -3438,12 +3440,14 @@ export async function softExitMonitor() {
             ? (liveP - pos.entryPrice) * parseFloat(qty)
             : (pos.entryPrice - liveP) * parseFloat(qty);
 
-          // Ukloni poziciju iz trackinga
+          // Ukloni poziciju iz trackinga i zapisuj u CSV
           const allPos = loadPositions(pid);
           savePositions(pid, allPos.filter(p => !(p.symbol === pos.symbol && p.side === pos.side)));
+          const exitLabel = slHit ? "Soft SL — bot izlaz" : "Soft TP — bot izlaz";
+          writeExitCsv(pid, pos, liveP, exitLabel, pnl);
 
           if (slHit) {
-            await tg(`🛑 <b>SOFT SL [ULTRA]</b> ${pos.symbol} ${pos.side}\nCijena: ${fmtPrice(liveP)} | SL: ${fmtPrice(pos.sl)}\nP&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}\n(Razina nije bila vidljiva na Bitgetu)`);
+            await tg(`🛑 <b>SOFT SL [ULTRA]</b> ${pos.symbol} ${pos.side}\nCijena: ${fmtPrice(liveP)} | SL: ${fmtPrice(pos.sl)}\nP&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}`);
             symbolSlCooldown.set(pos.symbol, Date.now());
             saveSlCooldown();
             await recordSymbolSl(pid, pos.symbol);
@@ -3451,7 +3455,7 @@ export async function softExitMonitor() {
             if (pos.sigMask != null) recordSignalOutcome(pos.sigMask, false);
             recordSymbolOutcome(pos.symbol, false);
           } else {
-            await tg(`🎯 <b>SOFT TP [ULTRA]</b> ${pos.symbol} ${pos.side}\nCijena: ${fmtPrice(liveP)} | TP: ${fmtPrice(pos.tp)}\nP&L: +$${pnl.toFixed(2)}\n(Razina nije bila vidljiva na Bitgetu)`);
+            await tg(`🎯 <b>SOFT TP [ULTRA]</b> ${pos.symbol} ${pos.side}\nCijena: ${fmtPrice(liveP)} | TP: ${fmtPrice(pos.tp)}\nP&L: +$${pnl.toFixed(2)}`);
             if (pos.sigMask != null) recordSignalOutcome(pos.sigMask, true);
             recordSymbolOutcome(pos.symbol, true);
           }

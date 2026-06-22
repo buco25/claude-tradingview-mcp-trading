@@ -2550,7 +2550,8 @@ function applyTrail(pos, currentPrice) {
 async function fetchBitgetPositionSize(symbol, side) {
   try {
     const holdSide = side === "LONG" ? "long" : "short";
-    const path = `/api/v2/mix/position/single-position?symbol=${symbol}&productType=USDT-FUTURES&marginCoin=USDT`;
+    // Koristi all-position (single-position ne postoji u Standard/Classic API-ju)
+    const path = "/api/v2/mix/position/all-position?productType=USDT-FUTURES&marginCoin=USDT";
     const ts   = Date.now().toString();
     const sign = signBitGet(ts, "GET", path);
     const r    = await fetch(`${BITGET.baseUrl}${path}`, {
@@ -2563,8 +2564,8 @@ async function fetchBitgetPositionSize(symbol, side) {
     });
     const d = await r.json();
     if (d.code !== "00000") return null;
-    const pos = (d.data || []).find(p => p.holdSide === holdSide);
-    if (!pos || parseFloat(pos.total) <= 0) return null;
+    const pos = (d.data || []).find(p => p.symbol === symbol && p.holdSide === holdSide && parseFloat(p.total) > 0);
+    if (!pos) return null;
     return {
       total:     parseFloat(pos.total),
       available: parseFloat(pos.available ?? pos.total),

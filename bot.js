@@ -2963,10 +2963,10 @@ async function checkPortfolioPositions(pid) {
           if (softSlHit) {
             console.log(`  🛑 [SOFT SL] ${pos.symbol} ${pos.side} — cijena ${fmtPrice(liveP)} ≤ SL ${fmtPrice(pos.sl)} → tržišni izlaz`);
             try {
-              const hSide = pos.side === "LONG" ? "long" : "short";
+              const closeSide = pos.side === "LONG" ? "sell" : "buy";
               const closeR = await bitgetPost("/api/v2/mix/order/place-order", {
                 symbol: pos.symbol, productType: "USDT-FUTURES", marginMode: "isolated", marginCoin: "USDT",
-                side: hSide === "long" ? "sell" : "buy", tradeSide: "close", holdSide: hSide,
+                side: closeSide, tradeSide: "close",
                 orderType: "market", size: String(qty.toFixed(4)),
               });
               if (closeR.code !== "00000") throw new Error(`Bitget: ${closeR.code} ${closeR.msg}`);
@@ -3425,13 +3425,12 @@ export async function softExitMonitor() {
         console.log(`  ${slHit ? "🛑" : "🎯"} [SOFT ${reason}] ${pos.symbol} ${pos.side} — cijena ${fmtPrice(liveP)} ${slHit ? "≤" : "≥"} ${reason} ${fmtPrice(level)} → zatvaramo`);
 
         try {
-          const holdSide  = pos.side === "LONG" ? "long" : "short";
           const closeSide = pos.side === "LONG" ? "sell" : "buy";
           const qty = (pos.quantity ?? (pos.totalUSD / pos.entryPrice)).toFixed(4);
           const closeRes = await bitgetPost("/api/v2/mix/order/place-order", {
             symbol: pos.symbol, productType: "USDT-FUTURES",
             marginMode: "isolated", marginCoin: "USDT",
-            side: closeSide, tradeSide: "close", holdSide,
+            side: closeSide, tradeSide: "close",
             orderType: "market", size: qty,
           });
           if (closeRes.code !== "00000") throw new Error(`${closeRes.code} ${closeRes.msg}`);

@@ -5,136 +5,134 @@
     "synapse_t": "15m"
   },
   "default_timeframe": "1H",
-  "_sltp_note": "REBALANS 26.05.2026 — tješnji SL/TP za brži izlaz. Tier0=BTC SL1.5%/TP2.25%/52x, Tier1=ETH/SOL/XRP/LINK/ADA/DOGE SL2%/TP3%/41x, Tier2=NEAR/HYPE/SUI/SEI/APT/TAO SL2.5%/TP3.75%/34x, Tier3=JUP/ENA/INJ SL3%/TP4.5%/29x. 50% zatvara na TP, 50% trail. R:R 1:1.5 (normalno) ili 1:3 (jako tržište). Max 3 pozicije, bez pyramidinga.",
+  "_sltp_note": "REBALANS 22.06.2026 — R:R povećan na 1:2. Tier0=BTC SL1.5%/TP3%/52x, Tier1=ETH/SOL SL2%/TP4%/41x, Tier2=HYPE/SUI/SEI/TAO/AAVE SL2.5%/TP5%/25x, Tier3=JUP SL3%/TP6%/20x. 50% zatvara na TP, 50% trail. Max 3 pozicije, bez pyramidinga.",
   "symbol_sltp": {
     "BTCUSDT": {
       "slPct": 1.5,
-      "tpPct": 2.25,
+      "tpPct": 3.0,
       "tier": 0,
       "leverage": 52,
       "avgRange": "2.57%"
     },
     "ETHUSDT": {
       "slPct": 2.0,
-      "tpPct": 3.0,
+      "tpPct": 4.0,
       "tier": 1,
       "leverage": 41,
       "avgRange": "3.25%"
     },
     "SOLUSDT": {
       "slPct": 2.0,
-      "tpPct": 3.0,
+      "tpPct": 4.0,
       "tier": 1,
       "leverage": 41,
       "avgRange": "3.47%"
     },
     "XRPUSDT": {
       "slPct": 2.0,
-      "tpPct": 3.0,
+      "tpPct": 4.0,
       "tier": 1,
       "leverage": 41,
       "avgRange": "3.18%"
     },
     "LINKUSDT": {
       "slPct": 2.0,
-      "tpPct": 3.0,
+      "tpPct": 4.0,
       "tier": 1,
       "leverage": 41,
       "avgRange": "3.95%"
     },
     "ADAUSDT": {
       "slPct": 2.0,
-      "tpPct": 3.0,
+      "tpPct": 4.0,
       "tier": 1,
       "leverage": 41,
       "avgRange": "3.96%"
     },
     "DOGEUSDT": {
       "slPct": 2.0,
-      "tpPct": 3.0,
+      "tpPct": 4.0,
       "tier": 1,
       "leverage": 41,
       "avgRange": "4.31%"
     },
     "HYPEUSDT": {
       "slPct": 2.5,
-      "tpPct": 3.75,
+      "tpPct": 5.0,
       "tier": 2,
       "leverage": 25,
       "avgRange": "5.36%"
     },
     "SUIUSDT": {
       "slPct": 2.5,
-      "tpPct": 3.75,
+      "tpPct": 5.0,
       "tier": 2,
       "leverage": 25,
       "avgRange": "5.71%"
     },
     "SEIUSDT": {
       "slPct": 2.5,
-      "tpPct": 3.75,
+      "tpPct": 5.0,
       "tier": 2,
       "leverage": 25,
       "avgRange": "5.71%"
     },
     "TAOUSDT": {
       "slPct": 2.5,
-      "tpPct": 3.75,
+      "tpPct": 5.0,
       "tier": 2,
       "leverage": 25,
       "avgRange": "5.91%"
     },
     "JUPUSDT": {
       "slPct": 3.0,
-      "tpPct": 4.5,
+      "tpPct": 6.0,
       "tier": 3,
       "leverage": 20,
       "avgRange": "7.00%"
     },
     "PEPEUSDT": {
       "slPct": 2.0,
-      "tpPct": 3.0,
+      "tpPct": 4.0,
       "tier": 1,
       "leverage": 41,
       "avgRange": "4.2%"
     },
     "FETUSDT": {
       "slPct": 2.5,
-      "tpPct": 3.75,
+      "tpPct": 5.0,
       "tier": 2,
       "leverage": 25,
       "avgRange": "5.5%"
     },
     "AAVEUSDT": {
       "slPct": 2.5,
-      "tpPct": 3.75,
+      "tpPct": 5.0,
       "tier": 2,
       "leverage": 25,
       "avgRange": "5.3%"
     },
     "BNBUSDT": {
       "slPct": 1.5,
-      "tpPct": 2.25,
+      "tpPct": 3.0,
       "tier": 0,
       "leverage": 52,
       "avgRange": "2.8%"
     },
     "WLDUSDT": {
       "slPct": 3.0,
-      "tpPct": 4.5,
+      "tpPct": 6.0,
       "tier": 3,
       "leverage": 20,
       "avgRange": "7.5%"
     },
-    "TIAUSDT": { "slPct": 2.5, "tpPct": 3.5 },
-    "WIFUSDT": { "slPct": 2.5, "tpPct": 3.5 },
-    "ARBUSDT": { "slPct": 2.5, "tpPct": 3.5 },
-    "FETUSDT": { "slPct": 2.0, "tpPct": 3.0 },
-    "DOTUSDT": { "slPct": 2.0, "tpPct": 3.0 },
-    "AVAXUSDT": { "slPct": 2.0, "tpPct": 3.0 },
-    "BNBUSDT": { "slPct": 1.5, "tpPct": 2.5 },
-    "XAUUSDT": { "slPct": 1.5, "tpPct": 2.5 },
-    "XAGUSDT": { "slPct": 1.5, "tpPct": 2.5 }
+    "TIAUSDT": { "slPct": 2.5, "tpPct": 5.0 },
+    "WIFUSDT": { "slPct": 2.5, "tpPct": 5.0 },
+    "ARBUSDT": { "slPct": 2.5, "tpPct": 5.0 },
+    "DOTUSDT": { "slPct": 2.0, "tpPct": 4.0 },
+    "AVAXUSDT": { "slPct": 2.0, "tpPct": 4.0 },
+    "XAUUSDT": { "slPct": 1.5, "tpPct": 3.0 },
+    "XAGUSDT": { "slPct": 1.5, "tpPct": 3.0 }
   },
   "strategies": {
     "synapse_t": {
@@ -143,7 +141,7 @@
       "params": {
         "minSig": 4,
         "slPct": 2.0,
-        "tpPct": 3.0
+        "tpPct": 4.0
       }
     }
   },

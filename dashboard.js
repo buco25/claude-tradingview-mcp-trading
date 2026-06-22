@@ -1324,6 +1324,18 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     </div>
   </div>
 
+  <!-- ── Liquidity Sweep Risk Card ──────────────────────────────────────── -->
+  <div id="liq-risk-card" style="background:#1f2937;border:1px solid #374151;border-radius:12px;padding:16px 20px;margin-bottom:16px;transition:border-color .3s,box-shadow .3s">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#a78bfa">🎯 MM Likvidacijske Zone &amp; Sweep Risk</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span id="liq-risk-ts" style="font-size:10px;color:#4b5563">učitavam…</span>
+        <button onclick="loadLiqRisk()" style="background:#374151;border:none;color:#9ca3af;font-size:10px;padding:3px 8px;border-radius:4px;cursor:pointer">↻</button>
+      </div>
+    </div>
+    <div id="liq-risk-body" style="font-size:12px;color:#9ca3af">Dohvaćam podatke…</div>
+  </div>
+
   <!-- Open positions — na vrhu za brzi pregled -->
   ${positionsSections}
 
@@ -2749,6 +2761,117 @@ async function loadSweepStatus() {
 }
 loadSweepStatus();
 setInterval(loadSweepStatus, 60 * 1000);  // osvježi svaku minutu
+
+// ── Liquidity Sweep Risk ──────────────────────────────────────────────────────
+async function loadLiqRisk() {
+  const bodyEl = document.getElementById('liq-risk-body');
+  const tsEl   = document.getElementById('liq-risk-ts');
+  const cardEl = document.getElementById('liq-risk-card');
+  if (!bodyEl) return;
+  try {
+    const r = await fetch('/api/sweepRisk');
+    const d = await r.json();
+    if (tsEl) tsEl.textContent = new Date(d.ts).toLocaleTimeString('hr-HR', {hour:'2-digit',minute:'2-digit'});
+
+    let anyDanger = false, anyCaution = false;
+    let html = '';
+
+    for (const sym of d.results || []) {
+      if (sym.error) continue;
+      const name = sym.sym.replace('USDT','');
+      const price = sym.price;
+
+      // Bojanje po riziku pozicija
+      let symRisk = 'CLEAR';
+      if (sym.myPositions?.some(p => p.risk === 'DANGER'))   { symRisk = 'DANGER';  anyDanger  = true; }
+      else if (sym.myPositions?.some(p => p.risk === 'CAUTION')) { symRisk = 'CAUTION'; anyCaution = true; }
+
+      const riskColor  = symRisk === 'DANGER' ? '#dc2626' : symRisk === 'CAUTION' ? '#d97706' : '#059669';
+      const riskIcon   = symRisk === 'DANGER' ? '🔴' : symRisk === 'CAUTION' ? '🟡' : '🟢';
+      const borderCol  = symRisk === 'DANGER' ? '#dc2626' : symRisk === 'CAUTION' ? '#d97706' : '#374151';
+
+      html += '<div style="background:#111827;border:1px solid ' + borderCol + ';border-radius:8px;padding:12px;margin-bottom:10px">';
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
+      html += '<span style="font-weight:700;font-size:13px;color:#f3f4f6">' + riskIcon + ' ' + name + '</span>';
+      html += '<span style="font-size:11px;color:#9ca3af">Cijena: <b style="color:#f3f4f6">' + price.toLocaleString() + '</b></span>';
+      html += '</div>';
+
+      // Moje otvorene pozicije
+      if (sym.myPositions?.length) {
+        for (const pos of sym.myPositions) {
+          const pRiskCol = pos.risk === 'DANGER' ? '#dc2626' : pos.risk === 'CAUTION' ? '#d97706' : '#059669';
+          const slPct = (pos.slDistPct >= 0 ? '+' : '') + pos.slDistPct + '%';
+          const tpPct = (pos.tpDistPct >= 0 ? '+' : '') + pos.tpDistPct + '%';
+          html += '<div style="background:#1f2937;border-radius:6px;padding:8px 10px;margin-bottom:6px;border-left:3px solid ' + pRiskCol + '">';
+          html += '<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:11px">';
+          html += '<span style="color:' + (pos.side==='LONG'?'#059669':'#dc2626') + ';font-weight:700">' + pos.side + '</span>';
+          html += '<span style="color:#9ca3af">SL: <b style="color:#f3f4f6">' + (pos.sl||0).toLocaleString() + '</b> (' + slPct + ')</span>';
+          html += '<span style="color:#9ca3af">TP: <b style="color:#f3f4f6">' + (pos.tp||0).toLocaleString() + '</b> (' + tpPct + ')</span>';
+          if (pos.nearestDangerZone) {
+            html += '<span style="color:' + pRiskCol + ';font-weight:600">⚠ Najbliža zona: ' + pos.nearestDangerZone.price.toLocaleString() + ' (' + Math.abs(pos.nearestDangerZone.distPct) + '%)</span>';
+          }
+          html += '</div>';
+          if (pos.slNearZone) {
+            html += '<div style="margin-top:4px;font-size:11px;color:#f59e0b">⚡ OPASNO: tvoj SL (' + (pos.sl||0).toLocaleString() + ') je blizu likvidacijske zone ' + pos.slNearZone.src + ' @ ' + pos.slNearZone.price.toLocaleString() + ' — MM može pokupiti!</div>';
+          }
+          if (pos.zonesBetweenPriceAndSL?.length) {
+            const zones = pos.zonesBetweenPriceAndSL.map(z => z.price.toLocaleString() + ' (' + z.src + ')').join(', ');
+            html += '<div style="margin-top:4px;font-size:10px;color:#9ca3af">Zona između cijene i SL: ' + zones + '</div>';
+          }
+          html += '</div>';
+        }
+      } else {
+        html += '<div style="font-size:11px;color:#4b5563;font-style:italic">Nema otvorene pozicije</div>';
+      }
+
+      // Zbirni prikaz zona gore/dole
+      html += '<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">';
+      // Gore — SHORT SL clusteri
+      const above = sym.zonesAbove?.slice(0,3) || [];
+      if (above.length) {
+        html += '<div style="flex:1;min-width:140px">';
+        html += '<div style="font-size:9px;color:#6b7280;text-transform:uppercase;margin-bottom:3px">▲ Likvidnost GORE (SHORT SL)</div>';
+        above.forEach(z => {
+          const col = z.distPct < 1.5 ? '#f59e0b' : '#4b5563';
+          html += '<div style="font-size:10px;color:' + col + '">' + z.price.toLocaleString() + ' <span style="color:#6b7280">+' + z.distPct + '% ' + z.src + '</span></div>';
+        });
+        html += '</div>';
+      }
+      // Dole — LONG SL clusteri
+      const below = sym.zonesBelow?.slice(0,3) || [];
+      if (below.length) {
+        html += '<div style="flex:1;min-width:140px">';
+        html += '<div style="font-size:9px;color:#6b7280;text-transform:uppercase;margin-bottom:3px">▼ Likvidnost DOLE (LONG SL)</div>';
+        below.forEach(z => {
+          const col = Math.abs(z.distPct) < 1.5 ? '#f59e0b' : '#4b5563';
+          html += '<div style="font-size:10px;color:' + col + '">' + z.price.toLocaleString() + ' <span style="color:#6b7280">' + z.distPct + '% ' + z.src + '</span></div>';
+        });
+        html += '</div>';
+      }
+      html += '</div>';  // flex gore/dole
+
+      // PDH/PDL
+      if (sym.pdh || sym.pdl) {
+        html += '<div style="margin-top:6px;font-size:10px;color:#6b7280">PDH: <span style="color:#9ca3af">' + (sym.pdh||'–').toLocaleString() + '</span> &nbsp;|&nbsp; PDL: <span style="color:#9ca3af">' + (sym.pdl||'–').toLocaleString() + '</span></div>';
+      }
+
+      html += '</div>';  // card za simbol
+    }
+
+    bodyEl.innerHTML = html || '<div style="color:#6b7280">Nema podataka</div>';
+
+    // Boja ruba kartice
+    if (cardEl) {
+      if (anyDanger)   { cardEl.style.borderColor = '#dc2626'; cardEl.style.boxShadow = '0 0 12px rgba(220,38,38,.25)'; }
+      else if (anyCaution) { cardEl.style.borderColor = '#d97706'; cardEl.style.boxShadow = 'none'; }
+      else             { cardEl.style.borderColor = '#374151'; cardEl.style.boxShadow = 'none'; }
+    }
+  } catch(e) {
+    if (bodyEl) bodyEl.textContent = 'Greška: ' + e.message;
+  }
+}
+loadLiqRisk();
+setInterval(loadLiqRisk, 5 * 60 * 1000);  // osvježi svakih 5 min
 </script>
 
 <!-- ═══════════════════════════ SQUEEZE WATCHLIST PANEL ═══════════════════ -->
@@ -4268,6 +4391,147 @@ const server = http.createServer(async (req, res) => {
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ paused, remainMs, sweepState, btcVol, mss: mssResults }));
+    return;
+  }
+
+  // Sweep Risk — GET /api/sweepRisk
+  // Za svaki simbol: swing pivoti iz 4H, round numbers, PDH/PDL
+  // Uspoređuje s otvorenim pozicijama bota → flag DANGER/CAUTION/CLEAR
+  if (url.pathname === "/api/sweepRisk") {
+    const WATCH = ["BTCUSDT","ETHUSDT","SOLUSDT","TAOUSDT","AAVEUSDT"];
+    const PIVOT_WING = 5;  // koliko bara lijevo/desno za pivot
+    const ZONE_BUFFER = 0.004;  // ±0.4% — zona oko pivota = likvidacijski magnet
+
+    // Dohvati otvorene pozicije bota
+    let openPos = [];
+    try {
+      const posFile = `${DATA_DIR}/open_positions_synapse_t.json`;
+      if (existsSync(posFile)) openPos = JSON.parse(readFileSync(posFile, "utf8"));
+    } catch(_) {}
+
+    const symResults = await Promise.all(WATCH.map(async sym => {
+      try {
+        // 4H candles — 120 bara = 20 dana
+        const r4 = await fetch(
+          `https://api.bitget.com/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=4H&limit=120`,
+          { signal: AbortSignal.timeout(7000) }
+        );
+        if (!r4.ok) return { sym, error: "HTTP " + r4.status };
+        const j4 = await r4.json();
+        const c4 = (j4?.data ?? []).map(c => ({ t:+c[0], o:+c[1], h:+c[2], l:+c[3], cl:+c[4] }));
+        if (c4.length < PIVOT_WING * 2 + 2) return { sym, error: "premalo bara" };
+
+        const price = c4[c4.length - 1].cl;
+        // Swing pivoti
+        const pivotH = [], pivotL = [];
+        for (let i = PIVOT_WING; i < c4.length - PIVOT_WING; i++) {
+          let isH = true, isL = true;
+          for (let j = i - PIVOT_WING; j <= i + PIVOT_WING; j++) {
+            if (j === i) continue;
+            if (c4[j].h >= c4[i].h) isH = false;
+            if (c4[j].l <= c4[i].l) isL = false;
+          }
+          if (isH) pivotH.push({ price: c4[i].h, t: c4[i].t });
+          if (isL) pivotL.push({ price: c4[i].l, t: c4[i].t });
+        }
+
+        // PDH/PDL (prethodni dan — zadnji zatvoreni 1D)
+        let pdh = null, pdl = null;
+        try {
+          const r1d = await fetch(
+            `https://api.bitget.com/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=1D&limit=3`,
+            { signal: AbortSignal.timeout(5000) }
+          );
+          const j1d = await r1d.json();
+          const d1 = (j1d?.data ?? []);
+          if (d1.length >= 2) { pdh = +d1[1][2]; pdl = +d1[1][3]; }
+        } catch(_) {}
+
+        // Round numbers — ovisno o cijeni
+        const magnitude = Math.pow(10, Math.floor(Math.log10(price)) - 1);
+        const roundLevels = [];
+        for (let k = -8; k <= 8; k++) {
+          const rl = Math.round(price / magnitude + k) * magnitude;
+          if (Math.abs(rl - price) / price < 0.08) roundLevels.push(rl);
+        }
+
+        // Sve zone — above i below price
+        const zonesAbove = [], zonesBelow = [];
+        const addZone = (p, type, src) => {
+          if (!p || p <= 0) return;
+          const distPct = (p - price) / price * 100;
+          const zone = { price: +p.toFixed(4), distPct: +distPct.toFixed(2), type, src };
+          if (distPct > 0.1) zonesAbove.push(zone);
+          else if (distPct < -0.1) zonesBelow.push(zone);
+        };
+
+        // SHORT SL clusteri — iznad swing highova (iznad cijene)
+        pivotH.filter(p => p.price > price).forEach(p => addZone(p.price, "SHORT_SL", "SwingH"));
+        // LONG SL clusteri — ispod swing lowova
+        pivotL.filter(p => p.price < price).forEach(p => addZone(p.price, "LONG_SL", "SwingL"));
+        // PDH/PDL
+        if (pdh && pdh > price) addZone(pdh, "SHORT_SL", "PDH");
+        if (pdl && pdl < price) addZone(pdl, "LONG_SL", "PDL");
+        // Round numbers
+        roundLevels.filter(r => r > price * 1.001).forEach(r => addZone(r, "ROUND", "Round"));
+        roundLevels.filter(r => r < price * 0.999).forEach(r => addZone(r, "ROUND", "Round"));
+
+        // Sortiraj po udaljenosti (najbliže prvo)
+        zonesAbove.sort((a, b) => a.distPct - b.distPct);
+        zonesBelow.sort((a, b) => b.distPct - a.distPct);
+
+        // Provjeri otvorene pozicije za ovaj simbol
+        const myPositions = openPos.filter(p => (p.symbol || "").replace("/", "") === sym);
+        const posRisk = myPositions.map(pos => {
+          const side = pos.side;
+          const sl = pos.sl;
+          const tp = pos.tp;
+          const entry = pos.entryPrice;
+          const slDistPct = side === "LONG"
+            ? (sl - price) / price * 100
+            : (price - sl) / price * 100;
+          const tpDistPct = side === "LONG"
+            ? (tp - price) / price * 100
+            : (price - tp) / price * 100;
+
+          // Je li SL blizu neke zone (±ZONE_BUFFER)?
+          const allZones = [...zonesAbove, ...zonesBelow];
+          const slNearZone = allZones.find(z =>
+            Math.abs(z.price - sl) / sl <= ZONE_BUFFER
+          );
+          // Je li između trenutne cijene i SL-a neka opasna zona?
+          const zonesBetweenPriceAndSL = allZones.filter(z => {
+            if (side === "LONG") return z.price < price && z.price > sl;
+            return z.price > price && z.price < sl;
+          });
+          // Je li cijena već "u putu" prema likvidacijskoj zoni?
+          const nearestDangerZone = side === "LONG"
+            ? zonesBelow[0]  // ispod za LONG — tamo idu po SL
+            : zonesAbove[0]; // iznad za SHORT
+
+          const distToNearest = nearestDangerZone ? Math.abs(nearestDangerZone.distPct) : 99;
+          const risk = distToNearest < 0.8 ? "DANGER"
+                     : distToNearest < 2.0 ? "CAUTION"
+                     : "CLEAR";
+
+          return {
+            side, entry, sl, tp, slDistPct: +slDistPct.toFixed(2), tpDistPct: +tpDistPct.toFixed(2),
+            slNearZone: slNearZone || null, zonesBetweenPriceAndSL,
+            nearestDangerZone, distToNearest: +distToNearest.toFixed(2), risk,
+          };
+        });
+
+        return {
+          sym, price, pdh, pdl,
+          zonesAbove: zonesAbove.slice(0, 5),
+          zonesBelow: zonesBelow.slice(0, 5),
+          myPositions: posRisk,
+        };
+      } catch(e) { return { sym, error: e.message }; }
+    }));
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ results: symResults, ts: new Date().toISOString() }));
     return;
   }
 

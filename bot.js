@@ -2907,18 +2907,36 @@ async function checkPortfolioPositions(pid) {
           // Pozicija zatvorena na Bitgetu (SL/TP/likvidacija) — dohvati stvarni P&L
           const closed = await fetchBitgetClosedPnl(pos.symbol, pos);
 
-          // Ako fill fetch nije uspio — izračunaj P&L iz SL/TP cijene koju znamo
+          // Ako fill fetch nije uspio — pokušaj dohvatiti live cijenu kao fallback exit
           if (!closed) {
-            console.warn(`  ⚠️  [${pid}] ${pos.symbol} — fill fetch nije uspio, računam P&L iz SL/TP cijene`);
-            // Određujemo exit cijenu: SL ili TP (ovisno o smjeru pomaka)
-            const _fallbackExit = pos.sl || pos.entryPrice;
+            console.warn(`  ⚠️  [${pid}] ${pos.symbol} — fill fetch nije uspio, koristim live cijenu ili TP za procjenu`);
+            // Pokušaj dohvatiti live cijenu — bolje od fiksnog SL-a
+            let _fallbackExit = pos.entryPrice;
+            try {
+              const _liveMap = await fetchLivePrices([pos.symbol]);
+              const _live = _liveMap[pos.symbol];
+              if (_live) {
+                // Ako je live cijena bliža TP-u nego SL-u → vjerojatno TP pogođen
+                const distToSl = Math.abs(_live - pos.sl);
+                const distToTp = Math.abs(_live - pos.tp);
+                _fallbackExit = distToTp < distToSl ? pos.tp : _live;
+              }
+            } catch(_) {
+              // Ne možemo dohvatiti live — koristi TP kao optimistični fallback
+              // jer je pozicija već zatvorena (ne znamo kako)
+              _fallbackExit = pos.tp;
+            }
             const _fallbackQty  = pos.quantity ?? (pos.totalUSD / pos.entryPrice);
             const _fallbackPnl  = pos.side === "LONG"
               ? (_fallbackExit - pos.entryPrice) * _fallbackQty
               : (pos.entryPrice - _fallbackExit) * _fallbackQty;
             const _maxLoss = pos.margin ? pos.margin * 1.1 : pos.totalUSD * 0.02;
             const _pnl = Math.max(_fallbackPnl, -_maxLoss);
-            const _exitReason = _pnl >= 0 ? "TP/Trail" : "SL dostignut";
+            // Odredi razlog iz stvarnog smjera izlaza, ne samo predznaka P&L
+            const _priceDiff = pos.side === "LONG"
+              ? _fallbackExit - pos.entryPrice
+              : pos.entryPrice - _fallbackExit;
+            const _exitReason = _priceDiff > 0 ? "TP/Trail" : "SL dostignut";
             console.log(`  ${_pnl >= 0 ? "✅" : "❌"} [${pid}] ${pos.symbol} — fallback P&L: ${_pnl.toFixed(4)} @ ${fmtPrice(_fallbackExit)} (${_exitReason})`);
             writeExitCsv(pid, pos, _fallbackExit, _exitReason + " (est.)", _pnl);
             await tg(`${_pnl >= 0 ? "✅" : "❌"} [ULTRA] ${pos.symbol} ${pos.side}\nP&L: ${_pnl >= 0?"+":""}$${_pnl.toFixed(2)} | ${_exitReason} (procjena)\nUlaz: ${fmtPrice(pos.entryPrice)} → Izlaz: ${fmtPrice(_fallbackExit)}\n⚠️ Fill podaci nisu dohvaćeni — P&L je procjena`);

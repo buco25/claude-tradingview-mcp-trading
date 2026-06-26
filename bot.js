@@ -3483,6 +3483,15 @@ export async function softExitMonitor() {
         const liveP = prices[pos.symbol];
         if (!liveP || !pos.sl || !pos.tp) continue;
 
+        // Trail SL/TP — pomakni razine ako je cijena dovoljno u profitu
+        const trailMoved = applyTrail(pos, liveP);
+        if (trailMoved) {
+          savePositions(pid, loadPositions(pid).map(p =>
+            (p.symbol === pos.symbol && p.side === pos.side) ? pos : p
+          ));
+          console.log(`  🔁 [TRAIL] ${pos.symbol} ${pos.side} — SL→${fmtPrice(pos.sl)} TP→${fmtPrice(pos.tp)}`);
+        }
+
         const slHit = pos.side === "LONG" ? liveP <= pos.sl : liveP >= pos.sl;
         const tpHit = pos.side === "LONG" ? liveP >= pos.tp : liveP <= pos.tp;
 

@@ -3504,7 +3504,24 @@ export async function softExitMonitor() {
         // Dohvati pravu veličinu s Bitgeta — lokalna qty može biti pogrešna
         const bitPos = await fetchBitgetPositionSize(pos.symbol, pos.side);
         if (!bitPos) {
-          console.log(`  ⚠️  [SOFT ${reason}] ${pos.symbol} — pozicija ne postoji na Bitgetu, uklanjam lokalni tracking`);
+          // Pozicija zatvorena izvana (ručno / drugi bot) — dohvati pravi P&L i zapiši u CSV
+          console.log(`  ⚠️  [SOFT ${reason}] ${pos.symbol} — pozicija ne postoji na Bitgetu, dohvaćam P&L i zatvaramo tracking`);
+          const closed = await fetchBitgetClosedPnl(pos.symbol, pos).catch(() => null);
+          if (closed) {
+            const priceDiff = pos.side === "LONG" ? closed.exitPrice - pos.entryPrice : pos.entryPrice - closed.exitPrice;
+            const exitReason = priceDiff > 0 ? "TP/Ručno" : "SL/Ručno";
+            writeExitCsv(pid, pos, closed.exitPrice, exitReason, closed.realizedPnl);
+            await tg(`${closed.realizedPnl >= 0 ? "✅" : "❌"} [ULTRA] ${pos.symbol} ${pos.side} zatvoreno izvana\nP&L: ${closed.realizedPnl >= 0?"+":""}$${closed.realizedPnl.toFixed(2)} | ${exitReason}\nUlaz: ${fmtPrice(pos.entryPrice)} → Izlaz: ${fmtPrice(closed.exitPrice)}`);
+            if (pos.sigMask != null) recordSignalOutcome(pos.sigMask, closed.realizedPnl >= 0);
+            recordSymbolOutcome(pos.symbol, closed.realizedPnl >= 0);
+          } else {
+            // Fallback — procijeni iz live cijene
+            const _liveMap = await fetchLivePrices([pos.symbol]).catch(() => ({}));
+            const _live = _liveMap[pos.symbol] || pos.tp;
+            const _pnl = pos.side === "LONG" ? (_live - pos.entryPrice) * (pos.quantity ?? 1) : (pos.entryPrice - _live) * (pos.quantity ?? 1);
+            writeExitCsv(pid, pos, _live, "Zatvoreno izvana (est.)", _pnl);
+            await tg(`⚠️ [ULTRA] ${pos.symbol} ${pos.side} zatvoreno izvana\nP&L procjena: ${_pnl>=0?"+":""}$${_pnl.toFixed(2)}\nUlaz: ${fmtPrice(pos.entryPrice)} → Live: ${fmtPrice(_live)}`);
+          }
           const allPos = loadPositions(pid);
           savePositions(pid, allPos.filter(p => !(p.symbol === pos.symbol && p.side === pos.side)));
           continue;

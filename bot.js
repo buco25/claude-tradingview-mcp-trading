@@ -4981,7 +4981,8 @@ export async function run() {
         const startCap   = pDef.startCapital ?? START_CAPITAL;
         const equity     = getPortfolioEquity(pid, startCap);
 
-        const riskAmount = equity * (RISK_PCT / 100);
+        const _symRiskPct = rules.symbol_sltp?.[symbol]?.riskPct ?? RISK_PCT;
+        const riskAmount = equity * (_symRiskPct / 100);
         const tradeSize  = (riskAmount / (slPct / 100)) * (atrTrend?.sizeMult ?? 1) * (_oiSizeMult ?? 1) * (_vwapSizeMult ?? 1) * (_stableSizeMult ?? 1);
         const margin     = tradeSize / LEVERAGE;  // preliminarno — ažurira se nakon setupSymbol
 

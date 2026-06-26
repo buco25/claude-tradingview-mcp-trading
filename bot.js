@@ -3509,7 +3509,8 @@ export async function softExitMonitor() {
           savePositions(pid, allPos.filter(p => !(p.symbol === pos.symbol && p.side === pos.side)));
           continue;
         }
-        const qty      = bitPos.available.toFixed(4);
+        // Koristi total (ne available) — available može biti 0 ako postoji pending order
+        const qty      = (bitPos.total > 0 ? bitPos.total : bitPos.available).toFixed(4);
         const closeSide = pos.side === "LONG" ? "sell" : "buy";
         console.log(`  📐 [SOFT ${reason}] ${pos.symbol} — Bitget veličina: ${qty} (lokalna: ${(pos.quantity ?? "?").toString()})`);
 
@@ -3526,14 +3527,14 @@ export async function softExitMonitor() {
             if (closeRes.code !== "00000") throw new Error(`${closeRes.code} ${closeRes.msg}`);
             closed = true;
           } catch (e) {
-            console.log(`  ❌ [SOFT ${reason}] ${pos.symbol} pokušaj ${attempt}/3: ${e.message}`);
+            console.log(`  ❌ [SOFT ${reason}] ${pos.symbol} pokušaj ${attempt}/3: ${e.message} | qty=${qty}`);
             if (attempt < 3) await new Promise(r => setTimeout(r, 2000));
           }
         }
 
         if (!closed) {
           console.log(`  🚨 [SOFT ${reason}] ${pos.symbol} — svi pokušaji neuspješni, pozicija ostaje otvorena`);
-          await tg(`🚨 <b>SOFT ${reason} FAIL</b> ${pos.symbol} ${pos.side}\nNije moguće zatvoriti! Provjeri Bitget ručno.\nCijena: ${fmtPrice(liveP)} | ${reason}: ${fmtPrice(level)}`);
+          await tg(`🚨 <b>SOFT ${reason} FAIL</b> ${pos.symbol} ${pos.side}\nNije moguće zatvoriti! Provjeri Bitget ručno.\nCijena: ${fmtPrice(liveP)} | ${reason}: ${fmtPrice(level)} | qty: ${qty}`);
           continue;
         }
 

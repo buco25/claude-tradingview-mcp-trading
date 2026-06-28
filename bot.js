@@ -3492,6 +3492,43 @@ export async function softExitMonitor() {
           console.log(`  🔁 [TRAIL] ${pos.symbol} ${pos.side} — SL→${fmtPrice(pos.sl)} TP→${fmtPrice(pos.tp)}`);
         }
 
+        // Emergency close — ako gubitak > 85% margine (pre-likvidacija)
+        // Bez ovoga bot može propustiti SL i pozicija ide u likvidaciju (burst_loss)
+        const _unrealPnl = pos.side === "LONG"
+          ? (liveP - pos.entryPrice) * (pos.quantity ?? 1)
+          : (pos.entryPrice - liveP) * (pos.quantity ?? 1);
+        const _margin = pos.margin ?? (pos.totalUSD / (pos.leverage ?? 25));
+        const _lossRatio = _margin > 0 ? -_unrealPnl / _margin : 0;
+        if (_lossRatio > 0.85 && _unrealPnl < 0) {
+          console.log(`  🚨 [EMRG] ${pos.symbol} ${pos.side} — gubitak ${(_lossRatio*100).toFixed(0)}% margine, zatvaramo ODMAH (pre-likvidacija)`);
+          await tg(`🚨 <b>EMERGENCY CLOSE [ULTRA]</b> ${pos.symbol} ${pos.side}\nGubitak ${(_lossRatio*100).toFixed(0)}% margine — zatvaramo prije likvidacije!\nCijena: ${fmtPrice(liveP)} | Entry: ${fmtPrice(pos.entryPrice)} | P&L: $${_unrealPnl.toFixed(2)}`);
+          const bitPos = await fetchBitgetPositionSize(pos.symbol, pos.side);
+          if (bitPos) {
+            const qty = (bitPos.total > 0 ? bitPos.total : bitPos.available).toFixed(4);
+            const closeSide = pos.side === "LONG" ? "sell" : "buy";
+            for (let attempt = 1; attempt <= 3; attempt++) {
+              try {
+                const r = await bitgetPost("/api/v2/mix/order/place-order", {
+                  symbol: pos.symbol, productType: "USDT-FUTURES",
+                  marginMode: "isolated", marginCoin: "USDT",
+                  side: closeSide, tradeSide: "close",
+                  orderType: "market", size: qty,
+                });
+                if (r.code !== "00000") throw new Error(`${r.code} ${r.msg}`);
+                break;
+              } catch(e) {
+                if (attempt < 3) await new Promise(r => setTimeout(r, 1000));
+              }
+            }
+          }
+          const allPos = loadPositions(pid);
+          savePositions(pid, allPos.filter(p => !(p.symbol === pos.symbol && p.side === pos.side)));
+          writeExitCsv(pid, pos, liveP, "Emergency close (pre-likvidacija)", _unrealPnl);
+          if (pos.sigMask != null) recordSignalOutcome(pos.sigMask, false);
+          recordSymbolOutcome(pos.symbol, false);
+          continue;
+        }
+
         const slHit = pos.side === "LONG" ? liveP <= pos.sl : liveP >= pos.sl;
         const tpHit = pos.side === "LONG" ? liveP >= pos.tp : liveP <= pos.tp;
 

@@ -5467,6 +5467,15 @@ setInterval(async () => {
 server.listen(PORT, () => {
   console.log(`📊 Dashboard: http://localhost:${PORT}`);
   console.log(`⚙️  Bot scheduler aktivan (svake 5 min) | Daily report: 07:00 UTC`);
+
+  // Startup reconciliation — odmah provjeri sve pozicije pri pokretanju
+  // Sprječava likvidacije ako je bot bio down dok je cijena prošla SL
+  setTimeout(async () => {
+    console.log("🔍 [STARTUP] Provjera otvorenih pozicija...");
+    try { await softExitMonitor(); }
+    catch(e) { console.error("Startup softExit greška:", e.message); }
+  }, 3000);
+
   scheduledRun();
   setInterval(scheduledRun, 5 * 60 * 1000);
 

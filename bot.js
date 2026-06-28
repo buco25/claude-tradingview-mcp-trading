@@ -1220,7 +1220,7 @@ export function getConsecutiveLossCount(pid) {
 // Čitamo nakon izlaza koji signal je bio aktivan i označavamo win/loss
 // Svaka 10. analiza ispisuje per-signal WR u konzolu
 
-const SIG_NAMES = ["E50⟳","RSI⟳","CHP","CVD⟳","R⟳","MCD","E145","MCC⟳","RSI↗","SRS","SRB"];
+const SIG_NAMES = ["E50","CVD","MACD","E145","PWHL","RDIV","MSTR","FVG","OB"];
 const getSigStatsFile = () => `${DATA_DIR}/signal_stats.json`;
 
 function loadSigStats() {

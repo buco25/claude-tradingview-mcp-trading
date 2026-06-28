@@ -4674,6 +4674,19 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Reset signal stats — POST /api/reset-signal-stats
+  if (url.pathname === "/api/reset-signal-stats" && req.method === "POST") {
+    const f = `${DATA_DIR}/signal_stats.json`;
+    try {
+      writeFileSync(f, JSON.stringify({}));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, msg: "signal_stats.json resetiran" }));
+    } catch(e) {
+      res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
+    }
+    return;
+  }
+
   // Signal stats — GET /api/signal-stats
   if (url.pathname === "/api/signal-stats") {
     const f = `${DATA_DIR}/signal_stats.json`;

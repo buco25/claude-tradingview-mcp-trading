@@ -100,11 +100,11 @@ const VOL_EXH_DEFAULT = 3.0; // fallback za nepoznate simbole
 // ─── Per-simbol signal kombinacije (backtest optimizirano 16.06.2026) ──────────
 // Indeksi odgovaraju sigs[] u analyzeUltra: 0=E50↑ 1=CVD↑ 2=MACD 3=E145 4=PWHL 5=RDIV 6=MSTR 7=FVG
 const SYMBOL_COMBOS = {
-  "BTCUSDT":  { sigIdx: [0,1,2,3,7,8], minSig: 4 }, // E50↑+CVD↑+MACD+E145+FVG+OB  WR68%
-  "ETHUSDT":  { sigIdx: [0,1,2,3,7,8], minSig: 4 }, // E50↑+CVD↑+MACD+E145+FVG+OB  WR67%
-  "SOLUSDT":  { sigIdx: [0,1,3,5,6,8], minSig: 4 }, // E50↑+CVD↑+E145+RDIV+MSTR+OB WR67%
-  "TAOUSDT":  { sigIdx: [0,1,3,5,6,8], minSig: 4 }, // E50↑+CVD↑+E145+RDIV+MSTR+OB WR50%
-  "AAVEUSDT": { sigIdx: [0,1,2,3,7,8], minSig: 4 }, // E50↑+CVD↑+MACD+E145+FVG+OB  WR65%
+  "BTCUSDT":  { sigIdx: [0,1,2,3,7,8], minSig: 4 },               // WR83% — ostaje
+  "ETHUSDT":  { sigIdx: [0,1,2,3,7,8], minSig: 5, btcAlign: true }, // minSig 4→5 + BTC align
+  "SOLUSDT":  { sigIdx: [0,1,3,5,6,8], minSig: 5, btcAlign: true }, // minSig 4→5 + BTC align
+  "TAOUSDT":  { sigIdx: [0,1,3,5,6,8], minSig: 4 },               // ostaje, WR prihvatljiv
+  "AAVEUSDT": { sigIdx: [0,1,2,3,7,8], minSig: 4 },               // ostaje, WR prihvatljiv
 };
 
 // ─── Ekonomski kalendar ───────────────────────────────────────────────────────
@@ -4815,6 +4815,20 @@ export async function run() {
           if (signal === "SHORT" && _bounceMode) {
             console.log(`  🔄 [BOUNCE MODE] ${symbol} — bounce mode, SHORT blokiran`);
             continue;
+          }
+
+          // BTC align filter — za ETH/SOL zahtijevamo eksplicitni BTC trend (ne NEUTRAL)
+          // Sprječava ulaze na kraju poteza kad BTC nema jasnog smjera
+          const _needsBtcAlign = SYMBOL_COMBOS[symbol]?.btcAlign === true;
+          if (_needsBtcAlign) {
+            if (signal === "LONG" && _effectiveRegime !== "BULL") {
+              console.log(`  🔒 [BTC ALIGN] ${symbol} — LONG zahtijeva BTC BULL, trenutno ${_effectiveRegime} → blokiram`);
+              continue;
+            }
+            if (signal === "SHORT" && _effectiveRegime !== "BEAR") {
+              console.log(`  🔒 [BTC ALIGN] ${symbol} — SHORT zahtijeva BTC BEAR, trenutno ${_effectiveRegime} → blokiram`);
+              continue;
+            }
           }
 
           // SP500 RISK_OFF → blokira LONG, ali SHORT prolazi (osim bypass)

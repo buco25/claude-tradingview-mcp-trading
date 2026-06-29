@@ -4867,7 +4867,7 @@ async function fetchRegShoList() {
       return tickers;
     }
   }
-  console.warn('RegSHO: nije dostupna ni jedna lista');
+  // Tiho — RegSHO liste nisu uvijek dostupne (vikend, kašnjenje NYSE-a)
   return _regShoCache?.tickers || new Set();
 }
 

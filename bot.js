@@ -4487,24 +4487,33 @@ export async function run() {
       const _spike = await checkBtcSpike();
       if (_spike.spike && _spike.direction === "UP") {
         // BTC naglo skočio → sve open SHORT pozicije su u opasnosti
-        const _openShorts = pDef.positions.filter(p => p.side === "SHORT");
+        const _openShorts = loadPositions(pid).filter(p => p.side === "SHORT");
         if (_openShorts.length > 0) {
           console.log(`  🚨 [CORR EXIT] BTC +${_spike.pct}% u 30min (spike UP) → zatvaramo ${_openShorts.length} SHORT pozicija`);
           for (const _sp of _openShorts) {
             try {
               const _isLiveCe = pDef.live === true && !PAPER_TRADING;
-              if (_isLiveCe) await closeBitGetOrder(_sp);
-              const _pnlEst = _sp.entry > 0 ? ((_sp.entry - _sp.lastPrice) / _sp.entry * 100).toFixed(2) : "?";
-              const _exitPx  = _sp.lastPrice ?? _sp.entryPrice ?? _sp.entry;
-              const _qty     = _sp.qty ?? _sp.size ?? 0;
-              const _pnlUsd  = _sp.side === "SHORT"
-                ? (_sp.entryPrice - _exitPx) * _qty
-                : (_exitPx - _sp.entryPrice) * _qty;
+              if (_isLiveCe) {
+                const _closeRes = await bitgetPost("/api/v2/mix/order/place-order", {
+                  symbol: _sp.symbol, productType: "USDT-FUTURES",
+                  marginMode: "isolated", marginCoin: "USDT",
+                  side: "buy", tradeSide: "close",
+                  holdSide: "short",
+                  orderType: "market",
+                  size: (await fetchBitgetPositionSize(_sp.symbol, "SHORT"))?.total?.toFixed(4) ?? "0",
+                });
+                if (_closeRes.code !== "00000") throw new Error(`${_closeRes.code} ${_closeRes.msg}`);
+              }
+              const _livePxMap = await fetchLivePrices([_sp.symbol]).catch(() => ({}));
+              const _exitPx    = _livePxMap[_sp.symbol] ?? _sp.entryPrice;
+              const _qty       = _sp.quantity ?? 0;
+              const _pnlUsd    = (_sp.entryPrice - _exitPx) * _qty;
               writeExitCsv(pid, _sp, _exitPx, `CORR EXIT: BTC spike +${_spike.pct}% u 30min`, _pnlUsd);
               if (_pnlUsd < 0) { symbolSlCooldown.set(_sp.symbol, Date.now()); saveSlCooldown(); }
               await tg(`⚡ [CORR EXIT] ${_sp.symbol} SHORT\nBTC spike +${_spike.pct}% u 30min → zatvoren preventivno\nP&L: ${_pnlUsd >= 0?"+":""}$${_pnlUsd.toFixed(2)}`).catch(()=>{});
-              pDef.positions = pDef.positions.filter(p => p.symbol !== _sp.symbol || p.side !== "SHORT");
-              console.log(`  ✅ [CORR EXIT] ${_sp.symbol} SHORT zatvoren (est. ${_pnlEst}%)`);
+              const _allPos = loadPositions(pid);
+              savePositions(pid, _allPos.filter(p => !(p.symbol === _sp.symbol && p.side === "SHORT")));
+              console.log(`  ✅ [CORR EXIT] ${_sp.symbol} SHORT zatvoren`);
             } catch(e) {
               console.log(`  ⚠️  [CORR EXIT] ${_sp.symbol} greška: ${e.message}`);
             }
@@ -4514,7 +4523,7 @@ export async function run() {
         }
       } else if (_spike.spike && _spike.direction === "DOWN") {
         // BTC naglo pao → sve open LONG pozicije su u opasnosti (upozorenje)
-        const _openLongs = pDef.positions.filter(p => p.side === "LONG");
+        const _openLongs = loadPositions(pid).filter(p => p.side === "LONG");
         if (_openLongs.length > 0) {
           console.log(`  ⚠️  [CORR WARN] BTC ${_spike.pct}% u 30min (spike DOWN) — ${_openLongs.length} LONG pozicija pod pritiskom`);
         }

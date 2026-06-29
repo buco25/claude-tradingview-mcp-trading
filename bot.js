@@ -1421,6 +1421,25 @@ async function fetchCandles(symbol, interval = TIMEFRAME, limit = 250) {
   }));
 }
 
+// Dohvati dnevni H/L za symbol (koristi se za day range filter pri ulasku)
+const _dayHLCache = {};
+async function fetchDayHL(symbol) {
+  const now = Date.now();
+  const cached = _dayHLCache[symbol];
+  if (cached && now - cached.ts < 5 * 60 * 1000) return cached; // 5min cache
+  try {
+    const url = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=1D&limit=1`;
+    const res  = await fetch(url);
+    const json = await res.json();
+    if (json.code !== "00000" || !json.data?.length) return null;
+    const c = json.data[0];
+    const high = parseFloat(c[2]), low = parseFloat(c[3]);
+    const result = { high, low, ts: now };
+    _dayHLCache[symbol] = result;
+    return result;
+  } catch { return null; }
+}
+
 async function fetchKlines(symbol, interval = TIMEFRAME, limit = 250) {
   const url = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=${interval}&limit=${limit}`;
   const res  = await fetch(url);
@@ -4828,6 +4847,29 @@ export async function run() {
             if (signal === "SHORT" && _effectiveRegime !== "BEAR") {
               console.log(`  🔒 [BTC ALIGN] ${symbol} — SHORT zahtijeva BTC BEAR, trenutno ${_effectiveRegime} → blokiram`);
               continue;
+            }
+          }
+
+          // Day range filter — LONG samo u donjem dijelu dana (≤45%), SHORT samo u gornjem (≥55%)
+          // Analiza 36 trejdova pokazala da SOL/ETH/TAO LONG ulaze blizu vrha dana → odmah SL
+          {
+            const _dayHL = await fetchDayHL(symbol).catch(() => null);
+            if (_dayHL && _dayHL.high > _dayHL.low) {
+              const _hlRange   = _dayHL.high - _dayHL.low;
+              const _livePriceMap = await fetchLivePrices([symbol]).catch(() => ({}));
+              const _livePrice = _livePriceMap[symbol] ?? null;
+              if (_livePrice) {
+                const _posInRange = (_livePrice - _dayHL.low) / _hlRange * 100;
+                if (signal === "LONG" && _posInRange > 65) {
+                  console.log(`  📊 [DAY RANGE] ${symbol} — cijena na ${_posInRange.toFixed(0)}% dana (H:${fmtPrice(_dayHL.high)} L:${fmtPrice(_dayHL.low)}) → LONG blokiran (previsoko u danu)`);
+                  continue;
+                }
+                if (signal === "SHORT" && _posInRange < 35) {
+                  console.log(`  📊 [DAY RANGE] ${symbol} — cijena na ${_posInRange.toFixed(0)}% dana (H:${fmtPrice(_dayHL.high)} L:${fmtPrice(_dayHL.low)}) → SHORT blokiran (preniško u danu)`);
+                  continue;
+                }
+                console.log(`  📊 [DAY RANGE] ${symbol} — cijena na ${_posInRange.toFixed(0)}% dana → ${signal} dozvoljen`);
+              }
             }
           }
 

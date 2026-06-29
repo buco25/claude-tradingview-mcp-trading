@@ -3026,6 +3026,7 @@ async function checkPortfolioPositions(pid) {
                 const closeR = await bitgetPost("/api/v2/mix/order/place-order", {
                   symbol: pos.symbol, productType: "USDT-FUTURES", marginMode: "isolated", marginCoin: "USDT",
                   side: closeSide, tradeSide: "close",
+                  holdSide: pos.side === "LONG" ? "long" : "short",
                   orderType: "market", size: closeQty,
                 });
                 if (closeR.code !== "00000") throw new Error(`Bitget: ${closeR.code} ${closeR.msg}`);
@@ -3403,6 +3404,7 @@ async function partialClosePosition(pos, closePct = PARTIAL_CLOSE_PCT) {
       symbol: pos.symbol, productType: "USDT-FUTURES",
       marginMode: "isolated", marginCoin: "USDT",
       side: closeSide, tradeSide: "close",
+      holdSide: pos.side === "LONG" ? "long" : "short",
       orderType: "market",
       size: parseFloat(qty.toFixed(4)).toString(),
     });
@@ -3512,6 +3514,7 @@ export async function softExitMonitor() {
                   symbol: pos.symbol, productType: "USDT-FUTURES",
                   marginMode: "isolated", marginCoin: "USDT",
                   side: closeSide, tradeSide: "close",
+                  holdSide: pos.side === "LONG" ? "long" : "short",
                   orderType: "market", size: qty,
                 });
                 if (r.code !== "00000") throw new Error(`${r.code} ${r.msg}`);
@@ -3576,6 +3579,7 @@ export async function softExitMonitor() {
               symbol: pos.symbol, productType: "USDT-FUTURES",
               marginMode: "isolated", marginCoin: "USDT",
               side: closeSide, tradeSide: "close",
+              holdSide: pos.side === "LONG" ? "long" : "short",
               orderType: "market", size: qty,
             });
             if (closeRes.code !== "00000") throw new Error(`${closeRes.code} ${closeRes.msg}`);
@@ -3711,6 +3715,7 @@ async function closeBitgetPosition(symbol, side, quantity) {
     const r = await bitgetPost("/api/v2/mix/order/place-order", {
       symbol, productType: "USDT-FUTURES", marginMode: "isolated", marginCoin: "USDT",
       side: closeSide, tradeSide: "close",
+      holdSide: side === "LONG" ? "long" : "short",
       orderType: "market", size: String(quantity),
     });
     if (r?.code === "00000") {

@@ -3048,6 +3048,22 @@ async function checkPortfolioPositions(pid) {
                   holdSide: pos.side === "LONG" ? "long" : "short",
                   orderType: "market", size: closeQty,
                 });
+                if (closeR.code === "22002") {
+                  // Pozicija već ne postoji ili je blokirana pending nalogom
+                  console.log(`  ⚠️  [SOFT SL] ${pos.symbol} — 22002 No position, pokušavam otkazati plan naloge...`);
+                  const cancelled = await cancelAllPlanOrders(pos.symbol, pos.side);
+                  console.log(`  🗑️  [SOFT SL] Otkazano ${cancelled} plan naloga za ${pos.symbol}`);
+                  // Provjeri da li pozicija uopće postoji nakon otkazivanja
+                  const recheck = await fetchBitgetPositionSize(pos.symbol, pos.side);
+                  if (!recheck) {
+                    console.log(`  ℹ️  [SOFT SL] ${pos.symbol} — pozicija ne postoji na Bitgetu (već zatvorena) → uklanjam tracking`);
+                    stillOpen.push({ ...pos, _remove: true });
+                    softClosed = true; // izlaz iz retry petlje
+                    break;
+                  }
+                  if (attempt < 3) await new Promise(r => setTimeout(r, 1500));
+                  continue;
+                }
                 if (closeR.code !== "00000") throw new Error(`Bitget: ${closeR.code} ${closeR.msg}`);
                 softClosed = true;
               } catch (e) {
@@ -3060,6 +3076,8 @@ async function checkPortfolioPositions(pid) {
               await tg(`🚨 <b>SOFT SL FAIL</b> ${pos.symbol} ${pos.side}\nNije moguće zatvoriti! Provjeri Bitget ručno.`);
               continue;
             }
+            // Ako je pozicija bila externally closed (22002 + ne postoji) — samo ukloni tracking bez CSV
+            if (pos._remove) { continue; }
             const softQtyN = parseFloat(closeQty);
             const pnl = pos.side === "LONG"
               ? (liveP - pos.entryPrice) * softQtyN
@@ -3592,6 +3610,7 @@ export async function softExitMonitor() {
 
         // 3 pokušaja s 2s pauzom između
         let closed = false;
+        let _extClosed = false; // true ako je 22002 + pozicija ne postoji
         for (let attempt = 1; attempt <= 3 && !closed; attempt++) {
           try {
             const closeRes = await bitgetPost("/api/v2/mix/order/place-order", {
@@ -3601,12 +3620,44 @@ export async function softExitMonitor() {
               holdSide: pos.side === "LONG" ? "long" : "short",
               orderType: "market", size: qty,
             });
+            if (closeRes.code === "22002") {
+              // Pending nalog blokira ili pozicija ne postoji — otkaži plan naloge pa retry
+              console.log(`  ⚠️  [SOFT ${reason}] ${pos.symbol} — 22002, otkazujem plan naloge...`);
+              const cancelled = await cancelAllPlanOrders(pos.symbol, pos.side);
+              console.log(`  🗑️  [SOFT ${reason}] Otkazano ${cancelled} plan naloga`);
+              const recheck = await fetchBitgetPositionSize(pos.symbol, pos.side);
+              if (!recheck) {
+                console.log(`  ℹ️  [SOFT ${reason}] ${pos.symbol} — pozicija zatvorena izvana → dohvaćam P&L`);
+                _extClosed = true;
+                break;
+              }
+              if (attempt < 3) await new Promise(r => setTimeout(r, 1500));
+              continue;
+            }
             if (closeRes.code !== "00000") throw new Error(`${closeRes.code} ${closeRes.msg}`);
             closed = true;
           } catch (e) {
             console.log(`  ❌ [SOFT ${reason}] ${pos.symbol} pokušaj ${attempt}/3: ${e.message} | qty=${qty}`);
             if (attempt < 3) await new Promise(r => setTimeout(r, 2000));
           }
+        }
+
+        // Pozicija zatvorena od strane Bitgeta (22002 + ne postoji) — dohvati P&L i ukloni
+        if (_extClosed) {
+          const closedExt = await fetchBitgetClosedPnl(pos.symbol, pos).catch(() => null);
+          if (closedExt) {
+            writeExitCsv(pid, pos, closedExt.exitPrice, "Zatvoreno izvana", closedExt.realizedPnl);
+            await tg(`${closedExt.realizedPnl >= 0 ? "✅" : "❌"} [ULTRA] ${pos.symbol} ${pos.side} zatvoreno izvana\nP&L: ${closedExt.realizedPnl >= 0?"+":""}$${closedExt.realizedPnl.toFixed(2)}\nUlaz: ${fmtPrice(pos.entryPrice)} → Izlaz: ${fmtPrice(closedExt.exitPrice)}`);
+            if (pos.sigMask != null) recordSignalOutcome(pos.sigMask, closedExt.realizedPnl >= 0);
+            recordSymbolOutcome(pos.symbol, closedExt.realizedPnl >= 0);
+          } else {
+            const _pnl = pos.side === "LONG" ? (liveP - pos.entryPrice) * (pos.quantity ?? 1) : (pos.entryPrice - liveP) * (pos.quantity ?? 1);
+            writeExitCsv(pid, pos, liveP, "Zatvoreno izvana (est.)", _pnl);
+            await tg(`⚠️ [ULTRA] ${pos.symbol} ${pos.side} zatvoreno izvana\nP&L procjena: ${_pnl>=0?"+":""}$${_pnl.toFixed(2)}`);
+          }
+          const allPos2 = loadPositions(pid);
+          savePositions(pid, allPos2.filter(p => !(p.symbol === pos.symbol && p.side === pos.side)));
+          continue;
         }
 
         if (!closed) {

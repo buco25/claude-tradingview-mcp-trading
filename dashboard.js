@@ -5432,7 +5432,7 @@ async function scheduledRun() {
   if (botRunning) return;
   botRunning = true;
   try { await botRun(); }
-  catch (e) { console.error("Bot scheduler greška:", e.message); }
+  catch (e) { console.error("Bot scheduler greška:", e.message, "\n", e.stack); }
   finally { botRunning = false; }
 }
 

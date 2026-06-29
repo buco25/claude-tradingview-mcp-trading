@@ -3364,7 +3364,7 @@ async function fetchLivePrices(symbols) {
 }
 
 // ─── Break-Even Stop — pomakni SL na entry+buffer kad je 50% TP dostignuto ────
-const BE_TRIGGER_PCT = 50;   // % TP-a koji mora biti dostignut
+const BE_TRIGGER_PCT = 40;   // % TP-a koji mora biti dostignut
 const BE_BUFFER_PCT  = 0.2;  // % iznad/ispod entry za SL (pokrije fees)
 
 async function moveSLtoBreakEven(pos) {

@@ -1,6 +1,6 @@
 {
-  "all_symbols": ["BTCUSDT","ETHUSDT","SOLUSDT","TAOUSDT","AAVEUSDT"],
-  "watchlist_synapse_t": ["BTCUSDT","ETHUSDT","SOLUSDT","TAOUSDT","AAVEUSDT"],
+  "all_symbols": ["BTCUSDT"],
+  "watchlist_synapse_t": ["BTCUSDT"],
   "portfolio_timeframes": {
     "synapse_t": "15m"
   },

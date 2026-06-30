@@ -23,7 +23,7 @@ const TIMEFRAME     = "1H";
 const LEVERAGE      = 50;     // 50x default → SL 1.5% = 75% margine (više prostora za šum)
 const BTC_LEVERAGE  = 75;    // BTC posebno — 75x
 const START_CAPITAL = 1000;   // po portfoliju
-const RISK_PCT      = 1.5;    // % banke koji rizikaš po tradeu (= veličina uloga/margine)
+const RISK_PCT      = 3.0;    // % banke koji rizikaš po tradeu (= veličina uloga/margine)
 const SL_PCT        = 2.0;    // fallback SL % (Tier 1) — override per-simbol u symbol_sltp
 const TP_PCT        = 3.0;    // fallback TP % (Tier 1, 1.5×SL) — override per-simbol u symbol_sltp
 

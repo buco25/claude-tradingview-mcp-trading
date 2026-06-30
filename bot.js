@@ -3037,13 +3037,15 @@ async function checkPortfolioPositions(pid) {
               stillOpen.push({ ...pos, _remove: true });
               continue;
             }
-            const closeQty  = bitPos2.available.toFixed(4);
+            const closeQty  = (bitPos2.total > 0 ? bitPos2.total : bitPos2.available).toFixed(4);
             const closeSide = pos.side === "LONG" ? "sell" : "buy";
+            // Otkaži plan naloge PRIJE close-a (ne nakon 22002) — sprječava blokadu
+            await cancelAllPlanOrders(pos.symbol, pos.side).catch(() => {});
             let softClosed  = false;
             for (let attempt = 1; attempt <= 3 && !softClosed; attempt++) {
               try {
                 const closeR = await bitgetPost("/api/v2/mix/order/place-order", {
-                  symbol: pos.symbol, productType: "USDT-FUTURES", marginMode: "isolated", marginCoin: "USDT",
+                  symbol: pos.symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
                   side: closeSide, tradeSide: "close",
                   holdSide: pos.side === "LONG" ? "long" : "short",
                   orderType: "market", size: closeQty,
@@ -3438,8 +3440,7 @@ async function partialClosePosition(pos, closePct = PARTIAL_CLOSE_PCT) {
   const closeSide = pos.side === "LONG" ? "sell" : "buy";
   try {
     const res = await bitgetPost("/api/v2/mix/order/place-order", {
-      symbol: pos.symbol, productType: "USDT-FUTURES",
-      marginMode: "isolated", marginCoin: "USDT",
+      symbol: pos.symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
       side: closeSide, tradeSide: "close",
       holdSide: pos.side === "LONG" ? "long" : "short",
       orderType: "market",
@@ -3548,8 +3549,7 @@ export async function softExitMonitor() {
             for (let attempt = 1; attempt <= 3; attempt++) {
               try {
                 const r = await bitgetPost("/api/v2/mix/order/place-order", {
-                  symbol: pos.symbol, productType: "USDT-FUTURES",
-                  marginMode: "isolated", marginCoin: "USDT",
+                  symbol: pos.symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
                   side: closeSide, tradeSide: "close",
                   holdSide: pos.side === "LONG" ? "long" : "short",
                   orderType: "market", size: qty,
@@ -3608,14 +3608,15 @@ export async function softExitMonitor() {
         const closeSide = pos.side === "LONG" ? "sell" : "buy";
         console.log(`  📐 [SOFT ${reason}] ${pos.symbol} — Bitget veličina: ${qty} (lokalna: ${(pos.quantity ?? "?").toString()})`);
 
+        // Otkaži plan naloge PRIJE close-a — sprječava 22002 blokadu
+        await cancelAllPlanOrders(pos.symbol, pos.side).catch(() => {});
         // 3 pokušaja s 2s pauzom između
         let closed = false;
         let _extClosed = false; // true ako je 22002 + pozicija ne postoji
         for (let attempt = 1; attempt <= 3 && !closed; attempt++) {
           try {
             const closeRes = await bitgetPost("/api/v2/mix/order/place-order", {
-              symbol: pos.symbol, productType: "USDT-FUTURES",
-              marginMode: "isolated", marginCoin: "USDT",
+              symbol: pos.symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
               side: closeSide, tradeSide: "close",
               holdSide: pos.side === "LONG" ? "long" : "short",
               orderType: "market", size: qty,
@@ -3783,7 +3784,7 @@ async function closeBitgetPosition(symbol, side, quantity) {
 
     // Market close nalog
     const r = await bitgetPost("/api/v2/mix/order/place-order", {
-      symbol, productType: "USDT-FUTURES", marginMode: "isolated", marginCoin: "USDT",
+      symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
       side: closeSide, tradeSide: "close",
       holdSide: side === "LONG" ? "long" : "short",
       orderType: "market", size: String(quantity),
@@ -4495,8 +4496,7 @@ export async function run() {
               const _isLiveCe = pDef.live === true && !PAPER_TRADING;
               if (_isLiveCe) {
                 const _closeRes = await bitgetPost("/api/v2/mix/order/place-order", {
-                  symbol: _sp.symbol, productType: "USDT-FUTURES",
-                  marginMode: "isolated", marginCoin: "USDT",
+                  symbol: _sp.symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
                   side: "buy", tradeSide: "close",
                   holdSide: "short",
                   orderType: "market",

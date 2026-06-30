@@ -35,7 +35,7 @@ const STRONG_TP_MULT      = 3.0;  // jako tržište → TP = SL × 3 (1:3 R:R)
 const NORMAL_TP_MULT      = 1.5;  // konsolidacija / neutralno → TP = SL × 1.5 (1:1.5 R:R)
 const MAX_TRADES_PER_DAY = 100;
 const MAX_OPEN_PER_PORTFOLIO = 3;  // max otvorenih pozicija po portfoliju
-const MAX_PYRAMID           = 0;   // pyramid onemogućen (26.05.2026) — jedna pozicija po simbolu
+const MAX_PYRAMID           = 1;   // max 1 adicija u istom smjeru (BTC only mode)
 const MAX_NEW_ENTRIES_PER_SCAN = 3; // max NOVIH ulaza po scan ciklusu (sprječava 8 simultanih gubitaka)
 
 // ─── 7. Korelacijski filter — sektori ─────────────────────────────────────────
@@ -4831,10 +4831,51 @@ export async function run() {
           }
         }
 
-        // ── Pyramid provjera smjera: ako postoji pozicija, signal mora biti ISTI smjer ──
+        // ── Pyramid / Flip logika ─────────────────────────────────────────────
         if (existingPos && existingPos.side !== signal) {
-          console.log(`  ⏭️  [${pDef.name}] ${symbol} — pozicija ${existingPos.side} otvorena, signal ${signal} suprotan → skip (bez hedgea)`);
-          continue;
+          // Suprotan signal — flip samo ako je jak (score >= 5)
+          const _flipScore = signal === "LONG" ? (result.bullScore ?? 0) : (result.bearScore ?? 0);
+          const FLIP_MIN_SCORE = 5;
+          if (_flipScore >= FLIP_MIN_SCORE && isLive) {
+            console.log(`  🔄 [FLIP] ${symbol} — jak kontra signal (score=${_flipScore}) → zatvaramo ${existingPos.side}, otvaramo ${signal}`);
+            // Zatvori postojeću poziciju
+            const _flipBitPos = await fetchBitgetPositionSize(symbol, existingPos.side).catch(() => null);
+            if (_flipBitPos) {
+              await cancelAllPlanOrders(symbol, existingPos.side).catch(() => {});
+              const _flipQty      = (_flipBitPos.total > 0 ? _flipBitPos.total : _flipBitPos.available).toFixed(4);
+              const _flipCloseSide = existingPos.side === "LONG" ? "sell" : "buy";
+              const _flipCloseRes  = await bitgetPost("/api/v2/mix/order/place-order", {
+                symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
+                side: _flipCloseSide, tradeSide: "close",
+                holdSide: existingPos.side === "LONG" ? "long" : "short",
+                orderType: "market", size: _flipQty,
+              });
+              if (_flipCloseRes.code === "00000") {
+                const _flipLiveMap = await fetchLivePrices([symbol]).catch(() => ({}));
+                const _flipExit = _flipLiveMap[symbol] ?? existingPos.entryPrice;
+                const _flipPnl  = existingPos.side === "LONG"
+                  ? (_flipExit - existingPos.entryPrice) * parseFloat(_flipQty)
+                  : (existingPos.entryPrice - _flipExit) * parseFloat(_flipQty);
+                writeExitCsv(pid, existingPos, _flipExit, `FLIP → ${signal} (score=${_flipScore})`, _flipPnl);
+                if (existingPos.sigMask != null) recordSignalOutcome(existingPos.sigMask, _flipPnl >= 0);
+                recordSymbolOutcome(symbol, _flipPnl >= 0);
+                const _allPos = loadPositions(pid);
+                savePositions(pid, _allPos.filter(p => !(p.symbol === symbol && p.side === existingPos.side)));
+                await tg(`🔄 <b>FLIP [ULTRA]</b> ${symbol}\nZatvoren ${existingPos.side} → otvaram ${signal}\nScore: ${_flipScore}/6 | P&L: ${_flipPnl >= 0 ? "+" : ""}$${_flipPnl.toFixed(2)}`);
+                // Nastavi s otvaranjem nove pozicije u suprotnom smjeru
+              } else {
+                console.log(`  ❌ [FLIP] Close fail: ${_flipCloseRes.code} ${_flipCloseRes.msg} → skip`);
+                continue;
+              }
+            } else {
+              // Pozicija ne postoji na Bitgetu — samo ukloni tracking
+              const _allPos = loadPositions(pid);
+              savePositions(pid, _allPos.filter(p => !(p.symbol === symbol && p.side === existingPos.side)));
+            }
+          } else {
+            console.log(`  ⏭️  [${pDef.name}] ${symbol} — pozicija ${existingPos.side}, kontra signal ${signal} (score=${_flipScore} < ${FLIP_MIN_SCORE}) → skip`);
+            continue;
+          }
         }
         if (existingPos && existingPos.side === signal) {
           console.log(`  🔺 [PYRAMID] ${symbol} ${signal} — adicija ${existingPosList.length + 1}/${MAX_PYRAMID} u trendu`);

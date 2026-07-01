@@ -2831,7 +2831,7 @@ async function loadSweepStatus() {
     // MSS per-simbol
     const mssRow = document.getElementById('mss-row');
     if (mssRow && d.mss) {
-      const SYM_SHORT = { BTCUSDT:'BTC', ETHUSDT:'ETH', SOLUSDT:'SOL', TAOUSDT:'TAO', AAVEUSDT:'AAVE' };
+      const SYM_SHORT = { BTCUSDT:'BTC' };
       mssRow.innerHTML = Object.entries(d.mss).map(([sym, v]) => {
         const label = SYM_SHORT[sym] || sym;
         const bg  = v ===  1 ? '#0d3d26' : v === -1 ? '#3d0d0d' : '#111827';
@@ -3719,7 +3719,7 @@ const server = http.createServer(async (req, res) => {
   // Za svaki simbol: swing pivoti iz 4H, round numbers, PDH/PDL
   // Uspoređuje s otvorenim pozicijama bota → flag DANGER/CAUTION/CLEAR
   if (url.pathname === "/api/sweepRisk") {
-    const WATCH = ["BTCUSDT","ETHUSDT","SOLUSDT","TAOUSDT","AAVEUSDT"];
+    const WATCH = ["BTCUSDT"];
     const PIVOT_WING = 5;  // koliko bara lijevo/desno za pivot
     const ZONE_BUFFER = 0.004;  // ±0.4% — zona oko pivota = likvidacijski magnet
 
@@ -3858,8 +3858,7 @@ const server = http.createServer(async (req, res) => {
 
   // Liq Zones — GET /api/liqzones (svi simboli paralelno)
   if (url.pathname === "/api/liqzones") {
-    const SYMBOLS  = ["BTCUSDT","ETHUSDT","SOLUSDT","XRPUSDT","ADAUSDT","LINKUSDT","DOGEUSDT",
-                      "NEARUSDT","HYPEUSDT","SUIUSDT","SEIUSDT","APTUSDT","TAOUSDT","JUPUSDT","ENAUSDT","INJUSDT"];
+    const SYMBOLS  = ["BTCUSDT"];
     const PIVOT_LEN = 8, N_PIVOTS = 4, RANGE_PCT = 12.0, LEVS = [10,20,25,50,100];
 
     function calcSymLiq(klines) {

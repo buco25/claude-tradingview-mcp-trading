@@ -3671,7 +3671,7 @@ const server = http.createServer(async (req, res) => {
     } catch (_) { /* Bitget timeout — ok */ }
 
     // MSS per-simbol — swing high/low struktura iz 1H klines
-    const MSS_SYMBOLS = ["BTCUSDT","ETHUSDT","SOLUSDT","TAOUSDT","AAVEUSDT"];
+    const MSS_SYMBOLS = ["BTCUSDT"];
     const mssResults = {};
     await Promise.all(MSS_SYMBOLS.map(async sym => {
       try {

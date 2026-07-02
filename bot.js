@@ -4788,22 +4788,7 @@ export async function run() {
           }
         }
 
-        // ── D) Quiet Pullback filter — ulazimo samo na tihim svjećama ──────────
-        // PBK signal: max 2.0× | MOM signal: max 3.0×
-        // Pyramid (existingPos): preskačemo filter — već smo u poziciji
-        if (pDef.strategy === "synapse_t" && !existingPos) {
-          const _isPbk   = !result.isMomentum;
-          const _volMax  = _isPbk ? 2.0 : 3.0;
-          const _scoreNow = signal === "LONG" ? result.bullScore : result.bearScore;
-          const _isMaxScore = _scoreNow >= 6;
-          if (volAnomaly.ratio > _volMax && !_isMaxScore) {
-            console.log(`  🔇 [QUIET] ${symbol} ${signal} (${_isPbk?"PBK":"MOM"}) — volRatio ${volAnomaly.ratio}× > ${_volMax}× score ${_scoreNow}/6 → preskačem`);
-            continue;
-          }
-          if (volAnomaly.ratio > _volMax && _isMaxScore) {
-            console.log(`  ⚡ [QUIET bypass] ${symbol} — score ${_scoreNow}/6 (max), QUIET ignoriran`);
-          }
-        }
+        // ── D) Quiet Pullback filter — uklonjen za BTC-only (BTC ima trajno visok vol) ──
 
         // ── C) Per-simbol Liq Zone Filter ────────────────────────────────────────────
         // Svaki simbol provjerava VLASTITE liq zone iz već dohvaćenih 1H candles.

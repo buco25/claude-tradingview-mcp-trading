@@ -4044,6 +4044,16 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, async () => {
   console.log(`Dashboard pokrenut na portu ${PORT}`);
 
+  // ─── Pokreni bot scan loop ─────────────────────────────────────────────────
+  async function scheduledRun() {
+    try { await botRun(); }
+    catch (e) { console.error("Bot scheduler greška:", e.message, "\n", e.stack); }
+  }
+  // Prvo skeniranje odmah (s malim odmakom da se server stabilizira)
+  setTimeout(scheduledRun, 5000);
+  // Ponavljaj svakih 5 minuta
+  setInterval(scheduledRun, 5 * 60 * 1000);
+
   // Startup reconciliation — provjeri postoje li otvorene pozicije koje treba pratiti
   setTimeout(async () => { await softExitMonitor(); }, 3000);
 

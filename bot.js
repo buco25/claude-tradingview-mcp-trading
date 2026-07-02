@@ -4794,13 +4794,14 @@ export async function run() {
         if (pDef.strategy === "synapse_t" && !existingPos) {
           const _isPbk   = !result.isMomentum;
           const _volMax  = _isPbk ? 2.0 : 3.0;
-          const _isMax7  = (result.bullScore >= 7 || result.bearScore >= 7);
-          if (volAnomaly.ratio > _volMax && !_isMax7) {
-            console.log(`  🔇 [QUIET] ${symbol} ${signal} (${_isPbk?"PBK":"MOM"}) — volRatio ${volAnomaly.ratio}× > ${_volMax}× → preskačem`);
+          const _scoreNow = signal === "LONG" ? result.bullScore : result.bearScore;
+          const _isMaxScore = _scoreNow >= 6;
+          if (volAnomaly.ratio > _volMax && !_isMaxScore) {
+            console.log(`  🔇 [QUIET] ${symbol} ${signal} (${_isPbk?"PBK":"MOM"}) — volRatio ${volAnomaly.ratio}× > ${_volMax}× score ${_scoreNow}/6 → preskačem`);
             continue;
           }
-          if (volAnomaly.ratio > _volMax && _isMax7) {
-            console.log(`  ⚡ [QUIET bypass] ${symbol} — 7/7+ score, QUIET ignoriran`);
+          if (volAnomaly.ratio > _volMax && _isMaxScore) {
+            console.log(`  ⚡ [QUIET bypass] ${symbol} — score ${_scoreNow}/6 (max), QUIET ignoriran`);
           }
         }
 

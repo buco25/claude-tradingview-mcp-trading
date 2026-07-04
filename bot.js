@@ -5383,8 +5383,12 @@ export async function run() {
         const _symRiskPct = rules.symbol_sltp?.[symbol]?.riskPct ?? _dynRiskPct;
         console.log(`  🎚️  [RISK] ${symbol} — score ${_entryScore}/${SYMBOL_COMBOS[symbol]?.sigIdx?.length ?? 8}, ${_isStrong ? "JAKO" : "normalno"} → rizik ${_symRiskPct}% banke`);
         const riskAmount = equity * (_symRiskPct / 100);
-        let tradeSize  = (riskAmount / (slPct / 100)) * (atrTrend?.sizeMult ?? 1) * (_oiSizeMult ?? 1) * (_vwapSizeMult ?? 1) * (_stableSizeMult ?? 1) * (_squeezeMult ?? 1) * (_macroSizeMult ?? 1);
-        if (_macroSizeMult < 1) console.log(`  ⚖️  [MACRO] ${symbol} — ukupni macro size mult ×${_macroSizeMult.toFixed(2)}`);
+        // Ukupni size mult (macro + stable + vwap + oi) ne smije pasti ispod 0.5
+        // — inače stack multiplikatora spusti rizik daleko ispod RISK_PCT_MIN
+        const _rawMult   = (atrTrend?.sizeMult ?? 1) * (_oiSizeMult ?? 1) * (_vwapSizeMult ?? 1) * (_stableSizeMult ?? 1) * (_macroSizeMult ?? 1);
+        const _totalMult = Math.max(_rawMult, 0.5) * (_squeezeMult ?? 1);  // squeeze boost ide iznad floora
+        let tradeSize  = (riskAmount / (slPct / 100)) * _totalMult;
+        if (_rawMult < 1) console.log(`  ⚖️  [MULT] ${symbol} — kombinirani mult ×${_rawMult.toFixed(2)}${_rawMult < 0.5 ? " → floor ×0.50" : ""}`);
         // Bitget minimum: 5 USDT amount + minTradeNum po simbolu (npr. ETH 0.01, BTC 0.001)
         // Ispod minimuma nalozi padaju s 45110/45111 → dižemo na min + 5% buffer
         const _minQtyNotional = (_minTradeNum[symbol] ?? 0) * price * 1.05;

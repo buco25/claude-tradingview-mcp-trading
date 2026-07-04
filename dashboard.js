@@ -1329,6 +1329,11 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div style="font-size:22px;font-weight:800" id="btc-pyramid-val">—</div>
         <div style="font-size:10px;color:#9ca3af;margin-top:2px" id="btc-pyramid-sub">dodatni ulaz</div>
       </div>
+      <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px;text-align:center">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">L/S Ratio</div>
+        <div style="font-size:22px;font-weight:800" id="btc-lsr-val">—</div>
+        <div style="font-size:10px;color:#9ca3af;margin-top:2px" id="btc-lsr-sub">retail long % · trend</div>
+      </div>
     </div>
   </div>
 <script>
@@ -1379,6 +1384,19 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         pyEl.textContent = py === 0 ? '✅ Slobodan' : py >= 1 ? '🔒 Zauzet' : '—';
         pyEl.style.color = py === 0 ? '#059669' : '#d97706';
         document.getElementById('btc-pyramid-sub').textContent = py === 0 ? 'max 1 pyramid ulaz' : py + '/1 pyramid pozicija';
+      }
+
+      // L/S Ratio
+      const lsr = d.lsr;
+      const lsrEl = document.getElementById('btc-lsr-val');
+      if (lsr && lsr.longRatio) {
+        const lr = parseFloat(lsr.longRatio);
+        const squeeze = lr < 40;
+        const trap    = lr > 62;
+        lsrEl.textContent = lr.toFixed(1) + '%';
+        lsrEl.style.color = squeeze ? '#059669' : trap ? '#dc2626' : '#d97706';
+        const label = squeeze ? '🔥 Squeeze setup' : trap ? '⚠️ Long trap' : '⚖️ Neutral';
+        document.getElementById('btc-lsr-sub').textContent = label + ' · ' + (lsr.trend || '');
       }
     } catch(e) {
       document.getElementById('btc-status-ts').textContent = 'Greška: ' + e.message;
@@ -3969,6 +3987,11 @@ const server = http.createServer(async (req, res) => {
         const pos = loadPositions("synapse_t");
         const btcPos = pos.filter(p => p.symbol === "BTCUSDT");
         result.pyramid = btcPos.length;
+      } catch {}
+
+      // L/S Ratio (Binance global account ratio)
+      try {
+        result.lsr = await getLongShortRatio("BTCUSDT");
       } catch {}
 
       res.writeHead(200, { "Content-Type": "application/json" });

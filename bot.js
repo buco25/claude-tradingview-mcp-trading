@@ -36,7 +36,10 @@ const STRONG_SIGNAL_SCORE = 9;    // nekorišten za TP (zadržan za eventualne f
 const STRONG_TP_MULT      = 3.0;  // jako tržište → TP = SL × 3 (1:3 R:R)
 const NORMAL_TP_MULT      = 2.0;  // konsolidacija / neutralno → TP = SL × 2.0 (1:2 R:R min, TraderaEdge standard)
 const MAX_TRADES_PER_DAY = 100;
-const MAX_OPEN_PER_PORTFOLIO = 8;  // max otvorenih pozicija (23 simbola, 1-2% rizik → worst case ~16%, realno ~10%)
+const MAX_OPEN_CRYPTO = 6;  // max otvorenih kripto pozicija
+const MAX_OPEN_STOCKS = 3;  // max otvorenih pozicija na dionicama (xStocks)
+const MAX_OPEN_PER_PORTFOLIO = MAX_OPEN_CRYPTO + MAX_OPEN_STOCKS;  // ukupni cap = 9
+const isStockSym = (s) => (SYMBOL_SECTORS[s] || "").startsWith("STOCK_");
 const MAX_PYRAMID           = 1;   // max 1 adicija u istom smjeru (BTC only mode)
 const MAX_NEW_ENTRIES_PER_SCAN = 3; // max NOVIH ulaza po scan ciklusu (sprječava 8 simultanih gubitaka)
 
@@ -4811,8 +4814,9 @@ export async function run() {
         console.log(`  🔺 [${pDef.name}] ${symbol} — postoji pozicija (${existingPos.side}), provjeravamo pyramid ulaz (${pyramidCount}/${MAX_PYRAMID})`);
       }
 
-      // Provjeri limit otvorenih pozicija
-      const currentOpen = loadPositions(pid).length;
+      // Provjeri limit otvorenih pozicija (ukupni + po klasi: kripto/dionice)
+      const _openNow    = loadPositions(pid);
+      const currentOpen = _openNow.length;
       const _reEntry = _winReEntry.get(symbol);
       const _reEntryActive = _reEntry && (Date.now() - _reEntry.ts) < REENTRY_WINDOW_MS;
       if (!_reEntryActive && _reEntry) _winReEntry.delete(symbol);
@@ -4820,6 +4824,14 @@ export async function run() {
       if (currentOpen >= _maxOpen && symbol !== BTC_EXCEPTION) {
         console.log(`  🔒 [${pDef.name}] Max ${MAX_OPEN_PER_PORTFOLIO}${_reEntryActive?" (re-entry +1)":""} dostignut — preskačem ${symbol}`);
         _scanLogEntries.push({ symbol, signal: "SKIP", blocker: `MAX_POS(${currentOpen}/${_maxOpen})`, reason: "Max otvorenih pozicija dostignut" });
+        continue;
+      }
+      const _symIsStock = isStockSym(symbol);
+      const _classOpen  = _openNow.filter(p => isStockSym(p.symbol) === _symIsStock).length;
+      const _classMax   = _symIsStock ? MAX_OPEN_STOCKS : MAX_OPEN_CRYPTO;
+      if (_classOpen >= _classMax && symbol !== BTC_EXCEPTION && !openSymbols.includes(symbol)) {
+        console.log(`  🔒 [${pDef.name}] Max ${_classMax} ${_symIsStock ? "dionica" : "kripto"} dostignut (${_classOpen}) — preskačem ${symbol}`);
+        _scanLogEntries.push({ symbol, signal: "SKIP", blocker: `MAX_${_symIsStock ? "STOCK" : "CRYPTO"}(${_classOpen}/${_classMax})`, reason: `Max ${_symIsStock ? "dionica" : "kripto"} pozicija` });
         continue;
       }
 

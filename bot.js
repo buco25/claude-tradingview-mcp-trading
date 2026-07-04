@@ -2140,7 +2140,7 @@ function analyzeUltra(candles, cfg) {
   // Kontekst: iznad/ispod majority zona = bull/bear bias
   const {
     _monthlyOpen = null, _monthlyHigh = null, _monthlyLow = null,
-    _weeklyOpen  = null, _yearlyOpen  = null
+    _weeklyOpen  = null, _yearlyOpen  = null, _fridayClose = null
   } = cfg;
   let sigMOPEN = 0;
   const LH_ZONE = 0.015;  // 1.5% proximity za sweep detekciju
@@ -2148,7 +2148,7 @@ function analyzeUltra(candles, cfg) {
   const recentHighsLH = candles.slice(-8).map(c => c.high);
   // Sakupi sve dostupne LH razine
   const _lhLevels = [
-    _monthlyOpen, _weeklyOpen, _yearlyOpen,
+    _monthlyOpen, _weeklyOpen, _yearlyOpen, _fridayClose,
     _monthlyHigh, _monthlyLow,
     cfg._pwh ?? null, cfg._pwl ?? null
   ].filter(v => v !== null && v > 0);
@@ -2466,7 +2466,7 @@ async function analyzeUltraPullback(symbol, candles, cfg) {
   // ── Dohvati Daily EMA 10/20 + sve Liquidity Hunt zone ────────────────────────
   let _dailyEma10 = null, _dailyEma20 = null;
   let _monthlyOpen = null, _monthlyHigh = null, _monthlyLow = null;
-  let _yearlyOpen  = null;
+  let _yearlyOpen  = null, _fridayClose = null;
   const _weeklyOpen = _wOpen;  // iz tjednog fetcha gore
   try {
     // Daily candles — ascending, history max ~90 dana
@@ -2495,6 +2495,10 @@ async function analyzeUltraPullback(symbol, candles, cfg) {
         _monthlyHigh = Math.max(...monthCandles.map(c => c.high));
         _monthlyLow  = Math.min(...monthCandles.map(c => c.low));
       }
+      // Friday close — zadnji dovršeni petak (TraderaEdge AMA: "Friday closing" zona)
+      const todayStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+      const fridays = dC.filter(c => new Date(c.ts).getUTCDay() === 5 && c.ts < todayStart);
+      if (fridays.length > 0) _fridayClose = fridays[fridays.length - 1].close;
     }
     // Yearly Open — mjesečne svijeće (daily history preplitka)
     const mUrl = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=1Mutc&limit=13`;
@@ -2509,7 +2513,7 @@ async function analyzeUltraPullback(symbol, candles, cfg) {
   }
 
   // Pokreni analizu (proslijedi symbol + PWH/PWL + daily signali)
-  const result = analyzeUltra(candles, { ...cfg, symbol, _pwh, _pwl, _dailyEma10, _dailyEma20, _monthlyOpen, _monthlyHigh, _monthlyLow, _weeklyOpen, _yearlyOpen });
+  const result = analyzeUltra(candles, { ...cfg, symbol, _pwh, _pwl, _dailyEma10, _dailyEma20, _monthlyOpen, _monthlyHigh, _monthlyLow, _weeklyOpen, _yearlyOpen, _fridayClose });
 
   if (result.signal === "LONG" || result.signal === "SHORT") {
     console.log(`  ✅ [ULTRA] ${symbol} ${result.signal} @ ${fmtPrice(price)} — (${result.bullScore ?? 0}↑/${result.bearScore ?? 0}↓)`);
@@ -2633,6 +2637,20 @@ function applyTrail(pos, currentPrice) {
   const gainPct = pos.side === "LONG"
     ? (currentPrice - entry) / entry * 100
     : (entry - currentPrice) / entry * 100;
+
+  // ── Break-even @ +1R (TraderaEdge AMA: "čim ode na 100%, break even") ──────
+  // Kad profit dosegne 1× rizik (slPct), SL ide na entry (+0.05% za fee)
+  const _riskPct = parseFloat(pos.slPct) || 2.0;
+  if (!pos.beApplied && gainPct >= _riskPct) {
+    const beSl = pos.side === "LONG" ? entry * 1.0005 : entry * 0.9995;
+    const improved = pos.side === "LONG" ? beSl > pos.sl : beSl < pos.sl;
+    pos.beApplied = true;
+    if (improved) {
+      pos.sl = beSl;
+      console.log(`  🛡️  [BE] ${pos.symbol} ${pos.side} — +1R (${gainPct.toFixed(2)}% ≥ ${_riskPct}%) → SL na break-even ${fmtPrice(beSl)}`);
+      if (gainPct < TRAIL_TRIGGER) return true;  // BE primijenjen, trail još nije
+    }
+  }
 
   if (gainPct < TRAIL_TRIGGER) return false;
 
@@ -4804,6 +4822,13 @@ export async function run() {
         if (sess.dead) {
           _macroSizeMult *= 0.5;
           console.log(`  🌙 [SESSION] ${symbol} — dead zone (${sess.utcHour}:00 UTC) → size ×0.5`);
+        }
+
+        // ── Weekend — TraderaEdge AMA: "weekendom se inače ne trguje" ───────
+        const _dow = new Date().getUTCDay();
+        if (_dow === 0 || _dow === 6) {
+          _macroSizeMult *= 0.5;
+          console.log(`  📅 [WEEKEND] ${symbol} — ${_dow === 6 ? "subota" : "nedjelja"} → size ×0.5`);
         }
 
         // ── A) MM Blackout — UKLONJEN 25.05.2026 ────────────────────────────

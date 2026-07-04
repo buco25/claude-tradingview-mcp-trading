@@ -1407,6 +1407,73 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
 })();
 </script>
 
+  <!-- ── Liquidity Hunt Zones Card ───────────────────────────────────────── -->
+  <div style="background:#1f2937;border:1px solid #374151;border-radius:12px;padding:16px 20px;margin-bottom:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#8b5cf6">🎯 Liquidity Hunt Zones</div>
+      <span id="lhz-ts" style="font-size:10px;color:#4b5563">učitavam…</span>
+    </div>
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:12px" id="lhz-table">
+        <thead>
+          <tr style="color:#6b7280;text-transform:uppercase;font-size:10px">
+            <th style="text-align:left;padding:4px 8px;font-weight:600">Zona</th>
+            <th style="text-align:right;padding:4px 8px;font-weight:600">Razina</th>
+            <th style="text-align:right;padding:4px 8px;font-weight:600">Dist. %</th>
+            <th style="text-align:left;padding:4px 8px;font-weight:600">Status</th>
+          </tr>
+        </thead>
+        <tbody id="lhz-body">
+          <tr><td colspan="4" style="text-align:center;color:#4b5563;padding:12px">Učitavam…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+<script>
+(function lhzCard() {
+  function zoneRow(icon, name, val, price) {
+    var dist = (val - price) / price * 100;
+    var absDist = Math.abs(dist);
+    var above = dist > 0;
+    var near  = absDist < 1.5;
+    var distColor   = near ? '#f59e0b' : above ? '#059669' : '#dc2626';
+    var distStr     = (dist > 0 ? '+' : '') + dist.toFixed(2) + '%';
+    var statusLabel = near ? '⚡ NEAR' : above ? '↑ Resistance' : '↓ Support';
+    var statusColor = near ? '#f59e0b' : above ? '#059669' : '#dc2626';
+    return '<tr style="border-top:1px solid #374151">' +
+      '<td style="padding:5px 8px;color:#e5e7eb">' + icon + ' ' + name + '</td>' +
+      '<td style="padding:5px 8px;text-align:right;font-family:monospace;color:#f3f4f6;font-weight:600">$' + Math.round(val).toLocaleString() + '</td>' +
+      '<td style="padding:5px 8px;text-align:right;font-family:monospace;color:' + distColor + ';font-weight:700">' + distStr + '</td>' +
+      '<td style="padding:5px 8px;color:' + statusColor + ';font-size:11px">' + statusLabel + '</td>' +
+      '</tr>';
+  }
+  async function load() {
+    try {
+      var d = await fetch('/api/btc-status').then(function(r){return r.json();});
+      document.getElementById('lhz-ts').textContent = 'osvježeno ' + new Date().toLocaleTimeString('hr-HR');
+      var lhz = d.lhz, price = d.dayRange && d.dayRange.close;
+      if (!lhz || !price) { document.getElementById('lhz-body').innerHTML = '<tr><td colspan="4" style="text-align:center;color:#4b5563;padding:8px">Nema podataka</td></tr>'; return; }
+      var zones = [
+        { icon: '📅', name: 'Yearly Open',    val: lhz.yearlyOpen  },
+        { icon: '🗓️', name: 'Monthly Open',   val: lhz.monthlyOpen },
+        { icon: '🔺', name: 'Monthly High',   val: lhz.monthlyHigh },
+        { icon: '🔻', name: 'Monthly Low',    val: lhz.monthlyLow  },
+        { icon: '📆', name: 'Weekly Open',    val: lhz.weeklyOpen  },
+        { icon: '⬆️', name: 'Prev Week High', val: lhz.pwh         },
+        { icon: '⬇️', name: 'Prev Week Low',  val: lhz.pwl         },
+      ].filter(function(z){ return z.val; });
+      zones.sort(function(a,b){ return Math.abs(a.val-price)-Math.abs(b.val-price); });
+      var rows = zones.map(function(z){ return zoneRow(z.icon, z.name, z.val, price); }).join('');
+      document.getElementById('lhz-body').innerHTML = rows || '<tr><td colspan="4" style="text-align:center;color:#4b5563;padding:8px">—</td></tr>';
+    } catch(e) {
+      document.getElementById('lhz-ts').textContent = 'Greška';
+    }
+  }
+  load();
+  setInterval(load, 60000);
+})();
+</script>
+
   <!-- ── SWEEP + MSS Card ────────────────────────────────────────────────── -->
   <div id="sweep-card" style="background:#1f2937;border:1px solid #374151;border-radius:12px;padding:16px 20px;margin-bottom:16px;transition:border-color .3s,box-shadow .3s">
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px">
@@ -3992,6 +4059,38 @@ const server = http.createServer(async (req, res) => {
       // L/S Ratio (Binance global account ratio)
       try {
         result.lsr = await getLongShortRatio("BTCUSDT");
+      } catch {}
+
+      // Liquidity Hunt zones — dohvati Weekly + Daily podatke za BTC
+      try {
+        const [wdR, ddR] = await Promise.all([
+          fetch("https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1W&limit=3").then(r=>r.json()),
+          fetch("https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1Dutc&limit=365").then(r=>r.json())
+        ]);
+        const lhz = {};
+        if (wdR.code === "00000" && wdR.data?.length >= 2) {
+          lhz.weeklyOpen = parseFloat(wdR.data[0][1]);
+          lhz.pwh        = parseFloat(wdR.data[1][2]);
+          lhz.pwl        = parseFloat(wdR.data[1][3]);
+        }
+        if (ddR.code === "00000" && ddR.data?.length >= 2) {
+          const dC = ddR.data.map(k => ({
+            ts: parseInt(k[0]), open: parseFloat(k[1]),
+            high: parseFloat(k[2]), low: parseFloat(k[3])
+          })).reverse();
+          const now = new Date();
+          const monthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+          const yearStart  = Date.UTC(now.getUTCFullYear(), 0, 1);
+          const monthC = dC.filter(c => c.ts >= monthStart);
+          if (monthC.length > 0) {
+            lhz.monthlyOpen = monthC[0].open;
+            lhz.monthlyHigh = Math.max(...monthC.map(c => c.high));
+            lhz.monthlyLow  = Math.min(...monthC.map(c => c.low));
+          }
+          const firstYear = dC.find(c => c.ts >= yearStart);
+          if (firstYear) lhz.yearlyOpen = firstYear.open;
+        }
+        if (Object.keys(lhz).length > 0) result.lhz = lhz;
       } catch {}
 
       res.writeHead(200, { "Content-Type": "application/json" });

@@ -100,11 +100,18 @@ const VOL_EXH_DEFAULT = 3.0; // fallback za nepoznate simbole
 // ─── Per-simbol signal kombinacije (backtest optimizirano 16.06.2026) ──────────
 // Indeksi odgovaraju sigs[] u analyzeUltra: 0=E50↑ 1=CVD↑ 2=MACD 3=E145 4=PWHL 5=RDIV 6=MSTR 7=FVG
 const SYMBOL_COMBOS = {
-  "BTCUSDT":  { sigIdx: [0,2,3,4,5,6,9,10], minSig: 5 },           // TraderaEdge: E50+MACD+E145+PWHL+RDIV+MSTR+DEMA+MOPEN (bez CVD/FVG/OB)
-  "ETHUSDT":  { sigIdx: [0,1,2,3,7,8], minSig: 5, btcAlign: true }, // minSig 4→5 + BTC align
-  "SOLUSDT":  { sigIdx: [0,1,3,5,6,8], minSig: 5, btcAlign: true }, // minSig 4→5 + BTC align
-  "TAOUSDT":  { sigIdx: [0,1,3,5,6,8], minSig: 4 },               // ostaje, WR prihvatljiv
-  "AAVEUSDT": { sigIdx: [0,1,2,3,7,8], minSig: 4 },               // ostaje, WR prihvatljiv
+  // BTC — puni TraderaEdge setup: trend + momentum + Smart Hub + Liquidity Hunt
+  "BTCUSDT":  { sigIdx: [0,2,3,4,5,6,9,10], minSig: 5 },
+  // ── TraderaEdge alts — E50+CVD+MACD/E145+RDIV+MSTR+DEMA+LHUNT ──────────────
+  "ETHUSDT":  { sigIdx: [0,1,2,3,5,6,9,10], minSig: 5, btcAlign: true },
+  "SOLUSDT":  { sigIdx: [0,1,3,5,6,9,10],   minSig: 5, btcAlign: true },
+  "BNBUSDT":  { sigIdx: [0,1,2,3,5,6,9,10], minSig: 5, btcAlign: true },
+  "XRPUSDT":  { sigIdx: [0,1,2,3,5,6,9,10], minSig: 5, btcAlign: true },
+  "AVAXUSDT": { sigIdx: [0,1,3,5,6,9,10],   minSig: 5, btcAlign: true },
+  "LINKUSDT": { sigIdx: [0,1,2,3,5,6,9,10], minSig: 5, btcAlign: true },
+  // ── Extra ────────────────────────────────────────────────────────────────────
+  "TAOUSDT":  { sigIdx: [0,1,3,5,6,9,10],   minSig: 4 },
+  "AAVEUSDT": { sigIdx: [0,1,2,3,5,6,9,10], minSig: 4 },
 };
 
 // ─── Ekonomski kalendar ───────────────────────────────────────────────────────
@@ -1227,7 +1234,7 @@ export function getConsecutiveLossCount(pid) {
 // Čitamo nakon izlaza koji signal je bio aktivan i označavamo win/loss
 // Svaka 10. analiza ispisuje per-signal WR u konzolu
 
-const SIG_NAMES = ["E50","CVD","MACD","E145","PWHL","RDIV","MSTR","FVG","OB","DEMA","MOPEN"];
+const SIG_NAMES = ["E50","CVD","MACD","E145","PWHL","RDIV","MSTR","FVG","OB","DEMA","LHUNT"];
 const getSigStatsFile = () => `${DATA_DIR}/signal_stats.json`;
 
 function loadSigStats() {
@@ -2115,41 +2122,45 @@ function analyzeUltra(candles, cfg) {
     else                                              sigDailyEMA = -1;  // ispod daily EMA10 = bear
   }
 
-  // ── sig11: Monthly Open sweep (TraderaEdge Liquidity Hunt) ────────────────────
-  // Ključne razine: Yearly Open, Monthly Open, Weekly Open (svaki = likvidnosni magnet)
-  // Bullish sweep: cijena probila ispod Monthly Open (uzela SL-ove), zatim se vratila iznad
-  // Bearish sweep: cijena probila iznad Monthly Open (uzela SL-ove), zatim pala ispod
-  // Softer: cijena jednostavno iznad/ispod Monthly Open = bull/bear kontekst za taj mjesec
-  const { _monthlyOpen = null } = cfg;
+  // ── sig11: Liquidity Hunt — sve ključne zone (TraderaEdge) ───────────────────
+  // Prati: Monthly Open/High/Low, Weekly Open, Yearly Open, PWH, PWL
+  // Bullish sweep: cijena prošla ispod zone → uzela SL-ove → sada iznad = LONG
+  // Bearish sweep: cijena prošla iznad zone → uzela SL-ove → sada ispod = SHORT
+  // Kontekst: iznad/ispod majority zona = bull/bear bias
+  const {
+    _monthlyOpen = null, _monthlyHigh = null, _monthlyLow = null,
+    _weeklyOpen  = null, _yearlyOpen  = null
+  } = cfg;
   let sigMOPEN = 0;
-  if (_monthlyOpen !== null) {
-    const MOPEN_ZONE = 0.025;
-    const nearMOpen  = Math.abs(price - _monthlyOpen) / price < MOPEN_ZONE;
-    const recentLowsMO  = candles.slice(-8).map(c => c.low);
-    const recentHighsMO = candles.slice(-8).map(c => c.high);
-    const sweptBelowMO  = recentLowsMO.some(l  => l < _monthlyOpen * 0.999);
-    const sweptAboveMO  = recentHighsMO.some(h => h > _monthlyOpen * 1.001);
-    if      (sweptBelowMO && price > _monthlyOpen && nearMOpen && rsiRising)  sigMOPEN =  1;  // sweep + recovery = jak LONG
-    else if (sweptAboveMO && price < _monthlyOpen && nearMOpen && rsiFalling) sigMOPEN = -1;  // fake breakout = jak SHORT
-    else if (price > _monthlyOpen * 1.002)  sigMOPEN =  1;  // iznad MOpen = bull kontekst
-    else if (price < _monthlyOpen * 0.998)  sigMOPEN = -1;  // ispod MOpen = bear kontekst
-  }
-
-  // ── FIB 0.702 kontekstualni gate (soft) — Golden Ratio ───────────────────────
-  // Iz videa: 0.702 je non-tradicionalni FIB. Ako cijena pada ispod 0.702 razine,
-  // veliki je signal promjene trenda → blokiramo LONG (ne SHORT)
-  // Računamo od recentnog swing high/low (zadnjih 100 bara)
-  let _fib702Level = null, _fib702Bearish = false;
-  {
-    const FIB_LOOKBACK = 100;
-    const fibStart = Math.max(0, n - FIB_LOOKBACK);
-    const swHigh = Math.max(...candles.slice(fibStart).map(c => c.high));
-    const swLow  = Math.min(...candles.slice(fibStart).map(c => c.low));
-    if (swHigh > swLow) {
-      _fib702Level = swHigh - (swHigh - swLow) * 0.702;
-      _fib702Bearish = price < _fib702Level;
+  const LH_ZONE = 0.015;  // 1.5% proximity za sweep detekciju
+  const recentLowsLH  = candles.slice(-8).map(c => c.low);
+  const recentHighsLH = candles.slice(-8).map(c => c.high);
+  // Sakupi sve dostupne LH razine
+  const _lhLevels = [
+    _monthlyOpen, _weeklyOpen, _yearlyOpen,
+    _monthlyHigh, _monthlyLow,
+    cfg._pwh ?? null, cfg._pwl ?? null
+  ].filter(v => v !== null && v > 0);
+  if (_lhLevels.length > 0) {
+    let sweepBull = 0, sweepBear = 0;
+    for (const lvl of _lhLevels) {
+      const near     = Math.abs(price - lvl) / price < LH_ZONE;
+      const sweptBel = recentLowsLH.some(l  => l < lvl * 0.999);
+      const sweptAbv = recentHighsLH.some(h => h > lvl * 1.001);
+      if (sweptBel && price > lvl && near && rsiRising)  sweepBull++;
+      if (sweptAbv && price < lvl && near && rsiFalling) sweepBear++;
+    }
+    if (sweepBull > sweepBear && sweepBull > 0)      sigMOPEN =  1;  // aktivan sweep + recovery
+    else if (sweepBear > sweepBull && sweepBear > 0) sigMOPEN = -1;
+    else {
+      // Kontekst: je li cijena iznad/ispod majority ključnih zona
+      const bullCtx = _lhLevels.filter(l => price > l * 1.001).length;
+      const bearCtx = _lhLevels.filter(l => price < l * 0.999).length;
+      if (bullCtx > bearCtx)      sigMOPEN =  1;
+      else if (bearCtx > bullCtx) sigMOPEN = -1;
     }
   }
+
 
   // Volume vs average
   const volAvg20 = vols.slice(-20).reduce((a,b)=>a+b,0) / 20;
@@ -2179,7 +2190,7 @@ function analyzeUltra(candles, cfg) {
     sigFVG,                                            //  8. FVG   Fair Value Gap imbalance
     sigOB,                                             //  9. OB    Order Block (SMC institucijska zona)
     sigDailyEMA,                                       // 10. DEMA  Daily EMA10/20 retest (TraderaEdge Smart Hub)
-    sigMOPEN,                                          // 11. MOPEN Monthly Open sweep (TraderaEdge Liquidity Hunt)
+    sigMOPEN,                                          // 11. LHUNT Liquidity Hunt: MOpen+WOpen+YOpen+MH/ML+PWH/PWL
   ];
 
   // Per-simbol combo filter — koristi samo signale iz SYMBOL_COMBOS
@@ -2236,20 +2247,7 @@ function analyzeUltra(candles, cfg) {
     console.log(`  ⚡ [VOL_EXH bypass] ${_sym} — max score, ignoriramo VOL_EXH (${volRatioNow.toFixed(2)}x)`);
   }
 
-  // 5. FIB 0.702 Golden Ratio — soft gate za LONG
-  // Iz SMC edukacije: ako cijena ispod 0.702 FIB razine, trend je promijenjen → blokira LONG
-  // SHORT i dalje dozvoljen (breakdowns su validni ispod 0.702)
-  if (_fib702Bearish && _fib702Level !== null) {
-    const fibPct = ((_fib702Level - price) / price * 100).toFixed(1);
-    console.log(`  📐 [FIB702] ${_sym} — cijena ${fibPct}% ispod Golden Ratio (${_fib702Level?.toFixed(2)}) → LONG blokiran`);
-    // Blokira samo LONG pullback — SHORT i momentum SHORT i dalje prolaze
-    if (bullScore >= minSig && (bearScore < minSig)) {
-      return { price, signal: "NEUTRAL", bullScore, bearScore,
-        reason: `FIB702 LONG blokiran: cijena ${fibPct}% ispod Golden Ratio ${_fib702Level?.toFixed(2)}` };
-    }
-  }
-
-  // 6. VWAP crossover + potvrda
+  // 5. VWAP crossover + potvrda
   // Ulaz SAMO kad je:
   //   - Svjeća N-2: bila na suprotnoj strani VWAP
   //   - Svjeća N-1: probila VWAP (zatvorila na novoj strani)
@@ -2452,13 +2450,31 @@ async function analyzeUltraPullback(symbol, candles, cfg) {
     console.log(`  ⚠️  [PWH/PWL] ${symbol} — ne mogu dohvatiti weekly candle: ${e.message}`);
   }
 
-  // ── Dohvati Daily EMA 10/20 i Monthly Open (TraderaEdge signali) ─────────────
-  let _dailyEma10 = null, _dailyEma20 = null, _monthlyOpen = null;
+  // ── Dohvati Daily EMA 10/20 + sve Liquidity Hunt zone ────────────────────────
+  let _dailyEma10 = null, _dailyEma20 = null;
+  let _monthlyOpen = null, _monthlyHigh = null, _monthlyLow = null;
+  let _yearlyOpen  = null;
+  let _weeklyOpen  = null;  // tekući tjedan — open (iz tjednog fetcha gore)
   try {
-    const dUrl = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=1Dutc&limit=60`;
+    // Tjedni open iz već dohvaćenog tjednog candle-a
+    const wUrl2 = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=1W&limit=3`;
+    const wd2 = await fetch(wUrl2).then(r => r.json());
+    if (wd2.code === "00000" && wd2.data?.length >= 1) {
+      _weeklyOpen = parseFloat(wd2.data[0][1]);  // tekući tjedan open
+      if (!_pwh && wd2.data.length >= 2) {
+        _pwh = parseFloat(wd2.data[1][2]);
+        _pwl = parseFloat(wd2.data[1][3]);
+      }
+    }
+  } catch {}
+  try {
+    const dUrl = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=1Dutc&limit=365`;
     const dd = await fetch(dUrl).then(r => r.json());
     if (dd.code === "00000" && dd.data?.length >= 21) {
-      const dC = dd.data.map(k => ({ ts: parseInt(k[0]), open: parseFloat(k[1]), close: parseFloat(k[4]) })).reverse();
+      const dC = dd.data.map(k => ({
+        ts: parseInt(k[0]), open: parseFloat(k[1]),
+        high: parseFloat(k[2]), low: parseFloat(k[3]), close: parseFloat(k[4])
+      })).reverse();
       const dCl = dC.map(c => c.close);
       const dn = dCl.length;
       const dema = (p) => {
@@ -2468,18 +2484,26 @@ async function analyzeUltraPullback(symbol, candles, cfg) {
       };
       _dailyEma10 = dema(10);
       _dailyEma20 = dema(20);
-      // Monthly Open: open prvog dnevnog candle-a tekućeg kalendarskog mjeseca (UTC)
       const now = new Date();
+      // Monthly Open/High/Low
       const monthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
-      const firstOfMonth = dC.find(c => c.ts >= monthStart);
-      if (firstOfMonth) _monthlyOpen = firstOfMonth.open;
+      const monthCandles = dC.filter(c => c.ts >= monthStart);
+      if (monthCandles.length > 0) {
+        _monthlyOpen = monthCandles[0].open;
+        _monthlyHigh = Math.max(...monthCandles.map(c => c.high));
+        _monthlyLow  = Math.min(...monthCandles.map(c => c.low));
+      }
+      // Yearly Open
+      const yearStart = Date.UTC(now.getUTCFullYear(), 0, 1);
+      const firstOfYear = dC.find(c => c.ts >= yearStart);
+      if (firstOfYear) _yearlyOpen = firstOfYear.open;
     }
   } catch(e) {
-    console.log(`  ⚠️  [DEMA/MOPEN] ${symbol} — ${e.message}`);
+    console.log(`  ⚠️  [DEMA/LHUNT] ${symbol} — ${e.message}`);
   }
 
   // Pokreni analizu (proslijedi symbol + PWH/PWL + daily signali)
-  const result = analyzeUltra(candles, { ...cfg, symbol, _pwh, _pwl, _dailyEma10, _dailyEma20, _monthlyOpen });
+  const result = analyzeUltra(candles, { ...cfg, symbol, _pwh, _pwl, _dailyEma10, _dailyEma20, _monthlyOpen, _monthlyHigh, _monthlyLow, _weeklyOpen, _yearlyOpen });
 
   if (result.signal === "LONG" || result.signal === "SHORT") {
     console.log(`  ✅ [ULTRA] ${symbol} ${result.signal} @ ${fmtPrice(price)} — (${result.bullScore ?? 0}↑/${result.bearScore ?? 0}↓)`);
@@ -4632,11 +4656,6 @@ export async function run() {
       if (sp.change4h !== null) console.log(`  📈 [SP500] ${sp.change4h}% (4H) — ${sp.regime}`);
     }
 
-    // ── BTC/ETH divergencija — jednom po ciklusu ─────────────────────────────
-    let _btcEthDiv = { diverging: false, corr: 1 };
-    if (pDef.strategy === "synapse_t") {
-      _btcEthDiv = await checkBtcEthDivergence();
-    }
 
     // ── Fear & Greed gate ─────────────────────────────────────────────────────
     let _fearGreed = null;
@@ -5206,16 +5225,6 @@ export async function run() {
           }
         }
 
-        // ── BTC/ETH divergencija — market uncertainty → traži minSig+1 signala ──
-        if (pDef.strategy === "synapse_t" && _btcEthDiv.diverging) {
-          const score = signal === "LONG" ? result.bullScore : result.bearScore;
-          const divThresh = (cfg?.minSig ?? 6) + 1;
-          if (score < divThresh) {
-            console.log(`  ⚡ [DIV] ${symbol} — BTC/ETH divergiraju (corr=${_btcEthDiv.corr}), signal ${score}/13 < ${divThresh} → preskačem`);
-            continue;
-          }
-          console.log(`  ⚡ [DIV] ${symbol} — BTC/ETH divergiraju ali signal jak (${score}/13 ≥ ${divThresh}) → nastavljam`);
-        }
 
         // ── Cooldown provjera: 4h pauza po simbolu nakon SL-a ──────────────
         const lastSl = symbolSlCooldown.get(symbol);
@@ -5300,14 +5309,11 @@ export async function run() {
           console.log(`  📐 [Tier-SL] ${symbol} Tier${symSltp.tier??'?'}: SL ${slPct}% / TP ${tpPct}%`);
         }
 
-        // ── Dinamički TP — tržišni uvjeti (BTC Regime + Market Breadth) ────────
-        // JAKO: BTC Regime BULL+LONG ili BEAR+SHORT AND Breadth ≥ 5 → TP × 3 (1:3 R:R)
-        // NORMALNO: NEUTRAL ili Breadth prenizak → TP × 1.5 (1:1.5 R:R)
-        // Pravilo: samo POVEĆAVAMO TP, nikad ne smanjujemo ako je S/R dal bolji target
-        const _breadthBull = _marketBreadth.bullish >= BREADTH_STRONG;
-        const _breadthBear = _marketBreadth.bearish >= BREADTH_STRONG;
-        const _isStrong = (_btcRegime === "BULL" && signal === "LONG"  && _breadthBull) ||
-                          (_btcRegime === "BEAR" && signal === "SHORT" && _breadthBear);
+        // ── Dinamički TP — BTC Regime ─────────────────────────────────────────
+        // JAKO: BTC Regime BULL+LONG ili BEAR+SHORT → TP × 3 (1:3 R:R)
+        // NORMALNO: NEUTRAL ili kontra → TP × 2.0 (1:2 R:R)
+        const _isStrong = (_btcRegime === "BULL" && signal === "LONG") ||
+                          (_btcRegime === "BEAR" && signal === "SHORT");
         const _tpMult     = _isStrong ? STRONG_TP_MULT : NORMAL_TP_MULT;
         const _dynTpPct   = slPct * _tpMult;
         const signalStrength = _isStrong ? "strong" : "normal";
@@ -5318,9 +5324,9 @@ export async function run() {
         }
 
         if (_isStrong) {
-          console.log(`  💪 [JAKO TRŽIŠTE] ${symbol} — Regime:${_btcRegime} + Breadth▲${_marketBreadth.bullish} + ${signal} → TP ×3 = ${tpPct.toFixed(2)}% | RR 1:${(tpPct/slPct).toFixed(1)}`);
+          console.log(`  💪 [JAKO] ${symbol} — Regime:${_btcRegime} + ${signal} → TP ×3 = ${tpPct.toFixed(2)}% | RR 1:${(tpPct/slPct).toFixed(1)}`);
         } else {
-          console.log(`  📊 [KONSOLIDACIJA] ${symbol} — Regime:${_btcRegime} Breadth▲${_marketBreadth.bullish}▼${_marketBreadth.bearish} → TP ×1.5 = ${tpPct.toFixed(2)}% | RR 1:${(tpPct/slPct).toFixed(1)}`);
+          console.log(`  📊 [NORMALNO] ${symbol} — Regime:${_btcRegime} → TP ×2 = ${tpPct.toFixed(2)}% | RR 1:${(tpPct/slPct).toFixed(1)}`);
         }
 
         // Risk-based position sizing: SL gubitak = točno RISK_PCT% trenutne equity

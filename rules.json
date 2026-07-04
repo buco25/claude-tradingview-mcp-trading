@@ -1,6 +1,18 @@
 {
-  "all_symbols": ["BTCUSDT"],
-  "watchlist_synapse_t": ["BTCUSDT"],
+  "all_symbols": [
+    "BTCUSDT"
+  ],
+  "watchlist_synapse_t": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "BNBUSDT",
+    "XRPUSDT",
+    "AVAXUSDT",
+    "LINKUSDT",
+    "TAOUSDT",
+    "AAVEUSDT"
+  ],
   "portfolio_timeframes": {
     "synapse_t": "15m"
   },
@@ -9,107 +21,107 @@
   "symbol_sltp": {
     "BTCUSDT": {
       "slPct": 1.5,
-      "tpPct": 3.0,
+      "tpPct": 3,
       "tier": 0,
       "leverage": 52,
       "avgRange": "2.57%"
     },
     "ETHUSDT": {
-      "slPct": 2.0,
-      "tpPct": 4.0,
+      "slPct": 2,
+      "tpPct": 4,
       "tier": 1,
       "leverage": 41,
       "avgRange": "3.25%"
     },
     "SOLUSDT": {
-      "slPct": 2.0,
-      "tpPct": 4.0,
+      "slPct": 2,
+      "tpPct": 4,
       "tier": 1,
       "leverage": 41,
       "avgRange": "3.47%",
       "riskPct": 0.75
     },
     "XRPUSDT": {
-      "slPct": 2.0,
-      "tpPct": 4.0,
+      "slPct": 2,
+      "tpPct": 4,
       "tier": 1,
       "leverage": 41,
       "avgRange": "3.18%"
     },
     "LINKUSDT": {
-      "slPct": 2.0,
-      "tpPct": 4.0,
+      "slPct": 2,
+      "tpPct": 4,
       "tier": 1,
       "leverage": 41,
       "avgRange": "3.95%"
     },
     "ADAUSDT": {
-      "slPct": 2.0,
-      "tpPct": 4.0,
+      "slPct": 2,
+      "tpPct": 4,
       "tier": 1,
       "leverage": 41,
       "avgRange": "3.96%"
     },
     "DOGEUSDT": {
-      "slPct": 2.0,
-      "tpPct": 4.0,
+      "slPct": 2,
+      "tpPct": 4,
       "tier": 1,
       "leverage": 41,
       "avgRange": "4.31%"
     },
     "HYPEUSDT": {
       "slPct": 2.5,
-      "tpPct": 5.0,
+      "tpPct": 5,
       "tier": 2,
       "leverage": 25,
       "avgRange": "5.36%"
     },
     "SUIUSDT": {
       "slPct": 2.5,
-      "tpPct": 5.0,
+      "tpPct": 5,
       "tier": 2,
       "leverage": 25,
       "avgRange": "5.71%"
     },
     "SEIUSDT": {
       "slPct": 2.5,
-      "tpPct": 5.0,
+      "tpPct": 5,
       "tier": 2,
       "leverage": 25,
       "avgRange": "5.71%"
     },
     "TAOUSDT": {
       "slPct": 2.5,
-      "tpPct": 5.0,
+      "tpPct": 5,
       "tier": 2,
       "leverage": 25,
       "avgRange": "5.91%",
       "riskPct": 0.75
     },
     "JUPUSDT": {
-      "slPct": 3.0,
-      "tpPct": 6.0,
+      "slPct": 3,
+      "tpPct": 6,
       "tier": 3,
       "leverage": 20,
       "avgRange": "7.00%"
     },
     "PEPEUSDT": {
-      "slPct": 2.0,
-      "tpPct": 4.0,
+      "slPct": 2,
+      "tpPct": 4,
       "tier": 1,
       "leverage": 41,
       "avgRange": "4.2%"
     },
     "FETUSDT": {
       "slPct": 2.5,
-      "tpPct": 5.0,
+      "tpPct": 5,
       "tier": 2,
       "leverage": 25,
       "avgRange": "5.5%"
     },
     "AAVEUSDT": {
       "slPct": 2.5,
-      "tpPct": 5.0,
+      "tpPct": 5,
       "tier": 2,
       "leverage": 25,
       "avgRange": "5.3%",
@@ -117,25 +129,46 @@
     },
     "BNBUSDT": {
       "slPct": 1.5,
-      "tpPct": 3.0,
+      "tpPct": 3,
       "tier": 0,
       "leverage": 52,
       "avgRange": "2.8%"
     },
     "WLDUSDT": {
-      "slPct": 3.0,
-      "tpPct": 6.0,
+      "slPct": 3,
+      "tpPct": 6,
       "tier": 3,
       "leverage": 20,
       "avgRange": "7.5%"
     },
-    "TIAUSDT": { "slPct": 2.5, "tpPct": 5.0 },
-    "WIFUSDT": { "slPct": 2.5, "tpPct": 5.0 },
-    "ARBUSDT": { "slPct": 2.5, "tpPct": 5.0 },
-    "DOTUSDT": { "slPct": 2.0, "tpPct": 4.0 },
-    "AVAXUSDT": { "slPct": 2.0, "tpPct": 4.0 },
-    "XAUUSDT": { "slPct": 1.5, "tpPct": 3.0 },
-    "XAGUSDT": { "slPct": 1.5, "tpPct": 3.0 }
+    "TIAUSDT": {
+      "slPct": 2.5,
+      "tpPct": 5
+    },
+    "WIFUSDT": {
+      "slPct": 2.5,
+      "tpPct": 5
+    },
+    "ARBUSDT": {
+      "slPct": 2.5,
+      "tpPct": 5
+    },
+    "DOTUSDT": {
+      "slPct": 2,
+      "tpPct": 4
+    },
+    "AVAXUSDT": {
+      "slPct": 2,
+      "tpPct": 4
+    },
+    "XAUUSDT": {
+      "slPct": 1.5,
+      "tpPct": 3
+    },
+    "XAGUSDT": {
+      "slPct": 1.5,
+      "tpPct": 3
+    }
   },
   "strategies": {
     "synapse_t": {
@@ -143,8 +176,8 @@
       "description": "ULTRA v3 (07.06.2026): 8 signala: E50rev, CVDrev, MACD, E145, PWHL, RDIV, MSTR, FVG. Bonus: CVD+E145, PWHL+MSTR. Gates: ADX, RSI, VOL_EXH, VWAP, FIB0.702. BTC EMA50 4H SHORT filter + Correlated Exit (BTC spike +1.2%/30min). minSig=6 — backtest WR=48.1%, PF=1.39. Watchlist rebalans 07.06.2026: OUT=NEAR/APT/ENA/DOGE/INJ, IN=FET/AAVE/BNB/WLD/PEPE. Max 3 pozicije.",
       "params": {
         "minSig": 4,
-        "slPct": 2.0,
-        "tpPct": 4.0
+        "slPct": 2,
+        "tpPct": 4
       }
     }
   },

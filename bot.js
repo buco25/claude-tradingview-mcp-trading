@@ -5389,10 +5389,10 @@ export async function run() {
         const _totalMult = Math.max(_rawMult, 0.5) * (_squeezeMult ?? 1);  // squeeze boost ide iznad floora
         let tradeSize  = (riskAmount / (slPct / 100)) * _totalMult;
         if (_rawMult < 1) console.log(`  ⚖️  [MULT] ${symbol} — kombinirani mult ×${_rawMult.toFixed(2)}${_rawMult < 0.5 ? " → floor ×0.50" : ""}`);
-        // Bitget minimum: 5 USDT amount + minTradeNum po simbolu (npr. ETH 0.01, BTC 0.001)
-        // Ispod minimuma nalozi padaju s 45110/45111 → dižemo na min + 5% buffer
+        // Minimum: Bitget minTradeNum + $40 notional floor (margina ≥ ~$1 na 33-52x)
+        // — ispod toga fee pojede dobit, a nalozi < min qty padaju s 45110/45111
         const _minQtyNotional = (_minTradeNum[symbol] ?? 0) * price * 1.05;
-        const _minNotional = Math.max(12, _minQtyNotional);
+        const _minNotional = Math.max(40, _minQtyNotional);
         if (tradeSize < _minNotional) {
           console.log(`  📏 [MIN] ${symbol} — size $${tradeSize.toFixed(0)} < $${_minNotional.toFixed(0)} (minQty ${_minTradeNum[symbol] ?? "?"}) → podignut na minimum`);
           tradeSize = _minNotional;

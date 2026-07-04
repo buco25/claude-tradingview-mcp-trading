@@ -32,7 +32,7 @@ const TP_PCT        = 3.0;    // fallback TP % (Tier 1, 1.5×SL) — override pe
 // NORMALNO: BTC Regime NEUTRAL, ili regime ne podudara signal → TP = SL × 1.5 (1:1.5 R:R)
 const STRONG_SIGNAL_SCORE = 9;    // nekorišten za TP (zadržan za eventualne filter provjere)
 const STRONG_TP_MULT      = 3.0;  // jako tržište → TP = SL × 3 (1:3 R:R)
-const NORMAL_TP_MULT      = 1.5;  // konsolidacija / neutralno → TP = SL × 1.5 (1:1.5 R:R)
+const NORMAL_TP_MULT      = 2.0;  // konsolidacija / neutralno → TP = SL × 2.0 (1:2 R:R min, TraderaEdge standard)
 const MAX_TRADES_PER_DAY = 100;
 const MAX_OPEN_PER_PORTFOLIO = 3;  // max otvorenih pozicija po portfoliju
 const MAX_PYRAMID           = 1;   // max 1 adicija u istom smjeru (BTC only mode)
@@ -100,7 +100,7 @@ const VOL_EXH_DEFAULT = 3.0; // fallback za nepoznate simbole
 // ─── Per-simbol signal kombinacije (backtest optimizirano 16.06.2026) ──────────
 // Indeksi odgovaraju sigs[] u analyzeUltra: 0=E50↑ 1=CVD↑ 2=MACD 3=E145 4=PWHL 5=RDIV 6=MSTR 7=FVG
 const SYMBOL_COMBOS = {
-  "BTCUSDT":  { sigIdx: [0,1,2,3,7,8,9,10], minSig: 5 },           // +DEMA(9)+MOPEN(10) TraderaEdge
+  "BTCUSDT":  { sigIdx: [0,2,3,4,5,6,9,10], minSig: 5 },           // TraderaEdge: E50+MACD+E145+PWHL+RDIV+MSTR+DEMA+MOPEN (bez CVD/FVG/OB)
   "ETHUSDT":  { sigIdx: [0,1,2,3,7,8], minSig: 5, btcAlign: true }, // minSig 4→5 + BTC align
   "SOLUSDT":  { sigIdx: [0,1,3,5,6,8], minSig: 5, btcAlign: true }, // minSig 4→5 + BTC align
   "TAOUSDT":  { sigIdx: [0,1,3,5,6,8], minSig: 4 },               // ostaje, WR prihvatljiv
@@ -5374,10 +5374,14 @@ export async function run() {
           writeEntryCsv(pid, entry);
           _newEntriesThisScan++;
           _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: "ENTERED", reason: `${result.isMomentum?"MOM":"PBK"} ulaz @ ${fmtPrice(price)} SL ${fmtPrice(sl)} TP ${fmtPrice(tp)}`, vwapDist: result.vwap ? ((price-result.vwap)/result.vwap*100).toFixed(2) : null });
-          await tg(`📋 PAPER [${pDef.name}/${pDef.timeframe}] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b> ${_strengthEmoji}\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} (${slPct.toFixed(1)}%) | TP: ${fmtPrice(tp)} (${tpPct.toFixed(1)}%) | ${_rrLabel}\nEquity: $${equity.toFixed(2)} | Risk: $${riskAmount.toFixed(2)} | Notional: $${tradeSize.toFixed(0)} | Margin: $${margin.toFixed(2)} | ${symSltp.leverage ?? LEVERAGE}x`);
+          // Dinamički leverage: zone-based SL → getSafeLeverage izračunava; tier SL → fiksni
+          const _dynLev = slMethod === "tier" ? (symSltp.leverage ?? null) : null;
+          const _displayLev = _dynLev ?? getSafeLeverage(slPct);
+          await tg(`📋 PAPER [${pDef.name}/${pDef.timeframe}] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b> ${_strengthEmoji}\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} (${slPct.toFixed(1)}%) | TP: ${fmtPrice(tp)} (${tpPct.toFixed(1)}%) | ${_rrLabel}\nEquity: $${equity.toFixed(2)} | Risk: $${riskAmount.toFixed(2)} | Notional: $${tradeSize.toFixed(0)} | Margin: $${margin.toFixed(2)} | ${_displayLev}x [${slMethod}]`);
         } else {
           try {
-            const order = await placeBitGetOrder(symbol, signal, tradeSize, price, sl, tp, slPct, tpPct, symSltp.leverage ?? null);
+            const _dynLev = slMethod === "tier" ? (symSltp.leverage ?? null) : null;
+            const order = await placeBitGetOrder(symbol, signal, tradeSize, price, sl, tp, slPct, tpPct, _dynLev);
             const usedLev    = order?.actualLeverage || LEVERAGE;
             const usedMargin = tradeSize / usedLev;
             entry.orderId    = order?.orderId || orderId;

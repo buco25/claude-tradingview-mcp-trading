@@ -5377,8 +5377,14 @@ export async function run() {
         const _symRiskPct = rules.symbol_sltp?.[symbol]?.riskPct ?? _dynRiskPct;
         console.log(`  🎚️  [RISK] ${symbol} — score ${_entryScore}/${SYMBOL_COMBOS[symbol]?.sigIdx?.length ?? 8}, ${_isStrong ? "JAKO" : "normalno"} → rizik ${_symRiskPct}% banke`);
         const riskAmount = equity * (_symRiskPct / 100);
-        const tradeSize  = (riskAmount / (slPct / 100)) * (atrTrend?.sizeMult ?? 1) * (_oiSizeMult ?? 1) * (_vwapSizeMult ?? 1) * (_stableSizeMult ?? 1) * (_squeezeMult ?? 1) * (_macroSizeMult ?? 1);
+        let tradeSize  = (riskAmount / (slPct / 100)) * (atrTrend?.sizeMult ?? 1) * (_oiSizeMult ?? 1) * (_vwapSizeMult ?? 1) * (_stableSizeMult ?? 1) * (_squeezeMult ?? 1) * (_macroSizeMult ?? 1);
         if (_macroSizeMult < 1) console.log(`  ⚖️  [MACRO] ${symbol} — ukupni macro size mult ×${_macroSizeMult.toFixed(2)}`);
+        // Bitget minimum: 5 USDT amount + min quantity — ispod ~$12 nalozi padaju (45110/45111)
+        const MIN_TRADE_USD = 12;
+        if (tradeSize < MIN_TRADE_USD) {
+          console.log(`  📏 [MIN] ${symbol} — size $${tradeSize.toFixed(0)} < $${MIN_TRADE_USD} → podignut na minimum`);
+          tradeSize = MIN_TRADE_USD;
+        }
         const margin     = tradeSize / LEVERAGE;  // preliminarno — ažurira se nakon setupSymbol
 
         if (!checkDailyLimit(pid)) {

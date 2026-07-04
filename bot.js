@@ -100,7 +100,7 @@ const VOL_EXH_DEFAULT = 3.0; // fallback za nepoznate simbole
 // ─── Per-simbol signal kombinacije (backtest optimizirano 16.06.2026) ──────────
 // Indeksi odgovaraju sigs[] u analyzeUltra: 0=E50↑ 1=CVD↑ 2=MACD 3=E145 4=PWHL 5=RDIV 6=MSTR 7=FVG
 const SYMBOL_COMBOS = {
-  "BTCUSDT":  { sigIdx: [0,1,2,3,7,8], minSig: 4 },               // WR83% — ostaje
+  "BTCUSDT":  { sigIdx: [0,1,2,3,7,8,9,10], minSig: 5 },           // +DEMA(9)+MOPEN(10) TraderaEdge
   "ETHUSDT":  { sigIdx: [0,1,2,3,7,8], minSig: 5, btcAlign: true }, // minSig 4→5 + BTC align
   "SOLUSDT":  { sigIdx: [0,1,3,5,6,8], minSig: 5, btcAlign: true }, // minSig 4→5 + BTC align
   "TAOUSDT":  { sigIdx: [0,1,3,5,6,8], minSig: 4 },               // ostaje, WR prihvatljiv
@@ -1227,7 +1227,7 @@ export function getConsecutiveLossCount(pid) {
 // Čitamo nakon izlaza koji signal je bio aktivan i označavamo win/loss
 // Svaka 10. analiza ispisuje per-signal WR u konzolu
 
-const SIG_NAMES = ["E50","CVD","MACD","E145","PWHL","RDIV","MSTR","FVG","OB"];
+const SIG_NAMES = ["E50","CVD","MACD","E145","PWHL","RDIV","MSTR","FVG","OB","DEMA","MOPEN"];
 const getSigStatsFile = () => `${DATA_DIR}/signal_stats.json`;
 
 function loadSigStats() {
@@ -2098,6 +2098,43 @@ function analyzeUltra(candles, cfg) {
     }
   }
 
+  // ── sig10: Daily EMA 10 / EMA 20 retest (TraderaEdge Smart Hub) ─────────────
+  // Bullish: daily EMA10 > EMA20 (dnevni uptrend) + cijena iznad EMA10 = bull kontekst
+  // Bearish: daily EMA10 < EMA20 (dnevni downtrend) + cijena ispod EMA10 = bear kontekst
+  // Najjači signal: cijena je retestirala EMA10 (unutar 1.5%) i RSI raste/pada
+  const { _dailyEma10 = null, _dailyEma20 = null } = cfg;
+  let sigDailyEMA = 0;
+  if (_dailyEma10 !== null && _dailyEma20 !== null) {
+    const nearEma10  = Math.abs(price - _dailyEma10) / price < 0.015;
+    const aboveEma10 = price > _dailyEma10;
+    // Primarni signal: iznad/ispod daily EMA10 = bull/bear dnevni kontekst
+    // Pojačano: retest EMA10 (unutar 1.5%) + RSI potvrda = jači ulaz (TraderaEdge Smart Hub)
+    if      (aboveEma10 && nearEma10 && rsiRising)   sigDailyEMA =  1;  // retest EMA10 s gore + RSI raste
+    else if (aboveEma10)                              sigDailyEMA =  1;  // iznad daily EMA10 = bull
+    else if (!aboveEma10 && nearEma10 && rsiFalling)  sigDailyEMA = -1;  // retest EMA10 s dole + RSI pada
+    else                                              sigDailyEMA = -1;  // ispod daily EMA10 = bear
+  }
+
+  // ── sig11: Monthly Open sweep (TraderaEdge Liquidity Hunt) ────────────────────
+  // Ključne razine: Yearly Open, Monthly Open, Weekly Open (svaki = likvidnosni magnet)
+  // Bullish sweep: cijena probila ispod Monthly Open (uzela SL-ove), zatim se vratila iznad
+  // Bearish sweep: cijena probila iznad Monthly Open (uzela SL-ove), zatim pala ispod
+  // Softer: cijena jednostavno iznad/ispod Monthly Open = bull/bear kontekst za taj mjesec
+  const { _monthlyOpen = null } = cfg;
+  let sigMOPEN = 0;
+  if (_monthlyOpen !== null) {
+    const MOPEN_ZONE = 0.025;
+    const nearMOpen  = Math.abs(price - _monthlyOpen) / price < MOPEN_ZONE;
+    const recentLowsMO  = candles.slice(-8).map(c => c.low);
+    const recentHighsMO = candles.slice(-8).map(c => c.high);
+    const sweptBelowMO  = recentLowsMO.some(l  => l < _monthlyOpen * 0.999);
+    const sweptAboveMO  = recentHighsMO.some(h => h > _monthlyOpen * 1.001);
+    if      (sweptBelowMO && price > _monthlyOpen && nearMOpen && rsiRising)  sigMOPEN =  1;  // sweep + recovery = jak LONG
+    else if (sweptAboveMO && price < _monthlyOpen && nearMOpen && rsiFalling) sigMOPEN = -1;  // fake breakout = jak SHORT
+    else if (price > _monthlyOpen * 1.002)  sigMOPEN =  1;  // iznad MOpen = bull kontekst
+    else if (price < _monthlyOpen * 0.998)  sigMOPEN = -1;  // ispod MOpen = bear kontekst
+  }
+
   // ── FIB 0.702 kontekstualni gate (soft) — Golden Ratio ───────────────────────
   // Iz videa: 0.702 je non-tradicionalni FIB. Ako cijena pada ispod 0.702 razine,
   // veliki je signal promjene trenda → blokiramo LONG (ne SHORT)
@@ -2141,6 +2178,8 @@ function analyzeUltra(candles, cfg) {
     sigMktStr,                                         //  7. MSTR  Market Structure HH/HL vs LL/LH
     sigFVG,                                            //  8. FVG   Fair Value Gap imbalance
     sigOB,                                             //  9. OB    Order Block (SMC institucijska zona)
+    sigDailyEMA,                                       // 10. DEMA  Daily EMA10/20 retest (TraderaEdge Smart Hub)
+    sigMOPEN,                                          // 11. MOPEN Monthly Open sweep (TraderaEdge Liquidity Hunt)
   ];
 
   // Per-simbol combo filter — koristi samo signale iz SYMBOL_COMBOS
@@ -2413,8 +2452,34 @@ async function analyzeUltraPullback(symbol, candles, cfg) {
     console.log(`  ⚠️  [PWH/PWL] ${symbol} — ne mogu dohvatiti weekly candle: ${e.message}`);
   }
 
-  // Pokreni analizu (proslijedi symbol + PWH/PWL za tiered VOL_EXH threshold)
-  const result = analyzeUltra(candles, { ...cfg, symbol, _pwh, _pwl });
+  // ── Dohvati Daily EMA 10/20 i Monthly Open (TraderaEdge signali) ─────────────
+  let _dailyEma10 = null, _dailyEma20 = null, _monthlyOpen = null;
+  try {
+    const dUrl = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=1Dutc&limit=60`;
+    const dd = await fetch(dUrl).then(r => r.json());
+    if (dd.code === "00000" && dd.data?.length >= 21) {
+      const dC = dd.data.map(k => ({ ts: parseInt(k[0]), open: parseFloat(k[1]), close: parseFloat(k[4]) })).reverse();
+      const dCl = dC.map(c => c.close);
+      const dn = dCl.length;
+      const dema = (p) => {
+        const k = 2/(p+1); let v = dCl.slice(0,p).reduce((a,b)=>a+b,0)/p;
+        for (let i=p; i<dn; i++) v = dCl[i]*k + v*(1-k);
+        return v;
+      };
+      _dailyEma10 = dema(10);
+      _dailyEma20 = dema(20);
+      // Monthly Open: open prvog dnevnog candle-a tekućeg kalendarskog mjeseca (UTC)
+      const now = new Date();
+      const monthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+      const firstOfMonth = dC.find(c => c.ts >= monthStart);
+      if (firstOfMonth) _monthlyOpen = firstOfMonth.open;
+    }
+  } catch(e) {
+    console.log(`  ⚠️  [DEMA/MOPEN] ${symbol} — ${e.message}`);
+  }
+
+  // Pokreni analizu (proslijedi symbol + PWH/PWL + daily signali)
+  const result = analyzeUltra(candles, { ...cfg, symbol, _pwh, _pwl, _dailyEma10, _dailyEma20, _monthlyOpen });
 
   if (result.signal === "LONG" || result.signal === "SHORT") {
     console.log(`  ✅ [ULTRA] ${symbol} ${result.signal} @ ${fmtPrice(price)} — (${result.bullScore ?? 0}↑/${result.bearScore ?? 0}↓)`);

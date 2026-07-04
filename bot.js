@@ -4795,12 +4795,15 @@ export async function run() {
       if (isBlacklisted(symbol)) continue;
 
       try {
-        // ── Session Filter gate ─────────────────────────────────────────────
+        // ── Macro size multiplier — umjesto blokada smanjujemo poziciju ──────
+        // (TraderaEdge pristup: pusti trejd, kontroliraj rizik veličinom)
+        let _macroSizeMult = 1.0;
+
+        // ── Session Filter — dead zone smanjuje size, ne blokira ────────────
         const sess = getSessionInfo();
         if (sess.dead) {
-          console.log(`  🌙 [SESSION] ${symbol} — dead zone (${sess.utcHour}:00 UTC, 01-06 UTC blokiran) → preskačem`);
-          _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "DEAD_ZONE", reason: `Dead zone ${sess.utcHour}:00 UTC` });
-          continue;
+          _macroSizeMult *= 0.5;
+          console.log(`  🌙 [SESSION] ${symbol} — dead zone (${sess.utcHour}:00 UTC) → size ×0.5`);
         }
 
         // ── A) MM Blackout — UKLONJEN 25.05.2026 ────────────────────────────
@@ -5069,36 +5072,36 @@ export async function run() {
               if (_livePrice) {
                 const _posInRange = (_livePrice - _dayHL.low) / _hlRange * 100;
                 if (signal === "LONG" && _posInRange > 65) {
-                  console.log(`  📊 [DAY RANGE] ${symbol} — cijena na ${_posInRange.toFixed(0)}% dana (H:${fmtPrice(_dayHL.high)} L:${fmtPrice(_dayHL.low)}) → LONG blokiran (previsoko u danu)`);
-                  continue;
+                  _macroSizeMult *= 0.6;
+                  console.log(`  📊 [DAY RANGE] ${symbol} — cijena na ${_posInRange.toFixed(0)}% dana → LONG size ×0.6 (visoko u danu)`);
+                } else if (signal === "SHORT" && _posInRange < 35) {
+                  _macroSizeMult *= 0.6;
+                  console.log(`  📊 [DAY RANGE] ${symbol} — cijena na ${_posInRange.toFixed(0)}% dana → SHORT size ×0.6 (nisko u danu)`);
+                } else {
+                  console.log(`  📊 [DAY RANGE] ${symbol} — cijena na ${_posInRange.toFixed(0)}% dana → ${signal} dozvoljen`);
                 }
-                if (signal === "SHORT" && _posInRange < 35) {
-                  console.log(`  📊 [DAY RANGE] ${symbol} — cijena na ${_posInRange.toFixed(0)}% dana (H:${fmtPrice(_dayHL.high)} L:${fmtPrice(_dayHL.low)}) → SHORT blokiran (preniško u danu)`);
-                  continue;
-                }
-                console.log(`  📊 [DAY RANGE] ${symbol} — cijena na ${_posInRange.toFixed(0)}% dana → ${signal} dozvoljen`);
               }
             }
           }
 
-          // SP500 RISK_OFF → blokira LONG, ali SHORT prolazi (osim bypass)
+          // SP500 RISK_OFF → LONG smanjeni size (bila blokada)
           if (signal === "LONG" && _sp500Regime === "RISK_OFF" && !_anyLongBypass) {
-            console.log(`  🚨 [SP500] ${symbol} — RISK_OFF → LONG blokiran`);
-            continue;
+            _macroSizeMult *= 0.6;
+            console.log(`  🚨 [SP500] ${symbol} — RISK_OFF → LONG size ×0.6`);
           }
-          // Fear & Greed: samo ekstremni rubovi blokiraju
+          // Fear & Greed ekstremi → smanjeni size (bila blokada)
           if (signal === "SHORT" && _fearGreed !== null && _fearGreed <= 15) {
-            console.log(`  😱 [F&G] ${symbol} — Extreme Fear (${_fearGreed} ≤ 15) → SHORT blokiran (bounce rizik)`);
-            continue;
+            _macroSizeMult *= 0.5;
+            console.log(`  😱 [F&G] ${symbol} — Extreme Fear (${_fearGreed}) → SHORT size ×0.5 (bounce rizik)`);
           }
           if (signal === "LONG" && _fearGreed !== null && _fearGreed >= 85) {
-            console.log(`  🤑 [F&G] ${symbol} — Extreme Greed (${_fearGreed} ≥ 85) → LONG blokiran (reversal rizik)`);
-            continue;
+            _macroSizeMult *= 0.5;
+            console.log(`  🤑 [F&G] ${symbol} — Extreme Greed (${_fearGreed}) → LONG size ×0.5 (reversal rizik)`);
           }
-          // DXY: jaki dolar (>+0.3% na 4H) → blokira LONG na crypto
+          // DXY jaki dolar → LONG smanjeni size (bila blokada)
           if (signal === "LONG" && _dxyChange !== null && _dxyChange > 0.3) {
-            console.log(`  💵 [DXY] ${symbol} — DXY +${_dxyChange}% → LONG blokiran (jaki dolar)`);
-            continue;
+            _macroSizeMult *= 0.7;
+            console.log(`  💵 [DXY] ${symbol} — DXY +${_dxyChange}% → LONG size ×0.7 (jaki dolar)`);
           }
           // Liquidation Risk: visok rizik (>75) → blokira LONG (kaskadni padovi mogući)
           if (signal === "LONG" && _liqScore !== null && _liqScore > 75) {
@@ -5349,7 +5352,8 @@ export async function run() {
         const _symRiskPct = rules.symbol_sltp?.[symbol]?.riskPct ?? _dynRiskPct;
         console.log(`  🎚️  [RISK] ${symbol} — score ${_entryScore}/${SYMBOL_COMBOS[symbol]?.sigIdx?.length ?? 8}, ${_isStrong ? "JAKO" : "normalno"} → rizik ${_symRiskPct}% banke`);
         const riskAmount = equity * (_symRiskPct / 100);
-        const tradeSize  = (riskAmount / (slPct / 100)) * (atrTrend?.sizeMult ?? 1) * (_oiSizeMult ?? 1) * (_vwapSizeMult ?? 1) * (_stableSizeMult ?? 1) * (_squeezeMult ?? 1);
+        const tradeSize  = (riskAmount / (slPct / 100)) * (atrTrend?.sizeMult ?? 1) * (_oiSizeMult ?? 1) * (_vwapSizeMult ?? 1) * (_stableSizeMult ?? 1) * (_squeezeMult ?? 1) * (_macroSizeMult ?? 1);
+        if (_macroSizeMult < 1) console.log(`  ⚖️  [MACRO] ${symbol} — ukupni macro size mult ×${_macroSizeMult.toFixed(2)}`);
         const margin     = tradeSize / LEVERAGE;  // preliminarno — ažurira se nakon setupSymbol
 
         if (!checkDailyLimit(pid)) {

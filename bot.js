@@ -23,7 +23,9 @@ const TIMEFRAME     = "1H";
 const LEVERAGE      = 50;     // 50x default → SL 1.5% = 75% margine (više prostora za šum)
 const BTC_LEVERAGE  = 75;    // BTC posebno — 75x
 const START_CAPITAL = 1000;   // po portfoliju
-const RISK_PCT      = 3.0;    // % banke koji rizikaš po tradeu (= veličina uloga/margine)
+const RISK_PCT      = 1.0;    // bazni % banke po tradeu (dinamički 0.5–1.5% ovisno o snazi setupa)
+const RISK_PCT_MIN  = 0.5;    // minimalni setup (score = minSig, bez regime potvrde)
+const RISK_PCT_MAX  = 1.5;    // jak setup (regime aligned + score ≥ minSig+2)
 const SL_PCT        = 2.0;    // fallback SL % (Tier 1) — override per-simbol u symbol_sltp
 const TP_PCT        = 3.0;    // fallback TP % (Tier 1, 1.5×SL) — override per-simbol u symbol_sltp
 
@@ -5333,11 +5335,19 @@ export async function run() {
           console.log(`  📊 [NORMALNO] ${symbol} — Regime:${_btcRegime} → TP ×2 = ${tpPct.toFixed(2)}% | RR 1:${(tpPct/slPct).toFixed(1)}`);
         }
 
-        // Risk-based position sizing: SL gubitak = točno RISK_PCT% trenutne equity
+        // Risk-based position sizing: SL gubitak = dinamički 0.5–1.5% equity
+        // 1.5% — regime aligned (JAKO) + score ≥ minSig+2 | 0.5% — minimalni score | 1.0% — ostalo
         const startCap   = pDef.startCapital ?? START_CAPITAL;
         const equity     = getPortfolioEquity(pid, startCap);
 
-        const _symRiskPct = rules.symbol_sltp?.[symbol]?.riskPct ?? RISK_PCT;
+        const _entryScore  = signal === "LONG" ? (result.bullScore ?? 0) : (result.bearScore ?? 0);
+        const _comboMinSig = SYMBOL_COMBOS[symbol]?.minSig ?? 5;
+        let _dynRiskPct;
+        if      (_isStrong && _entryScore >= _comboMinSig + 2) _dynRiskPct = RISK_PCT_MAX;
+        else if (_entryScore <= _comboMinSig)                  _dynRiskPct = RISK_PCT_MIN;
+        else                                                   _dynRiskPct = RISK_PCT;
+        const _symRiskPct = rules.symbol_sltp?.[symbol]?.riskPct ?? _dynRiskPct;
+        console.log(`  🎚️  [RISK] ${symbol} — score ${_entryScore}/${SYMBOL_COMBOS[symbol]?.sigIdx?.length ?? 8}, ${_isStrong ? "JAKO" : "normalno"} → rizik ${_symRiskPct}% banke`);
         const riskAmount = equity * (_symRiskPct / 100);
         const tradeSize  = (riskAmount / (slPct / 100)) * (atrTrend?.sizeMult ?? 1) * (_oiSizeMult ?? 1) * (_vwapSizeMult ?? 1) * (_stableSizeMult ?? 1) * (_squeezeMult ?? 1);
         const margin     = tradeSize / LEVERAGE;  // preliminarno — ažurira se nakon setupSymbol

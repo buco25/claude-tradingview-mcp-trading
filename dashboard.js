@@ -1213,44 +1213,55 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="refresh" content="60">
-<title>🎯 ULTRA Trading Bot</title>
+<title>⚡ ULTRA · TraderaEdge Bot</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap');
   :root {
-    --bg-primary:   #111827;
-    --bg-secondary: #1f2937;
-    --bg-tertiary:  #2d3748;
-    --bg-card:      #1f2937;
-    --border:       #374151;
-    --border-light: #4b5563;
-    --text-primary: #f9fafb;
-    --text-muted:   #9ca3af;
-    --text-dim:     #6b7280;
-    --green:        #10b981;
-    --green-dim:    rgba(16,185,129,0.12);
-    --red:          #ef4444;
-    --red-dim:      rgba(239,68,68,0.12);
-    --blue:         #60a5fa;
-    --blue-dim:     rgba(96,165,250,0.12);
-    --purple:       #a78bfa;
-    --yellow:       #fbbf24;
-    --shadow-sm:    0 1px 3px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3);
-    --shadow-md:    0 4px 6px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.3);
-    --radius-sm:    8px;
-    --radius-md:    12px;
-    --radius-lg:    16px;
+    --bg-primary:   #0a0e1a;
+    --bg-secondary: #131a2b;
+    --bg-tertiary:  #1c2537;
+    --bg-card:      linear-gradient(160deg, #141c30 0%, #101626 100%);
+    --border:       #232e45;
+    --border-light: #34415e;
+    --text-primary: #f2f5fa;
+    --text-muted:   #8b96ab;
+    --text-dim:     #5c6880;
+    --green:        #34d399;
+    --green-dim:    rgba(52,211,153,0.10);
+    --red:          #f87171;
+    --red-dim:      rgba(248,113,113,0.10);
+    --blue:         #7dd3fc;
+    --blue-dim:     rgba(125,211,252,0.10);
+    --purple:       #c4b5fd;
+    --yellow:       #fcd34d;
+    --accent:       #6366f1;
+    --mono:         'JetBrains Mono', ui-monospace, monospace;
+    --shadow-sm:    0 1px 3px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.02) inset;
+    --shadow-md:    0 8px 24px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.03) inset;
+    --radius-sm:    10px;
+    --radius-md:    14px;
+    --radius-lg:    18px;
   }
   *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:var(--bg-primary); color:var(--text-primary); min-height:100vh; line-height:1.5; }
+  body { font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; color:var(--text-primary); min-height:100vh; line-height:1.5;
+         background: #0a0e1a;
+         background-image: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(99,102,241,0.13), transparent),
+                           radial-gradient(ellipse 60% 40% at 90% 10%, rgba(52,211,153,0.06), transparent); }
   a { color:var(--blue); text-decoration:none; }
-  .top-bar { height:3px; background:linear-gradient(90deg,#3b82f6,#8b5cf6,#10b981); }
+  .top-bar { height:3px; background:linear-gradient(90deg,#6366f1,#8b5cf6,#06b6d4,#34d399); background-size:300% 100%; animation:topbarFlow 12s linear infinite; }
+  @keyframes topbarFlow { 0%{background-position:0% 0} 100%{background-position:300% 0} }
   .page-wrap { max-width:1440px; margin:0 auto; padding:28px 24px 80px; }
   .header { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:32px; }
   .header-left { display:flex; align-items:center; gap:14px; }
-  .logo { font-size:24px; filter:drop-shadow(0 0 10px rgba(16,185,129,0.5)); }
-  .title { font-size:20px; font-weight:700; letter-spacing:-.02em; }
+  .logo { font-size:26px; filter:drop-shadow(0 0 12px rgba(99,102,241,0.6)); }
+  .title { font-size:21px; font-weight:800; letter-spacing:-.02em;
+           background:linear-gradient(90deg,#f2f5fa 30%,#a5b4fc 70%,#67e8f9);
+           -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
   .subtitle { font-size:12px; color:var(--text-muted); margin-top:3px; letter-spacing:.01em; }
+  .live-dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--green); margin-right:6px;
+              box-shadow:0 0 0 0 rgba(52,211,153,0.6); animation:livePulse 2s ease-out infinite; }
+  @keyframes livePulse { 0%{box-shadow:0 0 0 0 rgba(52,211,153,0.55)} 70%{box-shadow:0 0 0 7px rgba(52,211,153,0)} 100%{box-shadow:0 0 0 0 rgba(52,211,153,0)} }
   .badge { display:inline-flex; align-items:center; padding:3px 10px; border-radius:20px; font-size:12px; font-weight:600; white-space:nowrap; }
   .green-badge { background:var(--green-dim); color:var(--green); border:1px solid rgba(16,185,129,0.3); }
   .red-badge   { background:var(--red-dim);   color:var(--red);   border:1px solid rgba(239,68,68,0.3); }
@@ -1263,10 +1274,10 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
 
   /* Stats bar */
   .stats-bar { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:14px; margin-bottom:28px; }
-  .stat-card { background:var(--bg-card); border-radius:var(--radius-md); padding:16px 18px; border:1px solid var(--border); box-shadow:var(--shadow-sm); transition:transform .15s,box-shadow .15s; }
-  .stat-card:hover { transform:translateY(-1px); box-shadow:var(--shadow-md); }
+  .stat-card { background:var(--bg-card); border-radius:var(--radius-md); padding:16px 18px; border:1px solid var(--border); box-shadow:var(--shadow-sm); transition:transform .18s,box-shadow .18s,border-color .18s; }
+  .stat-card:hover { transform:translateY(-2px); box-shadow:var(--shadow-md); border-color:var(--border-light); }
   .stat-label { font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px; font-weight:600; }
-  .stat-value { font-size:24px; font-weight:800; letter-spacing:-.03em; }
+  .stat-value { font-size:24px; font-weight:800; letter-spacing:-.03em; font-family:var(--mono); font-variant-numeric:tabular-nums; }
   .stat-sub   { font-size:11px; color:var(--text-muted); margin-top:3px; }
 
   /* Chart */
@@ -1275,12 +1286,13 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   .chart-wrap { position:relative; height:220px; }
 
   /* Positions */
-  .section-label { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.09em; margin:32px 0 14px; padding-bottom:10px; border-bottom:2px solid var(--border); color:var(--text-muted); }
+  .section-label { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.09em; margin:32px 0 14px; padding-bottom:10px; border-bottom:1px solid var(--border); color:var(--text-muted); position:relative; }
+  .section-label::after { content:''; position:absolute; left:0; bottom:-1px; width:56px; height:2px; background:linear-gradient(90deg,var(--accent),transparent); border-radius:2px; }
   .pos-grid-wrap { display:grid; grid-template-columns:repeat(auto-fill,minmax(370px,1fr)); gap:16px; margin-bottom:8px; }
   .pos-card { background:var(--bg-card); border-radius:var(--radius-md); padding:18px; border:1px solid var(--border); box-shadow:var(--shadow-sm); transition:box-shadow .2s; }
   .pos-card:hover { box-shadow:var(--shadow-md); }
-  .pos-long  { border-left:4px solid var(--green); }
-  .pos-short { border-left:4px solid var(--red); }
+  .pos-long  { border-left:3px solid var(--green); box-shadow:var(--shadow-sm), -6px 0 18px -8px rgba(52,211,153,0.35); }
+  .pos-short { border-left:3px solid var(--red);   box-shadow:var(--shadow-sm), -6px 0 18px -8px rgba(248,113,113,0.35); }
   .pos-header { display:flex; align-items:center; gap:8px; margin-bottom:14px; flex-wrap:wrap; }
   .symbol { font-size:15px; font-weight:700; letter-spacing:-.01em; }
   .pos-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:14px; }
@@ -1295,7 +1307,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   .table-wrap { overflow-x:auto; margin-bottom:8px; }
   .trade-table { width:100%; border-collapse:collapse; font-size:13px; }
   .trade-table th { padding:10px 14px; text-align:left; color:var(--text-muted); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.05em; border-bottom:2px solid var(--border); background:var(--bg-secondary); }
-  .trade-table td { padding:10px 14px; border-bottom:1px solid var(--border); }
+  .trade-table td { padding:10px 14px; border-bottom:1px solid var(--border); font-variant-numeric:tabular-nums; }
   .win-row td  { background:rgba(5,150,105,0.04); }
   .loss-row td { background:rgba(220,38,38,0.04); }
   .trade-table tbody tr:hover td { background:var(--bg-secondary); }
@@ -1328,10 +1340,10 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <!-- Header -->
   <div class="header">
     <div class="header-left">
-      <div class="logo">🎯</div>
+      <div class="logo">⚡</div>
       <div>
-        <div class="title">ULTRA Trading Bot</div>
-        <div class="subtitle">BTC only · 3% rizik · 52x leverage · SL 1.5% / TP 3% &nbsp;|&nbsp; min 4/6 signala (1H) &nbsp;|&nbsp; Pyramid: max 1 dodatni ulaz · Flip: score≥5 &nbsp;|&nbsp; BE-STOP na 40% TP</div>
+        <div class="title">ULTRA · TraderaEdge Bot</div>
+        <div class="subtitle"><span class="live-dot"></span>${ALL_SYMBOLS.length} simbola (kripto + dionice) · rizik 1–2% dinamički · combo 5/8 signala · RR 1:2 (JAKO 1:3) · break-even @ +1R · max 6 kripto + 3 dionice</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -1368,13 +1380,13 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     </div>
     <div class="stat-card">
       <div class="stat-label">Otvoreno</div>
-      <div class="stat-value" style="color:#d97706">${positions.length}<span style="font-size:14px;color:#6b7280">/2</span></div>
-      <div class="stat-sub">pozicija</div>
+      <div class="stat-value" style="color:#d97706">${positions.length}<span style="font-size:14px;color:#6b7280">/9</span></div>
+      <div class="stat-sub">max 6 kripto + 3 dionice</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Strategija</div>
-      <div class="stat-value" style="font-size:14px;color:#db2777">ULTRA · 52x</div>
-      <div class="stat-sub">SL 1.5% / TP 3.0% · BTC only · rizik 3%</div>
+      <div class="stat-value" style="font-size:14px;color:#db2777">TraderaEdge · 15m</div>
+      <div class="stat-sub">SR-based SL · dinamički leverage · rizik 1–2%</div>
     </div>
   </div>
 
@@ -1895,7 +1907,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <div class="scan-card">
     <div class="scan-header">
       <div>
-        <div class="chart-title" style="margin-bottom:2px">🎯 ULTRA Scanner — ${ALL_SYMBOLS.length} simbola | min 4/6 signala po simbolu | ulaz odmah</div>
+        <div class="chart-title" style="margin-bottom:2px">⚡ Scanner — ${ALL_SYMBOLS.length} simbola | TraderaEdge combo, min 5/8 signala | ulaz na close 15m svijeće</div>
         <div style="font-size:12px;color:var(--text-muted)">
           Svi simboli (TraderaEdge): E50+MACD+E145+PWHL+RDIV+MSTR+DEMA+LHUNT · min 5/8 (TAO/AAVE 4/8)
           &nbsp;|&nbsp; 🟡 SETUP &nbsp; 🟢 Signal &nbsp; 🚀 Momentum &nbsp; Cache 90s &nbsp;|&nbsp;
@@ -1933,7 +1945,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <!-- Signal legend (collapsible) -->
   <div id="sig-legend" style="display:none;margin-top:12px">
     <div class="chart-card" style="padding:16px 20px">
-      <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — ULTRA v3 · 3 gateva + 6 signala po simbolu · min 4/6 za ulaz</div>
+      <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — TraderaEdge combo · gate-ovi (ADX/VOL) + 8 signala · min 5/8 za ulaz (TAO/AAVE 4/8)</div>
       <div style="margin-bottom:10px;font-size:11px;color:#f59e0b;background:#2d2000;border:1px solid #d97706;border-radius:6px;padding:8px 12px">
         ⚙️ <b>GATEVI (obvezni — blokiraju neovisno o score-u):</b>
         &nbsp; ADX ≥ 22 (trend jačina) &nbsp;·&nbsp; VOL_EXH (volumen ispod threshold-a) &nbsp;·&nbsp; VWAP cross/rejection (cijena na ispravnoj strani)

@@ -1068,6 +1068,13 @@ export async function getOIForSymbols(symbols) {
   return result;
 }
 
+// ─── getLSRForSymbols — batch wrapper (koristi postojeći getLongShortRatio) ────
+export async function getLSRForSymbols(symbols) {
+  const result = {};
+  await Promise.all(symbols.map(async sym => { result[sym] = await getLongShortRatio(sym); }));
+  return result;
+}
+
 // ─── Fear & Greed Index ───────────────────────────────────────────────────────
 let _fgCache = { value: null, label: '', ts: 0 };
 const FG_TTL = 30 * 60 * 1000;
@@ -5072,6 +5079,44 @@ export async function run() {
           }
         }
 
+        // ── Long/Short Ratio — squeeze detection ───────────────────────────────
+        // getLongShortRatio vraća { longRatio: "55.1", shortRatio: "44.9", trend } (Binance, %)
+        // < 40% long = retail pretežno short = kontrarian LONG (short squeeze)
+        // > 62% long = retail pretežno long  = kontrarian SHORT (long squeeze)
+        let _squeezeMult = 1.0;
+        if (pDef.strategy === "synapse_t") {
+          const lsr = await getLongShortRatio(symbol);
+          if (lsr) {
+            const lr       = parseFloat(lsr.longRatio);   // npr. 55.1
+            const extreme  = lr < 33 || lr > 72;
+            const bearish  = lr < 40;
+            const bullish  = lr > 62;
+            if (signal === "LONG" && bearish) {
+              if (oi.rising && oi.changePct > 8) {
+                _squeezeMult = extreme ? 1.4 : 1.25;
+                console.log(`  🔥 [SQUEEZE] ${symbol} — retail ${lr.toFixed(1)}% long + OI+${oi.changePct.toFixed(1)}% → short squeeze setup ×${_squeezeMult}`);
+              } else {
+                console.log(`  📊 [LSR] ${symbol} — retail bearish (${lr.toFixed(1)}% long) → kontrarian long bias`);
+              }
+            } else if (signal === "SHORT" && bullish) {
+              if (oi.rising && oi.changePct > 8) {
+                _squeezeMult = extreme ? 1.4 : 1.25;
+                console.log(`  🔥 [SQUEEZE] ${symbol} — retail ${lr.toFixed(1)}% long + OI+${oi.changePct.toFixed(1)}% → long squeeze setup ×${_squeezeMult}`);
+              } else {
+                console.log(`  📊 [LSR] ${symbol} — retail bullish (${lr.toFixed(1)}% long) → kontrarian short bias`);
+              }
+            } else if (signal === "LONG" && lr > 65) {
+              _squeezeMult = 0.8;
+              console.log(`  ⚠️  [LSR] ${symbol} — retail previše long (${lr.toFixed(1)}%) → size ×0.8`);
+            } else if (signal === "SHORT" && lr < 35) {
+              _squeezeMult = 0.8;
+              console.log(`  ⚠️  [LSR] ${symbol} — retail previše short (${lr.toFixed(1)}%) → size ×0.8`);
+            } else {
+              console.log(`  📊 [LSR] ${symbol} — retail ${lr.toFixed(1)}% long (neutral, trend: ${lsr.trend})`);
+            }
+          }
+        }
+
         // ── BTC/ETH divergencija — market uncertainty → traži minSig+1 signala ──
         if (pDef.strategy === "synapse_t" && _btcEthDiv.diverging) {
           const score = signal === "LONG" ? result.bullScore : result.bearScore;
@@ -5195,7 +5240,7 @@ export async function run() {
 
         const _symRiskPct = rules.symbol_sltp?.[symbol]?.riskPct ?? RISK_PCT;
         const riskAmount = equity * (_symRiskPct / 100);
-        const tradeSize  = (riskAmount / (slPct / 100)) * (atrTrend?.sizeMult ?? 1) * (_oiSizeMult ?? 1) * (_vwapSizeMult ?? 1) * (_stableSizeMult ?? 1);
+        const tradeSize  = (riskAmount / (slPct / 100)) * (atrTrend?.sizeMult ?? 1) * (_oiSizeMult ?? 1) * (_vwapSizeMult ?? 1) * (_stableSizeMult ?? 1) * (_squeezeMult ?? 1);
         const margin     = tradeSize / LEVERAGE;  // preliminarno — ažurira se nakon setupSymbol
 
         if (!checkDailyLimit(pid)) {

@@ -259,7 +259,7 @@ async function getBtcRegime1H() {
     const r = await fetch(url);
     const d = await r.json();
     if (d.code !== "00000" || !d.data?.length) return _regime1hCache;
-    const closes = d.data.map(k => parseFloat(k[4])).reverse();
+    const closes = d.data.map(k => parseFloat(k[4]));  // Bitget vraća ascending (najstarija prva)
     const n = closes.length - 1;
     // EMA20 i EMA50 na 1H
     const ema = (period) => {
@@ -295,7 +295,7 @@ async function getBtcRegime() {
 
     const candles = d.data.map(k => ({
       close: parseFloat(k[4]), high: parseFloat(k[2]), low: parseFloat(k[3]),
-    })).reverse();
+    }));  // Bitget vraća ascending (najstarija prva)
     const closes = candles.map(c => c.close);
     const n = closes.length - 1;
 
@@ -374,7 +374,7 @@ async function checkBtcSpike() {
 
     const candles = d.data.map(k => ({
       open: parseFloat(k[1]), close: parseFloat(k[4]),
-    })).reverse();  // najnoviji zadnji
+    }));  // Bitget vraća ascending — najnoviji već zadnji
 
     const n    = candles.length;
     const base = candles[n - 1 - BTC_SPIKE_BARS].close;  // cijena prije 30min
@@ -2435,14 +2435,16 @@ async function analyzeUltraPullback(symbol, candles, cfg) {
   pending = pending.filter(p => p.symbol !== symbol);
   savePending(pid, pending);
 
-  // ── Dohvati Previous Weekly High/Low (PWH/PWL) ────────────────────────────
-  // Bitget: granularity=1W, limit=3 → data[0]=tekući tjedan, data[1]=prethodni
-  let _pwh = null, _pwl = null;
+  // ── Dohvati Previous Weekly High/Low + Weekly Open ────────────────────────
+  // Bitget vraća ascending: zadnji = tekući tjedan, predzadnji = prethodni (dovršeni)
+  let _pwh = null, _pwl = null, _wOpen = null;
   try {
     const wUrl = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=1W&limit=3`;
     const wd = await fetch(wUrl).then(r => r.json());
     if (wd.code === "00000" && wd.data?.length >= 2) {
-      const prevWeek = wd.data[1];  // index 1 = prethodni (dovršeni) tjedan
+      const wLast = wd.data.length - 1;
+      _wOpen = parseFloat(wd.data[wLast][1]);      // tekući tjedan open
+      const prevWeek = wd.data[wLast - 1];         // prethodni (dovršeni) tjedan
       _pwh = parseFloat(prevWeek[2]);  // high
       _pwl = parseFloat(prevWeek[3]);  // low
     }
@@ -2454,27 +2456,16 @@ async function analyzeUltraPullback(symbol, candles, cfg) {
   let _dailyEma10 = null, _dailyEma20 = null;
   let _monthlyOpen = null, _monthlyHigh = null, _monthlyLow = null;
   let _yearlyOpen  = null;
-  let _weeklyOpen  = null;  // tekući tjedan — open (iz tjednog fetcha gore)
+  const _weeklyOpen = _wOpen;  // iz tjednog fetcha gore
   try {
-    // Tjedni open iz već dohvaćenog tjednog candle-a
-    const wUrl2 = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=1W&limit=3`;
-    const wd2 = await fetch(wUrl2).then(r => r.json());
-    if (wd2.code === "00000" && wd2.data?.length >= 1) {
-      _weeklyOpen = parseFloat(wd2.data[0][1]);  // tekući tjedan open
-      if (!_pwh && wd2.data.length >= 2) {
-        _pwh = parseFloat(wd2.data[1][2]);
-        _pwl = parseFloat(wd2.data[1][3]);
-      }
-    }
-  } catch {}
-  try {
-    const dUrl = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=1Dutc&limit=365`;
+    // Daily candles — ascending, history max ~90 dana
+    const dUrl = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=1Dutc&limit=90`;
     const dd = await fetch(dUrl).then(r => r.json());
     if (dd.code === "00000" && dd.data?.length >= 21) {
       const dC = dd.data.map(k => ({
         ts: parseInt(k[0]), open: parseFloat(k[1]),
         high: parseFloat(k[2]), low: parseFloat(k[3]), close: parseFloat(k[4])
-      })).reverse();
+      }));
       const dCl = dC.map(c => c.close);
       const dn = dCl.length;
       const dema = (p) => {
@@ -2493,10 +2484,14 @@ async function analyzeUltraPullback(symbol, candles, cfg) {
         _monthlyHigh = Math.max(...monthCandles.map(c => c.high));
         _monthlyLow  = Math.min(...monthCandles.map(c => c.low));
       }
-      // Yearly Open
-      const yearStart = Date.UTC(now.getUTCFullYear(), 0, 1);
-      const firstOfYear = dC.find(c => c.ts >= yearStart);
-      if (firstOfYear) _yearlyOpen = firstOfYear.open;
+    }
+    // Yearly Open — mjesečne svijeće (daily history preplitka)
+    const mUrl = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=1Mutc&limit=13`;
+    const md = await fetch(mUrl).then(r => r.json());
+    if (md.code === "00000" && md.data?.length >= 1) {
+      const yearStart = Date.UTC(new Date().getUTCFullYear(), 0, 1);
+      const janCandle = md.data.find(k => parseInt(k[0]) >= yearStart);
+      if (janCandle) _yearlyOpen = parseFloat(janCandle[1]);
     }
   } catch(e) {
     console.log(`  ⚠️  [DEMA/LHUNT] ${symbol} — ${e.message}`);

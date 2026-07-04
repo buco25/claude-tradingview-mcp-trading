@@ -605,7 +605,7 @@ async function runScan(rules) {
           const wUrl = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=1W&limit=3`;
           const wd   = await fetch(wUrl).then(r2 => r2.json());
           if (wd.code === "00000" && wd.data?.length >= 2) {
-            const prevWeek = wd.data[1];
+            const prevWeek = wd.data[wd.data.length - 2];  // ascending: predzadnji = prethodni tjedan
             _pwh = parseFloat(prevWeek[2]);
             _pwl = parseFloat(prevWeek[3]);
           }
@@ -4010,7 +4010,7 @@ const server = http.createServer(async (req, res) => {
       try {
         const dr = await fetch("https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1Dutc&limit=2").then(r=>r.json());
         if (dr.code === "00000" && dr.data?.length) {
-          const c = dr.data[0]; // most recent daily candle
+          const c = dr.data[dr.data.length - 1]; // Bitget ascending — zadnji = današnja svijeća
           const high = parseFloat(c[2]), low = parseFloat(c[3]), close = parseFloat(c[4]);
           const pct = (close - low) / (high - low) * 100;
           result.dayRange = { high, low, close, pct: isNaN(pct) ? null : Math.round(pct * 10) / 10 };
@@ -4040,7 +4040,7 @@ const server = http.createServer(async (req, res) => {
       try {
         const r4 = await fetch("https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=4H&limit=60").then(r=>r.json());
         if (r4.code === "00000" && r4.data?.length >= 55) {
-          const closes = r4.data.map(c => parseFloat(c[4])).reverse();
+          const closes = r4.data.map(c => parseFloat(c[4]));  // ascending
           const k = 2 / 51;
           let ema = closes[0];
           for (let i = 1; i < closes.length; i++) ema = closes[i] * k + ema * (1 - k);
@@ -4061,34 +4061,38 @@ const server = http.createServer(async (req, res) => {
         result.lsr = await getLongShortRatio("BTCUSDT");
       } catch {}
 
-      // Liquidity Hunt zones — dohvati Weekly + Daily podatke za BTC
+      // Liquidity Hunt zones — Bitget vraća ascending (najstarija prva)
       try {
-        const [wdR, ddR] = await Promise.all([
+        const [wdR, ddR, mdR] = await Promise.all([
           fetch("https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1W&limit=3").then(r=>r.json()),
-          fetch("https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1Dutc&limit=365").then(r=>r.json())
+          fetch("https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1Dutc&limit=90").then(r=>r.json()),
+          fetch("https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1Mutc&limit=13").then(r=>r.json())
         ]);
         const lhz = {};
         if (wdR.code === "00000" && wdR.data?.length >= 2) {
-          lhz.weeklyOpen = parseFloat(wdR.data[0][1]);
-          lhz.pwh        = parseFloat(wdR.data[1][2]);
-          lhz.pwl        = parseFloat(wdR.data[1][3]);
+          const wLast = wdR.data.length - 1;
+          lhz.weeklyOpen = parseFloat(wdR.data[wLast][1]);      // tekući tjedan
+          lhz.pwh        = parseFloat(wdR.data[wLast - 1][2]);  // prethodni tjedan
+          lhz.pwl        = parseFloat(wdR.data[wLast - 1][3]);
         }
         if (ddR.code === "00000" && ddR.data?.length >= 2) {
           const dC = ddR.data.map(k => ({
             ts: parseInt(k[0]), open: parseFloat(k[1]),
             high: parseFloat(k[2]), low: parseFloat(k[3])
-          })).reverse();
+          }));
           const now = new Date();
           const monthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
-          const yearStart  = Date.UTC(now.getUTCFullYear(), 0, 1);
           const monthC = dC.filter(c => c.ts >= monthStart);
           if (monthC.length > 0) {
             lhz.monthlyOpen = monthC[0].open;
             lhz.monthlyHigh = Math.max(...monthC.map(c => c.high));
             lhz.monthlyLow  = Math.min(...monthC.map(c => c.low));
           }
-          const firstYear = dC.find(c => c.ts >= yearStart);
-          if (firstYear) lhz.yearlyOpen = firstYear.open;
+        }
+        if (mdR.code === "00000" && mdR.data?.length >= 1) {
+          const yearStart = Date.UTC(new Date().getUTCFullYear(), 0, 1);
+          const janCandle = mdR.data.find(k => parseInt(k[0]) >= yearStart);
+          if (janCandle) lhz.yearlyOpen = parseFloat(janCandle[1]);
         }
         if (Object.keys(lhz).length > 0) result.lhz = lhz;
       } catch {}

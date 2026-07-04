@@ -16,7 +16,16 @@
     "ZECUSDT",
     "ALGOUSDT",
     "TAOUSDT",
-    "AAVEUSDT"
+    "AAVEUSDT",
+    "TSLAUSDT",
+    "NVDAUSDT",
+    "SPCXUSDT",
+    "MSTRUSDT",
+    "COINUSDT",
+    "HOODUSDT",
+    "PLTRUSDT",
+    "GMEUSDT",
+    "AMCUSDT"
   ],
   "portfolio_timeframes": {
     "synapse_t": "15m"

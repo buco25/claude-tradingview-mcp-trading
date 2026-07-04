@@ -48,6 +48,11 @@ const SYMBOL_SECTORS = {
   "XRPUSDT":    "PAYMENT", "ZECUSDT": "PAYMENT",
   "TAOUSDT":    "AI",    "RENDERUSDT": "AI",  "FETUSDT": "AI",
   "LINKUSDT":   "DEFI",  "AAVEUSDT": "DEFI",
+  // Dionice
+  "TSLAUSDT":   "STOCK_TECH", "NVDAUSDT": "STOCK_TECH", "PLTRUSDT": "STOCK_TECH",
+  "MSTRUSDT":   "STOCK_CRYPTO", "COINUSDT": "STOCK_CRYPTO", "HOODUSDT": "STOCK_CRYPTO",
+  "GMEUSDT":    "STOCK_MEME", "AMCUSDT": "STOCK_MEME",
+  "SPCXUSDT":   "STOCK_SPACE",
 };
 const MAX_PER_SECTOR = 2;  // max otvorenih pozicija istog sektora
 
@@ -125,6 +130,16 @@ export const SYMBOL_COMBOS = {
   // ── Extra (dobar WR history) ────────────────────────────────────────────────
   "TAOUSDT":    { sigIdx: TE_COMBO, minSig: 4 },
   "AAVEUSDT":   { sigIdx: TE_COMBO, minSig: 4 },
+  // ── Tokenizirane dionice (Bitget xStocks futures) — bez btcAlign ───────────
+  "TSLAUSDT":   { sigIdx: TE_COMBO, minSig: 5 },
+  "NVDAUSDT":   { sigIdx: TE_COMBO, minSig: 5 },
+  "SPCXUSDT":   { sigIdx: TE_COMBO, minSig: 5 },
+  "MSTRUSDT":   { sigIdx: TE_COMBO, minSig: 5 },
+  "COINUSDT":   { sigIdx: TE_COMBO, minSig: 5 },
+  "HOODUSDT":   { sigIdx: TE_COMBO, minSig: 5 },
+  "PLTRUSDT":   { sigIdx: TE_COMBO, minSig: 5 },
+  "GMEUSDT":    { sigIdx: TE_COMBO, minSig: 5 },
+  "AMCUSDT":    { sigIdx: TE_COMBO, minSig: 5 },
 };
 
 // ─── Ekonomski kalendar ───────────────────────────────────────────────────────

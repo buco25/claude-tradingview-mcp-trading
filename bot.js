@@ -3167,16 +3167,15 @@ async function checkPortfolioPositions(pid) {
           ? (liveP - pos.entryPrice) * qty
           : (pos.entryPrice - liveP) * qty;
 
-        // ── STOCK FLAT: dionice se zatvaraju prije US closea (gap zaštita) ─────
+        // ── STOCK FLAT: dionice se zatvaraju u prozoru 19:40–19:59 UTC ─────────
         // xStocks noću/vikendom stoje, a na openu gap može preskočiti SL.
-        // US close 20:00/21:00 UTC (EDT/EST) → flat od 19:40 UTC. Petkom = weekend flat.
+        // Zatvaranje se pokušava SAMO dok market još radi (do 20:00) —
+        // izvan sesije Bitget odbija naloge pa bi retry samo spamao.
         let _stockFlat = false;
         if (isStockSym(pos.symbol)) {
           const _nowU = new Date();
           const _h = _nowU.getUTCHours(), _m = _nowU.getUTCMinutes(), _d = _nowU.getUTCDay();
-          const _pastFlatTime = _h > 19 || (_h === 19 && _m >= 40);
-          const _marketClosed = _d === 0 || _d === 6 || _h < 13 || (_h === 13 && _m < 30);
-          _stockFlat = _pastFlatTime || _marketClosed;
+          _stockFlat = _d >= 1 && _d <= 5 && _h === 19 && _m >= 40;
         }
 
         // ── SOFT SL: bot zatvara na pravom SL (ghost stop bypass) ──────────────
@@ -3232,8 +3231,13 @@ async function checkPortfolioPositions(pid) {
               }
             }
             if (!softClosed) {
-              console.log(`  🚨 [SOFT SL] ${pos.symbol} — svi pokušaji neuspješni`);
-              await tg(`🚨 <b>SOFT SL FAIL</b> ${pos.symbol} ${pos.side}\nNije moguće zatvoriti! Provjeri Bitget ručno.`);
+              console.log(`  🚨 [SOFT SL] ${pos.symbol} — svi pokušaji neuspješni, pozicija OSTAJE u trackingu`);
+              // TG alert max 1× po satu po poziciji — bez spama
+              if (!pos._closeFailAlertTs || Date.now() - pos._closeFailAlertTs > 60 * 60 * 1000) {
+                pos._closeFailAlertTs = Date.now();
+                await tg(`🚨 <b>SOFT SL FAIL</b> ${pos.symbol} ${pos.side}\nNije moguće zatvoriti! Provjeri Bitget ručno.\n(pozicija ostaje praćena, retry sljedeći ciklus)`);
+              }
+              stillOpen.push(pos);  // NE gubi tracking — pozicija je i dalje živa na Bitgetu
               continue;
             }
             // Ako je pozicija bila externally closed (22002 + ne postoji) — samo ukloni tracking bez CSV

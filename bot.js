@@ -3167,13 +3167,27 @@ async function checkPortfolioPositions(pid) {
           ? (liveP - pos.entryPrice) * qty
           : (pos.entryPrice - liveP) * qty;
 
+        // ── STOCK FLAT: dionice se zatvaraju prije US closea (gap zaštita) ─────
+        // xStocks noću/vikendom stoje, a na openu gap može preskočiti SL.
+        // US close 20:00/21:00 UTC (EDT/EST) → flat od 19:40 UTC. Petkom = weekend flat.
+        let _stockFlat = false;
+        if (isStockSym(pos.symbol)) {
+          const _nowU = new Date();
+          const _h = _nowU.getUTCHours(), _m = _nowU.getUTCMinutes(), _d = _nowU.getUTCDay();
+          const _pastFlatTime = _h > 19 || (_h === 19 && _m >= 40);
+          const _marketClosed = _d === 0 || _d === 6 || _h < 13 || (_h === 13 && _m < 30);
+          _stockFlat = _pastFlatTime || _marketClosed;
+        }
+
         // ── SOFT SL: bot zatvara na pravom SL (ghost stop bypass) ──────────────
         // pos.sl = pravi SL koji bot prati — BitGet ghost SL je 0.5% dalje (decoy)
         // Samo dok trail NIJE aktivan (trail sam pomiče SL pa nema potrebe za soft check)
-        if (isLivePortfolio && pos.sl && !pos.trailActive && !pos.partialClosed) {
-          const softSlHit = pos.side === "LONG" ? liveP <= pos.sl : liveP >= pos.sl;
+        if (isLivePortfolio && pos.sl && (_stockFlat || (!pos.trailActive && !pos.partialClosed))) {
+          const softSlHit = _stockFlat || (pos.side === "LONG" ? liveP <= pos.sl : liveP >= pos.sl);
           if (softSlHit) {
-            console.log(`  🛑 [SOFT SL] ${pos.symbol} ${pos.side} — cijena ${fmtPrice(liveP)} ≤ SL ${fmtPrice(pos.sl)} → tržišni izlaz`);
+            console.log(_stockFlat
+              ? `  🏦 [STOCK FLAT] ${pos.symbol} ${pos.side} — US market close/zatvoreno → tržišni izlaz @ ${fmtPrice(liveP)} (gap zaštita)`
+              : `  🛑 [SOFT SL] ${pos.symbol} ${pos.side} — cijena ${fmtPrice(liveP)} ≤ SL ${fmtPrice(pos.sl)} → tržišni izlaz`);
             // Provjeri pravu veličinu na Bitgetu
             const bitPos2 = await fetchBitgetPositionSize(pos.symbol, pos.side);
             if (!bitPos2) {
@@ -4862,6 +4876,21 @@ export async function run() {
         if (_dow === 0 || _dow === 6) {
           _macroSizeMult *= 0.5;
           console.log(`  📅 [WEEKEND] ${symbol} — ${_dow === 6 ? "subota" : "nedjelja"} → size ×0.5`);
+        }
+
+        // ── Dionice: ulaz SAMO dok US tržište radi (13:35–19:30 UTC, pon–pet) ──
+        // xStocks izvan sesije stoje (zamrznuta cijena = lažni signali), a
+        // pozicija se ionako flat-a u 19:40 → nema smisla ulaziti kasnije
+        if (isStockSym(symbol)) {
+          const _nowS = new Date();
+          const _hS = _nowS.getUTCHours(), _mS = _nowS.getUTCMinutes();
+          const _inSession = _dow >= 1 && _dow <= 5
+            && (_hS > 13 || (_hS === 13 && _mS >= 35))
+            && (_hS < 19 || (_hS === 19 && _mS <= 30));
+          if (!_inSession) {
+            _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "STOCK_SESSION", reason: "US tržište zatvoreno" });
+            continue;
+          }
         }
 
         // ── A) MM Blackout — UKLONJEN 25.05.2026 ────────────────────────────

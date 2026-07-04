@@ -2544,8 +2544,9 @@ function savePending(pid, list) {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────────
 
-// Cache pricePlace po simbolu (dohvat iz BitGet contracts API)
+// Cache pricePlace + minTradeNum po simbolu (dohvat iz BitGet contracts API)
 const _pricePlace = {};
+const _minTradeNum = {};
 
 async function loadPricePrecision() {
   try {
@@ -2557,8 +2558,11 @@ async function loadPricePrecision() {
         if (c.symbol && c.pricePlace !== undefined) {
           _pricePlace[c.symbol] = parseInt(c.pricePlace);
         }
+        if (c.symbol && c.minTradeNum !== undefined) {
+          _minTradeNum[c.symbol] = parseFloat(c.minTradeNum);
+        }
       }
-      console.log(`✅ Učitano ${Object.keys(_pricePlace).length} simbola s pricePlace`);
+      console.log(`✅ Učitano ${Object.keys(_pricePlace).length} simbola s pricePlace + minTradeNum`);
     }
   } catch (e) {
     console.log(`⚠️  loadPricePrecision greška: ${e.message}`);
@@ -5379,11 +5383,13 @@ export async function run() {
         const riskAmount = equity * (_symRiskPct / 100);
         let tradeSize  = (riskAmount / (slPct / 100)) * (atrTrend?.sizeMult ?? 1) * (_oiSizeMult ?? 1) * (_vwapSizeMult ?? 1) * (_stableSizeMult ?? 1) * (_squeezeMult ?? 1) * (_macroSizeMult ?? 1);
         if (_macroSizeMult < 1) console.log(`  ⚖️  [MACRO] ${symbol} — ukupni macro size mult ×${_macroSizeMult.toFixed(2)}`);
-        // Bitget minimum: 5 USDT amount + min quantity — ispod ~$12 nalozi padaju (45110/45111)
-        const MIN_TRADE_USD = 12;
-        if (tradeSize < MIN_TRADE_USD) {
-          console.log(`  📏 [MIN] ${symbol} — size $${tradeSize.toFixed(0)} < $${MIN_TRADE_USD} → podignut na minimum`);
-          tradeSize = MIN_TRADE_USD;
+        // Bitget minimum: 5 USDT amount + minTradeNum po simbolu (npr. ETH 0.01, BTC 0.001)
+        // Ispod minimuma nalozi padaju s 45110/45111 → dižemo na min + 5% buffer
+        const _minQtyNotional = (_minTradeNum[symbol] ?? 0) * price * 1.05;
+        const _minNotional = Math.max(12, _minQtyNotional);
+        if (tradeSize < _minNotional) {
+          console.log(`  📏 [MIN] ${symbol} — size $${tradeSize.toFixed(0)} < $${_minNotional.toFixed(0)} (minQty ${_minTradeNum[symbol] ?? "?"}) → podignut na minimum`);
+          tradeSize = _minNotional;
         }
         const margin     = tradeSize / LEVERAGE;  // preliminarno — ažurira se nakon setupSymbol
 

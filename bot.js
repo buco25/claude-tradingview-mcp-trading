@@ -4807,9 +4807,19 @@ export async function run() {
           if (_liqStatus.danger !== "CLEAR") {
             const _icon = _liqStatus.danger === "DANGER" ? "🔴" : "🟡";
             if (_liqStatus.danger === "DANGER") {
-              console.log(`  ${_icon} [LIQ] ${symbol} — DANGER (${_liqStatus.minDist.toFixed(1)}% do liq · LONG $${_liqStatus.closestLong?.price.toFixed(0)||"?"} · SHORT $${_liqStatus.closestShort?.price.toFixed(0)||"?"}) → preskačem`);
-              _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: `LIQ_DANGER(${_liqStatus.minDist.toFixed(1)}%)`, reason: `Liq zona ${_liqStatus.minDist.toFixed(1)}% od cijene` });
-              continue;
+              // Za LONG: SHORT liq zona ISPOD cijene = već prošla ili support → ignoriramo
+              // Za SHORT: LONG liq zona IZNAD cijene = već prošla ili support → ignoriramo
+              const cp = candles[candles.length - 1].close;
+              const _dangerousForLong  = _liqStatus.closestLong  && _liqStatus.closestLong.dist  < 1.0 && _liqStatus.closestLong.price  < cp;  // LONG liq ispod = MM može sweepnuti dolje
+              const _dangerousForShort = _liqStatus.closestShort && _liqStatus.closestShort.dist < 1.0 && _liqStatus.closestShort.price > cp;  // SHORT liq iznad = MM može sweepnuti gore
+              const _realDanger = (signal === "LONG" && _dangerousForLong) || (signal === "SHORT" && _dangerousForShort);
+              if (_realDanger) {
+                console.log(`  ${_icon} [LIQ] ${symbol} — DANGER (${_liqStatus.minDist.toFixed(1)}% do liq · LONG $${_liqStatus.closestLong?.price.toFixed(0)||"?"} · SHORT $${_liqStatus.closestShort?.price.toFixed(0)||"?"}) → preskačem`);
+                _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: `LIQ_DANGER(${_liqStatus.minDist.toFixed(1)}%)`, reason: `Liq zona ${_liqStatus.minDist.toFixed(1)}% od cijene` });
+                continue;
+              } else {
+                console.log(`  🟡 [LIQ] ${symbol} — zona ${_liqStatus.minDist.toFixed(1)}% ali nije opasna za ${signal} → nastavljam`);
+              }
             }
             if (_liqStatus.danger === "CAUTION") {
               const _scoreNow = Math.max(result.bullScore ?? 0, result.bearScore ?? 0);
@@ -4896,11 +4906,25 @@ export async function run() {
           // 4H ostaje samo kao kontekst za TP dinamiku
           const _effectiveRegime = _btcRegime1h !== "UNKNOWN" ? _btcRegime1h : _btcRegime;
 
-          // LONG blokiran samo ako je 1H BEAR (ne 4H)
+          // LONG filter: 1H BEAR blokira, OSIM ako je 4H BULL (pullback setup)
+          // Pullback u BULL trendu = Telegram trader strategija, ali traži score ≥ 5
           if (signal === "LONG" && _effectiveRegime === "BEAR" && !_anyLongBypass) {
-            console.log(`  🌧️  [REGIME] ${symbol} — BTC 1H BEAR → LONG blokiran`);
-            _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: `BTC_REGIME(${_effectiveRegime})`, reason: "BTC 1H BEAR → LONG blokiran", vwapDist: result.vwap ? ((result.price-result.vwap)/result.vwap*100).toFixed(2) : null });
-            continue;
+            const _4hBull = _btcRegime === "BULL";
+            if (_4hBull) {
+              const _pullbackScore = result.bullScore ?? 0;
+              const _pullbackMin = 5;
+              if (_pullbackScore >= _pullbackMin) {
+                console.log(`  🔄 [PULLBACK] ${symbol} — 4H BULL + 1H pullback, score ${_pullbackScore}/6 ≥ ${_pullbackMin} → LONG dopušten`);
+              } else {
+                console.log(`  🌧️  [REGIME] ${symbol} — 4H BULL + 1H BEAR pullback, score ${_pullbackScore} < ${_pullbackMin} → LONG blokiran`);
+                _scanLogEntries.push({ symbol, signal, score: _pullbackScore, blocker: `PULLBACK_SCORE(${_pullbackScore}<${_pullbackMin})`, reason: `4H BULL + 1H BEAR, slab signal` });
+                continue;
+              }
+            } else {
+              console.log(`  🌧️  [REGIME] ${symbol} — BTC 1H BEAR + 4H ${_btcRegime} → LONG blokiran`);
+              _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: `BTC_REGIME(${_effectiveRegime})`, reason: "BTC 1H BEAR → LONG blokiran", vwapDist: result.vwap ? ((result.price-result.vwap)/result.vwap*100).toFixed(2) : null });
+              continue;
+            }
           }
 
           // SHORT filter — tri razine zaštite:

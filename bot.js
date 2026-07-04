@@ -23,9 +23,9 @@ const TIMEFRAME     = "1H";
 const LEVERAGE      = 50;     // 50x default → SL 1.5% = 75% margine (više prostora za šum)
 const BTC_LEVERAGE  = 75;    // BTC posebno — 75x
 const START_CAPITAL = 1000;   // po portfoliju
-const RISK_PCT      = 1.0;    // bazni % banke po tradeu (dinamički 0.5–1.5% ovisno o snazi setupa)
-const RISK_PCT_MIN  = 0.5;    // minimalni setup (score = minSig, bez regime potvrde)
-const RISK_PCT_MAX  = 1.5;    // jak setup (regime aligned + score ≥ minSig+2)
+const RISK_PCT      = 1.5;    // bazni % banke po tradeu (dinamički 1–2% ovisno o snazi setupa)
+const RISK_PCT_MIN  = 1.0;    // minimalni setup (score = minSig, bez regime potvrde)
+const RISK_PCT_MAX  = 2.0;    // jak setup (regime aligned + score ≥ minSig+2)
 const SL_PCT        = 2.0;    // fallback SL % (Tier 1) — override per-simbol u symbol_sltp
 const TP_PCT        = 3.0;    // fallback TP % (Tier 1, 1.5×SL) — override per-simbol u symbol_sltp
 

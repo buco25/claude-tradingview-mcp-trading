@@ -43,8 +43,7 @@
       "tpPct": 4,
       "tier": 1,
       "leverage": 41,
-      "avgRange": "3.47%",
-      "riskPct": 0.75
+      "avgRange": "3.47%"
     },
     "XRPUSDT": {
       "slPct": 2,
@@ -100,8 +99,7 @@
       "tpPct": 5,
       "tier": 2,
       "leverage": 25,
-      "avgRange": "5.91%",
-      "riskPct": 0.75
+      "avgRange": "5.91%"
     },
     "JUPUSDT": {
       "slPct": 3,
@@ -129,8 +127,7 @@
       "tpPct": 5,
       "tier": 2,
       "leverage": 25,
-      "avgRange": "5.3%",
-      "riskPct": 0.75
+      "avgRange": "5.3%"
     },
     "BNBUSDT": {
       "slPct": 1.5,

@@ -36,16 +36,18 @@ const STRONG_SIGNAL_SCORE = 9;    // nekorišten za TP (zadržan za eventualne f
 const STRONG_TP_MULT      = 3.0;  // jako tržište → TP = SL × 3 (1:3 R:R)
 const NORMAL_TP_MULT      = 2.0;  // konsolidacija / neutralno → TP = SL × 2.0 (1:2 R:R min, TraderaEdge standard)
 const MAX_TRADES_PER_DAY = 100;
-const MAX_OPEN_PER_PORTFOLIO = 3;  // max otvorenih pozicija po portfoliju
+const MAX_OPEN_PER_PORTFOLIO = 6;  // max otvorenih pozicija (14 simbola × 0.5-1.5% rizik → max ~6% istovremeno)
 const MAX_PYRAMID           = 1;   // max 1 adicija u istom smjeru (BTC only mode)
 const MAX_NEW_ENTRIES_PER_SCAN = 3; // max NOVIH ulaza po scan ciklusu (sprječava 8 simultanih gubitaka)
 
 // ─── 7. Korelacijski filter — sektori ─────────────────────────────────────────
 const SYMBOL_SECTORS = {
-  "BTCUSDT":  "BTC",
-  "ETHUSDT":  "OG_L1", "SOLUSDT": "OG_L1",
-  "TAOUSDT":  "AI",
-  "AAVEUSDT": "DEFI",
+  "BTCUSDT":    "BTC",
+  "ETHUSDT":    "OG_L1", "SOLUSDT":  "OG_L1", "BNBUSDT": "OG_L1",
+  "AVAXUSDT":   "L1",    "ATOMUSDT": "L1",    "ALGOUSDT": "L1",
+  "XRPUSDT":    "PAYMENT", "ZECUSDT": "PAYMENT",
+  "TAOUSDT":    "AI",    "RENDERUSDT": "AI",  "FETUSDT": "AI",
+  "LINKUSDT":   "DEFI",  "AAVEUSDT": "DEFI",
 };
 const MAX_PER_SECTOR = 2;  // max otvorenih pozicija istog sektora
 

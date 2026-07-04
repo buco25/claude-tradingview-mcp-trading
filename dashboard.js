@@ -12,7 +12,7 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   getSessionInfo, calcAtrTrend, getSp500Data, calcSymbolCorrelation,
   getDeribitPutCall, getLiquidationRisk, getEconEvents, isEconBlocked, calcVWAP,
   getLongShortRatio, getStablecoinInflow, getBtcPerpBasis, getAltcoinSeason,
-  generateDailyReport, autoFixCsvFromBitget } from "./bot.js";
+  generateDailyReport, autoFixCsvFromBitget, SYMBOL_COMBOS } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -215,7 +215,52 @@ function hadCross(e9, e21, bars = 5) {
   return { up, dn };
 }
 
-function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}, _pwh = null, _pwl = null) {
+// ─── Liquidity Hunt zone + Daily EMA fetch (za DEMA/LHUNT signale u scanneru) ──
+// Cache 10 min po simbolu — 3 fetcha po simbolu inače preskupo na svakom scanu
+const _lhZonesCache = {};
+async function fetchLhZones(sym) {
+  const now = Date.now();
+  const c = _lhZonesCache[sym];
+  if (c && now - c.ts < 10 * 60 * 1000) return c.zones;
+  const zones = {};
+  try {
+    const [wd, dd, md] = await Promise.all([
+      fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=1W&limit=2`).then(r=>r.json()),
+      fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=1Dutc&limit=90`).then(r=>r.json()),
+      fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=1Mutc&limit=13`).then(r=>r.json())
+    ]);
+    if (wd.code === "00000" && wd.data?.length >= 1)
+      zones.weeklyOpen = parseFloat(wd.data[wd.data.length - 1][1]);  // ascending — zadnji = tekući
+    if (dd.code === "00000" && dd.data?.length >= 21) {
+      const dC = dd.data.map(k => ({ ts:+k[0], open:+k[1], high:+k[2], low:+k[3], close:+k[4] }));
+      const dCl = dC.map(x => x.close);
+      const dema = (p) => {
+        const k = 2/(p+1); let v = dCl.slice(0,p).reduce((a,b)=>a+b,0)/p;
+        for (let i=p; i<dCl.length; i++) v = dCl[i]*k + v*(1-k);
+        return v;
+      };
+      zones.dailyEma10 = dema(10);
+      zones.dailyEma20 = dema(20);
+      const nowD = new Date();
+      const mS = Date.UTC(nowD.getUTCFullYear(), nowD.getUTCMonth(), 1);
+      const mC = dC.filter(x => x.ts >= mS);
+      if (mC.length > 0) {
+        zones.monthlyOpen = mC[0].open;
+        zones.monthlyHigh = Math.max(...mC.map(x => x.high));
+        zones.monthlyLow  = Math.min(...mC.map(x => x.low));
+      }
+    }
+    if (md.code === "00000" && md.data?.length >= 1) {
+      const yS = Date.UTC(new Date().getUTCFullYear(), 0, 1);
+      const jan = md.data.find(k => +k[0] >= yS);
+      if (jan) zones.yearlyOpen = parseFloat(jan[1]);
+    }
+  } catch {}
+  _lhZonesCache[sym] = { zones, ts: now };
+  return zones;
+}
+
+function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultraCfg = {}, _pwh = null, _pwl = null, _zones = null) {
   const closes = candles.map(c => c.close);
   const opens  = candles.map(c => c.open);
   const vols   = candles.map(c => c.volume || 0);
@@ -453,18 +498,11 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
 
   let ultraSig = "—";
   let ultraBull = 0, ultraBear = 0;
-  let ultraSigs16 = new Array(8).fill(0);
-  const SYMBOL_COMBOS_D = {
-    "BTCUSDT":  { sigIdx: [0,1,2,3,7,8], minSig: 4 },
-    "ETHUSDT":  { sigIdx: [0,1,2,3,7,8], minSig: 4 },
-    "SOLUSDT":  { sigIdx: [0,1,3,5,6,8], minSig: 4 },
-    "TAOUSDT":  { sigIdx: [0,1,3,5,6,8], minSig: 4 },
-    "AAVEUSDT": { sigIdx: [0,1,2,3,7,8], minSig: 4 },
-  };
+  let ultraSigs16 = new Array(11).fill(0);
   let ultraMinSig = 4;  // default
   {
-    const _symCombo = SYMBOL_COMBOS_D[symbol];
-    const _comboIdxD = _symCombo?.sigIdx ?? [0,1,2,3,4,5,6,7];
+    const _symCombo = SYMBOL_COMBOS[symbol];  // jedan izvor istine — bot.js
+    const _comboIdxD = _symCombo?.sigIdx ?? [0,2,3,4,5,6,9,10];
     const { minSig = 4 } = _symCombo ?? {};
     ultraMinSig = minSig;
     if (n >= 200 && ema9 && ema21) {
@@ -498,7 +536,43 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
         }
       }
 
-      // 9 signala: E50rev, CVDrev, MACD, E145, PWHL, RDIV, MSTR, FVG, OB
+      // DEMA — Daily EMA10 retest (TraderaEdge Smart Hub)
+      let sigDEMAD = 0;
+      if (_zones?.dailyEma10 != null) {
+        const nearE10  = Math.abs(price - _zones.dailyEma10) / price < 0.015;
+        const aboveE10 = price > _zones.dailyEma10;
+        if      (aboveE10 && nearE10 && rsiRising)   sigDEMAD =  1;
+        else if (aboveE10)                            sigDEMAD =  1;
+        else if (!aboveE10 && nearE10 && rsiFalling)  sigDEMAD = -1;
+        else                                          sigDEMAD = -1;
+      }
+
+      // LHUNT — Liquidity Hunt zone sweep (TraderaEdge)
+      let sigLHUNTD = 0;
+      {
+        const lvls = [_zones?.monthlyOpen, _zones?.weeklyOpen, _zones?.yearlyOpen,
+                      _zones?.monthlyHigh, _zones?.monthlyLow, _pwh, _pwl]
+                     .filter(v => v != null && v > 0);
+        if (lvls.length > 0) {
+          const rLows  = candles.slice(-8).map(c => c.low);
+          const rHighs = candles.slice(-8).map(c => c.high);
+          let swB = 0, swS = 0;
+          for (const lvl of lvls) {
+            const near = Math.abs(price - lvl) / price < 0.015;
+            if (rLows.some(l => l < lvl*0.999)  && price > lvl && near && rsiRising)  swB++;
+            if (rHighs.some(h => h > lvl*1.001) && price < lvl && near && rsiFalling) swS++;
+          }
+          if (swB > swS && swB > 0)      sigLHUNTD =  1;
+          else if (swS > swB && swS > 0) sigLHUNTD = -1;
+          else {
+            const bc = lvls.filter(l => price > l*1.001).length;
+            const sc = lvls.filter(l => price < l*0.999).length;
+            if (bc > sc) sigLHUNTD = 1; else if (sc > bc) sigLHUNTD = -1;
+          }
+        }
+      }
+
+      // 11 signala: E50, CVD, MACD, E145, PWHL, RDIV, MSTR, FVG, OB, DEMA, LHUNT
       ultraSigs16 = [
         ema50 ? (price > ema50 ? 1 : -1) : 0,             //  1. E50  TREND
         cvdSum > 0 ? 1 : -1,                              //  2. CVD  TREND
@@ -509,6 +583,8 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
         sigMktStrD,                                        //  7. MSTR
         sigFVGD,                                           //  8. FVG
         sigOBD,                                            //  9. OB Order Block
+        sigDEMAD,                                          // 10. DEMA Smart Hub
+        sigLHUNTD,                                         // 11. LHUNT Liquidity Hunt
       ];
 
       const _activeSigsD = _comboIdxD.map(i => ultraSigs16[i]);
@@ -535,6 +611,8 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
           sigMktStrD,
           sigFVGD,
           sigOBD,
+          sigDEMAD,
+          sigLHUNTD,
         ];
         const _momActiveSigsD = _comboIdxD.map(i => momSigsD[i]);
         const momBullD = _momActiveSigsD.filter(s => s === 1).length;
@@ -610,7 +688,8 @@ async function runScan(rules) {
             _pwl = parseFloat(prevWeek[3]);
           }
         } catch(e) { /* ignoriraj — PWHL ostaje 0 */ }
-        const s       = scanSymbol(sym, candles, {}, {}, {}, ultraCfg, _pwh, _pwl);
+        const _zones  = await fetchLhZones(sym);
+        const s       = scanSymbol(sym, candles, {}, {}, {}, ultraCfg, _pwh, _pwl, _zones);
         const pending = pendingList.find(p => p.symbol === sym) || null;
         const symSltp = rules.symbol_sltp?.[sym] || {};
         const slPct   = symSltp.slPct ?? 1.5;
@@ -1361,7 +1440,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       const sc = d.lastScore;
       const scEl = document.getElementById('btc-score-val');
       if (sc) {
-        scEl.textContent = sc.score + '/6';
+        scEl.textContent = sc.score + '/8';
         scEl.style.color = sc.score >= 5 ? '#059669' : sc.score >= 4 ? '#d97706' : '#9ca3af';
         const sigText = sc.signal ? (sc.signal === 'LONG' ? '🟢 LONG' : '🔴 SHORT') : '⚪ nema';
         document.getElementById('btc-score-sub').textContent =
@@ -1818,7 +1897,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div>
         <div class="chart-title" style="margin-bottom:2px">🎯 ULTRA Scanner — ${ALL_SYMBOLS.length} simbola | min 4/6 signala po simbolu | ulaz odmah</div>
         <div style="font-size:12px;color:var(--text-muted)">
-          BTC/ETH/AAVE: E50↑+CVD↑+MACD+E145+FVG &nbsp;·&nbsp; SOL/TAO: E50↑+CVD↑+E145+RDIV+MSTR
+          Svi simboli (TraderaEdge): E50+MACD+E145+PWHL+RDIV+MSTR+DEMA+LHUNT · min 5/8 (TAO/AAVE 4/8)
           &nbsp;|&nbsp; 🟡 SETUP &nbsp; 🟢 Signal &nbsp; 🚀 Momentum &nbsp; Cache 90s &nbsp;|&nbsp;
           <button onclick="toggleLegend()" style="background:none;border:1px solid #30363d;border-radius:4px;color:#9ca3af;font-size:11px;cursor:pointer;padding:2px 8px">📖 Legenda signala</button>
         </div>
@@ -2089,8 +2168,8 @@ async function resetOne(pid) {
 // Maknuti: CRS (WR 14%), ADXsn (obavezan gate), 6Sc (obavezan gate), EMA smjer (nije obavezan)
 // Maknuti 2025-05: E55⟳ (duplikat E50), VOL⟳ (asimetričan — nikad +1 za LONG)
 // Maknuti Option C: RSI (redundantan s RSI gate-om), CHP (redundantan s ADX gate-om)
-// ULTRA v3 — 8 signala (bez SRB): E50rev, CVDrev, MACD, E145, PWHL, RDIV, MSTR, FVG
-const SIG_NAMES = ['E50','CVD','MACD','E145','PWHL','RDIV','MSTR','FVG','OB'];
+// ULTRA v4 — TraderaEdge: E50, MACD, E145, PWHL, RDIV, MSTR, DEMA, LHUNT (CVD/FVG/OB više nisu u combu)
+const SIG_NAMES = ['E50','CVD','MACD','E145','PWHL','RDIV','MSTR','FVG','OB','DEMA','LHUNT'];
 
 const SIG_COND_BULL = [
   'Cijena > EMA50 — bullish trend potvrđen',                             //  1. E50 TREND
@@ -2102,6 +2181,8 @@ const SIG_COND_BULL = [
   'HH + HL — market structure uptrend potvrđen',                         //  7. MSTR
   'Bullish FVG — cijena u nezapunjenoj gap zoni (imbalance support)',    //  8. FVG
   'Bullish OB — cijena se vratila u zonu zadnje crvene svjećice prije 3+ uzlaznih (institucijska potpora)', //  9. OB
+  'Cijena iznad Daily EMA10 — dnevni bull momentum (TraderaEdge Smart Hub)', // 10. DEMA
+  'Sweep ključne zone (MOpen/WOpen/YOpen/PWL) + recovery iznad — Liquidity Hunt LONG', // 11. LHUNT
 ];
 const SIG_COND_BEAR = [
   'Cijena < EMA50 — bearish trend potvrđen',                             //  1. E50 TREND
@@ -2113,6 +2194,8 @@ const SIG_COND_BEAR = [
   'LL + LH — market structure downtrend potvrđen',                       //  7. MSTR
   'Bearish FVG — cijena u nezapunjenoj gap resistance zoni',            //  8. FVG
   'Bearish OB — cijena se vratila u zonu zadnje zelene svjećice prije 3+ silaznih (institucijska rezistencija)', //  9. OB
+  'Cijena ispod Daily EMA10 — dnevni bear momentum (TraderaEdge Smart Hub)',  // 10. DEMA
+  'Fake breakout iznad ključne zone + pad ispod — Liquidity Hunt SHORT',      // 11. LHUNT
 ];
 const SIG_COND_NEUT = [
   'Cijena na EMA50 — nema jasnog pullbacka',              //  1. E50
@@ -2124,6 +2207,8 @@ const SIG_COND_NEUT = [
   'Nejasna market structure (nema dovoljno swingova)',    //  7. MSTR
   'Nema aktivnog Fair Value Gapa u blizini',              //  8. FVG
   'Cijena nije u Order Block zoni',                       //  9. OB
+  'Daily EMA podaci nedostupni',                          // 10. DEMA
+  'Nema likvidnosnih zona u blizini',                     // 11. LHUNT
 ];
 
 function mandatoryBoxes(s) {
@@ -2189,11 +2274,8 @@ function mandatoryBoxes(s) {
 
 function sigBoxes(sigs, symbol) {
   if (!sigs || sigs.length === 0) return '<span style="color:#444">—</span>';
-  const _combos = {
-    "BTCUSDT":[0,1,2,3,7,8],"ETHUSDT":[0,1,2,3,7,8],"AAVEUSDT":[0,1,2,3,7,8],
-    "SOLUSDT":[0,1,3,5,6,8],"TAOUSDT":[0,1,3,5,6,8],
-  };
-  const activeIdx = _combos[symbol] ?? [0,1,2,3,4,5,6,7];
+  const _combos = ${JSON.stringify(Object.fromEntries(Object.entries(SYMBOL_COMBOS).map(([k,v]) => [k, v.sigIdx])))};  // injektirano iz bot.js
+  const activeIdx = _combos[symbol] ?? [0,2,3,4,5,6,9,10];
   return activeIdx.map(i => {
     const v    = sigs[i] ?? 0;
     const bg   = v === 1 ? '#0d3d26' : v === -1 ? '#3d0d0d' : '#1c2128';
@@ -2207,7 +2289,7 @@ function sigBoxes(sigs, symbol) {
 }
 
 function scoreBox(bull, bear, sig, minSig) {
-  const total = 6;
+  const total = 8;  // TraderaEdge combo — 8 signala
   const minLabel = minSig ? '<br><span style="color:#444;font-size:9px">min:' + minSig + '</span>' : '';
   if (sig === "LONG")   return '<div style="background:rgba(5,150,105,0.15);border:1px solid #059669;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#059669;font-weight:800;font-size:16px">↑' + bull + '</span><span style="color:#94a3b8;font-size:11px">/' + total + '</span><br><span class="sig-long" style="font-size:11px">▲ LONG</span></div>';
   if (sig === "SHORT")  return '<div style="background:rgba(220,38,38,0.15);border:1px solid #dc2626;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#dc2626;font-weight:800;font-size:16px">↓' + bear + '</span><span style="color:#94a3b8;font-size:11px">/' + total + '</span><br><span class="sig-short" style="font-size:11px">▼ SHORT</span></div>';
@@ -2241,7 +2323,7 @@ function statusBox(s) {
     return '<div style="background:rgba(5,150,105,0.1);border:1px solid ' + (s.volLow ? '#f59e0b' : '#059669') + ';border-radius:8px;padding:8px 10px">' +
       '<div style="font-size:11px;color:#059669;font-weight:700;margin-bottom:4px">' + (s.volLow ? '⚠️ SIGNAL (vol nizak)' : '✅ SIGNAL AKTIVIRAN') + '</div>' +
       '<div style="font-size:13px;font-weight:700;color:#059669">▲ LONG</div>' +
-      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Ulaz odmah @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBull||0) + '/5</b></div>' +
+      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Ulaz odmah @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBull||0) + '/8</b></div>' +
       volWarning +
       '</div>';
   }
@@ -2249,7 +2331,7 @@ function statusBox(s) {
     return '<div style="background:rgba(220,38,38,0.1);border:1px solid ' + (s.volLow ? '#f59e0b' : '#dc2626') + ';border-radius:8px;padding:8px 10px">' +
       '<div style="font-size:11px;color:#dc2626;font-weight:700;margin-bottom:4px">' + (s.volLow ? '⚠️ SIGNAL (vol nizak)' : '✅ SIGNAL AKTIVIRAN') + '</div>' +
       '<div style="font-size:13px;font-weight:700;color:#dc2626">▼ SHORT</div>' +
-      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Ulaz odmah @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBear||0) + '/5</b></div>' +
+      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Ulaz odmah @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBear||0) + '/8</b></div>' +
       volWarning +
       '</div>';
   }
@@ -2259,14 +2341,14 @@ function statusBox(s) {
     return '<div style="background:rgba(59,130,246,0.1);border:1px solid #3b82f6;border-radius:8px;padding:8px 10px">' +
       '<div style="font-size:11px;color:#3b82f6;font-weight:700;margin-bottom:4px">🚀 MOMENTUM LONG</div>' +
       '<div style="font-size:13px;font-weight:700;color:#3b82f6">▲ LONG</div>' +
-      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Breakout ulaz @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBull||0) + '/5</b></div>' +
+      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Breakout ulaz @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBull||0) + '/8</b></div>' +
       '</div>';
   }
   if (sig === "MOM↓") {
     return '<div style="background:rgba(139,92,246,0.1);border:1px solid #8b5cf6;border-radius:8px;padding:8px 10px">' +
       '<div style="font-size:11px;color:#8b5cf6;font-weight:700;margin-bottom:4px">🚀 MOMENTUM SHORT</div>' +
       '<div style="font-size:13px;font-weight:700;color:#8b5cf6">▼ SHORT</div>' +
-      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Breakdown ulaz @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBear||0) + '/5</b></div>' +
+      '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Breakdown ulaz @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBear||0) + '/8</b></div>' +
       '</div>';
   }
 

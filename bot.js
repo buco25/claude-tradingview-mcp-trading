@@ -99,19 +99,28 @@ const VOL_EXH_DEFAULT = 3.0; // fallback za nepoznate simbole
 
 // ─── Per-simbol signal kombinacije (backtest optimizirano 16.06.2026) ──────────
 // Indeksi odgovaraju sigs[] u analyzeUltra: 0=E50↑ 1=CVD↑ 2=MACD 3=E145 4=PWHL 5=RDIV 6=MSTR 7=FVG
-const SYMBOL_COMBOS = {
-  // BTC — puni TraderaEdge setup: trend + momentum + Smart Hub + Liquidity Hunt
-  "BTCUSDT":  { sigIdx: [0,2,3,4,5,6,9,10], minSig: 5 },
-  // ── TraderaEdge alts — E50+CVD+MACD/E145+RDIV+MSTR+DEMA+LHUNT ──────────────
-  "ETHUSDT":  { sigIdx: [0,1,2,3,5,6,9,10], minSig: 5, btcAlign: true },
-  "SOLUSDT":  { sigIdx: [0,1,3,5,6,9,10],   minSig: 5, btcAlign: true },
-  "BNBUSDT":  { sigIdx: [0,1,2,3,5,6,9,10], minSig: 5, btcAlign: true },
-  "XRPUSDT":  { sigIdx: [0,1,2,3,5,6,9,10], minSig: 5, btcAlign: true },
-  "AVAXUSDT": { sigIdx: [0,1,3,5,6,9,10],   minSig: 5, btcAlign: true },
-  "LINKUSDT": { sigIdx: [0,1,2,3,5,6,9,10], minSig: 5, btcAlign: true },
-  // ── Extra ────────────────────────────────────────────────────────────────────
-  "TAOUSDT":  { sigIdx: [0,1,3,5,6,9,10],   minSig: 4 },
-  "AAVEUSDT": { sigIdx: [0,1,2,3,5,6,9,10], minSig: 4 },
+// Jedinstveni TraderaEdge set za sve simbole:
+// E50 + MACD + E145 (trend) · PWHL (weekly zone) · RDIV + MSTR (struktura)
+// DEMA (Smart Hub) · LHUNT (Liquidity Hunt) — bez CVD/FVG/OB (nisu TraderaEdge)
+const TE_COMBO = [0,2,3,4,5,6,9,10];
+export const SYMBOL_COMBOS = {
+  "BTCUSDT":    { sigIdx: TE_COMBO, minSig: 5 },
+  // ── Majors ──────────────────────────────────────────────────────────────────
+  "ETHUSDT":    { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
+  "SOLUSDT":    { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
+  "BNBUSDT":    { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
+  "XRPUSDT":    { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
+  "AVAXUSDT":   { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
+  "LINKUSDT":   { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
+  // ── TraderaEdge momentum pickovi (iz videa) ─────────────────────────────────
+  "RENDERUSDT": { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
+  "FETUSDT":    { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
+  "ATOMUSDT":   { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
+  "ZECUSDT":    { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
+  "ALGOUSDT":   { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
+  // ── Extra (dobar WR history) ────────────────────────────────────────────────
+  "TAOUSDT":    { sigIdx: TE_COMBO, minSig: 4 },
+  "AAVEUSDT":   { sigIdx: TE_COMBO, minSig: 4 },
 };
 
 // ─── Ekonomski kalendar ───────────────────────────────────────────────────────

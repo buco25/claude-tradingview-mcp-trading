@@ -3172,7 +3172,7 @@ async function checkPortfolioPositions(pid) {
               try {
                 const closeR = await bitgetPost("/api/v2/mix/order/place-order", {
                   symbol: pos.symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
-                  side: closeSide, tradeSide: "close",
+                  side: closeSide, tradeSide: "close", marginMode: "isolated",
                   holdSide: pos.side === "LONG" ? "long" : "short",
                   orderType: "market", size: closeQty,
                 });
@@ -3567,7 +3567,7 @@ async function partialClosePosition(pos, closePct = PARTIAL_CLOSE_PCT) {
   try {
     const res = await bitgetPost("/api/v2/mix/order/place-order", {
       symbol: pos.symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
-      side: closeSide, tradeSide: "close",
+      side: closeSide, tradeSide: "close", marginMode: "isolated",
       holdSide: pos.side === "LONG" ? "long" : "short",
       orderType: "market",
       size: parseFloat(qty.toFixed(4)).toString(),
@@ -3676,7 +3676,7 @@ export async function softExitMonitor() {
               try {
                 const r = await bitgetPost("/api/v2/mix/order/place-order", {
                   symbol: pos.symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
-                  side: closeSide, tradeSide: "close",
+                  side: closeSide, tradeSide: "close", marginMode: "isolated",
                   holdSide: pos.side === "LONG" ? "long" : "short",
                   orderType: "market", size: qty,
                 });
@@ -3743,7 +3743,7 @@ export async function softExitMonitor() {
           try {
             const closeRes = await bitgetPost("/api/v2/mix/order/place-order", {
               symbol: pos.symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
-              side: closeSide, tradeSide: "close",
+              side: closeSide, tradeSide: "close", marginMode: "isolated",
               holdSide: pos.side === "LONG" ? "long" : "short",
               orderType: "market", size: qty,
             });
@@ -3911,7 +3911,7 @@ async function closeBitgetPosition(symbol, side, quantity) {
     // Market close nalog
     const r = await bitgetPost("/api/v2/mix/order/place-order", {
       symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
-      side: closeSide, tradeSide: "close",
+      side: closeSide, tradeSide: "close", marginMode: "isolated",
       holdSide: side === "LONG" ? "long" : "short",
       orderType: "market", size: String(quantity),
     });
@@ -4623,7 +4623,7 @@ export async function run() {
               if (_isLiveCe) {
                 const _closeRes = await bitgetPost("/api/v2/mix/order/place-order", {
                   symbol: _sp.symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
-                  side: "buy", tradeSide: "close",
+                  side: "buy", tradeSide: "close", marginMode: "isolated",
                   holdSide: "short",
                   orderType: "market",
                   size: (await fetchBitgetPositionSize(_sp.symbol, "SHORT"))?.total?.toFixed(4) ?? "0",
@@ -4973,7 +4973,7 @@ export async function run() {
               const _flipCloseSide = existingPos.side === "LONG" ? "sell" : "buy";
               const _flipCloseRes  = await bitgetPost("/api/v2/mix/order/place-order", {
                 symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
-                side: _flipCloseSide, tradeSide: "close",
+                side: _flipCloseSide, tradeSide: "close", marginMode: "isolated",
                 holdSide: existingPos.side === "LONG" ? "long" : "short",
                 orderType: "market", size: _flipQty,
               });

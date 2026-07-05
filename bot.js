@@ -2709,7 +2709,9 @@ function applyTrail(pos, currentPrice) {
 }
 
 // Dohvati stvarnu veličinu pozicije za jedan simbol/stranu s Bitgeta
-// Vraća { total, available } ili null ako pozicija ne postoji / greška
+// Vraća: { total, available } | null = POTVRĐENO ne postoji | { error: true } = API greška
+// KRITIČNO (05.07.2026): greška se NE SMIJE tumačiti kao "pozicija ne postoji" —
+// to je preko noći tiho izbacilo 6 živih pozicija iz trackinga → likvidacije bez SL-a.
 async function fetchBitgetPositionSize(symbol, side) {
   try {
     const holdSide = side === "LONG" ? "long" : "short";
@@ -2726,16 +2728,19 @@ async function fetchBitgetPositionSize(symbol, side) {
       signal: AbortSignal.timeout(5000),
     });
     const d = await r.json();
-    if (d.code !== "00000") return null;
+    if (d.code !== "00000") {
+      console.log(`  ⚠️  fetchBitgetPositionSize(${symbol} ${side}): Bitget ${d.code} ${d.msg}`);
+      return { error: true };
+    }
     const pos = (d.data || []).find(p => p.symbol === symbol && p.holdSide === holdSide && parseFloat(p.total) > 0);
-    if (!pos) return null;
+    if (!pos) return null;  // API OK, pozicije stvarno nema
     return {
       total:     parseFloat(pos.total),
       available: parseFloat(pos.available ?? pos.total),
     };
   } catch (e) {
     console.log(`  ⚠️  fetchBitgetPositionSize(${symbol} ${side}): ${e.message}`);
-    return null;
+    return { error: true };
   }
 }
 
@@ -3189,6 +3194,11 @@ async function checkPortfolioPositions(pid) {
               : `  🛑 [SOFT SL] ${pos.symbol} ${pos.side} — cijena ${fmtPrice(liveP)} ≤ SL ${fmtPrice(pos.sl)} → tržišni izlaz`);
             // Provjeri pravu veličinu na Bitgetu
             const bitPos2 = await fetchBitgetPositionSize(pos.symbol, pos.side);
+            if (bitPos2?.error) {
+              console.log(`  ⚠️  [SOFT SL] ${pos.symbol} — API greška pri provjeri, pozicija OSTAJE praćena (retry sljedeći ciklus)`);
+              stillOpen.push(pos);
+              continue;
+            }
             if (!bitPos2) {
               console.log(`  ⚠️  [SOFT SL] ${pos.symbol} ne postoji na Bitgetu — uklanjam tracking`);
               stillOpen.push({ ...pos, _remove: true });
@@ -3214,7 +3224,7 @@ async function checkPortfolioPositions(pid) {
                   console.log(`  🗑️  [SOFT SL] Otkazano ${cancelled} plan naloga za ${pos.symbol}`);
                   // Provjeri da li pozicija uopće postoji nakon otkazivanja
                   const recheck = await fetchBitgetPositionSize(pos.symbol, pos.side);
-                  if (!recheck) {
+                  if (!recheck && !recheck?.error) {
                     console.log(`  ℹ️  [SOFT SL] ${pos.symbol} — pozicija ne postoji na Bitgetu (već zatvorena) → uklanjam tracking`);
                     stillOpen.push({ ...pos, _remove: true });
                     softClosed = true; // izlaz iz retry petlje
@@ -3705,7 +3715,7 @@ export async function softExitMonitor() {
           console.log(`  🚨 [EMRG] ${pos.symbol} ${pos.side} — gubitak ${(_lossRatio*100).toFixed(0)}% margine, zatvaramo ODMAH (pre-likvidacija)`);
           await tg(`🚨 <b>EMERGENCY CLOSE [ULTRA]</b> ${pos.symbol} ${pos.side}\nGubitak ${(_lossRatio*100).toFixed(0)}% margine — zatvaramo prije likvidacije!\nCijena: ${fmtPrice(liveP)} | Entry: ${fmtPrice(pos.entryPrice)} | P&L: $${_unrealPnl.toFixed(2)}`);
           const bitPos = await fetchBitgetPositionSize(pos.symbol, pos.side);
-          if (bitPos) {
+          if (bitPos && !bitPos.error) {
             const qty = (bitPos.total > 0 ? bitPos.total : bitPos.available).toFixed(4);
             const closeSide = pos.side === "LONG" ? "sell" : "buy";
             for (let attempt = 1; attempt <= 3; attempt++) {
@@ -3742,6 +3752,10 @@ export async function softExitMonitor() {
 
         // Dohvati pravu veličinu s Bitgeta — lokalna qty može biti pogrešna
         const bitPos = await fetchBitgetPositionSize(pos.symbol, pos.side);
+        if (bitPos?.error) {
+          console.log(`  ⚠️  [SOFT ${reason}] ${pos.symbol} — API greška pri provjeri, pozicija OSTAJE praćena`);
+          continue;
+        }
         if (!bitPos) {
           // Pozicija zatvorena izvana (ručno / drugi bot) — dohvati pravi P&L i zapiši u CSV
           console.log(`  ⚠️  [SOFT ${reason}] ${pos.symbol} — pozicija ne postoji na Bitgetu, dohvaćam P&L i zatvaramo tracking`);
@@ -3789,7 +3803,7 @@ export async function softExitMonitor() {
               const cancelled = await cancelAllPlanOrders(pos.symbol, pos.side);
               console.log(`  🗑️  [SOFT ${reason}] Otkazano ${cancelled} plan naloga`);
               const recheck = await fetchBitgetPositionSize(pos.symbol, pos.side);
-              if (!recheck) {
+              if (!recheck && !recheck?.error) {
                 console.log(`  ℹ️  [SOFT ${reason}] ${pos.symbol} — pozicija zatvorena izvana → dohvaćam P&L`);
                 _extClosed = true;
                 break;
@@ -3867,13 +3881,14 @@ export async function softExitMonitor() {
 //   Tier3 SL=2.5% → 30x (liq 2.83%)  ✅
 //   BTC   SL=1.5% → 40x (liq 2.00%)  ✅ (BTC_LEVERAGE 75x je PREVIŠE za 1.5% SL)
 function getSafeLeverage(slPct) {
-  // Strategija: liq cijena = SL cijena (likvidacija je backup za SL)
-  // Formula: liq_dist = 1/L - MMR → postavimo liq_dist = SL% → L = 1/(SL% + MMR)
-  // Math.floor → liq je uvijek malo DALJE od SL-a (SL uvijek okida prvi)
-  const MAINT  = 0.004;  // 0.4% BitGet maintenance margin (standardni za male pozicije)
-  const maxLev = 1 / (slPct / 100 + MAINT);
-  return Math.max(10, Math.min(125, Math.floor(maxLev)));
-  // Provjera: SL2.5%→34x(liq@2.54%) SL4%→22x(liq@4.15%) SL5.5%→16x(liq@5.85%) SL7%→13x(liq@7.29%)
+  // Redoslijed okidanja MORA biti: soft SL (slPct) → ghost SL (slPct+0.5%) → liq
+  // 05.07.2026: buffer 0.4% bio pretanak — liq je padala NA/PRIJE ghost SL-a
+  // (fees + funding + spread jedu marginu) → 6 likvidacija preko noći.
+  // Novi buffer: liq minimalno SL + 1.2% (ghost +0.5% ostaje sigurno unutra).
+  const SAFETY = 0.012;  // 1.2% = ghost offset 0.5% + maintenance ~0.4% + fees/spread rezerva
+  const maxLev = 1 / (slPct / 100 + SAFETY);
+  return Math.max(5, Math.min(30, Math.floor(maxLev)));
+  // Provjera: SL1.5%→30x(cap) SL2%→31→30x SL2.5%→27x(liq@3.7%) SL3%→23x(liq@4.3%)
 }
 
 async function setupSymbol(symbol, slPct, preferredLeverage = null) {
@@ -4064,7 +4079,7 @@ export async function closeBitGetOrder(pos) {
 
   // Pokušaj 2: fallback — place-order s pravom veličinom s Bitgeta
   const bitPosData = await fetchBitgetPositionSize(pos.symbol, pos.side);
-  const quantity   = bitPosData
+  const quantity   = (bitPosData && !bitPosData.error)
     ? bitPosData.available.toFixed(4)
     : (pos.quantity ?? (pos.totalUSD / pos.entryPrice)).toFixed(4);
   const closeSide = pos.side === "LONG" ? "sell" : "buy";
@@ -5027,7 +5042,7 @@ export async function run() {
             console.log(`  🔄 [FLIP] ${symbol} — jak kontra signal (score=${_flipScore}) → zatvaramo ${existingPos.side}, otvaramo ${signal}`);
             // Zatvori postojeću poziciju
             const _flipBitPos = await fetchBitgetPositionSize(symbol, existingPos.side).catch(() => null);
-            if (_flipBitPos) {
+            if (_flipBitPos && !_flipBitPos.error) {
               await cancelAllPlanOrders(symbol, existingPos.side).catch(() => {});
               const _flipQty      = (_flipBitPos.total > 0 ? _flipBitPos.total : _flipBitPos.available).toFixed(4);
               const _flipCloseSide = existingPos.side === "LONG" ? "sell" : "buy";

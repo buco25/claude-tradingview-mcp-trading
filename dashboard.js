@@ -536,7 +536,7 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
         }
       }
 
-      // DEMA — Daily EMA10 retest (TraderaEdge Smart Hub)
+      // DEMA — Daily EMA10 retest (Smart Hub)
       let sigDEMAD = 0;
       if (_zones?.dailyEma10 != null) {
         const nearE10  = Math.abs(price - _zones.dailyEma10) / price < 0.015;
@@ -1213,7 +1213,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="refresh" content="60">
-<title>⚡ ULTRA · TraderaEdge Bot</title>
+<title>⚡ ULTRA · Future Bot</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap');
@@ -1342,7 +1342,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     <div class="header-left">
       <div class="logo">⚡</div>
       <div>
-        <div class="title">ULTRA · TraderaEdge Bot</div>
+        <div class="title">ULTRA · Future Bot</div>
         <div class="subtitle"><span class="live-dot"></span>${ALL_SYMBOLS.length} simbola (kripto + dionice) · rizik 1–2% dinamički · combo 5/8 signala · RR 1:2 (JAKO 1:3) · break-even @ +1R · max 6 kripto + 3 dionice</div>
       </div>
     </div>
@@ -1385,7 +1385,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     </div>
     <div class="stat-card">
       <div class="stat-label">Strategija</div>
-      <div class="stat-value" style="font-size:14px;color:#db2777">TraderaEdge · 15m</div>
+      <div class="stat-value" style="font-size:14px;color:#db2777">Future · 15m</div>
       <div class="stat-sub">SR-based SL · dinamički leverage · rizik 1–2%</div>
     </div>
   </div>
@@ -1907,9 +1907,9 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <div class="scan-card">
     <div class="scan-header">
       <div>
-        <div class="chart-title" style="margin-bottom:2px">⚡ Scanner — ${ALL_SYMBOLS.length} simbola | TraderaEdge combo, min 5/8 signala | ulaz na close 15m svijeće</div>
+        <div class="chart-title" style="margin-bottom:2px">⚡ Scanner — ${ALL_SYMBOLS.length} simbola | Future combo, min 5/8 signala | ulaz na close 15m svijeće</div>
         <div style="font-size:12px;color:var(--text-muted)">
-          Svi simboli (TraderaEdge): E50+MACD+E145+PWHL+RDIV+MSTR+DEMA+LHUNT · min 5/8 (TAO/AAVE 4/8)
+          Svi simboli (Future): E50+MACD+E145+PWHL+RDIV+MSTR+DEMA+LHUNT · min 5/8 (TAO/AAVE 4/8)
           &nbsp;|&nbsp; 🟡 SETUP &nbsp; 🟢 Signal &nbsp; 🚀 Momentum &nbsp; Cache 90s &nbsp;|&nbsp;
           <button onclick="toggleLegend()" style="background:none;border:1px solid #30363d;border-radius:4px;color:#9ca3af;font-size:11px;cursor:pointer;padding:2px 8px">📖 Legenda signala</button>
         </div>
@@ -1945,7 +1945,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   <!-- Signal legend (collapsible) -->
   <div id="sig-legend" style="display:none;margin-top:12px">
     <div class="chart-card" style="padding:16px 20px">
-      <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — TraderaEdge combo · gate-ovi (ADX/VOL) + 8 signala · min 5/8 za ulaz (TAO/AAVE 4/8)</div>
+      <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — Future combo · gate-ovi (ADX/VOL) + 8 signala · min 5/8 za ulaz (TAO/AAVE 4/8)</div>
       <div style="margin-bottom:10px;font-size:11px;color:#f59e0b;background:#2d2000;border:1px solid #d97706;border-radius:6px;padding:8px 12px">
         ⚙️ <b>GATEVI (obvezni — blokiraju neovisno o score-u):</b>
         &nbsp; ADX ≥ 22 (trend jačina) &nbsp;·&nbsp; VOL_EXH (volumen ispod threshold-a) &nbsp;·&nbsp; VWAP cross/rejection (cijena na ispravnoj strani)
@@ -2193,7 +2193,7 @@ const SIG_COND_BULL = [
   'HH + HL — market structure uptrend potvrđen',                         //  7. MSTR
   'Bullish FVG — cijena u nezapunjenoj gap zoni (imbalance support)',    //  8. FVG
   'Bullish OB — cijena se vratila u zonu zadnje crvene svjećice prije 3+ uzlaznih (institucijska potpora)', //  9. OB
-  'Cijena iznad Daily EMA10 — dnevni bull momentum (TraderaEdge Smart Hub)', // 10. DEMA
+  'Cijena iznad Daily EMA10 — dnevni bull momentum (Smart Hub)', // 10. DEMA
   'Sweep ključne zone (MOpen/WOpen/YOpen/PWL) + recovery iznad — Liquidity Hunt LONG', // 11. LHUNT
 ];
 const SIG_COND_BEAR = [
@@ -2206,7 +2206,7 @@ const SIG_COND_BEAR = [
   'LL + LH — market structure downtrend potvrđen',                       //  7. MSTR
   'Bearish FVG — cijena u nezapunjenoj gap resistance zoni',            //  8. FVG
   'Bearish OB — cijena se vratila u zonu zadnje zelene svjećice prije 3+ silaznih (institucijska rezistencija)', //  9. OB
-  'Cijena ispod Daily EMA10 — dnevni bear momentum (TraderaEdge Smart Hub)',  // 10. DEMA
+  'Cijena ispod Daily EMA10 — dnevni bear momentum (Smart Hub)',  // 10. DEMA
   'Fake breakout iznad ključne zone + pad ispod — Liquidity Hunt SHORT',      // 11. LHUNT
 ];
 const SIG_COND_NEUT = [
@@ -2301,7 +2301,7 @@ function sigBoxes(sigs, symbol) {
 }
 
 function scoreBox(bull, bear, sig, minSig) {
-  const total = 8;  // TraderaEdge combo — 8 signala
+  const total = 8;  // Future combo — 8 signala
   const minLabel = minSig ? '<br><span style="color:#444;font-size:9px">min:' + minSig + '</span>' : '';
   if (sig === "LONG")   return '<div style="background:rgba(5,150,105,0.15);border:1px solid #059669;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#059669;font-weight:800;font-size:16px">↑' + bull + '</span><span style="color:#94a3b8;font-size:11px">/' + total + '</span><br><span class="sig-long" style="font-size:11px">▲ LONG</span></div>';
   if (sig === "SHORT")  return '<div style="background:rgba(220,38,38,0.15);border:1px solid #dc2626;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#dc2626;font-weight:800;font-size:16px">↓' + bear + '</span><span style="color:#94a3b8;font-size:11px">/' + total + '</span><br><span class="sig-short" style="font-size:11px">▼ SHORT</span></div>';

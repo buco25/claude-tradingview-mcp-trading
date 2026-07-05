@@ -2245,7 +2245,11 @@ function analyzeUltra(candles, cfg) {
   const _pwhMstrBonusBear = (_pwhInCombo && _mstrInCombo && sigs[4] === -1 && sigs[6] === -1) ? 1 : 0;
   const bullScore = bullCnt + _premiumBonusBull + _pwhMstrBonusBull;
   const bearScore = bearCnt + _premiumBonusBear + _pwhMstrBonusBear;
-  const MIN_CONFIRM = _combo?.minSig ?? minSig;
+  // Vikend: +1 signal — subotom/nedjeljom tanka likvidnost, samo najjači setupi
+  // (post-mortem 05.07.: svi likvidirani ulazi bili subotnji minimalni 5/8)
+  const _dowMC = new Date().getUTCDay();
+  const _weekendBoost = (_dowMC === 0 || _dowMC === 6) ? 1 : 0;
+  const MIN_CONFIRM = (_combo?.minSig ?? minSig) + _weekendBoost;
 
   // ══ OBAVEZNI GATEVI (3) ══
 
@@ -5177,6 +5181,18 @@ export async function run() {
               const _livePrice = _livePriceMap[symbol] ?? null;
               if (_livePrice) {
                 const _posInRange = (_livePrice - _dayHL.low) / _hlRange * 100;
+                // >80% dana = kupovanje vrha — HARD BLOCK (post-mortem 05.07.: AVAX 81%, LINK 97% → likvidacije)
+                if (signal === "LONG" && _posInRange > 80) {
+                  console.log(`  📊 [DAY RANGE] ${symbol} — cijena na ${_posInRange.toFixed(0)}% dana → LONG BLOKIRAN (vrh dana)`);
+                  _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "DAY_RANGE", reason: `LONG na ${_posInRange.toFixed(0)}% dana` });
+                  continue;
+                }
+                if (signal === "SHORT" && _posInRange < 20) {
+                  console.log(`  📊 [DAY RANGE] ${symbol} — cijena na ${_posInRange.toFixed(0)}% dana → SHORT BLOKIRAN (dno dana)`);
+                  _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "DAY_RANGE", reason: `SHORT na ${_posInRange.toFixed(0)}% dana` });
+                  continue;
+                }
+                // 65-80% (LONG) / 20-35% (SHORT) = oprezna zona — size penal
                 if (signal === "LONG" && _posInRange > 65) {
                   _macroSizeMult *= 0.6;
                   console.log(`  📊 [DAY RANGE] ${symbol} — cijena na ${_posInRange.toFixed(0)}% dana → LONG size ×0.6 (visoko u danu)`);
@@ -5427,8 +5443,14 @@ export async function run() {
         // ── Dinamički TP — BTC Regime ─────────────────────────────────────────
         // JAKO: BTC Regime BULL+LONG ili BEAR+SHORT → TP × 3 (1:3 R:R)
         // NORMALNO: NEUTRAL ili kontra → TP × 2.0 (1:2 R:R)
-        const _isStrong = (_btcRegime === "BULL" && signal === "LONG") ||
-                          (_btcRegime === "BEAR" && signal === "SHORT");
+        // 4H RSI ekstrem isključuje JAKO — overbought/oversold bull nije "jako", nego KASNO
+        // tržište (post-mortem 05.07.: RSI 71.6 + JAKO → TP ×3 na vrhu poteza)
+        const _rsi4h = _regimeCache?.btcRsi4h ?? 50;
+        const _rsiOkForStrong = signal === "LONG" ? _rsi4h < 70 : _rsi4h > 30;
+        const _isStrong = _rsiOkForStrong &&
+                          ((_btcRegime === "BULL" && signal === "LONG") ||
+                           (_btcRegime === "BEAR" && signal === "SHORT"));
+        if (!_rsiOkForStrong) console.log(`  ⚠️  [RSI-4H] ${symbol} — BTC 4H RSI ${_rsi4h.toFixed(1)} ekstrem → nije JAKO (TP ×2, standardni rizik)`);
         const _tpMult     = _isStrong ? STRONG_TP_MULT : NORMAL_TP_MULT;
         const _dynTpPct   = slPct * _tpMult;
         const signalStrength = _isStrong ? "strong" : "normal";

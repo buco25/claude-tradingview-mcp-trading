@@ -2665,7 +2665,9 @@ function addPosition(pid, entry) {
 const _softFailAlertTs = new Map();  // symbol:side → ts zadnjeg SOFT FAIL alerta (anti-spam)
 const TRAIL_STRATEGIES = ["synapse_t"];  // koje strategije koriste trail
 const TRAIL_TRIGGER    = 2.5;            // % gain koji aktivira trail
-const TRAIL_STEP       = 0.5;            // korak pomaka SL i TP (%)
+const TRAIL_STEP       = 0.5;            // korak pomaka TP-a (%)
+const TRAIL_GIVEBACK   = 1.0;            // % ispod peaka — prostor za disanje u trendu
+                                         // (06.07.: AAVE izbačen na prvi titraj jer je SL stajao na cijeni)
 
 function applyTrail(pos, currentPrice) {
   if (!TRAIL_STRATEGIES.includes(pos.strategy)) return false;
@@ -2696,24 +2698,29 @@ function applyTrail(pos, currentPrice) {
     ? (pos.origTp ?? pos.tp - entry) / entry * 100   // origTp za referentni TP
     : (entry - (pos.origTp ?? pos.tp)) / entry * 100;
 
-  // Izračun novih razina
-  const newSlPct = TRAIL_TRIGGER + steps * TRAIL_STEP;
+  // Peak-based trail: SL prati vrh s TRAIL_GIVEBACK prostora (ne stoji na cijeni)
+  // Pod: nikad ispod break-evena (+0.3% za fee) — aktivirani trail je uvijek u plusu
+  pos.trailPeak = pos.side === "LONG"
+    ? Math.max(pos.trailPeak ?? currentPrice, currentPrice)
+    : Math.min(pos.trailPeak ?? currentPrice, currentPrice);
   const newTpPct = (pos.origTpPct ?? origTpPct) + (steps + 1) * TRAIL_STEP;
 
   let newSl, newTp;
   if (pos.side === "LONG") {
-    newSl = entry * (1 + newSlPct / 100);
+    newSl = Math.max(pos.trailPeak * (1 - TRAIL_GIVEBACK / 100), entry * 1.003);
     newTp = entry * (1 + newTpPct / 100);
     if (newSl <= pos.sl && newTp <= pos.tp) return false;  // ništa novo
     pos.sl = Math.max(pos.sl, newSl);
     pos.tp = Math.max(pos.tp, newTp);
   } else {
-    newSl = entry * (1 - newSlPct / 100);
+    newSl = Math.min(pos.trailPeak * (1 + TRAIL_GIVEBACK / 100), entry * 0.997);
     newTp = entry * (1 - newTpPct / 100);
     if (newSl >= pos.sl && newTp >= pos.tp) return false;
     pos.sl = Math.min(pos.sl, newSl);
     pos.tp = Math.min(pos.tp, newTp);
   }
+  // NAPOMENA: ne postavljamo pos.trailActive — soft SL monitor izvršava trail izlaz
+  // (trailActive flag koristi samo partial-TP peak mehanizam koji sam pomiče SL)
 
   // Pohrani originalni TP% za referencu (samo prvi put)
   if (!pos.origTpPct) pos.origTpPct = origTpPct;

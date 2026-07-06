@@ -2654,6 +2654,7 @@ function addPosition(pid, entry) {
 //   newSlPct = TRAIL_TRIGGER + steps × TRAIL_STEP          (2.5, 3.0, 3.5, ...)
 //   newTpPct = origTpPct   + (steps+1) × TRAIL_STEP        (3.5, 4.0, 4.5, ...)
 
+const _softFailAlertTs = new Map();  // symbol:side → ts zadnjeg SOFT FAIL alerta (anti-spam)
 const TRAIL_STRATEGIES = ["synapse_t"];  // koje strategije koriste trail
 const TRAIL_TRIGGER    = 2.5;            // % gain koji aktivira trail
 const TRAIL_STEP       = 0.5;            // korak pomaka SL i TP (%)
@@ -3209,7 +3210,7 @@ async function checkPortfolioPositions(pid) {
               continue;
             }
             const closeQty  = (bitPos2.total > 0 ? bitPos2.total : bitPos2.available).toFixed(4);
-            const closeSide = pos.side === "LONG" ? "sell" : "buy";
+            const closeSide = pos.side === "LONG" ? "buy" : "sell";  // Bitget v2 hedge: close nosi side ISTOG smjera kao pozicija
             // Otkaži plan naloge PRIJE close-a (ne nakon 22002) — sprječava blokadu
             await cancelAllPlanOrders(pos.symbol, pos.side).catch(() => {});
             let softClosed  = false;
@@ -3613,7 +3614,7 @@ async function partialClosePosition(pos, closePct = PARTIAL_CLOSE_PCT) {
   if (PAPER_TRADING) return false;
   if (pos.partialClosed) return false;
   const qty       = (pos.quantity ?? (pos.totalUSD / pos.entryPrice)) * (closePct / 100);
-  const closeSide = pos.side === "LONG" ? "sell" : "buy";
+  const closeSide = pos.side === "LONG" ? "buy" : "sell";  // Bitget v2 hedge: close nosi side ISTOG smjera kao pozicija
   try {
     const res = await bitgetPost("/api/v2/mix/order/place-order", {
       symbol: pos.symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
@@ -3721,7 +3722,7 @@ export async function softExitMonitor() {
           const bitPos = await fetchBitgetPositionSize(pos.symbol, pos.side);
           if (bitPos && !bitPos.error) {
             const qty = (bitPos.total > 0 ? bitPos.total : bitPos.available).toFixed(4);
-            const closeSide = pos.side === "LONG" ? "sell" : "buy";
+            const closeSide = pos.side === "LONG" ? "buy" : "sell";  // Bitget v2 hedge: close nosi side ISTOG smjera kao pozicija
             for (let attempt = 1; attempt <= 3; attempt++) {
               try {
                 const r = await bitgetPost("/api/v2/mix/order/place-order", {
@@ -3785,7 +3786,7 @@ export async function softExitMonitor() {
         }
         // Koristi total (ne available) — available može biti 0 ako postoji pending order
         const qty      = (bitPos.total > 0 ? bitPos.total : bitPos.available).toFixed(4);
-        const closeSide = pos.side === "LONG" ? "sell" : "buy";
+        const closeSide = pos.side === "LONG" ? "buy" : "sell";  // Bitget v2 hedge: close nosi side ISTOG smjera kao pozicija
         console.log(`  📐 [SOFT ${reason}] ${pos.symbol} — Bitget veličina: ${qty} (lokalna: ${(pos.quantity ?? "?").toString()})`);
 
         // Otkaži plan naloge PRIJE close-a — sprječava 22002 blokadu
@@ -3843,7 +3844,12 @@ export async function softExitMonitor() {
 
         if (!closed) {
           console.log(`  🚨 [SOFT ${reason}] ${pos.symbol} — svi pokušaji neuspješni, pozicija ostaje otvorena`);
-          await tg(`🚨 <b>SOFT ${reason} FAIL</b> ${pos.symbol} ${pos.side}\nNije moguće zatvoriti! Provjeri Bitget ručno.\nCijena: ${fmtPrice(liveP)} | ${reason}: ${fmtPrice(level)} | qty: ${qty}`);
+          // TG max 1× po satu po poziciji (modul-level mapa — pozicije se učitavaju s diska svaki ciklus)
+          const _failKey = `${pos.symbol}:${pos.side}`;
+          if (!_softFailAlertTs.has(_failKey) || Date.now() - _softFailAlertTs.get(_failKey) > 60 * 60 * 1000) {
+            _softFailAlertTs.set(_failKey, Date.now());
+            await tg(`🚨 <b>SOFT ${reason} FAIL</b> ${pos.symbol} ${pos.side}\nNije moguće zatvoriti! Provjeri Bitget ručno.\nCijena: ${fmtPrice(liveP)} | ${reason}: ${fmtPrice(level)} | qty: ${qty}\n(retry se nastavlja automatski)`);
+          }
           continue;
         }
 
@@ -3955,7 +3961,7 @@ async function setupSymbol(symbol, slPct, preferredLeverage = null) {
 // ─── Zatvori poziciju na Bitgetu (market order, reduceOnly) ───────────────────
 async function closeBitgetPosition(symbol, side, quantity) {
   const holdSide  = side === "LONG" ? "long" : "short";
-  const closeSide = side === "LONG" ? "sell" : "buy";
+  const closeSide = side === "LONG" ? "buy" : "sell";  // Bitget v2 hedge: close nosi side ISTOG smjera kao pozicija
   try {
     // Otkaži sve otvorene SL/TP naloge za ovaj simbol
     await bitgetPost("/api/v2/mix/order/cancel-plan-order", {
@@ -4086,7 +4092,7 @@ export async function closeBitGetOrder(pos) {
   const quantity   = (bitPosData && !bitPosData.error)
     ? bitPosData.available.toFixed(4)
     : (pos.quantity ?? (pos.totalUSD / pos.entryPrice)).toFixed(4);
-  const closeSide = pos.side === "LONG" ? "sell" : "buy";
+  const closeSide = pos.side === "LONG" ? "buy" : "sell";  // Bitget v2 hedge: close nosi side ISTOG smjera kao pozicija
   const path = "/api/v2/mix/order/place-order";
   const orderBody = {
     symbol:      pos.symbol,
@@ -4678,7 +4684,7 @@ export async function run() {
               if (_isLiveCe) {
                 const _closeRes = await bitgetPost("/api/v2/mix/order/place-order", {
                   symbol: _sp.symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
-                  side: "buy", tradeSide: "close", marginMode: "isolated",
+                  side: "sell", tradeSide: "close", marginMode: "isolated",  // v2 hedge: close SHORT = side sell
                   holdSide: "short",
                   orderType: "market",
                   size: (await fetchBitgetPositionSize(_sp.symbol, "SHORT"))?.total?.toFixed(4) ?? "0",
@@ -5049,7 +5055,7 @@ export async function run() {
             if (_flipBitPos && !_flipBitPos.error) {
               await cancelAllPlanOrders(symbol, existingPos.side).catch(() => {});
               const _flipQty      = (_flipBitPos.total > 0 ? _flipBitPos.total : _flipBitPos.available).toFixed(4);
-              const _flipCloseSide = existingPos.side === "LONG" ? "sell" : "buy";
+              const _flipCloseSide = existingPos.side === "LONG" ? "buy" : "sell";  // v2 hedge close
               const _flipCloseRes  = await bitgetPost("/api/v2/mix/order/place-order", {
                 symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
                 side: _flipCloseSide, tradeSide: "close", marginMode: "isolated",

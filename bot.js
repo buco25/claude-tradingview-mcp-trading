@@ -2543,6 +2543,14 @@ async function analyzeUltraPullback(symbol, candles, cfg) {
     console.log(`  ✅ [ULTRA] ${symbol} ${result.signal} @ ${fmtPrice(price)} — (${result.bullScore ?? 0}↑/${result.bearScore ?? 0}↓)`);
   }
 
+  // HTF zone za SL postavljanje (TraderaEdge: stop ispod likvidnosne zone, ne 15m pivota)
+  result._zonesSL = {
+    pwl: _pwl, pwh: _pwh,
+    monthlyLow: _monthlyLow, monthlyHigh: _monthlyHigh,
+    monthlyOpen: _monthlyOpen, weeklyOpen: _weeklyOpen,
+    yearlyOpen: _yearlyOpen, fridayClose: _fridayClose,
+  };
+
   return result;
 }
 
@@ -5402,6 +5410,30 @@ export async function run() {
             tp = signal === "LONG" ? price * (1 + tpPct / 100) : price * (1 - tpPct / 100);
             slMethod = "MOM-ATR";
             console.log(`  🚀 [MOM-SL] ${symbol} MOMENTUM: SL ${slPct.toFixed(2)}% TP ${tpPct.toFixed(2)}% RR=${( tpPct/slPct).toFixed(1)}x`);
+          }
+
+          // 0. HTF zone SL — TraderaEdge stil: stop ispod likvidnosne zone (PWL,
+          //    monthly low, weekly/monthly open...), dublje i teže za sweep od 15m pivota.
+          //    Najbliža zona ispod cijene (LONG) / iznad (SHORT), do max 4% udaljenosti.
+          if (slMethod === "tier" && result._zonesSL) {
+            const HTF_SL_MAX = 4.0;
+            const _z = result._zonesSL;
+            const _htfCands = (signal === "LONG"
+              ? [_z.pwl, _z.monthlyLow, _z.weeklyOpen, _z.monthlyOpen, _z.fridayClose, _z.yearlyOpen].filter(v => v != null && v > 0 && v < price).sort((a, b) => b - a)
+              : [_z.pwh, _z.monthlyHigh, _z.weeklyOpen, _z.monthlyOpen, _z.fridayClose, _z.yearlyOpen].filter(v => v != null && v > 0 && v > price).sort((a, b) => a - b));
+            for (const _zone of _htfCands) {
+              const _zSlPrice = signal === "LONG" ? _zone * (1 - SR_BUFFER) : _zone * (1 + SR_BUFFER);
+              const _zSlPct = Math.abs(price - _zSlPrice) / price * 100;
+              if (_zSlPct >= tierSlMin && _zSlPct <= HTF_SL_MAX) {
+                slPct = _zSlPct;
+                tpPct = Math.min(Math.max(slPct * 2.5, tierTpMin), tierTpMax);
+                sl = _zSlPrice;
+                tp = signal === "LONG" ? price * (1 + tpPct / 100) : price * (1 - tpPct / 100);
+                slMethod = "HTF";
+                console.log(`  🏛️  [HTF-SL] ${symbol} ${signal}: zona @ ${fmtPrice(_zone)} → SL ${fmtPrice(sl)} (${slPct.toFixed(2)}%) | TP ${fmtPrice(tp)} (${tpPct.toFixed(2)}%) RR=${(tpPct/slPct).toFixed(1)}x`);
+                break;
+              }
+            }
           }
 
           // 1. Pokušaj S/R-based SL (za pullback signale)

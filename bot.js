@@ -1260,6 +1260,30 @@ export function getConsecutiveLossCount(pid) {
   } catch { return 0; }
 }
 
+// ─── Direkcijski cooldown: 3 uzastopna SL-a istog smjera → smjer blokiran 4h ──
+// (analiza 07.07.: bot uporno ponavljao LONG u padu — XRP/LINK/ALGO/AAVE/RENDER isti dan)
+const DIR_STREAK_MAX = 3;
+const DIR_COOLDOWN_MS = 4 * 60 * 60 * 1000;
+export function getDirLossStreak(pid, side) {
+  const f = csvFilePath(pid);
+  if (!existsSync(f)) return { count: 0, blocked: false };
+  try {
+    const tag = side === "LONG" ? "CLOSE_LONG" : "CLOSE_SHORT";
+    const lines = readFileSync(f, "utf8").trim().split("\n");
+    const exits = lines.slice(1).filter(l => l.includes(tag) && !l.includes("Partial TP"));
+    let count = 0, lastTs = 0;
+    for (let i = exits.length - 1; i >= 0; i--) {
+      const cols = exits[i].split(",");
+      const pnl = parseFloat(cols[9] || 0);
+      if (pnl >= 0) break;                       // win tog smjera prekida niz
+      count++;
+      if (!lastTs) lastTs = new Date(cols[0]).getTime() || 0;
+    }
+    const blocked = count >= DIR_STREAK_MAX && Date.now() - lastTs < DIR_COOLDOWN_MS;
+    return { count, blocked };
+  } catch { return { count: 0, blocked: false }; }
+}
+
 // ─── 4. SIGNAL ANALIZA — prati koje signale bilježe pobjedu ──────────────────
 // Svaki ulaz bilježi fingerprint aktivnih signala (bitmask)
 // Čitamo nakon izlaza koji signal je bio aktivan i označavamo win/loss
@@ -2253,6 +2277,17 @@ function analyzeUltra(candles, cfg) {
 
   // ══ OBAVEZNI GATEVI (3) ══
 
+  // 0. DEMA gate — TraderaEdge momentum pravilo: LONG samo iznad daily EMA10,
+  //    SHORT samo ispod (analiza 07.07.: pullback longovi ispod dnevnog trenda = 18L)
+  if (sigDailyEMA === -1 && bullScore >= MIN_CONFIRM && bearScore < MIN_CONFIRM) {
+    return { price, signal: "NEUTRAL", bullScore, bearScore,
+      reason: `DEMA gate: cijena ispod daily EMA10 — LONG blokiran (dnevni trend dolje)` };
+  }
+  if (sigDailyEMA === 1 && bearScore >= MIN_CONFIRM && bullScore < MIN_CONFIRM) {
+    return { price, signal: "NEUTRAL", bullScore, bearScore,
+      reason: `DEMA gate: cijena iznad daily EMA10 — SHORT blokiran (dnevni trend gore)` };
+  }
+
   // 1. ADX ≥ effectiveAdx — tržište mora biti u jasnom trendu
   if (adx < effectiveAdx) {
     return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
@@ -3191,6 +3226,47 @@ async function checkPortfolioPositions(pid) {
         const unrealized = pos.side === "LONG"
           ? (liveP - pos.entryPrice) * qty
           : (pos.entryPrice - liveP) * qty;
+
+        // ── PARTIAL TP @ +1R: zatvori 50%, SL na break-even ─────────────────────
+        // TraderaEdge "manualno zatvaranje u plusu" automatizirano: trade koji ode
+        // +1R pa se vrati postaje mali WIN umjesto punog LOSS-a (analiza 07.07.: WR 28%,
+        // prosjek WIN $0.48 vs LOSS $0.57 — dobici su bježali nenaplaćeni)
+        if (isLivePortfolio && !pos.partial1R && !pos.partialClosed && !pos.trailActive && pos.sl) {
+          const _gain1R = pos.side === "LONG"
+            ? (liveP - pos.entryPrice) / pos.entryPrice * 100
+            : (pos.entryPrice - liveP) / pos.entryPrice * 100;
+          const _risk1R = parseFloat(pos.slPct) || 2.0;
+          if (_gain1R >= _risk1R) {
+            const _bp1R = await fetchBitgetPositionSize(pos.symbol, pos.side);
+            if (_bp1R && !_bp1R.error) {
+              const _halfQty = _bp1R.total / 2;
+              const _minQ = _minTradeNum[pos.symbol] ?? 0;
+              if (_halfQty >= _minQ && _halfQty * liveP >= 5.5) {
+                const _r1R = await bitgetPost("/api/v2/mix/order/place-order", {
+                  symbol: pos.symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
+                  side: pos.side === "LONG" ? "buy" : "sell", tradeSide: "close", marginMode: "isolated",
+                  holdSide: pos.side === "LONG" ? "long" : "short",
+                  orderType: "market", size: _halfQty.toFixed(4),
+                }).catch(() => null);
+                if (_r1R?.code === "00000") {
+                  const _pnl1R = pos.side === "LONG"
+                    ? (liveP - pos.entryPrice) * _halfQty
+                    : (pos.entryPrice - liveP) * _halfQty;
+                  pos.partial1R = true;
+                  pos.quantity  = _bp1R.total - _halfQty;
+                  pos.sl = pos.side === "LONG" ? pos.entryPrice * 1.0005 : pos.entryPrice * 0.9995;
+                  writeExitCsv(pid, { ...pos, quantity: _halfQty }, liveP, "Partial TP +1R (50%)", _pnl1R);
+                  console.log(`  💰 [1R] ${pos.symbol} ${pos.side} — +1R (${_gain1R.toFixed(2)}%) → 50% zatvoreno (+$${_pnl1R.toFixed(2)}), SL na BE`);
+                  await tg(`💰 <b>PARTIAL +1R</b> ${pos.symbol} ${pos.side}\n50% zatvoreno @ ${fmtPrice(liveP)} → +$${_pnl1R.toFixed(2)} zaključano\nOstatak: SL na break-even, trail lovi trend`);
+                }
+              } else {
+                pos.partial1R = true;  // premala pozicija za split — BE svejedno
+                pos.sl = pos.side === "LONG" ? pos.entryPrice * 1.0005 : pos.entryPrice * 0.9995;
+                console.log(`  💰 [1R] ${pos.symbol} — pozicija premala za 50% split → samo SL na BE`);
+              }
+            }
+          }
+        }
 
         // ── STOCK FLAT: dionice se zatvaraju u prozoru 19:40–19:59 UTC ─────────
         // xStocks noću/vikendom stoje, a na openu gap može preskočiti SL.
@@ -5176,6 +5252,16 @@ export async function run() {
           if (signal === "SHORT" && _bounceMode) {
             console.log(`  🔄 [BOUNCE MODE] ${symbol} — bounce mode, SHORT blokiran`);
             continue;
+          }
+
+          // Direkcijski cooldown — 3 uzastopna SL-a istog smjera = smjer blokiran 4h
+          {
+            const _dirStreak = getDirLossStreak(pid, signal);
+            if (_dirStreak.blocked) {
+              console.log(`  🧊 [DIR-CD] ${symbol} — ${_dirStreak.count} uzastopna ${signal} SL-a → ${signal} blokiran 4h`);
+              _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "DIR_COOLDOWN", reason: `${_dirStreak.count}× ${signal} SL zaredom` });
+              continue;
+            }
           }
 
           // BTC align filter — za ETH/SOL zahtijevamo eksplicitni BTC trend (ne NEUTRAL)

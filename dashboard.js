@@ -776,6 +776,27 @@ async function runScan(rules) {
     if (i + BATCH < ALL_SYMBOLS.length) await new Promise(r => setTimeout(r, 200));
   }
 
+  // ── Bot blockeri iz scan_log.csv — stvarna odluka bota, ne procjena dashboarda ──
+  try {
+    const _slFile = `${DATA_DIR}/scan_log.csv`;
+    if (existsSync(_slFile)) {
+      const _slLines = readFileSync(_slFile, "utf8").trim().split("\n").slice(-400);
+      const _blockMap = {};
+      for (const l of _slLines) {
+        const c = l.split(",");
+        if (c.length < 9 || !c[7] || c[7] === "—" || c[7] === "Blocker") continue;
+        _blockMap[c[1]] = { blocker: c[7], reason: (c[8] || "").trim(), ts: c[0] };
+      }
+      const _now = Date.now();
+      for (const r of results) {
+        const b = _blockMap[r.symbol];
+        if (!b) continue;
+        const age = _now - new Date(b.ts.replace(" ", "T") + ":00Z").getTime();
+        if (age < 45 * 60 * 1000) r.botBlock = b;  // samo svježe (zadnjih 45 min)
+      }
+    }
+  } catch {}
+
   _scanCache   = { ts: new Date().toISOString(), results };
   _scanCacheTs = Date.now();
   _scanRunning = false;
@@ -2324,11 +2345,17 @@ function statusBox(s) {
   const sig = s.ultraSig;
 
   // Volume upozorenja — nizak vol (slabi signal) ili visok vol (VOL_EXH blocker)
-  const volWarning = s.volHigh
+  let volWarning = s.volHigh
     ? '<div style="font-size:10px;color:#ef4444;margin-top:3px">🚫 VOL_EXH: ' + s.volRatio + 'x ≥ ' + (s.volExhThreshold||1.5) + '× — bot blokiran</div>'
     : s.volLow
       ? '<div style="font-size:10px;color:#f59e0b;margin-top:3px">⚠️ VOL nizak ' + s.volRatio + 'x · slabi signal</div>'
       : '';
+
+  // Bot blocker iz scan_log-a — STVARNA odluka bota na zadnjem scanu
+  if (s.botBlock) {
+    volWarning += '<div style="font-size:10px;color:#ef4444;margin-top:3px" title="' + (s.botBlock.reason||'') + ' (' + s.botBlock.ts + ' UTC)">' +
+      '⛔ bot: ' + s.botBlock.blocker + (s.botBlock.reason ? ' — ' + s.botBlock.reason : '') + '</div>';
+  }
 
   // Aktivan signal — bot ulazi odmah na close svjećice
   if (sig === "LONG") {
@@ -2354,6 +2381,7 @@ function statusBox(s) {
       '<div style="font-size:11px;color:#3b82f6;font-weight:700;margin-bottom:4px">🚀 MOMENTUM LONG</div>' +
       '<div style="font-size:13px;font-weight:700;color:#3b82f6">▲ LONG</div>' +
       '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Breakout ulaz @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBull||0) + '/8</b></div>' +
+      volWarning +
       '</div>';
   }
   if (sig === "MOM↓") {
@@ -2361,6 +2389,7 @@ function statusBox(s) {
       '<div style="font-size:11px;color:#8b5cf6;font-weight:700;margin-bottom:4px">🚀 MOMENTUM SHORT</div>' +
       '<div style="font-size:13px;font-weight:700;color:#8b5cf6">▼ SHORT</div>' +
       '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Breakdown ulaz @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBear||0) + '/8</b></div>' +
+      volWarning +
       '</div>';
   }
 
@@ -2386,7 +2415,7 @@ function statusBox(s) {
     }
   }
 
-  return '<span style="color:#444;font-size:12px">—</span>';
+  return '<span style="color:#444;font-size:12px">—</span>' + volWarning;
 }
 
 // ── Market Regime — via /api/regime endpoint (server-side, no CORS issues) ────

@@ -2196,15 +2196,17 @@ function analyzeUltra(candles, cfg) {
     _monthlyHigh, _monthlyLow,
     cfg._pwh ?? null, cfg._pwl ?? null
   ].filter(v => v !== null && v > 0);
+  let _sweepInfo = null;  // za Liquidity Hunt strategiju (standalone ulaz)
   if (_lhLevels.length > 0) {
     let sweepBull = 0, sweepBear = 0;
     for (const lvl of _lhLevels) {
       const near     = Math.abs(price - lvl) / price < LH_ZONE;
       const sweptBel = recentLowsLH.some(l  => l < lvl * 0.999);
       const sweptAbv = recentHighsLH.some(h => h > lvl * 1.001);
-      if (sweptBel && price > lvl && near && rsiRising)  sweepBull++;
-      if (sweptAbv && price < lvl && near && rsiFalling) sweepBear++;
+      if (sweptBel && price > lvl && near && rsiRising)  { sweepBull++; _sweepInfo = { dir: 1,  level: lvl }; }
+      if (sweptAbv && price < lvl && near && rsiFalling) { sweepBear++; _sweepInfo = { dir: -1, level: lvl }; }
     }
+    if (sweepBull > 0 && sweepBear > 0) _sweepInfo = null;  // konfliktni sweepovi — ne diraj
     if (sweepBull > sweepBear && sweepBull > 0)      sigMOPEN =  1;  // aktivan sweep + recovery
     else if (sweepBear > sweepBull && sweepBear > 0) sigMOPEN = -1;
     else {
@@ -2288,10 +2290,73 @@ function analyzeUltra(candles, cfg) {
       reason: `DEMA gate: cijena iznad daily EMA10 — SHORT blokiran (dnevni trend gore)` };
   }
 
-  // 1. ADX ≥ effectiveAdx — tržište mora biti u jasnom trendu
+  // 1. ADX ≥ effectiveAdx — trend strategije traže trend. Ako ga NEMA,
+  //    market je u zoni/fakeout modu → TraderaEdge router: SWEEP i RANGE strategije
   if (adx < effectiveAdx) {
+
+    // ── STRATEGIJA: LIQUIDITY HUNT (sweep + reclaim HTF zone) ────────────────
+    // TraderaEdge: "čekati konfirmaciju da se likvidnost skine, a tek onda ući;
+    // u zadnjem low tog impulsa staviti stop loss" — kratkoročni kontra trade
+    if (_sweepInfo) {
+      if (_sweepInfo.dir === 1) {
+        const _swLow = Math.min(...recentLowsLH);
+        const _slP = _swLow * 0.997;
+        const _slPctS = (price - _slP) / price * 100;
+        if (_slPctS >= 0.6 && _slPctS <= 4) {
+          const _tpP = price + (price - _slP) * 2;  // 1:2
+          return { price, signal: "LONG", bullScore: MIN_CONFIRM, bearScore: 0,
+            _strategy: "SWEEP", _slPrice: _slP, _tpPrice: _tpP, nearSup, nearRes,
+            reason: `SWEEP LONG: likvidnost skinuta ispod ${_sweepInfo.level.toFixed(4)} + reclaim | SL ispod sweep low` };
+        }
+      }
+      if (_sweepInfo.dir === -1) {
+        const _swHigh = Math.max(...recentHighsLH);
+        const _slP = _swHigh * 1.003;
+        const _slPctS = (_slP - price) / price * 100;
+        if (_slPctS >= 0.6 && _slPctS <= 4) {
+          const _tpP = price - (_slP - price) * 2;
+          return { price, signal: "SHORT", bullScore: 0, bearScore: MIN_CONFIRM,
+            _strategy: "SWEEP", _slPrice: _slP, _tpPrice: _tpP, nearSup, nearRes,
+            reason: `SWEEP SHORT: fake breakout iznad ${_sweepInfo.level.toFixed(4)} + pad | SL iznad sweep high` };
+        }
+      }
+    }
+
+    // ── STRATEGIJA: RANGE / Smart Hub (bounce sa S/R ruba zone) ──────────────
+    // TraderaEdge: "kada je market u zoni, mnogo bolje radi momentum/zonska trgovina —
+    // pracenje range high/low, reakcije, podrške i otpora"
+    if (nearSup !== null && nearRes !== null) {
+      const _rWidth = (nearRes - nearSup) / price * 100;
+      if (_rWidth >= 1.5 && _rWidth <= 8) {
+        const _supDist = (price - nearSup) / price * 100;
+        const _resDist = (nearRes - price) / price * 100;
+        // LONG bounce s donjeg ruba: cijena na supportu + RSI okreće gore iz niskog
+        if (_supDist <= 0.5 && rsiRising && rsi < 45) {
+          const _slP = nearSup * 0.996;
+          const _slPctR = (price - _slP) / price * 100;
+          const _tpP = Math.min(nearRes * 0.998, price + (price - _slP) * 2);
+          if ((_tpP - price) >= (price - _slP) * 1.5) {  // min 1:1.5 unutar zone
+            return { price, signal: "LONG", bullScore: MIN_CONFIRM, bearScore: 0,
+              _strategy: "RANGE", _slPrice: _slP, _tpPrice: _tpP, nearSup, nearRes,
+              reason: `RANGE LONG: bounce @ sup ${nearSup.toFixed(4)} (zona ${_rWidth.toFixed(1)}%, RSI ${rsi.toFixed(0)}↑)` };
+          }
+        }
+        // SHORT rejection s gornjeg ruba
+        if (_resDist <= 0.5 && rsiFalling && rsi > 55) {
+          const _slP = nearRes * 1.004;
+          const _slPctR = (_slP - price) / price * 100;
+          const _tpP = Math.max(nearSup * 1.002, price - (_slP - price) * 2);
+          if ((price - _tpP) >= (_slP - price) * 1.5) {
+            return { price, signal: "SHORT", bullScore: 0, bearScore: MIN_CONFIRM,
+              _strategy: "RANGE", _slPrice: _slP, _tpPrice: _tpP, nearSup, nearRes,
+              reason: `RANGE SHORT: rejection @ res ${nearRes.toFixed(4)} (zona ${_rWidth.toFixed(1)}%, RSI ${rsi.toFixed(0)}↓)` };
+          }
+        }
+      }
+    }
+
     return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
-      reason: `ADX ${adx.toFixed(1)} < ${effectiveAdx} — ranging, nema ulaza` };
+      reason: `ADX ${adx.toFixed(1)} < ${effectiveAdx} — zona bez ruba/sweepa, nema ulaza` };
   }
 
   // 6-Scale info (nije više obavezan gate, koristi se samo za _strongTrend i reason string)
@@ -5206,9 +5271,14 @@ export async function run() {
           // 4H ostaje samo kao kontekst za TP dinamiku
           const _effectiveRegime = _btcRegime1h !== "UNKNOWN" ? _btcRegime1h : _btcRegime;
 
+          // RANGE/SWEEP strategije su po prirodi kontra-trend (zona/liquidity hunt)
+          // → izuzete od BTC regime i BTC align trend filtera
+          const _stratBypass = ["RANGE", "SWEEP"].includes(result._strategy);
+          if (_stratBypass) console.log(`  🎪 [${result._strategy}] ${symbol} — zonska strategija → regime/align bypass`);
+
           // LONG filter: 1H BEAR blokira, OSIM ako je 4H BULL (pullback setup)
           // Pullback u BULL trendu = Telegram trader strategija, ali traži score ≥ 5
-          if (signal === "LONG" && _effectiveRegime === "BEAR" && !_anyLongBypass) {
+          if (signal === "LONG" && _effectiveRegime === "BEAR" && !_anyLongBypass && !_stratBypass) {
             const _4hBull = _btcRegime === "BULL";
             if (_4hBull) {
               const _pullbackScore = result.bullScore ?? 0;
@@ -5234,13 +5304,13 @@ export async function run() {
           const _btcAboveEma50 = _regimeCache.btcAboveEma50_4h ?? false;
           const _sym1hTrend = result?.trend1h || trend1h?.trend || null;
 
-          if (signal === "SHORT" && _btcAboveEma50 && _sym1hTrend !== "BEAR") {
+          if (signal === "SHORT" && _btcAboveEma50 && _sym1hTrend !== "BEAR" && !_stratBypass) {
             const _ema50str = _regimeCache.btcEma50_4h ? ` (EMA50=$${_regimeCache.btcEma50_4h.toFixed(0)})` : "";
             console.log(`  ☀️  [REGIME EMA50] ${symbol} — BTC 4H iznad EMA50${_ema50str} + simbol 1H ${_sym1hTrend||"?"} → SHORT blokiran`);
             _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: `BTC_EMA50_ABOVE`, reason: `BTC 4H iznad EMA50, simbol 1H ${_sym1hTrend||"?"} → SHORT blokiran` });
             continue;
           }
-          if (signal === "SHORT" && _effectiveRegime === "BULL" && _sym1hTrend !== "BEAR") {
+          if (signal === "SHORT" && _effectiveRegime === "BULL" && _sym1hTrend !== "BEAR" && !_stratBypass) {
             console.log(`  ☀️  [REGIME] ${symbol} — BTC 1H BULL + simbol 1H ${_sym1hTrend||"?"} → SHORT blokiran`);
             _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: `BTC_REGIME(${_effectiveRegime})`, reason: `BTC 1H BULL, simbol 1H ${_sym1hTrend||"?"} → SHORT blokiran` });
             continue;
@@ -5267,7 +5337,7 @@ export async function run() {
           // BTC align filter — za ETH/SOL zahtijevamo eksplicitni BTC trend (ne NEUTRAL)
           // Sprječava ulaze na kraju poteza kad BTC nema jasnog smjera
           const _needsBtcAlign = SYMBOL_COMBOS[symbol]?.btcAlign === true;
-          if (_needsBtcAlign) {
+          if (_needsBtcAlign && !_stratBypass) {
             if (signal === "LONG" && _effectiveRegime !== "BULL") {
               console.log(`  🔒 [BTC ALIGN] ${symbol} — LONG zahtijeva BTC BULL, trenutno ${_effectiveRegime} → blokiram`);
               continue;
@@ -5505,6 +5575,17 @@ export async function run() {
             console.log(`  🚀 [MOM-SL] ${symbol} MOMENTUM: SL ${slPct.toFixed(2)}% TP ${tpPct.toFixed(2)}% RR=${( tpPct/slPct).toFixed(1)}x`);
           }
 
+          // 00. Strategy override — RANGE/SWEEP donose vlastiti SL/TP (rub zone / sweep ekstrem)
+          if (slMethod === "tier" && result._slPrice && result._tpPrice) {
+            const _oSlPct = Math.abs(price - result._slPrice) / price * 100;
+            if (_oSlPct >= 0.5 && _oSlPct <= 4.5) {
+              sl = result._slPrice; slPct = _oSlPct;
+              tp = result._tpPrice; tpPct = Math.abs(tp - price) / price * 100;
+              slMethod = result._strategy ?? "STRAT";
+              console.log(`  🎪 [${result._strategy}] ${symbol} ${signal}: SL ${fmtPrice(sl)} (${slPct.toFixed(2)}%) | TP ${fmtPrice(tp)} (${tpPct.toFixed(2)}%) RR=${(tpPct/slPct).toFixed(1)}x`);
+            }
+          }
+
           // 0. HTF zone SL — TraderaEdge stil: stop ispod likvidnosne zone (PWL,
           //    monthly low, weekly/monthly open...), dublje i teže za sweep od 15m pivota.
           //    Najbliža zona ispod cijene (LONG) / iznad (SHORT), do max 4% udaljenosti.
@@ -5586,7 +5667,7 @@ export async function run() {
         const _dynTpPct   = slPct * _tpMult;
         const signalStrength = _isStrong ? "strong" : "normal";
 
-        if (_dynTpPct > tpPct) {
+        if (_dynTpPct > tpPct && !result._tpPrice) {  // RANGE/SWEEP TP je vezan uz zonu — ne rastezati
           tpPct = _dynTpPct;
           tp    = signal === "LONG" ? price * (1 + tpPct / 100) : price * (1 - tpPct / 100);
         }

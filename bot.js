@@ -41,7 +41,8 @@ const MAX_OPEN_STOCKS = 3;  // max otvorenih pozicija na dionicama (xStocks)
 const MAX_OPEN_PER_PORTFOLIO = MAX_OPEN_CRYPTO + MAX_OPEN_STOCKS;  // ukupni cap = 9
 const isStockSym = (s) => (SYMBOL_SECTORS[s] || "").startsWith("STOCK_");
 const MAX_PYRAMID           = 1;   // max 1 adicija u istom smjeru (BTC only mode)
-const MAX_NEW_ENTRIES_PER_SCAN = 3; // max NOVIH ulaza po scan ciklusu (sprječava 8 simultanih gubitaka)
+const MAX_NEW_ENTRIES_PER_SCAN = 2; // max NOVIH ulaza po scan ciklusu (08.07.: 4 longa u istom scanu = 1 oklada ×4)
+const MAX_SAME_DIR_CRYPTO = 3;      // max kripto pozicija u ISTOM smjeru — svi altovi su jedan BTC-beta trade
 
 // ─── 7. Korelacijski filter — sektori ─────────────────────────────────────────
 const SYMBOL_SECTORS = {
@@ -314,6 +315,24 @@ async function getBtcRegime1H() {
   } catch(e) {
     return _regime1hCache;
   }
+}
+
+// BTC vs vlastiti daily EMA10 — globalni kripto filter (TraderaEdge: "altcoin ne živi
+// izolovano, njegovo ponašanje zavisi šta radi BTC"). BTC ispod dEMA10 → alt LONG nema smisla.
+let _btcDema10Cache = { above: null, ema10: null, ts: 0 };
+async function getBtcDailyEma10() {
+  if (Date.now() - _btcDema10Cache.ts < 10 * 60 * 1000 && _btcDema10Cache.above !== null) return _btcDema10Cache;
+  try {
+    const d = await fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1Dutc&limit=60`).then(r => r.json());
+    if (d.code === "00000" && d.data?.length >= 11) {
+      const cl = d.data.map(k => parseFloat(k[4]));  // ascending
+      const k10 = 2 / 11;
+      let e = cl.slice(0, 10).reduce((a, b) => a + b, 0) / 10;
+      for (let i = 10; i < cl.length; i++) e = cl[i] * k10 + e * (1 - k10);
+      _btcDema10Cache = { above: cl[cl.length - 1] > e, ema10: e, ts: Date.now() };
+    }
+  } catch {}
+  return _btcDema10Cache;
 }
 
 async function getBtcRegime() {
@@ -5330,6 +5349,28 @@ export async function run() {
             if (_dirStreak.blocked) {
               console.log(`  🧊 [DIR-CD] ${symbol} — ${_dirStreak.count} uzastopna ${signal} SL-a → ${signal} blokiran 4h`);
               _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "DIR_COOLDOWN", reason: `${_dirStreak.count}× ${signal} SL zaredom` });
+              continue;
+            }
+          }
+
+          // Korelacijski cap — max 3 kripto pozicije u ISTOM smjeru (08.07.: 6 istovremenih
+          // longova = jedna BTC oklada plaćena 6 puta). BTC iznimka vrijedi, dionice izuzete.
+          if (!isStockSym(symbol) && symbol !== "BTCUSDT" && !openSymbols.includes(symbol)) {
+            const _sameDir = loadPositions(pid).filter(p => !isStockSym(p.symbol) && p.side === signal).length;
+            if (_sameDir >= MAX_SAME_DIR_CRYPTO) {
+              console.log(`  🔗 [SAME-DIR] ${symbol} — već ${_sameDir} kripto ${signal} pozicija (max ${MAX_SAME_DIR_CRYPTO}) → preskačem`);
+              _scanLogEntries.push({ symbol, signal: "SKIP", blocker: `SAME_DIR(${_sameDir}/${MAX_SAME_DIR_CRYPTO})`, reason: `Previše kripto ${signal} pozicija — korelacija` });
+              continue;
+            }
+          }
+
+          // BTC daily EMA10 — globalni kripto filter: BTC ispod svog dEMA10 → alt LONG blokiran
+          // (altovi prate BTC; per-simbol DEMA gate ovo ne hvata dok alt još nije probio svoju EMA)
+          if (!isStockSym(symbol) && symbol !== "BTCUSDT" && signal === "LONG" && !_stratBypass) {
+            const _btcDema = await getBtcDailyEma10();
+            if (_btcDema.above === false) {
+              console.log(`  🌐 [BTC-dEMA10] ${symbol} — BTC ispod svog daily EMA10 ($${_btcDema.ema10?.toFixed(0)}) → alt LONG blokiran`);
+              _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "BTC_DEMA10", reason: "BTC ispod daily EMA10 — altovi prate BTC" });
               continue;
             }
           }

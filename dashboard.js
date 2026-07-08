@@ -2485,7 +2485,12 @@ async function doScan() {
     const shorts  = results.filter(s => s.ultraSig === "SHORT").length;
     const pending = results.filter(s => s.pending).length;
     const setups  = results.filter(s => (s.ultraSig||"").startsWith("SETUP")).length;
-    document.getElementById("scan-ts").textContent = ts + " (UTC+2) | ▲ " + longs + " LONG · ▼ " + shorts + " SHORT · ⏳ " + pending + " čeka · ◈ " + setups + " setup";
+    // SPREMNO = aktivan signal + bez bot blockera + bez VOL_EXH → ulazi na idućem 15m closeu
+    const isActive = s => ["LONG","SHORT","MOM↑","MOM↓"].includes(s.ultraSig);
+    const ready   = results.filter(s => isActive(s) && !s.botBlock && !s.volHigh).length;
+    const readyCol = ready > 0 ? '#34d399' : '#8b96ab';
+    document.getElementById("scan-ts").innerHTML = ts + " (UTC+2) | ▲ " + longs + " LONG · ▼ " + shorts + " SHORT · ⏳ " + pending + " čeka · ◈ " + setups + " setup · " +
+      '<b style="color:' + readyCol + '">⚡ ' + ready + ' od ' + results.length + ' spremno za ulaz</b>';
 
     // ── Market Breadth — iz scan rezultata ───────────────────────────────
     const total     = results.filter(s => !s.error).length;

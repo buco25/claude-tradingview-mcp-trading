@@ -5068,11 +5068,14 @@ export async function run() {
         // (TraderaEdge pristup: pusti trejd, kontroliraj rizik veličinom)
         let _macroSizeMult = 1.0;
 
-        // ── Session Filter — dead zone smanjuje size, ne blokira ────────────
+        // ── Noćni blok — analiza 100 tradeova (08.07.): ulazi 20-06 UTC su WR 24%,
+        //    -11.6 USDT. Tanka likvidnost + nitko ne gleda. Upravljanje pozicijama
+        //    (SL/TP/trail/partial) radi 24/7 — blokiran je samo NOVI ulaz.
         const sess = getSessionInfo();
-        if (sess.dead) {
-          _macroSizeMult *= 0.5;
-          console.log(`  🌙 [SESSION] ${symbol} — dead zone (${sess.utcHour}:00 UTC) → size ×0.5`);
+        const _nightH = new Date().getUTCHours();
+        if ((_nightH >= 20 || _nightH < 6) && !isStockSym(symbol)) {
+          _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "NIGHT", reason: `Noćni blok ${_nightH}:00 UTC (WR 24% noću)` });
+          continue;
         }
 
         // ── Weekend — TraderaEdge AMA: "weekendom se inače ne trguje" ───────

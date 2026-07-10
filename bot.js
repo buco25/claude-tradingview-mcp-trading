@@ -3325,7 +3325,11 @@ async function checkPortfolioPositions(pid) {
             if (_bp1R && !_bp1R.error) {
               const _halfQty = _bp1R.total / 2;
               const _minQ = _minTradeNum[pos.symbol] ?? 0;
-              if (_halfQty >= _minQ && _halfQty * liveP >= 5.5) {
+              // Partial samo ako ta polovica nosi ≥ $1 — inače pusti do punog TP-a (SL svejedno na BE)
+              const _halfProfit = pos.side === "LONG"
+                ? (liveP - pos.entryPrice) * _halfQty
+                : (pos.entryPrice - liveP) * _halfQty;
+              if (_halfProfit >= 1 && _halfQty >= _minQ && _halfQty * liveP >= 5.5) {
                 const _r1R = await bitgetPost("/api/v2/mix/order/place-order", {
                   symbol: pos.symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
                   side: pos.side === "LONG" ? "buy" : "sell", tradeSide: "close", marginMode: "isolated",
@@ -3344,9 +3348,9 @@ async function checkPortfolioPositions(pid) {
                   await tg(`💰 <b>PARTIAL +1R</b> ${pos.symbol} ${pos.side}\n50% zatvoreno @ ${fmtPrice(liveP)} → +$${_pnl1R.toFixed(2)} zaključano\nOstatak: SL na break-even, trail lovi trend`);
                 }
               } else {
-                pos.partial1R = true;  // premala pozicija za split — BE svejedno
+                pos.partial1R = true;  // polovica < $1 ili premala za split — pusti do punog TP-a
                 pos.sl = pos.side === "LONG" ? pos.entryPrice * 1.0005 : pos.entryPrice * 0.9995;
-                console.log(`  💰 [1R] ${pos.symbol} — pozicija premala za 50% split → samo SL na BE`);
+                console.log(`  💰 [1R] ${pos.symbol} — 50% bi nosilo < $1 → bez splita, SL na BE, vozimo do TP-a`);
               }
             }
           }
@@ -5734,11 +5738,8 @@ export async function run() {
         else if (_entryScore <= _comboMinSig)                  _dynRiskPct = RISK_PCT_MIN;
         else                                                   _dynRiskPct = RISK_PCT;
         const _symRiskPct = rules.symbol_sltp?.[symbol]?.riskPct ?? _dynRiskPct;
-        // Minimalni rizik $2 — ispod toga partial +1R naplati < $1 i fee jede dobit
-        // (analiza 08.07.: 44% pobjeda ispod $1, medijan $1.15)
-        const MIN_RISK_USD = 2;
-        const riskAmount = Math.max(equity * (_symRiskPct / 100), MIN_RISK_USD);
-        console.log(`  🎚️  [RISK] ${symbol} — score ${_entryScore}/${SYMBOL_COMBOS[symbol]?.sigIdx?.length ?? 8}, ${_isStrong ? "JAKO" : "normalno"} → rizik $${riskAmount.toFixed(2)} (${(riskAmount/equity*100).toFixed(2)}% banke)`);
+        const riskAmount = equity * (_symRiskPct / 100);
+        console.log(`  🎚️  [RISK] ${symbol} — score ${_entryScore}/${SYMBOL_COMBOS[symbol]?.sigIdx?.length ?? 8}, ${_isStrong ? "JAKO" : "normalno"} → rizik $${riskAmount.toFixed(2)} (${_symRiskPct}% banke)`);
         // Ukupni size mult (macro + stable + vwap + oi) ne smije pasti ispod 0.5
         // — inače stack multiplikatora spusti rizik daleko ispod RISK_PCT_MIN
         const _rawMult   = (atrTrend?.sizeMult ?? 1) * (_oiSizeMult ?? 1) * (_vwapSizeMult ?? 1) * (_stableSizeMult ?? 1) * (_macroSizeMult ?? 1);

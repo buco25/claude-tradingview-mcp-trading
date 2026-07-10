@@ -3323,34 +3323,39 @@ async function checkPortfolioPositions(pid) {
           if (_gain1R >= _risk1R) {
             const _bp1R = await fetchBitgetPositionSize(pos.symbol, pos.side);
             if (_bp1R && !_bp1R.error) {
-              const _halfQty = _bp1R.total / 2;
               const _minQ = _minTradeNum[pos.symbol] ?? 0;
-              // Partial samo ako ta polovica nosi ≥ $1 — inače pusti do punog TP-a (SL svejedno na BE)
-              const _halfProfit = pos.side === "LONG"
-                ? (liveP - pos.entryPrice) * _halfQty
-                : (pos.entryPrice - liveP) * _halfQty;
-              if (_halfProfit >= 1 && _halfQty >= _minQ && _halfQty * liveP >= 5.5) {
+              const _gainPerUnit = Math.abs(liveP - pos.entryPrice);
+              const _totalProfit = _gainPerUnit * _bp1R.total;
+              // Zatvori TOČNO onoliko da je dobit $1 (+2% buffer za fee) — može biti više ili manje od 50%
+              let _closeQty = (1.02 / _gainPerUnit);
+              // Bitget minimumi: količina naloga + min 5.5 USDT notional
+              _closeQty = Math.max(_closeQty, _minQ, 5.5 / liveP);
+              // Ostatak mora biti tradabilan — ako bi ostao dust, zatvori sve (dobit je ionako ≥ $1)
+              if (_bp1R.total - _closeQty < _minQ) _closeQty = _bp1R.total;
+
+              if (_totalProfit < 1.02) {
+                // Ni cijela pozicija ne nosi $1 na +1R — bez splita, SL na BE, vozi do punog TP-a
+                pos.partial1R = true;
+                pos.sl = pos.side === "LONG" ? pos.entryPrice * 1.0005 : pos.entryPrice * 0.9995;
+                console.log(`  💰 [1R] ${pos.symbol} — cijela pozicija nosi $${_totalProfit.toFixed(2)} < $1 → bez splita, SL na BE, vozimo do TP-a`);
+              } else {
                 const _r1R = await bitgetPost("/api/v2/mix/order/place-order", {
                   symbol: pos.symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
                   side: pos.side === "LONG" ? "buy" : "sell", tradeSide: "close", marginMode: "isolated",
                   holdSide: pos.side === "LONG" ? "long" : "short",
-                  orderType: "market", size: _halfQty.toFixed(4),
+                  orderType: "market", size: _closeQty.toFixed(4),
                 }).catch(() => null);
                 if (_r1R?.code === "00000") {
-                  const _pnl1R = pos.side === "LONG"
-                    ? (liveP - pos.entryPrice) * _halfQty
-                    : (pos.entryPrice - liveP) * _halfQty;
+                  const _pnl1R = _gainPerUnit * _closeQty;
+                  const _pctClosed = (_closeQty / _bp1R.total * 100).toFixed(0);
                   pos.partial1R = true;
-                  pos.quantity  = _bp1R.total - _halfQty;
+                  pos.quantity  = Math.max(_bp1R.total - _closeQty, 0);
                   pos.sl = pos.side === "LONG" ? pos.entryPrice * 1.0005 : pos.entryPrice * 0.9995;
-                  writeExitCsv(pid, { ...pos, quantity: _halfQty }, liveP, "Partial TP +1R (50%)", _pnl1R);
-                  console.log(`  💰 [1R] ${pos.symbol} ${pos.side} — +1R (${_gain1R.toFixed(2)}%) → 50% zatvoreno (+$${_pnl1R.toFixed(2)}), SL na BE`);
-                  await tg(`💰 <b>PARTIAL +1R</b> ${pos.symbol} ${pos.side}\n50% zatvoreno @ ${fmtPrice(liveP)} → +$${_pnl1R.toFixed(2)} zaključano\nOstatak: SL na break-even, trail lovi trend`);
+                  writeExitCsv(pid, { ...pos, quantity: _closeQty }, liveP, `Partial TP +1R (${_pctClosed}%)`, _pnl1R);
+                  console.log(`  💰 [1R] ${pos.symbol} ${pos.side} — +1R (${_gain1R.toFixed(2)}%) → ${_pctClosed}% zatvoreno (+$${_pnl1R.toFixed(2)}), SL na BE`);
+                  await tg(`💰 <b>PARTIAL +1R</b> ${pos.symbol} ${pos.side}\n${_pctClosed}% zatvoreno @ ${fmtPrice(liveP)} → +$${_pnl1R.toFixed(2)} zaključano\nOstatak: SL na break-even, trail lovi trend`);
+                  if (pos.quantity <= 0) { stillOpen.push({ ...pos, _remove: true }); continue; }
                 }
-              } else {
-                pos.partial1R = true;  // polovica < $1 ili premala za split — pusti do punog TP-a
-                pos.sl = pos.side === "LONG" ? pos.entryPrice * 1.0005 : pos.entryPrice * 0.9995;
-                console.log(`  💰 [1R] ${pos.symbol} — 50% bi nosilo < $1 → bez splita, SL na BE, vozimo do TP-a`);
               }
             }
           }

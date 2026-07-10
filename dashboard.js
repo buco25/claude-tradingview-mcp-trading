@@ -923,7 +923,7 @@ function buildPortfolioStats(pid) {
     .sort((a, b) => b.total - a.total);
 
   // ── Phase 2 stats (od 2026-05-15 = stabilna strategija) ─────────────────────
-  const phase2Start   = new Date("2026-05-15T00:00:00Z");
+  const phase2Start   = new Date("2026-07-04T12:00:00Z");  // TraderaEdge/Future rework — novi signali, combo, risk
   const phase2Exits   = exits.filter(r => new Date(`${r["Date"]}T${r["Time (UTC)"] || "00:00:00"}Z`) >= phase2Start);
   const phase2Wins    = phase2Exits.filter(r => parseFloat(r["Net P&L"] || 0) >= 0);
   const phase2Losses  = phase2Exits.filter(r => parseFloat(r["Net P&L"] || 0) < 0);
@@ -1650,7 +1650,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     return `
   <div style="background:#1f2937;border:1px solid #374151;border-radius:12px;padding:16px 20px;margin-bottom:16px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-      <div style="font-size:11px;color:#a78bfa;font-weight:700;text-transform:uppercase;letter-spacing:1px">🚀 Phase 2 Statistike (od 15.5.2026 — stabilna strategija)</div>
+      <div style="font-size:11px;color:#a78bfa;font-weight:700;text-transform:uppercase;letter-spacing:1px">🚀 Future strategija (od 4.7.2026 — TraderaEdge rework)</div>
       <div style="font-size:11px;color:#6b7280">${p2.phase2Exits.length} zatvorenih tradova</div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">

@@ -211,5 +211,6 @@
     "Uklonjeni simboli (mali volumen <10M USD/dan): ARBUSDT, WIFUSDT, TIAUSDT, FETUSDT",
     "Uklonjeni simboli (WR 0% analiza): XAUUSDT, XAGUSDT, AVAXUSDT, DOTUSDT",
     "Rebalans 07.06.2026 (backtest 42 dana, 8sig min6/8): OUT=NEARUSDT(WR43.9%), APTUSDT(WR42%), ENAUSDT(WR38.9%), DOGEUSDT(WR34.1%), INJUSDT(WR30.8%) | IN=FETUSDT(WR55.6% PF1.88), AAVEUSDT(WR50% PF1.5), BNBUSDT(WR50% PF1.5), WLDUSDT(WR48.5% PF1.41), PEPEUSDT(WR50% PF1.5)"
-  ]
+  ],
+  "btc_key_level": 60000
 }

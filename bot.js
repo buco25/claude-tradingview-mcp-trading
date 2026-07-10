@@ -317,6 +317,24 @@ async function getBtcRegime1H() {
   }
 }
 
+// BTC tjedni close vs ključna ciklus-razina (TraderaEdge 07/2026: "bulls vladaju dok
+// smo iznad 60k; tek tjedni close ispod = shorteri u dominaciji"). Cache 30 min.
+let _btcWeeklyKeyCache = { belowKey: null, lastClose: null, key: null, ts: 0 };
+async function getBtcWeeklyVsKey() {
+  if (Date.now() - _btcWeeklyKeyCache.ts < 30 * 60 * 1000 && _btcWeeklyKeyCache.belowKey !== null) return _btcWeeklyKeyCache;
+  try {
+    const key = JSON.parse(readFileSync("rules.json", "utf8")).btc_key_level ?? null;
+    if (!key) return _btcWeeklyKeyCache;
+    const d = await fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1W&limit=3`).then(r => r.json());
+    if (d.code === "00000" && d.data?.length >= 2) {
+      // ascending: predzadnji = zadnji DOVRŠENI tjedan
+      const lastClose = parseFloat(d.data[d.data.length - 2][4]);
+      _btcWeeklyKeyCache = { belowKey: lastClose < key, lastClose, key, ts: Date.now() };
+    }
+  } catch {}
+  return _btcWeeklyKeyCache;
+}
+
 // BTC vs vlastiti daily EMA10 — globalni kripto filter (TraderaEdge: "altcoin ne živi
 // izolovano, njegovo ponašanje zavisi šta radi BTC"). BTC ispod dEMA10 → alt LONG nema smisla.
 let _btcDema10Cache = { above: null, ema10: null, ts: 0 };
@@ -2209,11 +2227,13 @@ function analyzeUltra(candles, cfg) {
   const LH_ZONE = 0.015;  // 1.5% proximity za sweep detekciju
   const recentLowsLH  = candles.slice(-8).map(c => c.low);
   const recentHighsLH = candles.slice(-8).map(c => c.high);
-  // Sakupi sve dostupne LH razine
+  // Sakupi sve dostupne LH razine (+ ključna ciklus-razina za BTC, npr. 60k —
+  // TraderaEdge 07/2026: "svaki satoshi ispod 60k agresivno kupljen; očekuje se fakeout")
   const _lhLevels = [
     _monthlyOpen, _weeklyOpen, _yearlyOpen, _fridayClose,
     _monthlyHigh, _monthlyLow,
-    cfg._pwh ?? null, cfg._pwl ?? null
+    cfg._pwh ?? null, cfg._pwl ?? null,
+    cfg._keyLevel ?? null
   ].filter(v => v !== null && v > 0);
   let _sweepInfo = null;  // za Liquidity Hunt strategiju (standalone ulaz)
   if (_lhLevels.length > 0) {
@@ -2656,7 +2676,13 @@ async function analyzeUltraPullback(symbol, candles, cfg) {
   }
 
   // Pokreni analizu (proslijedi symbol + PWH/PWL + daily signali)
-  const result = analyzeUltra(candles, { ...cfg, symbol, _pwh, _pwl, _dailyEma10, _dailyEma20, _monthlyOpen, _monthlyHigh, _monthlyLow, _weeklyOpen, _yearlyOpen, _fridayClose });
+  // Ključna ciklus-razina (samo BTC) — iz rules.json (btc_key_level, npr. 60000)
+  let _keyLevel = null;
+  if (symbol === "BTCUSDT") {
+    try { _keyLevel = JSON.parse(readFileSync("rules.json", "utf8")).btc_key_level ?? null; } catch {}
+  }
+
+  const result = analyzeUltra(candles, { ...cfg, symbol, _pwh, _pwl, _dailyEma10, _dailyEma20, _monthlyOpen, _monthlyHigh, _monthlyLow, _weeklyOpen, _yearlyOpen, _fridayClose, _keyLevel });
 
   if (result.signal === "LONG" || result.signal === "SHORT") {
     console.log(`  ✅ [ULTRA] ${symbol} ${result.signal} @ ${fmtPrice(price)} — (${result.bullScore ?? 0}↑/${result.bearScore ?? 0}↓)`);
@@ -5367,6 +5393,18 @@ export async function run() {
               _scanLogEntries.push({ symbol, signal: "SKIP", blocker: `SAME_DIR(${_sameDir}/${MAX_SAME_DIR_CRYPTO})`, reason: `Previše kripto ${signal} pozicija — korelacija` });
               continue;
             }
+          }
+
+          // BTC ključna ciklus-razina (60k) — TraderaEdge macro pravilo:
+          // BTC trend SHORT tek NAKON tjednog closea ispod razine (SWEEP izuzet — kratkoročan)
+          if (symbol === "BTCUSDT" && signal === "SHORT" && !_stratBypass) {
+            const _wk = await getBtcWeeklyVsKey();
+            if (_wk.belowKey === false) {
+              console.log(`  🏛️  [KEY-LVL] BTC — tjedni close $${_wk.lastClose?.toFixed(0)} ≥ $${_wk.key} → trend SHORT blokiran (bulls vladaju iznad razine)`);
+              _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "KEY_LEVEL", reason: `Tjedni close iznad $${_wk.key} — shorteri nisu u dominaciji` });
+              continue;
+            }
+            if (_wk.belowKey === true) console.log(`  ⚠️  [KEY-LVL] BTC — tjedni close $${_wk.lastClose?.toFixed(0)} < $${_wk.key} → SHORT režim potvrđen (TraderaEdge signal)`);
           }
 
           // BTC daily EMA10 — globalni kripto filter: BTC ispod svog dEMA10 → alt LONG blokiran

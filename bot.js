@@ -3361,16 +3361,9 @@ async function checkPortfolioPositions(pid) {
           }
         }
 
-        // ── STOCK FLAT: dionice se zatvaraju u prozoru 19:40–19:59 UTC ─────────
-        // xStocks noću/vikendom stoje, a na openu gap može preskočiti SL.
-        // Zatvaranje se pokušava SAMO dok market još radi (do 20:00) —
-        // izvan sesije Bitget odbija naloge pa bi retry samo spamao.
-        let _stockFlat = false;
-        if (isStockSym(pos.symbol)) {
-          const _nowU = new Date();
-          const _h = _nowU.getUTCHours(), _m = _nowU.getUTCMinutes(), _d = _nowU.getUTCDay();
-          _stockFlat = _d >= 1 && _d <= 5 && _h === 19 && _m >= 40;
-        }
+        // ── STOCK FLAT — ISKLJUČEN na zahtjev (09.07.): dionice smiju prenoćiti.
+        // Čuva ih exchange SL/TP; napomena: overnight/earnings gap može preskočiti SL.
+        const _stockFlat = false;
 
         // ── SOFT SL: bot zatvara na pravom SL (ghost stop bypass) ──────────────
         // pos.sl = pravi SL koji bot prati — BitGet ghost SL je 0.5% dalje (decoy)
@@ -5095,8 +5088,8 @@ export async function run() {
         }
 
         // ── Dionice: ulaz SAMO dok US tržište radi (13:35–19:30 UTC, pon–pet) ──
-        // xStocks izvan sesije stoje (zamrznuta cijena = lažni signali), a
-        // pozicija se ionako flat-a u 19:40 → nema smisla ulaziti kasnije
+        // xStocks izvan sesije stoje (zamrznuta cijena = lažni signali).
+        // Pozicije SMIJU prenoćiti (flat isključen 09.07. na zahtjev)
         if (isStockSym(symbol)) {
           const _nowS = new Date();
           const _hS = _nowS.getUTCHours(), _mS = _nowS.getUTCMinutes();

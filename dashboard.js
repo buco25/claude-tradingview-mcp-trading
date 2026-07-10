@@ -2661,7 +2661,7 @@ async function loadBitgetWR() {
       const col = d.wr >= 50 ? '#059669' : d.wr >= 35 ? '#d97706' : '#dc2626';
       el.textContent = d.wr.toFixed(1) + '%';
       el.style.color = col;
-      sub.textContent = d.wins + 'W / ' + d.losses + 'L (' + d.total + ' trejdova)';
+      sub.textContent = d.wins + 'W / ' + d.losses + 'L · net ' + (d.netSum >= 0 ? '+' : '') + '$' + d.netSum;
     } else {
       el.textContent = 'N/A';
       sub.textContent = d.error || 'nema podataka';
@@ -3286,7 +3286,8 @@ const server = http.createServer(async (req, res) => {
       const BITGET_SECRET = (process.env.BITGET_SECRET_KEY || "").trim();
       const BITGET_PASS   = (process.env.BITGET_PASSPHRASE || "").trim();
       const BITGET_BASE   = (process.env.BITGET_BASE_URL   || "https://api.bitget.com").trim();
-      const path = "/api/v2/mix/order/history?productType=USDT-FUTURES&limit=100";
+      // history-position: svaka zatvorena pozicija s netProfit — pouzdano za WR
+      const path = "/api/v2/mix/position/history-position?productType=USDT-FUTURES&limit=100";
       const ts   = Date.now().toString();
       const { createHmac } = await import("crypto");
       const sign = createHmac("sha256", BITGET_SECRET).update(`${ts}GET${path}`).digest("base64");
@@ -3298,14 +3299,15 @@ const server = http.createServer(async (req, res) => {
         },
       });
       const d = await r.json();
-      const orders = d?.data?.entrustedList || d?.data?.orderList || d?.data || [];
-      const filled = Array.isArray(orders) ? orders.filter(o => o.state === "filled" || o.status === "filled") : [];
-      const wins   = filled.filter(o => parseFloat(o.pnl || o.realizedPl || 0) > 0).length;
-      const losses = filled.filter(o => parseFloat(o.pnl || o.realizedPl || 0) < 0).length;
+      const list   = d?.data?.list ?? [];
+      const pnls   = list.map(p => parseFloat(p.netProfit)).filter(v => isFinite(v));
+      const wins   = pnls.filter(v => v >= 0).length;
+      const losses = pnls.filter(v => v < 0).length;
       const total  = wins + losses;
       const wr     = total > 0 ? wins / total * 100 : 0;
+      const netSum = pnls.reduce((a, b) => a + b, 0);
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: d.code === "00000", wins, losses, total, wr }));
+      res.end(JSON.stringify({ ok: d.code === "00000", error: d.code !== "00000" ? `Bitget ${d.code}: ${d.msg}` : undefined, wins, losses, total, wr, netSum: parseFloat(netSum.toFixed(2)) }));
     } catch (e) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: e.message, wins:0, losses:0, total:0, wr:0 }));

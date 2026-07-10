@@ -5879,6 +5879,20 @@ export async function run() {
     try { cleanScanLog(); } catch (_) {}
   }
 
+  // Tjedna analiza — ponedjeljak 08:00 UTC (10:00 HR), jednom tjedno (guard fajl)
+  {
+    const _nw = new Date();
+    if (_nw.getUTCDay() === 1 && _nw.getUTCHours() === 8) {
+      const _wf = `${DATA_DIR}/weekly_report_last.txt`;
+      const _today = _nw.toISOString().slice(0, 10);
+      let _last = null;
+      try { _last = readFileSync(_wf, "utf8").trim(); } catch {}
+      if (_last !== _today) {
+        try { writeFileSync(_wf, _today); await generateWeeklyAnalysis(); } catch (_) {}
+      }
+    }
+  }
+
   writeHeartbeat("ok", { portfolios: nPort, symbols: totalSymbols, leverage: LEVERAGE });
 }
 
@@ -6122,6 +6136,81 @@ function _buildReport(dateStr, stats, symReports) {
   md += `---\n*Generirano automatski od ULTRA Bot v3 | ${dateStr} | 8 signala min 6/8 + BTC EMA50 4H filter*\n`;
 
   return { md, tg: tgMsg };
+}
+
+// ─── Tjedna analiza (TraderaEdge framework) — ponedjeljkom na Telegram ────────
+// Mehanika njegove analize: trend (RSI) > cijena, tjedni close vs ključna razina,
+// udaljenost do likvidnosnih zona, stanje akumulacije/distribucije + tjedni učinak bota.
+export async function generateWeeklyAnalysis() {
+  try {
+    console.log(`📅 [Weekly] Generiranje tjedne analize...`);
+    // 1. BTC tjedne svijeće — RSI trend i divergencija
+    // Binance public (Bitget ima samo ~13 tjedana povijesti, premalo za RSI14)
+    const wkB = await fetch("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1w&limit=120").then(r => r.json());
+    const wCloses = wkB.map(k => parseFloat(k[4]));
+    const rsiW    = calcRSI(wCloses, 14);
+    const rsiW4   = calcRSI(wCloses.slice(0, -4), 14);  // prije 4 tjedna
+    const pxNow   = wCloses[wCloses.length - 1];
+    const px4     = wCloses[wCloses.length - 5];
+    const trendTxt = rsiW > rsiW4 ? "jača" : "slabi";
+    let divTxt = "nema jasne divergencije";
+    if (pxNow > px4 && rsiW < rsiW4) divTxt = "⚠️ BEARISH divergencija (cijena ↑, RSI ↓) — snaga impulsa opada";
+    if (pxNow < px4 && rsiW > rsiW4) divTxt = "🟢 BULLISH divergencija (cijena ↓, RSI ↑) — prodavači se troše";
+
+    // 2. Ključna razina (tjedni close vs 60k)
+    const wkKey = await getBtcWeeklyVsKey();
+    const keyTxt = wkKey.key
+      ? (wkKey.belowKey
+        ? `🔴 Tjedni close $${wkKey.lastClose?.toFixed(0)} ISPOD $${wkKey.key} — shorteri u dominaciji, zona ${(wkKey.key*0.97/1000).toFixed(0)}-${(wkKey.key*0.8/1000).toFixed(0)}k u igri`
+        : `🟢 Tjedni close $${wkKey.lastClose?.toFixed(0)} iznad $${wkKey.key} — bulls vladaju, akumulacija`)
+      : "ključna razina nije postavljena";
+    const distKey = wkKey.key ? ((pxNow - wkKey.key) / pxNow * 100) : null;
+
+    // 3. Daily kontekst
+    const dEma = await getBtcDailyEma10();
+    const _fgRaw = await getFearGreed().catch(() => null);
+    const fg   = (_fgRaw && typeof _fgRaw === "object") ? (_fgRaw.value ?? null) : _fgRaw;
+
+    // 4. Tjedni učinak bota (CSV exits zadnjih 7 dana)
+    let botTxt = "nema tradeova";
+    try {
+      const f = csvFilePath("synapse_t");
+      if (existsSync(f)) {
+        const wkAgo = Date.now() - 7 * 24 * 3600 * 1000;
+        const exits = readFileSync(f, "utf8").trim().split("\n").slice(1)
+          .filter(l => (l.includes("CLOSE_LONG") || l.includes("CLOSE_SHORT")))
+          .filter(l => { const t = new Date(l.split(",")[0]).getTime(); return isFinite(t) && t >= wkAgo; });
+        const pnls = exits.map(l => parseFloat(l.split(",")[9] || 0)).filter(isFinite);
+        const w = pnls.filter(p => p >= 0).length, lo = pnls.length - w;
+        const net = pnls.reduce((a, b) => a + b, 0);
+        if (pnls.length) botTxt = `${w}W/${lo}L (WR ${(w/pnls.length*100).toFixed(0)}%) · net ${net >= 0 ? "+" : ""}$${net.toFixed(2)}`;
+      }
+    } catch {}
+
+    // 5. Playbook — pravila iz TraderaEdge framework-a
+    const play = [];
+    if (wkKey.key && !wkKey.belowKey) play.push(`• LONG bias; BTC trend SHORT blokiran do tjednog closea ispod $${wkKey.key}`);
+    if (wkKey.key && wkKey.belowKey)  play.push(`• SHORT režim aktivan; pazi na fakeout — sweep $${wkKey.key} + reclaim = LONG (SWEEP strategija spremna)`);
+    if (distKey !== null && Math.abs(distKey) < 3) play.push(`• Cijena ${Math.abs(distKey).toFixed(1)}% od ključne razine — SWEEP scenarij u dometu`);
+    if (dEma.above === false) play.push(`• BTC ispod daily EMA10 — alt LONG blokiran, čekaj reclaim`);
+    if (fg !== null && fg <= 25) play.push(`• Fear ${fg} — bounce rizik za shortove (bounce mode štiti)`);
+    if (rsiW < 40 && pxNow < px4) play.push(`• Tjedni RSI ${rsiW.toFixed(0)} nisko + cijena pada — zona interesa za akumulaciju (TraderaEdge DCA logika)`);
+
+    const msg = `📅 <b>TJEDNA ANALIZA</b> (${new Date().toISOString().slice(0,10)})\n\n` +
+      `<b>₿ BTC:</b> $${pxNow.toFixed(0)}\n` +
+      `Tjedni RSI: ${rsiW.toFixed(1)} (${trendTxt} vs prije 4 tjedna)\n${divTxt}\n\n` +
+      `<b>Ključna razina:</b>\n${keyTxt}\n` +
+      (distKey !== null ? `Udaljenost: ${distKey >= 0 ? "+" : ""}${distKey.toFixed(1)}%\n` : "") +
+      `Daily EMA10: ${dEma.above === null ? "?" : dEma.above ? "iznad ✅" : "ispod ❌"} · F&G: ${fg ?? "?"}\n\n` +
+      `<b>🤖 Bot ovaj tjedan:</b> ${botTxt}\n\n` +
+      `<b>📋 Playbook:</b>\n${play.join("\n") || "• Bez posebnih uvjeta — standardni režim"}`;
+    await tg(msg);
+    console.log(`📅 [Weekly] Poslano na Telegram`);
+    return msg;
+  } catch (e) {
+    console.log(`⚠️ [Weekly] greška: ${e.message}`);
+    return null;
+  }
 }
 
 export async function generateDailyReport() {

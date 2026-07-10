@@ -2225,8 +2225,11 @@ function analyzeUltra(candles, cfg) {
   } = cfg;
   let sigMOPEN = 0;
   const LH_ZONE = 0.015;  // 1.5% proximity za sweep detekciju
-  const recentLowsLH  = candles.slice(-8).map(c => c.low);
-  const recentHighsLH = candles.slice(-8).map(c => c.high);
+  // Sweep prozor 48h (192×15m) — HTF sweep traje danima (10.07.: TraderaEdge 59k ulaz
+  // nakon sweep-a Yearly Low koji je trajao dane; stari 2h prozor bi ga propustio).
+  // Reclaim svježina i dalje: cijena SADA iznad zone + RSI okreće.
+  const recentLowsLH  = candles.slice(-192).map(c => c.low);
+  const recentHighsLH = candles.slice(-192).map(c => c.high);
   // Sakupi sve dostupne LH razine (+ ključna ciklus-razina za BTC, npr. 60k —
   // TraderaEdge 07/2026: "svaki satoshi ispod 60k agresivno kupljen; očekuje se fakeout")
   const _lhLevels = [

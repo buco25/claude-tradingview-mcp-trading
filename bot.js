@@ -335,6 +335,37 @@ async function getBtcWeeklyVsKey() {
   return _btcWeeklyKeyCache;
 }
 
+// ─── Relativna snaga vs BTC (TraderaEdge Strong/Weak lista) ──────────────────
+// alt/BTC ratio (1H, 7 dana) vs EMA20 ratija: iznad = STRONG, ispod = WEAK.
+// Pravila (TG 10.07.): "shortuj slabe shitcoine kad BTC pada" + long samo strong altove.
+const _relStrCache = {};
+let _btcCloses1h = { closes: null, ts: 0 };
+async function getRelStrengthVsBtc(symbol) {
+  const c = _relStrCache[symbol];
+  if (c && Date.now() - c.ts < 30 * 60 * 1000) return c.state;
+  try {
+    if (!_btcCloses1h.closes || Date.now() - _btcCloses1h.ts > 30 * 60 * 1000) {
+      const bd = await fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1H&limit=168`).then(r => r.json());
+      if (bd.code !== "00000") return null;
+      _btcCloses1h = { closes: bd.data.map(k => parseFloat(k[4])), ts: Date.now() };
+    }
+    const ad = await fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=1H&limit=168`).then(r => r.json());
+    if (ad.code !== "00000") return null;
+    const a = ad.data.map(k => parseFloat(k[4]));
+    const b = _btcCloses1h.closes;
+    const n = Math.min(a.length, b.length);
+    if (n < 40) return null;
+    const ratio = [];
+    for (let i = 0; i < n; i++) ratio.push(a[a.length - n + i] / b[b.length - n + i]);
+    const k20 = 2 / 21;
+    let e = ratio.slice(0, 20).reduce((x, y) => x + y, 0) / 20;
+    for (let i = 20; i < n; i++) e = ratio[i] * k20 + e * (1 - k20);
+    const state = ratio[n - 1] > e ? "STRONG" : "WEAK";
+    _relStrCache[symbol] = { state, ts: Date.now() };
+    return state;
+  } catch { return null; }
+}
+
 // BTC vs vlastiti daily EMA10 — globalni kripto filter (TraderaEdge: "altcoin ne živi
 // izolovano, njegovo ponašanje zavisi šta radi BTC"). BTC ispod dEMA10 → alt LONG nema smisla.
 let _btcDema10Cache = { above: null, ema10: null, ts: 0 };
@@ -5419,6 +5450,23 @@ export async function run() {
               _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "BTC_DEMA10", reason: "BTC ispod daily EMA10 — altovi prate BTC" });
               continue;
             }
+          }
+
+          // Strong/Weak relativna snaga vs BTC (TraderaEdge): LONG samo STRONG altove,
+          // SHORT samo WEAK altove ("shortuj slabe shitcoine kad BTC pada, ne lidere")
+          if (!isStockSym(symbol) && symbol !== "BTCUSDT" && !_stratBypass) {
+            const _relStr = await getRelStrengthVsBtc(symbol);
+            if (_relStr === "WEAK" && signal === "LONG") {
+              console.log(`  🐌 [REL-STR] ${symbol} — WEAK vs BTC → LONG blokiran (long samo strong altove)`);
+              _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "REL_STR_WEAK", reason: "Slab vs BTC — LONG samo na strong altovima" });
+              continue;
+            }
+            if (_relStr === "STRONG" && signal === "SHORT") {
+              console.log(`  💪 [REL-STR] ${symbol} — STRONG vs BTC → SHORT blokiran (ne shortaj lidere)`);
+              _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "REL_STR_STRONG", reason: "Jak vs BTC — ne shortamo lidere" });
+              continue;
+            }
+            if (_relStr) console.log(`  ${_relStr === "STRONG" ? "💪" : "🐌"} [REL-STR] ${symbol} — ${_relStr} vs BTC → ${signal} usklađen`);
           }
 
           // BTC align filter — za ETH/SOL zahtijevamo eksplicitni BTC trend (ne NEUTRAL)

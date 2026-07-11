@@ -12,7 +12,8 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   getSessionInfo, calcAtrTrend, getSp500Data, calcSymbolCorrelation,
   getDeribitPutCall, getLiquidationRisk, getEconEvents, isEconBlocked, calcVWAP,
   getLongShortRatio, getStablecoinInflow, getBtcPerpBasis, getAltcoinSeason,
-  generateDailyReport, autoFixCsvFromBitget, SYMBOL_COMBOS } from "./bot.js";
+  generateDailyReport, autoFixCsvFromBitget, SYMBOL_COMBOS,
+  getBtcWeeklyVsKey, getRelStrengthVsBtc, isStockSym } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -690,6 +691,9 @@ async function runScan(rules) {
         } catch(e) { /* ignoriraj — PWHL ostaje 0 */ }
         const _zones  = await fetchLhZones(sym);
         const s       = scanSymbol(sym, candles, {}, {}, {}, ultraCfg, _pwh, _pwl, _zones);
+        // Strong/Weak vs BTC (samo kripto altovi; 30-min cache u bot.js)
+        s.relStr = (sym !== "BTCUSDT" && !isStockSym(sym))
+          ? await getRelStrengthVsBtc(sym).catch(() => null) : null;
         const pending = pendingList.find(p => p.symbol === sym) || null;
         const symSltp = rules.symbol_sltp?.[sym] || {};
         const slPct   = symSltp.slPct ?? 1.5;
@@ -1446,6 +1450,11 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div style="font-size:22px;font-weight:800" id="btc-lsr-val">—</div>
         <div style="font-size:10px;color:#9ca3af;margin-top:2px" id="btc-lsr-sub">retail long % · trend</div>
       </div>
+      <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px;text-align:center">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">Ključna razina</div>
+        <div style="font-size:22px;font-weight:800" id="btc-key-val">—</div>
+        <div style="font-size:10px;color:#9ca3af;margin-top:2px" id="btc-key-sub">tjedni close vs razina</div>
+      </div>
     </div>
   </div>
 <script>
@@ -1509,6 +1518,18 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         lsrEl.style.color = squeeze ? '#059669' : trap ? '#dc2626' : '#d97706';
         const label = squeeze ? '🔥 Squeeze setup' : trap ? '⚠️ Long trap' : '⚖️ Neutral';
         document.getElementById('btc-lsr-sub').textContent = label + ' · ' + (lsr.trend || '');
+      }
+
+      // Ključna razina (TraderaEdge 60k)
+      const kl = d.keyLevel;
+      const klEl = document.getElementById('btc-key-val');
+      if (kl && kl.key && klEl) {
+        const above = kl.belowKey === false;
+        klEl.textContent = above ? '🐂 iznad' : '🐻 ispod';
+        klEl.style.color = above ? '#059669' : '#dc2626';
+        document.getElementById('btc-key-sub').textContent =
+          'W-close $' + Math.round(kl.lastClose||0).toLocaleString() + ' vs $' + (kl.key/1000) + 'k' +
+          (above ? ' · bulls vladaju' : ' · short režim');
       }
     } catch(e) {
       document.getElementById('btc-status-ts').textContent = 'Greška: ' + e.message;
@@ -2563,6 +2584,7 @@ async function doScan() {
       return '<tr style="' + rowBg + '">' +
         '<td style="color:#94a3b8;font-size:11px;text-align:center;padding:6px 4px">' + (i+1) + '</td>' +
         '<td style="font-weight:800;font-size:13px;white-space:nowrap;padding:6px 8px">' + s.symbol.replace("USDT","") + '<span style="color:#94a3b8;font-size:10px;font-weight:400">USDT</span>' +
+          (s.relStr ? ' <span title="Relativna snaga vs BTC (7d ratio vs EMA20): ' + s.relStr + ' — LONG samo STRONG, SHORT samo WEAK" style="font-size:10px">' + (s.relStr === 'STRONG' ? '💪' : '🐌') + '</span>' : '') +
           '<div style="font-size:9px;color:' + slTpCol + ';font-weight:500;margin-top:1px">' + slTp + '</div>' + rsiAdxInfo + '</td>' +
         '<td style="font-weight:600;white-space:nowrap;font-size:12px;padding:6px 8px">' + fmtLive(s.price) + entryInfo + '</td>' +
         '<td style="text-align:center;font-weight:800;color:' + t1hCol + ';font-size:13px;padding:6px 4px" title="1H EMA20: ' + t1h + '">' + t1hIcon + '</td>' +
@@ -4189,6 +4211,11 @@ const server = http.createServer(async (req, res) => {
       // L/S Ratio (Binance global account ratio)
       try {
         result.lsr = await getLongShortRatio("BTCUSDT");
+      } catch {}
+
+      // Ključna ciklus-razina (TraderaEdge): tjedni close vs btc_key_level
+      try {
+        result.keyLevel = await getBtcWeeklyVsKey();
       } catch {}
 
       // Liquidity Hunt zones — Bitget vraća ascending (najstarija prva)

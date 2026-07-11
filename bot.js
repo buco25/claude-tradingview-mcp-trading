@@ -39,7 +39,7 @@ const MAX_TRADES_PER_DAY = 100;
 const MAX_OPEN_CRYPTO = 6;  // max otvorenih kripto pozicija
 const MAX_OPEN_STOCKS = 3;  // max otvorenih pozicija na dionicama (xStocks)
 const MAX_OPEN_PER_PORTFOLIO = MAX_OPEN_CRYPTO + MAX_OPEN_STOCKS;  // ukupni cap = 9
-const isStockSym = (s) => (SYMBOL_SECTORS[s] || "").startsWith("STOCK_");
+export const isStockSym = (s) => (SYMBOL_SECTORS[s] || "").startsWith("STOCK_");
 const MAX_PYRAMID           = 1;   // max 1 adicija u istom smjeru (BTC only mode)
 const MAX_NEW_ENTRIES_PER_SCAN = 2; // max NOVIH ulaza po scan ciklusu (08.07.: 4 longa u istom scanu = 1 oklada ×4)
 const MAX_SAME_DIR_CRYPTO = 3;      // max kripto pozicija u ISTOM smjeru — svi altovi su jedan BTC-beta trade
@@ -320,7 +320,7 @@ async function getBtcRegime1H() {
 // BTC tjedni close vs ključna ciklus-razina (TraderaEdge 07/2026: "bulls vladaju dok
 // smo iznad 60k; tek tjedni close ispod = shorteri u dominaciji"). Cache 30 min.
 let _btcWeeklyKeyCache = { belowKey: null, lastClose: null, key: null, ts: 0 };
-async function getBtcWeeklyVsKey() {
+export async function getBtcWeeklyVsKey() {
   if (Date.now() - _btcWeeklyKeyCache.ts < 30 * 60 * 1000 && _btcWeeklyKeyCache.belowKey !== null) return _btcWeeklyKeyCache;
   try {
     const key = JSON.parse(readFileSync("rules.json", "utf8")).btc_key_level ?? null;
@@ -340,7 +340,7 @@ async function getBtcWeeklyVsKey() {
 // Pravila (TG 10.07.): "shortuj slabe shitcoine kad BTC pada" + long samo strong altove.
 const _relStrCache = {};
 let _btcCloses1h = { closes: null, ts: 0 };
-async function getRelStrengthVsBtc(symbol) {
+export async function getRelStrengthVsBtc(symbol) {
   const c = _relStrCache[symbol];
   if (c && Date.now() - c.ts < 30 * 60 * 1000) return c.state;
   try {

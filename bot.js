@@ -6246,6 +6246,12 @@ export async function generateWeeklyAnalysis() {
     if (dEma.above === false) play.push(`• BTC ispod daily EMA10 — alt LONG blokiran, čekaj reclaim`);
     if (fg !== null && fg <= 25) play.push(`• Fear ${fg} — bounce rizik za shortove (bounce mode štiti)`);
     if (rsiW < 40 && pxNow < px4) play.push(`• Tjedni RSI ${rsiW.toFixed(0)} nisko + cijena pada — zona interesa za akumulaciju (TraderaEdge DCA logika)`);
+    // Sanity check ključne razine — podsjetnik da je ručna i treba li je osvježiti
+    if (wkKey.key) {
+      const _minW12 = Math.min(...wCloses.slice(-12));
+      if (distKey !== null && Math.abs(distKey) > 20) play.push(`• ⚠️ Cijena ${Math.abs(distKey).toFixed(0)}% od ključne razine $${wkKey.key} — razina možda zastarjela, provjeri novu TraderaEdge analizu`);
+      play.push(`• Info: min tjedni close (12 tj.): $${_minW12.toFixed(0)} · ključna razina $${wkKey.key} je ručna (iz analize)`);
+    }
 
     const msg = `📅 <b>TJEDNA ANALIZA</b> (${new Date().toISOString().slice(0,10)})\n\n` +
       `<b>₿ BTC:</b> $${pxNow.toFixed(0)}\n` +

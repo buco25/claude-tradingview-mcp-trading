@@ -25,7 +25,12 @@
     "HOODUSDT",
     "PLTRUSDT",
     "GMEUSDT",
-    "AMCUSDT"
+    "AMCUSDT",
+    "DOGEUSDT",
+    "SUIUSDT",
+    "HYPEUSDT",
+    "WLDUSDT",
+    "PEPEUSDT"
   ],
   "portfolio_timeframes": {
     "synapse_t": "15m"

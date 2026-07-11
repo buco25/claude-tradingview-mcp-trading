@@ -51,7 +51,9 @@ const SYMBOL_SECTORS = {
   "AVAXUSDT":   "L1",    "ATOMUSDT": "L1",    "ALGOUSDT": "L1",
   "XRPUSDT":    "PAYMENT", "ZECUSDT": "PAYMENT",
   "TAOUSDT":    "AI",    "RENDERUSDT": "AI",  "FETUSDT": "AI",
-  "LINKUSDT":   "DEFI",  "AAVEUSDT": "DEFI",
+  "LINKUSDT":   "DEFI",  "AAVEUSDT": "DEFI", "HYPEUSDT": "DEFI",
+  "DOGEUSDT":   "MEME",  "PEPEUSDT": "MEME",
+  "SUIUSDT":    "L1",    "WLDUSDT": "AI",
   // Dionice
   "TSLAUSDT":   "STOCK_TECH", "NVDAUSDT": "STOCK_TECH", "PLTRUSDT": "STOCK_TECH",
   "MSTRUSDT":   "STOCK_CRYPTO", "COINUSDT": "STOCK_CRYPTO", "HOODUSDT": "STOCK_CRYPTO",
@@ -131,6 +133,11 @@ export const SYMBOL_COMBOS = {
   "ATOMUSDT":   { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
   "ZECUSDT":    { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
   "ALGOUSDT":   { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
+  "DOGEUSDT":   { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
+  "SUIUSDT":    { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
+  "HYPEUSDT":   { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
+  "WLDUSDT":    { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
+  "PEPEUSDT":   { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
   // ── Extra (dobar WR history) ────────────────────────────────────────────────
   "TAOUSDT":    { sigIdx: TE_COMBO, minSig: 4 },
   "AAVEUSDT":   { sigIdx: TE_COMBO, minSig: 4 },

@@ -346,6 +346,26 @@ export async function getBtcWeeklyVsKey() {
   return _btcWeeklyKeyCache;
 }
 
+// ─── CHILL mode — mrtvo tržište (ljetni režim) ───────────────────────────────
+// TraderaEdge 14.07: "letnji režim, nizak volumen — nisam bio preterano aktivan,
+// CHILL mode". Bot analiza 7d: 23 tradea, -8 USDT dok je mentor odradio 2-3.
+// BTC 24h raspon < 2.5% → kripto minSig +1 i size ×0.7 (trguj rijetko i malo).
+let _chillCache = { chill: false, rangePct: null, ts: 0 };
+async function getBtcChillMode() {
+  if (Date.now() - _chillCache.ts < 15 * 60 * 1000) return _chillCache;
+  try {
+    const d = await fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1H&limit=24`).then(r => r.json());
+    if (d.code === "00000" && d.data?.length >= 20) {
+      const hi = Math.max(...d.data.map(k => parseFloat(k[2])));
+      const lo = Math.min(...d.data.map(k => parseFloat(k[3])));
+      const px = parseFloat(d.data[d.data.length - 1][4]);
+      const rangePct = (hi - lo) / px * 100;
+      _chillCache = { chill: rangePct < 2.5, rangePct: parseFloat(rangePct.toFixed(2)), ts: Date.now() };
+    }
+  } catch {}
+  return _chillCache;
+}
+
 // ─── Relativna snaga vs BTC (TraderaEdge Strong/Weak lista) ──────────────────
 // alt/BTC ratio (1H, 7 dana) vs EMA20 ratija: iznad = STRONG, ispod = WEAK.
 // Pravila (TG 10.07.): "shortuj slabe shitcoine kad BTC pada" + long samo strong altove.
@@ -1343,6 +1363,28 @@ export function getConsecutiveLossCount(pid) {
 // (analiza 07.07.: bot uporno ponavljao LONG u padu — XRP/LINK/ALGO/AAVE/RENDER isti dan)
 const DIR_STREAK_MAX = 3;
 const DIR_COOLDOWN_MS = 4 * 60 * 60 * 1000;
+// Simbol+smjer: 2 uzastopna SL-a na istom simbolu i smjeru → taj par blokiran 24h
+// (analiza 20.07.: TAO shortan 4× u 5 dana, 3 gubitka — 4h cooldown prekratak)
+export function getSymbolSideLossStreak(pid, symbol, side) {
+  const f = csvFilePath(pid);
+  if (!existsSync(f)) return { count: 0, blocked: false };
+  try {
+    const tag = side === "LONG" ? "CLOSE_LONG" : "CLOSE_SHORT";
+    const lines = readFileSync(f, "utf8").trim().split("\n");
+    const exits = lines.slice(1).filter(l => l.includes(tag) && l.includes(symbol) && !l.includes("Partial TP"));
+    let count = 0, lastTs = 0;
+    for (let i = exits.length - 1; i >= 0; i--) {
+      const cols = exits[i].split(",");
+      const pnl = parseFloat(cols[9] || 0);
+      if (pnl >= 0) break;
+      count++;
+      if (!lastTs) lastTs = new Date(cols[0]).getTime() || 0;
+    }
+    const blocked = count >= 2 && Date.now() - lastTs < 24 * 60 * 60 * 1000;
+    return { count, blocked };
+  } catch { return { count: 0, blocked: false }; }
+}
+
 export function getDirLossStreak(pid, side) {
   const f = csvFilePath(pid);
   if (!existsSync(f)) return { count: 0, blocked: false };
@@ -2359,7 +2401,9 @@ function analyzeUltra(candles, cfg) {
   // (post-mortem 05.07.: svi likvidirani ulazi bili subotnji minimalni 5/8)
   const _dowMC = new Date().getUTCDay();
   const _weekendBoost = (_dowMC === 0 || _dowMC === 6) ? 1 : 0;
-  const MIN_CONFIRM = (_combo?.minSig ?? minSig) + _weekendBoost;
+  // CHILL mode: mrtvo tržište → kripto traži +1 signal (dionice izuzete — ne prate BTC)
+  const _chillBoost = (cfg._chillMode && !isStockSym(_sym)) ? 1 : 0;
+  const MIN_CONFIRM = (_combo?.minSig ?? minSig) + _weekendBoost + _chillBoost;
 
   // ══ OBAVEZNI GATEVI (3) ══
 
@@ -5047,6 +5091,10 @@ export async function run() {
       }
       // Spremi u params da analyzeUltra koristi dinamički prag
       pDef.params._dynAdx = dynAdx;
+      // CHILL mode — mrtvo tržište: kripto minSig +1 + size ×0.7
+      const _chillSt = await getBtcChillMode();
+      pDef.params._chillMode = _chillSt.chill;
+      if (_chillSt.chill) console.log(`  😴 [CHILL] BTC 24h raspon ${_chillSt.rangePct}% < 2.5% — mrtvo tržište → kripto minSig +1, size ×0.7`);
     }
 
     // ── 1. USDT.D proxy — Stablecoin Inflow/Outflow ──────────────────────────
@@ -5156,6 +5204,11 @@ export async function run() {
         if (_dow === 0 || _dow === 6) {
           _macroSizeMult *= 0.5;
           console.log(`  📅 [WEEKEND] ${symbol} — ${_dow === 6 ? "subota" : "nedjelja"} → size ×0.5`);
+        }
+
+        // ── CHILL mode — mrtvo tržište: kripto size ×0.7 ────────────────────
+        if (pDef.params._chillMode && !isStockSym(symbol)) {
+          _macroSizeMult *= 0.7;
         }
 
         // ── Dionice: ulaz SAMO dok US tržište radi (13:35–19:30 UTC, pon–pet) ──
@@ -5425,6 +5478,16 @@ export async function run() {
             if (_dirStreak.blocked) {
               console.log(`  🧊 [DIR-CD] ${symbol} — ${_dirStreak.count} uzastopna ${signal} SL-a → ${signal} blokiran 4h`);
               _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "DIR_COOLDOWN", reason: `${_dirStreak.count}× ${signal} SL zaredom` });
+              continue;
+            }
+          }
+
+          // Simbol+smjer cooldown — 2 uzastopna SL-a na istoj ideji = 24h pauza za taj par
+          {
+            const _ssStreak = getSymbolSideLossStreak(pid, symbol, signal);
+            if (_ssStreak.blocked) {
+              console.log(`  🧊 [SYM-CD] ${symbol} — ${_ssStreak.count}× ${signal} SL zaredom na ovom simbolu → blokiran 24h`);
+              _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "SYM_COOLDOWN", reason: `${_ssStreak.count}× ${signal} SL na ${symbol} — 24h pauza` });
               continue;
             }
           }

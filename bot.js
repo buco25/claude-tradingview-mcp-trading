@@ -23,9 +23,12 @@ const TIMEFRAME     = "1H";
 const LEVERAGE      = 50;     // 50x default → SL 1.5% = 75% margine (više prostora za šum)
 const BTC_LEVERAGE  = 75;    // BTC posebno — 75x
 const START_CAPITAL = 1000;   // po portfoliju
-const RISK_PCT      = 1.5;    // bazni % banke po tradeu (dinamički 1–2% ovisno o snazi setupa)
-const RISK_PCT_MIN  = 1.0;    // minimalni setup (score = minSig, bez regime potvrde)
-const RISK_PCT_MAX  = 2.0;    // jak setup (regime aligned + score ≥ minSig+2)
+// SURVIVAL MODE (20.07.): fiksni 1% dok ne dođe prvi profitabilan tjedan ILI proboj
+// strukture (tjedni close < 60k / potvrđen breakout > 65.7k). Očuvanje kapitala za
+// trending market. Vratiti na 1.0/1.5/2.0 kad se režim promijeni.
+const RISK_PCT      = 1.0;    // bazni % banke po tradeu
+const RISK_PCT_MIN  = 1.0;    // minimalni setup
+const RISK_PCT_MAX  = 1.0;    // jak setup (survival: bez povećanja)
 const SL_PCT        = 2.0;    // fallback SL % (Tier 1) — override per-simbol u symbol_sltp
 const TP_PCT        = 3.0;    // fallback TP % (Tier 1, 1.5×SL) — override per-simbol u symbol_sltp
 
@@ -3480,13 +3483,34 @@ async function checkPortfolioPositions(pid) {
         // Čuva ih exchange SL/TP; napomena: overnight/earnings gap može preskočiti SL.
         const _stockFlat = false;
 
+        // ── TIME-STOP (20.07.): 12h bez +0.5R → zatvori (chop bleed) ──────────
+        // Analiza 3 tjedna: medijan gubitnika visi 13.6h prije SL-a. TraderaEdge za
+        // zonske trgovine: "ostanite kraći vremenski period". Dionice: samo u sesiji.
+        let _timeStop = false;
+        if (!pos.partial1R && !pos.trailActive && !pos.partialClosed && pos.timestamp) {
+          const _ageH = (Date.now() - new Date(pos.timestamp).getTime()) / 3600000;
+          const _gainTS = pos.side === "LONG"
+            ? (liveP - pos.entryPrice) / pos.entryPrice * 100
+            : (pos.entryPrice - liveP) / pos.entryPrice * 100;
+          const _halfR = (parseFloat(pos.slPct) || 2.0) * 0.5;
+          if (_ageH > 12 && _gainTS < _halfR) {
+            const _nowTS = new Date();
+            const _hTS = _nowTS.getUTCHours(), _mTS = _nowTS.getUTCMinutes(), _dTS = _nowTS.getUTCDay();
+            const _stkOk = !isStockSym(pos.symbol) ||
+              (_dTS >= 1 && _dTS <= 5 && (_hTS > 13 || (_hTS === 13 && _mTS >= 35)) && _hTS < 20);
+            if (_stkOk) _timeStop = true;
+          }
+        }
+
         // ── SOFT SL: bot zatvara na pravom SL (ghost stop bypass) ──────────────
         // pos.sl = pravi SL koji bot prati — BitGet ghost SL je 0.5% dalje (decoy)
         // Samo dok trail NIJE aktivan (trail sam pomiče SL pa nema potrebe za soft check)
-        if (isLivePortfolio && pos.sl && (_stockFlat || (!pos.trailActive && !pos.partialClosed))) {
-          const softSlHit = _stockFlat || (pos.side === "LONG" ? liveP <= pos.sl : liveP >= pos.sl);
+        if (isLivePortfolio && pos.sl && (_stockFlat || _timeStop || (!pos.trailActive && !pos.partialClosed))) {
+          const softSlHit = _stockFlat || _timeStop || (pos.side === "LONG" ? liveP <= pos.sl : liveP >= pos.sl);
           if (softSlHit) {
-            console.log(_stockFlat
+            console.log(_timeStop
+              ? `  ⏱️  [TIME-STOP] ${pos.symbol} ${pos.side} — 12h+ bez +0.5R → tržišni izlaz @ ${fmtPrice(liveP)} (chop bleed)`
+              : _stockFlat
               ? `  🏦 [STOCK FLAT] ${pos.symbol} ${pos.side} — US market close/zatvoreno → tržišni izlaz @ ${fmtPrice(liveP)} (gap zaštita)`
               : `  🛑 [SOFT SL] ${pos.symbol} ${pos.side} — cijena ${fmtPrice(liveP)} ≤ SL ${fmtPrice(pos.sl)} → tržišni izlaz`);
             // Provjeri pravu veličinu na Bitgetu
@@ -3553,7 +3577,7 @@ async function checkPortfolioPositions(pid) {
             const pnl = pos.side === "LONG"
               ? (liveP - pos.entryPrice) * softQtyN
               : (pos.entryPrice - liveP) * softQtyN;
-            writeExitCsv(pid, pos, liveP, "Soft SL — bot izlaz", pnl);
+            writeExitCsv(pid, pos, liveP, _timeStop ? "Time-stop 12h" : "Soft SL — bot izlaz", pnl);
             await tg(`🛑 [SOFT SL] ${pos.symbol} ${pos.side}\nBot zatvorio na SL ${fmtPrice(pos.sl)}\nEgzekucija: ${fmtPrice(liveP)} | P&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}`);
             symbolSlCooldown.set(pos.symbol, Date.now());
             saveSlCooldown();
@@ -5503,16 +5527,17 @@ export async function run() {
             }
           }
 
-          // BTC ključna ciklus-razina (60k) — TraderaEdge macro pravilo:
-          // BTC trend SHORT tek NAKON tjednog closea ispod razine (SWEEP izuzet — kratkoročan)
-          if (symbol === "BTCUSDT" && signal === "SHORT" && !_stratBypass) {
+          // BTC ključna ciklus-razina (60k) — TraderaEdge macro pravilo, prošireno 20.07.:
+          // SVI kripto trend SHORTOVI tek NAKON tjednog closea ispod razine (analiza 3 tjedna:
+          // short WR 26%, -9.9 USDT — shortali smo akumulaciju). SWEEP/RANGE izuzeti.
+          if (!isStockSym(symbol) && signal === "SHORT" && !_stratBypass) {
             const _wk = await getBtcWeeklyVsKey();
             if (_wk.belowKey === false) {
-              console.log(`  🏛️  [KEY-LVL] BTC — tjedni close $${_wk.lastClose?.toFixed(0)} ≥ $${_wk.key} → trend SHORT blokiran (bulls vladaju iznad razine)`);
-              _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "KEY_LEVEL", reason: `Tjedni close iznad $${_wk.key} — shorteri nisu u dominaciji` });
+              console.log(`  🏛️  [KEY-LVL] ${symbol} — BTC tjedni close $${_wk.lastClose?.toFixed(0)} ≥ $${_wk.key} → kripto trend SHORT blokiran (akumulacija)`);
+              _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "KEY_LEVEL", reason: `BTC tjedni close iznad $${_wk.key} — ne shortamo akumulaciju` });
               continue;
             }
-            if (_wk.belowKey === true) console.log(`  ⚠️  [KEY-LVL] BTC — tjedni close $${_wk.lastClose?.toFixed(0)} < $${_wk.key} → SHORT režim potvrđen (TraderaEdge signal)`);
+            if (_wk.belowKey === true) console.log(`  ⚠️  [KEY-LVL] ${symbol} — BTC tjedni close < $${_wk.key} → SHORT režim potvrđen`);
           }
 
           // BTC daily EMA10 — globalni kripto filter: BTC ispod svog dEMA10 → alt LONG blokiran

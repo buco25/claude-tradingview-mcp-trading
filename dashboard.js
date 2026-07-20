@@ -13,7 +13,7 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   getDeribitPutCall, getLiquidationRisk, getEconEvents, isEconBlocked, calcVWAP,
   getLongShortRatio, getStablecoinInflow, getBtcPerpBasis, getAltcoinSeason,
   generateDailyReport, autoFixCsvFromBitget, SYMBOL_COMBOS,
-  getBtcWeeklyVsKey, getRelStrengthVsBtc, isStockSym } from "./bot.js";
+  getBtcWeeklyVsKey, getRelStrengthVsBtc, isStockSym, getBtcChillMode } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -1368,7 +1368,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="logo">⚡</div>
       <div>
         <div class="title">ULTRA · Future Bot</div>
-        <div class="subtitle"><span class="live-dot"></span>${ALL_SYMBOLS.length} simbola (kripto + dionice) · rizik 1–2% dinamički · combo 5/8 signala · RR 1:2 (JAKO 1:3) · break-even @ +1R · max 6 kripto + 3 dionice</div>
+        <div class="subtitle"><span class="live-dot"></span>${ALL_SYMBOLS.length} simbola (kripto + dionice) · rizik 1% (survival) · combo 5/8 signala · RR 1:2 (JAKO 1:3) · break-even @ +1R · max 6 kripto + 3 dionice</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -1414,6 +1414,9 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="stat-sub">SR-based SL · dinamički leverage · rizik 1–2%</div>
     </div>
   </div>
+
+  <!-- ── Režim bota ──────────────────────────────────────────────────────── -->
+  <div id="bot-mode-bar" style="display:none;background:linear-gradient(90deg,rgba(99,102,241,0.12),rgba(52,211,153,0.06));border:1px solid #34415e;border-radius:12px;padding:10px 18px;margin-bottom:16px;font-size:13px;font-weight:600"></div>
 
   <!-- ── BTC Status Card ────────────────────────────────────────────────── -->
   <div style="background:#1f2937;border:1px solid #374151;border-radius:12px;padding:16px 20px;margin-bottom:16px">
@@ -1518,6 +1521,19 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         lsrEl.style.color = squeeze ? '#059669' : trap ? '#dc2626' : '#d97706';
         const label = squeeze ? '🔥 Squeeze setup' : trap ? '⚠️ Long trap' : '⚖️ Neutral';
         document.getElementById('btc-lsr-sub').textContent = label + ' · ' + (lsr.trend || '');
+      }
+
+      // Režim bota — statusna traka
+      const bm = d.botMode;
+      const bmEl = document.getElementById('bot-mode-bar');
+      if (bm && bmEl) {
+        const parts = [];
+        if (bm.survival) parts.push('<span style="color:#fcd34d">🛡️ SURVIVAL — rizik 1%</span>');
+        if (bm.chill) parts.push('<span style="color:#7dd3fc">😴 CHILL — BTC 24h raspon ' + (bm.rangePct ?? '?') + '% — samo 6/8+ setupi, size ×0.7</span>');
+        if (bm.night) parts.push('<span style="color:#c4b5fd">🌙 NOĆNI BLOK — bez novih kripto ulaza do 08:00</span>');
+        if (bm.weekend) parts.push('<span style="color:#8b96ab">📅 VIKEND — minSig +1, size ×0.5</span>');
+        if (parts.length) { bmEl.innerHTML = '🤖 Režim bota: &nbsp;' + parts.join(' &nbsp;·&nbsp; '); bmEl.style.display = 'block'; }
+        else { bmEl.innerHTML = '🤖 Režim bota: <span style="color:#34d399">✅ NORMALAN — svi sustavi aktivni</span>'; bmEl.style.display = 'block'; }
       }
 
       // Ključna razina (TraderaEdge 60k)
@@ -4216,6 +4232,18 @@ const server = http.createServer(async (req, res) => {
       // Ključna ciklus-razina (TraderaEdge): tjedni close vs btc_key_level
       try {
         result.keyLevel = await getBtcWeeklyVsKey();
+      } catch {}
+
+      // Režim bota — CHILL / noćni blok / survival
+      try {
+        const _ch = await getBtcChillMode();
+        const _h = new Date().getUTCHours();
+        result.botMode = {
+          chill: _ch.chill, rangePct: _ch.rangePct,
+          night: _h >= 20 || _h < 6,
+          survival: true,
+          weekend: [0, 6].includes(new Date().getUTCDay()),
+        };
       } catch {}
 
       // Liquidity Hunt zones — Bitget vraća ascending (najstarija prva)

@@ -354,7 +354,7 @@ export async function getBtcWeeklyVsKey() {
 // CHILL mode". Bot analiza 7d: 23 tradea, -8 USDT dok je mentor odradio 2-3.
 // BTC 24h raspon < 2.5% → kripto minSig +1 i size ×0.7 (trguj rijetko i malo).
 let _chillCache = { chill: false, rangePct: null, ts: 0 };
-async function getBtcChillMode() {
+export async function getBtcChillMode() {
   if (Date.now() - _chillCache.ts < 15 * 60 * 1000) return _chillCache;
   try {
     const d = await fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1H&limit=24`).then(r => r.json());

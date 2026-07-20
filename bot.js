@@ -53,7 +53,8 @@ const SYMBOL_SECTORS = {
   "TAOUSDT":    "AI",    "RENDERUSDT": "AI",  "FETUSDT": "AI",
   "LINKUSDT":   "DEFI",  "AAVEUSDT": "DEFI", "HYPEUSDT": "DEFI",
   "DOGEUSDT":   "MEME",  "PEPEUSDT": "MEME",
-  "SUIUSDT":    "L1",    "WLDUSDT": "AI",
+  "SUIUSDT":    "L1",    "WLDUSDT": "AI", "VVVUSDT": "AI", "KAITOUSDT": "AI",
+  "INJUSDT":    "DEFI",
   // Dionice
   "TSLAUSDT":   "STOCK_TECH", "NVDAUSDT": "STOCK_TECH", "PLTRUSDT": "STOCK_TECH",
   "MSTRUSDT":   "STOCK_CRYPTO", "COINUSDT": "STOCK_CRYPTO", "HOODUSDT": "STOCK_CRYPTO",
@@ -138,6 +139,9 @@ export const SYMBOL_COMBOS = {
   "HYPEUSDT":   { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
   "WLDUSDT":    { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
   "PEPEUSDT":   { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
+  "INJUSDT":    { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
+  "VVVUSDT":    { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
+  "KAITOUSDT":  { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
   // ── Extra (dobar WR history) ────────────────────────────────────────────────
   "TAOUSDT":    { sigIdx: TE_COMBO, minSig: 4 },
   "AAVEUSDT":   { sigIdx: TE_COMBO, minSig: 4 },
@@ -5637,12 +5641,30 @@ export async function run() {
           }
         }
 
-        // ── Long/Short Ratio — squeeze detection ───────────────────────────────
+        // ── Long/Short Ratio — squeeze detection + WHALE alignment ─────────────
         // getLongShortRatio vraća { longRatio: "55.1", shortRatio: "44.9", trend } (Binance, %)
         // < 40% long = retail pretežno short = kontrarian LONG (short squeeze)
         // > 62% long = retail pretežno long  = kontrarian SHORT (long squeeze)
+        // + TraderaEdge AI Whale Summary logika: TOP traderi (position ratio) vs retail —
+        //   "top bullish + retail bearish = najjači long setup"
         let _squeezeMult = 1.0;
+        let _whaleMult = 1.0;
         if (pDef.strategy === "synapse_t") {
+          // Top-trader position ratio (Binance public, 30-min cache po simbolu)
+          try {
+            const _ttKey = `_tt_${symbol}`;
+            if (!global[_ttKey] || Date.now() - global[_ttKey].ts > 30 * 60 * 1000) {
+              const _tt = await fetch(`https://fapi.binance.com/futures/data/topLongShortPositionRatio?symbol=${symbol}&period=1h&limit=1`).then(r => r.json()).catch(() => null);
+              global[_ttKey] = { ratio: _tt?.[0]?.longShortRatio ? parseFloat(_tt[0].longShortRatio) : null, ts: Date.now() };
+            }
+            const _ttRatio = global[_ttKey].ratio;
+            if (_ttRatio !== null) {
+              if (signal === "LONG"  && _ttRatio >= 1.4) { _whaleMult = 1.2; console.log(`  🐋 [WHALE] ${symbol} — top traderi ${_ttRatio.toFixed(2)} L/S → LONG usklađen s kitovima ×1.2`); }
+              if (signal === "SHORT" && _ttRatio <= 0.7) { _whaleMult = 1.2; console.log(`  🐋 [WHALE] ${symbol} — top traderi ${_ttRatio.toFixed(2)} L/S → SHORT usklađen s kitovima ×1.2`); }
+              if (signal === "LONG"  && _ttRatio <= 0.7) { _whaleMult = 0.7; console.log(`  🐋 [WHALE] ${symbol} — top traderi SHORT (${_ttRatio.toFixed(2)}) a mi LONG → oprez ×0.7`); }
+              if (signal === "SHORT" && _ttRatio >= 1.4) { _whaleMult = 0.7; console.log(`  🐋 [WHALE] ${symbol} — top traderi LONG (${_ttRatio.toFixed(2)}) a mi SHORT → oprez ×0.7`); }
+            }
+          } catch {}
           const lsr = await getLongShortRatio(symbol);
           if (lsr) {
             const lr       = parseFloat(lsr.longRatio);   // npr. 55.1
@@ -5837,7 +5859,7 @@ export async function run() {
         // Ukupni size mult (macro + stable + vwap + oi) ne smije pasti ispod 0.5
         // — inače stack multiplikatora spusti rizik daleko ispod RISK_PCT_MIN
         const _rawMult   = (atrTrend?.sizeMult ?? 1) * (_oiSizeMult ?? 1) * (_vwapSizeMult ?? 1) * (_stableSizeMult ?? 1) * (_macroSizeMult ?? 1);
-        const _totalMult = Math.max(_rawMult, 0.5) * (_squeezeMult ?? 1);  // squeeze boost ide iznad floora
+        const _totalMult = Math.max(_rawMult, 0.5) * (_squeezeMult ?? 1) * (_whaleMult ?? 1);  // squeeze/whale idu iznad floora
         let tradeSize  = (riskAmount / (slPct / 100)) * _totalMult;
         if (_rawMult < 1) console.log(`  ⚖️  [MULT] ${symbol} — kombinirani mult ×${_rawMult.toFixed(2)}${_rawMult < 0.5 ? " → floor ×0.50" : ""}`);
         // Minimum: Bitget minTradeNum + $40 notional floor (margina ≥ ~$1 na 33-52x)

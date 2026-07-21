@@ -350,6 +350,24 @@ export async function getBtcWeeklyVsKey() {
   return _btcWeeklyKeyCache;
 }
 
+// BTC kraća trend-invalidacijska razina (odvojena od btc_key_level — ciklus linije).
+// TraderaEdge 23.07: "gubitak ove zone i pretvaranje u otpor = prvi ozbiljan signal
+// slabljenja trenda, fokus prebacujem na short". Dnevni close ispod = pooštri LONG.
+let _btcInvalCache = { belowInval: null, lastClose: null, level: null, ts: 0 };
+export async function getBtcDailyVsInvalidation() {
+  if (Date.now() - _btcInvalCache.ts < 15 * 60 * 1000 && _btcInvalCache.belowInval !== null) return _btcInvalCache;
+  try {
+    const level = JSON.parse(readFileSync("rules.json", "utf8")).btc_invalidation_level ?? null;
+    if (!level) return _btcInvalCache;
+    const d = await fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1Dutc&limit=2`).then(r => r.json());
+    if (d.code === "00000" && d.data?.length >= 1) {
+      const lastClose = parseFloat(d.data[d.data.length - 1][4]);
+      _btcInvalCache = { belowInval: lastClose < level, lastClose, level, ts: Date.now() };
+    }
+  } catch {}
+  return _btcInvalCache;
+}
+
 // ─── CHILL mode — mrtvo tržište (ljetni režim) ───────────────────────────────
 // TraderaEdge 14.07: "letnji režim, nizak volumen — nisam bio preterano aktivan,
 // CHILL mode". Bot analiza 7d: 23 tradea, -8 USDT dok je mentor odradio 2-3.
@@ -2408,6 +2426,9 @@ function analyzeUltra(candles, cfg) {
   // CHILL mode: mrtvo tržište → kripto traži +1 signal (dionice izuzete — ne prate BTC)
   const _chillBoost = (cfg._chillMode && !isStockSym(_sym)) ? 1 : 0;
   const MIN_CONFIRM = (_combo?.minSig ?? minSig) + _weekendBoost + _chillBoost;
+  // BTC trend-invalidacija: dnevni close ispod razine = prvi signal slabljenja → pooštri LONG
+  const _invalBoost = (cfg._invalBoost && !isStockSym(_sym)) ? 1 : 0;
+  const MIN_CONFIRM_LONG = MIN_CONFIRM + _invalBoost;
 
   // ══ OBAVEZNI GATEVI (3) ══
 
@@ -2579,7 +2600,7 @@ function analyzeUltra(candles, cfg) {
   const _newSigsBull = [sigPWHL===1?"PWL✓":"", sigMktStr===1?"MSTR✓":"", sigFVG===1?"FVG✓":""].filter(Boolean).join(" ");
   const _newSigsBear = [sigPWHL===-1?"PWH✓":"", sigMktStr===-1?"MSTR✓":"", sigFVG===-1?"FVG✓":""].filter(Boolean).join(" ");
 
-  if (bullScore >= MIN_CONFIRM && rsiLongOk) {
+  if (bullScore >= MIN_CONFIRM_LONG && rsiLongOk) {
     if (!vwapVal || vwapVal <= 0) {
       return { price, signal: "NEUTRAL", bullScore, bearScore,
         reason: `PBK LONG blokiran: VWAP nedostupan` };
@@ -5143,6 +5164,10 @@ export async function run() {
       const _chillSt = await getBtcChillMode();
       pDef.params._chillMode = _chillSt.chill;
       if (_chillSt.chill) console.log(`  😴 [CHILL] BTC 24h raspon ${_chillSt.rangePct}% < 2.5% — mrtvo tržište → kripto minSig +1, size ×0.7`);
+      // BTC trend-invalidacija (23.07.): dnevni close ispod razine → pooštri LONG (+1 minSig)
+      const _invalSt = await getBtcDailyVsInvalidation();
+      pDef.params._invalBoost = _invalSt.belowInval === true;
+      if (_invalSt.belowInval) console.log(`  ⚠️  [INVAL] BTC daily close $${_invalSt.lastClose?.toFixed(0)} < $${_invalSt.level} → trend slabi, kripto LONG +1 minSig`);
     }
 
     // ── 1. USDT.D proxy — Stablecoin Inflow/Outflow ──────────────────────────

@@ -13,7 +13,7 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   getDeribitPutCall, getLiquidationRisk, getEconEvents, isEconBlocked, calcVWAP,
   getLongShortRatio, getStablecoinInflow, getBtcPerpBasis, getAltcoinSeason,
   generateDailyReport, autoFixCsvFromBitget, SYMBOL_COMBOS,
-  getBtcWeeklyVsKey, getRelStrengthVsBtc, isStockSym, getBtcChillMode } from "./bot.js";
+  getBtcWeeklyVsKey, getRelStrengthVsBtc, isStockSym, getBtcChillMode, getBtcDailyVsInvalidation } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -1450,6 +1450,11 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div style="font-size:22px;font-weight:800" id="btc-key-val">—</div>
         <div style="font-size:10px;color:#9ca3af;margin-top:2px" id="btc-key-sub">tjedni close vs razina</div>
       </div>
+      <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px;text-align:center">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">Trend invalidacija</div>
+        <div style="font-size:22px;font-weight:800" id="btc-inval-val">—</div>
+        <div style="font-size:10px;color:#9ca3af;margin-top:2px" id="btc-inval-sub">dnevni close vs razina</div>
+      </div>
     </div>
   </div>
 <script>
@@ -1546,6 +1551,18 @@ window.toggleScanFilter = function(btn) {
         document.getElementById('btc-key-sub').textContent =
           'W-close $' + Math.round(kl.lastClose||0).toLocaleString() + ' vs $' + (kl.key/1000) + 'k' +
           (above ? ' · bulls vladaju' : ' · short režim');
+      }
+
+      // Trend invalidacija (kraći, dnevni signal)
+      const iv = d.invalLevel;
+      const ivEl = document.getElementById('btc-inval-val');
+      if (iv && iv.level && ivEl) {
+        const ok = iv.belowInval === false;
+        ivEl.textContent = ok ? '✅ zdravo' : '⚠️ slabi';
+        ivEl.style.color = ok ? '#059669' : '#f59e0b';
+        document.getElementById('btc-inval-sub').textContent =
+          'D-close $' + Math.round(iv.lastClose||0).toLocaleString() + ' vs $' + Math.round(iv.level).toLocaleString() +
+          (ok ? '' : ' · LONG +1 minSig');
       }
     } catch(e) {
       document.getElementById('btc-status-ts').textContent = 'Greška: ' + e.message;
@@ -4291,6 +4308,11 @@ const server = http.createServer(async (req, res) => {
       // Ključna ciklus-razina (TraderaEdge): tjedni close vs btc_key_level
       try {
         result.keyLevel = await getBtcWeeklyVsKey();
+      } catch {}
+
+      // Trend-invalidacijska razina (kraći, dnevni signal)
+      try {
+        result.invalLevel = await getBtcDailyVsInvalidation();
       } catch {}
 
       // Režim bota — CHILL / noćni blok / survival

@@ -5567,12 +5567,24 @@ export async function run() {
 
           // Korelacijski cap — max 3 kripto pozicije u ISTOM smjeru (08.07.: 6 istovremenih
           // longova = jedna BTC oklada plaćena 6 puta). BTC iznimka vrijedi, dionice izuzete.
+          // VIP slot (26.07.): score ≥ 7/8 dobiva +1 dodatni slot iznad limita — max 1 VIP
+          // istovremeno po smjeru, da ni "jaki" signali ne postanu novi izvor korelacije.
           if (!isStockSym(symbol) && symbol !== "BTCUSDT" && !openSymbols.includes(symbol)) {
-            const _sameDir = loadPositions(pid).filter(p => !isStockSym(p.symbol) && p.side === signal).length;
+            const _openCrypto = loadPositions(pid).filter(p => !isStockSym(p.symbol) && p.side === signal);
+            const _sameDir = _openCrypto.length;
             if (_sameDir >= MAX_SAME_DIR_CRYPTO) {
-              console.log(`  🔗 [SAME-DIR] ${symbol} — već ${_sameDir} kripto ${signal} pozicija (max ${MAX_SAME_DIR_CRYPTO}) → preskačem`);
-              _scanLogEntries.push({ symbol, signal: "SKIP", blocker: `SAME_DIR(${_sameDir}/${MAX_SAME_DIR_CRYPTO})`, reason: `Previše kripto ${signal} pozicija — korelacija` });
-              continue;
+              const _score = signal === "LONG" ? (result.bullScore ?? 0) : (result.bearScore ?? 0);
+              const _comboLen = SYMBOL_COMBOS[symbol]?.sigIdx?.length ?? 8;
+              const _vipEligible = _score >= 7 && _comboLen >= 8;
+              const _vipUsed = _openCrypto.some(p => p.vipSlot === true);
+              if (_vipEligible && !_vipUsed) {
+                console.log(`  ⭐ [VIP] ${symbol} — score ${_score}/${_comboLen} ≥ 7 → VIP slot (${_sameDir}/${MAX_SAME_DIR_CRYPTO}+1)`);
+                result._vipSlot = true;
+              } else {
+                console.log(`  🔗 [SAME-DIR] ${symbol} — već ${_sameDir} kripto ${signal} pozicija (max ${MAX_SAME_DIR_CRYPTO}) → preskačem`);
+                _scanLogEntries.push({ symbol, signal: "SKIP", blocker: `SAME_DIR(${_sameDir}/${MAX_SAME_DIR_CRYPTO})`, reason: `Previše kripto ${signal} pozicija — korelacija` });
+                continue;
+              }
             }
           }
 
@@ -6041,10 +6053,11 @@ export async function run() {
         const timestamp = new Date().toISOString();
         const orderId   = `${isLive ? "LIVE" : "PAPER"}-${Date.now()}`;
         const mode      = isLive ? (BITGET_DEMO ? "DEMO" : "LIVE") : "PAPER";
-        const entry = { symbol, signal, price, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode, sigMask: result.sigMask ?? null, entryMode: result.isMomentum ? "MOM" : "PBK", signalStrength };
+        const entry = { symbol, signal, price, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode, sigMask: result.sigMask ?? null, entryMode: result.isMomentum ? "MOM" : "PBK", signalStrength, vipSlot: result._vipSlot === true };
 
         const _strengthEmoji = signalStrength === "strong" ? "💪" : "📊";
         const _rrLabel = `RR 1:${(tpPct/slPct).toFixed(1)}`;
+        const _vipTag = entry.vipSlot ? " ⭐VIP" : "";
 
         if (!isLive) {
           addPosition(pid, entry);
@@ -6054,7 +6067,7 @@ export async function run() {
           // Dinamički leverage: zone-based SL → getSafeLeverage izračunava; tier SL → fiksni
           const _dynLev = slMethod === "tier" ? (symSltp.leverage ?? null) : null;
           const _displayLev = _dynLev ?? getSafeLeverage(slPct);
-          await tg(`📋 PAPER [${pDef.name}/${pDef.timeframe}] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b> ${_strengthEmoji}\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} (${slPct.toFixed(1)}%) | TP: ${fmtPrice(tp)} (${tpPct.toFixed(1)}%) | ${_rrLabel}\nEquity: $${equity.toFixed(2)} | Risk: $${riskAmount.toFixed(2)} | Notional: $${tradeSize.toFixed(0)} | Margin: $${margin.toFixed(2)} | ${_displayLev}x [${slMethod}]`);
+          await tg(`📋 PAPER [${pDef.name}/${pDef.timeframe}] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b> ${_strengthEmoji}${_vipTag}\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} (${slPct.toFixed(1)}%) | TP: ${fmtPrice(tp)} (${tpPct.toFixed(1)}%) | ${_rrLabel}\nEquity: $${equity.toFixed(2)} | Risk: $${riskAmount.toFixed(2)} | Notional: $${tradeSize.toFixed(0)} | Margin: $${margin.toFixed(2)} | ${_displayLev}x [${slMethod}]`);
         } else {
           try {
             const _dynLev = slMethod === "tier" ? (symSltp.leverage ?? null) : null;
@@ -6072,7 +6085,7 @@ export async function run() {
             writeEntryCsv(pid, entry);
             _newEntriesThisScan++;
             console.log(`  ✅ LIVE NALOG [${pDef.name}] — ${entry.orderId}`);
-            await tg(`🔴 LIVE [${pDef.name}/${pDef.timeframe}] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b> ${_strengthEmoji}\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} (${slPct.toFixed(1)}%) | TP: ${fmtPrice(tp)} (${tpPct.toFixed(1)}%) | ${_rrLabel}\nEquity: $${equity.toFixed(2)} | Risk: $${riskAmount.toFixed(2)} | Notional: $${tradeSize.toFixed(0)} | Margin: $${usedMargin.toFixed(2)} | ${usedLev}x`);
+            await tg(`🔴 LIVE [${pDef.name}/${pDef.timeframe}] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b> ${_strengthEmoji}${_vipTag}\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} (${slPct.toFixed(1)}%) | TP: ${fmtPrice(tp)} (${tpPct.toFixed(1)}%) | ${_rrLabel}\nEquity: $${equity.toFixed(2)} | Risk: $${riskAmount.toFixed(2)} | Notional: $${tradeSize.toFixed(0)} | Margin: $${usedMargin.toFixed(2)} | ${usedLev}x`);
           } catch (err) {
             console.log(`  ❌ LIVE NALOG PAO — ${err.message}`);
             await tg(`❌ LIVE GREŠKA [${pDef.name}] ${symbol}\n${err.message}`);

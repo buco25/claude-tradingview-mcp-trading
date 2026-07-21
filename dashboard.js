@@ -1379,29 +1379,21 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
 
   <!-- Stats bar -->
   <div class="stats-bar">
-    <div class="stat-card" style="border-top:3px solid #db2777">
-      <div class="stat-label">Equity <span style="font-size:10px;color:#9ca3af">(CSV)</span></div>
-      <div class="stat-value" style="color:${eqCol}">$${s.equity.toFixed(2)}</div>
-      <div class="stat-sub" style="color:${eqCol}">${pctStr}</div>
-    </div>
     <div class="stat-card" style="border-top:3px solid #d97706">
-      <div class="stat-label">Bitget balans <span style="font-size:10px;color:#9ca3af">(live)</span></div>
+      <div class="stat-label">Equity <span style="font-size:10px;color:#9ca3af">(Bitget live)</span></div>
       <div class="stat-value" id="bitget-bal" style="color:#d97706">…</div>
       <div class="stat-sub" id="bitget-unr" style="color:#9ca3af"></div>
+      <div class="stat-sub" style="color:${eqCol}">CSV: $${s.equity.toFixed(2)} (${pctStr})</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Net P&amp;L</div>
       <div class="stat-value" style="color:${pnlCol}">${s.totalPnl >= 0 ? "+" : ""}$${s.totalPnl.toFixed(2)}</div>
     </div>
-    <div class="stat-card">
-      <div class="stat-label">Win Rate <span style="font-size:10px;color:#9ca3af">(CSV)</span></div>
-      <div class="stat-value" style="color:${s.winRate !== null && parseFloat(s.winRate) >= 50 ? "#059669" : "#dc2626"}">${s.winRate !== null ? s.winRate + "%" : "—"}</div>
-      <div class="stat-sub">${s.wins.length}W / ${s.losses.length}L</div>
-    </div>
     <div class="stat-card" style="border-top:3px solid #8b5cf6">
       <div class="stat-label">Win Rate <span style="font-size:10px;color:#9ca3af">(Bitget live)</span></div>
       <div class="stat-value" id="bitget-wr" style="color:#8b5cf6">…</div>
       <div class="stat-sub" id="bitget-wr-sub" style="color:#9ca3af"></div>
+      <div class="stat-sub">CSV: ${s.winRate !== null ? s.winRate + "%" : "—"} (${s.wins.length}W/${s.losses.length}L)</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Otvoreno</div>
@@ -1461,6 +1453,14 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     </div>
   </div>
 <script>
+window.toggleScanFilter = function(btn) {
+  window._scanOnlySig = !window._scanOnlySig;
+  btn.style.color = window._scanOnlySig ? '#34d399' : '';
+  btn.textContent = window._scanOnlySig ? '✓ samo signali' : 'samo signali';
+  document.querySelectorAll('#scan-tbody tr[data-sig="0"]').forEach(function(r) {
+    r.style.display = window._scanOnlySig ? 'none' : '';
+  });
+};
 (function btcStatusCard() {
   async function load() {
     try {
@@ -1662,6 +1662,80 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
 
   <!-- Open positions — na vrhu za brzi pregled -->
   ${positionsSections}
+
+  <div class="scan-card">
+    <div class="scan-header">
+      <div>
+        <div class="chart-title" style="margin-bottom:2px">⚡ Scanner — ${ALL_SYMBOLS.length} simbola | Future combo, min 5/8 signala | ulaz na close 15m svijeće
+          &nbsp;<button id="scan-filter-btn" class="scan-btn" style="padding:2px 10px;font-size:11px" onclick="toggleScanFilter(this)">samo signali</button></div>
+        <div style="font-size:12px;color:var(--text-muted)">
+          Svi simboli (Future): E50+MACD+E145+PWHL+RDIV+MSTR+DEMA+LHUNT · min 5/8 (TAO/AAVE 4/8)
+          &nbsp;|&nbsp; 🟡 SETUP &nbsp; 🟢 Signal &nbsp; 🚀 Momentum &nbsp; Cache 90s &nbsp;|&nbsp;
+          <button onclick="toggleLegend()" style="background:none;border:1px solid #30363d;border-radius:4px;color:#9ca3af;font-size:11px;cursor:pointer;padding:2px 8px">📖 Legenda signala</button>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span id="scan-ts" style="font-size:12px;color:var(--text-muted)">—</span>
+        <button class="scan-btn" id="scan-btn" onclick="doScan()">🔄 Skeniraj</button>
+        <button class="scan-btn" style="border-color:#f85149;color:#f85149" onclick="resetAll()">🗑️ Reset SVE</button>
+        <button class="scan-btn" style="border-color:#db2777;color:#db2777" onclick="resetOne('synapse_t')">🎯 Reset ULTRA</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="scan-table" id="scan-table">
+        <thead>
+          <tr>
+            <th style="width:24px">#</th>
+            <th>Symbol</th>
+            <th>Cijena</th>
+            <th style="color:#d97706;text-align:center">1H</th>
+            <th style="color:#d97706;text-align:center">4OB <span style="font-weight:400;font-size:10px;color:#94a3b8">ADX·6Sc·RSI·VWAP</span></th>
+            <th style="color:#db2777;text-align:center">6 Signala</th>
+            <th style="color:#db2777;text-align:center;width:60px">↑↓</th>
+            <th style="min-width:160px">Status</th>
+          </tr>
+        </thead>
+        <tbody id="scan-tbody">
+          <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted)">Klikni "Skeniraj" za prikaz ULTRA signala</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Signal legend (collapsible) -->
+  <div id="sig-legend" style="display:none;margin-top:12px">
+    <div class="chart-card" style="padding:16px 20px">
+      <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — Future combo · gate-ovi (ADX/VOL) + 8 signala · min 5/8 za ulaz (TAO/AAVE 4/8)</div>
+      <div style="margin-bottom:10px;font-size:11px;color:#f59e0b;background:#2d2000;border:1px solid #d97706;border-radius:6px;padding:8px 12px">
+        ⚙️ <b>GATEVI (obvezni — blokiraju neovisno o score-u):</b>
+        &nbsp; ADX ≥ 22 (trend jačina) &nbsp;·&nbsp; VOL_EXH (volumen ispod threshold-a) &nbsp;·&nbsp; VWAP cross/rejection (cijena na ispravnoj strani)
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:8px;font-size:12px">
+        ${[
+          ['E50↑',  '▲ Cijena > EMA50 → trend bullish  |  ▼ Cijena < EMA50 → trend bearish'],
+          ['CVD↑',  '▲ CVD > 0 → kupci dominiraju volumenom (zadnjih 20 bara)  |  ▼ prodavači dominiraju'],
+          ['MACD',  '▲ MACD histogram > 0 → momentum gore  |  ▼ histogram < 0 → momentum dolje'],
+          ['E145',  '▲ Cijena > EMA145 → dugoročni bull trend  |  ▼ ispod EMA145 → bear'],
+          ['PWHL',  '▲ Sweep ispod prošlotjednog Low + zatvorena svjeća natrag iznad → LONG  |  ▼ Sweep iznad PWH + zatvorena ispod → SHORT  |  · van zone'],
+          ['RDIV',  '▲ RSI bullish divergencija (cijena LL, RSI HL) → iscrpljeni selleri  |  ▼ bearish div (cijena HH, RSI LH) → iscrpljeni buyeri'],
+          ['MSTR',  '▲ HH + HL = uptrend struktura (zadnjih 60 bara)  |  ▼ LL + LH = downtrend  |  · nejasna struktura'],
+          ['FVG',   '▲ Bullish Fair Value Gap — cijena u nezapunjenoj gap zoni  |  ▼ Bearish FVG — gap resistance  |  · nema FVG'],
+        ].map(([k,v]) =>
+          '<div style="background:#2d3748;border:1px solid #374151;border-radius:6px;padding:8px 10px">' +
+          '<span style="font-weight:800;color:#db2777;font-size:11px;display:inline-block;min-width:44px">' + k + '</span>' +
+          '<span style="color:#9ca3af">' + v + '</span></div>'
+        ).join('')}
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:#94a3b8">
+        🟢 Zeleno = bullish signal aktiviran &nbsp;|&nbsp; 🔴 Crveno = bearish &nbsp;|&nbsp; ⬛ Sivo = neutral/nema signala &nbsp;|&nbsp;
+        Min <b style="color:#db2777">6/8</b> signala · SL <b style="color:#d97706">1.5–3%</b> / TP <b style="color:#d97706">2.25–4.5%</b> po simbolu · rizik <b>1.5%</b> po tradeu
+      </div>
+    </div>
+  </div>
+
+  <!-- Closed trades -->
+  <div style="margin-top:40px">
+
 
   <!-- ── Phase 2 Stats Panel (od 15.5 = stabilna strategija) ──────────────── -->
   ${(() => {
@@ -1962,77 +2036,6 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
   </div>
 
   <!-- Live Scanner ULTRA -->
-  <div class="scan-card">
-    <div class="scan-header">
-      <div>
-        <div class="chart-title" style="margin-bottom:2px">⚡ Scanner — ${ALL_SYMBOLS.length} simbola | Future combo, min 5/8 signala | ulaz na close 15m svijeće</div>
-        <div style="font-size:12px;color:var(--text-muted)">
-          Svi simboli (Future): E50+MACD+E145+PWHL+RDIV+MSTR+DEMA+LHUNT · min 5/8 (TAO/AAVE 4/8)
-          &nbsp;|&nbsp; 🟡 SETUP &nbsp; 🟢 Signal &nbsp; 🚀 Momentum &nbsp; Cache 90s &nbsp;|&nbsp;
-          <button onclick="toggleLegend()" style="background:none;border:1px solid #30363d;border-radius:4px;color:#9ca3af;font-size:11px;cursor:pointer;padding:2px 8px">📖 Legenda signala</button>
-        </div>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <span id="scan-ts" style="font-size:12px;color:var(--text-muted)">—</span>
-        <button class="scan-btn" id="scan-btn" onclick="doScan()">🔄 Skeniraj</button>
-        <button class="scan-btn" style="border-color:#f85149;color:#f85149" onclick="resetAll()">🗑️ Reset SVE</button>
-        <button class="scan-btn" style="border-color:#db2777;color:#db2777" onclick="resetOne('synapse_t')">🎯 Reset ULTRA</button>
-      </div>
-    </div>
-    <div class="table-wrap">
-      <table class="scan-table" id="scan-table">
-        <thead>
-          <tr>
-            <th style="width:24px">#</th>
-            <th>Symbol</th>
-            <th>Cijena</th>
-            <th style="color:#d97706;text-align:center">1H</th>
-            <th style="color:#d97706;text-align:center">4OB <span style="font-weight:400;font-size:10px;color:#94a3b8">ADX·6Sc·RSI·VWAP</span></th>
-            <th style="color:#db2777;text-align:center">6 Signala</th>
-            <th style="color:#db2777;text-align:center;width:60px">↑↓</th>
-            <th style="min-width:160px">Status</th>
-          </tr>
-        </thead>
-        <tbody id="scan-tbody">
-          <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted)">Klikni "Skeniraj" za prikaz ULTRA signala</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- Signal legend (collapsible) -->
-  <div id="sig-legend" style="display:none;margin-top:12px">
-    <div class="chart-card" style="padding:16px 20px">
-      <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — Future combo · gate-ovi (ADX/VOL) + 8 signala · min 5/8 za ulaz (TAO/AAVE 4/8)</div>
-      <div style="margin-bottom:10px;font-size:11px;color:#f59e0b;background:#2d2000;border:1px solid #d97706;border-radius:6px;padding:8px 12px">
-        ⚙️ <b>GATEVI (obvezni — blokiraju neovisno o score-u):</b>
-        &nbsp; ADX ≥ 22 (trend jačina) &nbsp;·&nbsp; VOL_EXH (volumen ispod threshold-a) &nbsp;·&nbsp; VWAP cross/rejection (cijena na ispravnoj strani)
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:8px;font-size:12px">
-        ${[
-          ['E50↑',  '▲ Cijena > EMA50 → trend bullish  |  ▼ Cijena < EMA50 → trend bearish'],
-          ['CVD↑',  '▲ CVD > 0 → kupci dominiraju volumenom (zadnjih 20 bara)  |  ▼ prodavači dominiraju'],
-          ['MACD',  '▲ MACD histogram > 0 → momentum gore  |  ▼ histogram < 0 → momentum dolje'],
-          ['E145',  '▲ Cijena > EMA145 → dugoročni bull trend  |  ▼ ispod EMA145 → bear'],
-          ['PWHL',  '▲ Sweep ispod prošlotjednog Low + zatvorena svjeća natrag iznad → LONG  |  ▼ Sweep iznad PWH + zatvorena ispod → SHORT  |  · van zone'],
-          ['RDIV',  '▲ RSI bullish divergencija (cijena LL, RSI HL) → iscrpljeni selleri  |  ▼ bearish div (cijena HH, RSI LH) → iscrpljeni buyeri'],
-          ['MSTR',  '▲ HH + HL = uptrend struktura (zadnjih 60 bara)  |  ▼ LL + LH = downtrend  |  · nejasna struktura'],
-          ['FVG',   '▲ Bullish Fair Value Gap — cijena u nezapunjenoj gap zoni  |  ▼ Bearish FVG — gap resistance  |  · nema FVG'],
-        ].map(([k,v]) =>
-          '<div style="background:#2d3748;border:1px solid #374151;border-radius:6px;padding:8px 10px">' +
-          '<span style="font-weight:800;color:#db2777;font-size:11px;display:inline-block;min-width:44px">' + k + '</span>' +
-          '<span style="color:#9ca3af">' + v + '</span></div>'
-        ).join('')}
-      </div>
-      <div style="margin-top:10px;font-size:11px;color:#94a3b8">
-        🟢 Zeleno = bullish signal aktiviran &nbsp;|&nbsp; 🔴 Crveno = bearish &nbsp;|&nbsp; ⬛ Sivo = neutral/nema signala &nbsp;|&nbsp;
-        Min <b style="color:#db2777">6/8</b> signala · SL <b style="color:#d97706">1.5–3%</b> / TP <b style="color:#d97706">2.25–4.5%</b> po simbolu · rizik <b>1.5%</b> po tradeu
-      </div>
-    </div>
-  </div>
-
-  <!-- Closed trades -->
-  <div style="margin-top:40px">
     ${tradesSections}
   </div>
 
@@ -2597,7 +2600,8 @@ async function doScan() {
       }
 
 
-      return '<tr style="' + rowBg + '">' +
+      var _hasSig = ['LONG','SHORT','MOM↑','MOM↓','SETUP↑','SETUP↓'].includes(s.ultraSig) || s.pending ? '1' : '0';
+      return '<tr data-sig="' + _hasSig + '" style="' + rowBg + ((window._scanOnlySig && _hasSig === '0') ? ';display:none' : '') + '">' +
         '<td style="color:#94a3b8;font-size:11px;text-align:center;padding:6px 4px">' + (i+1) + '</td>' +
         '<td style="font-weight:800;font-size:13px;white-space:nowrap;padding:6px 8px">' + s.symbol.replace("USDT","") + '<span style="color:#94a3b8;font-size:10px;font-weight:400">USDT</span>' +
           (s.relStr ? ' <span title="Relativna snaga vs BTC (7d ratio vs EMA20): ' + s.relStr + ' — LONG samo STRONG, SHORT samo WEAK" style="font-size:10px">' + (s.relStr === 'STRONG' ? '💪' : '🐌') + '</span>' : '') +

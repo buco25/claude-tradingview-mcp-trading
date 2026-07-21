@@ -4230,11 +4230,15 @@ function getSafeLeverage(slPct) {
   // Redoslijed okidanja MORA biti: soft SL (slPct) → ghost SL (slPct+0.5%) → liq
   // 05.07.2026: buffer 0.4% bio pretanak — liq je padala NA/PRIJE ghost SL-a
   // (fees + funding + spread jedu marginu) → 6 likvidacija preko noći.
-  // Novi buffer: liq minimalno SL + 1.2% (ghost +0.5% ostaje sigurno unutra).
+  // Buffer: liq minimalno SL + 1.2% (ghost +0.5% ostaje sigurno unutra).
+  // 22.07.2026: dinamički cap (TraderaEdge model) — visok leverage SAMO uz uzak stop:
+  //   SL ≤ 1% (SWEEP/zone ulazi) → do 50x | SL > 1% → do 30x
+  //   Rizik u dolarima identičan (risk-based sizing) — samo manja zaključana margina.
   const SAFETY = 0.012;  // 1.2% = ghost offset 0.5% + maintenance ~0.4% + fees/spread rezerva
   const maxLev = 1 / (slPct / 100 + SAFETY);
-  return Math.max(5, Math.min(30, Math.floor(maxLev)));
-  // Provjera: SL1.5%→30x(cap) SL2%→31→30x SL2.5%→27x(liq@3.7%) SL3%→23x(liq@4.3%)
+  const cap = slPct <= 1.0 ? 50 : 30;
+  return Math.max(5, Math.min(cap, Math.floor(maxLev)));
+  // Provjera: SL0.7%→50x(liq@1.9%) SL1%→45x(liq@2.2%) SL2%→30x(cap) SL2.5%→27x(liq@3.7%)
 }
 
 async function setupSymbol(symbol, slPct, preferredLeverage = null) {

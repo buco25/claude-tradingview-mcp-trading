@@ -5218,7 +5218,9 @@ export async function run() {
         // (signal još nije poznat ovdje, provjerava se ispod nakon analize)
         // Placeholder: ako smjer ne odgovara, skip odmah u analizi
         const pyramidCount = existingPosList.length;
-        if (pyramidCount >= MAX_PYRAMID) {
+        // BTC VIP iznimka (26.07.): score se provjerava kasnije nakon analize — ovdje
+        // samo BTC-u dopuštamo proći dalje i kad je normalni pyramid limit dosegnut.
+        if (pyramidCount >= MAX_PYRAMID && symbol !== BTC_EXCEPTION) {
           console.log(`  ⏭️  [${pDef.name}] ${symbol} — max pyramid (${pyramidCount}/${MAX_PYRAMID}) dostignut, preskačem`);
           continue;
         }
@@ -5467,7 +5469,20 @@ export async function run() {
           }
         }
         if (existingPos && existingPos.side === signal) {
-          console.log(`  🔺 [PYRAMID] ${symbol} ${signal} — adicija ${existingPosList.length + 1}/${MAX_PYRAMID} u trendu`);
+          // BTC VIP pyramid (26.07.): score >=7/8 dobiva dodatnu adiciju iznad MAX_PYRAMID
+          if (existingPosList.length >= MAX_PYRAMID) {
+            const _pyScore = signal === "LONG" ? (result.bullScore ?? 0) : (result.bearScore ?? 0);
+            const _pyComboLen = SYMBOL_COMBOS[symbol]?.sigIdx?.length ?? 8;
+            if (symbol === BTC_EXCEPTION && _pyScore >= 7 && _pyComboLen >= 8) {
+              console.log(`  ⭐ [VIP PYRAMID] ${symbol} ${signal} — score ${_pyScore}/${_pyComboLen} ≥ 7 → dodatna adicija ${existingPosList.length + 1} iznad limita`);
+              result._vipSlot = true;
+            } else {
+              console.log(`  ⏭️  [${pDef.name}] ${symbol} — max pyramid (${existingPosList.length}/${MAX_PYRAMID}) dostignut, preskačem`);
+              continue;
+            }
+          } else {
+            console.log(`  🔺 [PYRAMID] ${symbol} ${signal} — adicija ${existingPosList.length + 1}/${MAX_PYRAMID} u trendu`);
+          }
         }
 
         // RE-ENTRY marker — loguj i očisti queue ako smjer odgovara

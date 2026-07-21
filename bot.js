@@ -56,7 +56,7 @@ const SYMBOL_SECTORS = {
   "TAOUSDT":    "AI",    "RENDERUSDT": "AI",  "FETUSDT": "AI",
   "LINKUSDT":   "DEFI",  "AAVEUSDT": "DEFI", "HYPEUSDT": "DEFI",
   "DOGEUSDT":   "MEME",  "PEPEUSDT": "MEME",
-  "SUIUSDT":    "L1",    "WLDUSDT": "AI", "VVVUSDT": "AI", "KAITOUSDT": "AI",
+  "SUIUSDT":    "L1",    "WLDUSDT": "AI", "VVVUSDT": "AI", "KAITOUSDT": "AI", "VIRTUALUSDT": "AI",
   "INJUSDT":    "DEFI",
   // Dionice
   "TSLAUSDT":   "STOCK_TECH", "NVDAUSDT": "STOCK_TECH", "PLTRUSDT": "STOCK_TECH",
@@ -145,6 +145,7 @@ export const SYMBOL_COMBOS = {
   "INJUSDT":    { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
   "VVVUSDT":    { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
   "KAITOUSDT":  { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
+  "VIRTUALUSDT": { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
   // ── Extra (dobar WR history) ────────────────────────────────────────────────
   "TAOUSDT":    { sigIdx: TE_COMBO, minSig: 4 },
   "AAVEUSDT":   { sigIdx: TE_COMBO, minSig: 4 },
@@ -2588,6 +2589,16 @@ function analyzeUltra(candles, cfg) {
       return { price, signal: "NEUTRAL", bullScore, bearScore, vwap: vwapVal,
         reason: `PBK LONG blokiran: nema VWAP crossover potvrde (cijena ${vd}% od VWAP)` };
     }
+    // Zone confluence (TG 21.07. Korak #2: "ne juri market cenu — čekaj da market dođe tebi")
+    // Trend LONG samo uz potporu: 15m pivot sup ili HTF zona unutar 1.5% ispod/na cijeni
+    {
+      const _confL = [nearSup, cfg._pwl, _monthlyLow, _weeklyOpen, _monthlyOpen, _fridayClose, _yearlyOpen, cfg._keyLevel]
+        .filter(v => v != null && v > 0 && v <= price * 1.002);
+      if (!_confL.some(l => (price - l) / price <= 0.015)) {
+        return { price, signal: "NEUTRAL", bullScore, bearScore, nearSup, nearRes, vwap: vwapVal,
+          reason: `PBK LONG blokiran: cijena nije uz potporu — ne jurimo, čekamo zonu` };
+      }
+    }
     const sigMask = sigs.reduce((mask, v, i) => v === 1 ? mask | (1 << i) : mask, 0);
     return { price, signal: "LONG", bullScore, bearScore, sigMask,
       nearSup, nearRes, vwap: vwapVal,
@@ -2602,6 +2613,15 @@ function analyzeUltra(candles, cfg) {
       const vd = ((price - vwapVal) / vwapVal * 100).toFixed(1);
       return { price, signal: "NEUTRAL", bullScore, bearScore, vwap: vwapVal,
         reason: `PBK SHORT blokiran: nema VWAP crossover potvrde (cijena ${vd}% od VWAP)` };
+    }
+    // Zone confluence — trend SHORT samo uz otpor (15m pivot res ili HTF zona ≤1.5% iznad)
+    {
+      const _confS = [nearRes, cfg._pwh, _monthlyHigh, _weeklyOpen, _monthlyOpen, _fridayClose, _yearlyOpen, cfg._keyLevel]
+        .filter(v => v != null && v > 0 && v >= price * 0.998);
+      if (!_confS.some(l => (l - price) / price <= 0.015)) {
+        return { price, signal: "NEUTRAL", bullScore, bearScore, nearSup, nearRes, vwap: vwapVal,
+          reason: `PBK SHORT blokiran: cijena nije uz otpor — ne jurimo, čekamo zonu` };
+      }
     }
     return { price, signal: "SHORT", bullScore, bearScore,
       nearSup, nearRes, vwap: vwapVal,

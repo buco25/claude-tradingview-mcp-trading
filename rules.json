@@ -33,7 +33,8 @@
     "PEPEUSDT",
     "INJUSDT",
     "VVVUSDT",
-    "KAITOUSDT"
+    "KAITOUSDT",
+    "VIRTUALUSDT"
   ],
   "portfolio_timeframes": {
     "synapse_t": "15m"

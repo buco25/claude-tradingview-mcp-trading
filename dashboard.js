@@ -1672,6 +1672,7 @@ window.toggleScanFilter = function(btn) {
           Svi simboli (Future): E50+MACD+E145+PWHL+RDIV+MSTR+DEMA+LHUNT · min 5/8 (TAO/AAVE 4/8)
           &nbsp;|&nbsp; 🟡 SETUP &nbsp; 🟢 Signal &nbsp; 🚀 Momentum &nbsp; Cache 90s &nbsp;|&nbsp;
           <button onclick="toggleLegend()" style="background:none;border:1px solid #30363d;border-radius:4px;color:#9ca3af;font-size:11px;cursor:pointer;padding:2px 8px">📖 Legenda signala</button>
+          <button onclick="toggleStrategije()" style="background:none;border:1px solid #6366f1;border-radius:4px;color:#a5b4fc;font-size:11px;cursor:pointer;padding:2px 8px">🎓 Strategije</button>
         </div>
       </div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -1699,6 +1700,56 @@ window.toggleScanFilter = function(btn) {
           <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted)">Klikni "Skeniraj" za prikaz ULTRA signala</td></tr>
         </tbody>
       </table>
+    </div>
+  </div>
+
+  <!-- Strategije (collapsible) -->
+  <div id="strat-panel" style="display:none;margin-top:12px">
+    <div class="chart-card" style="padding:18px 22px">
+      <div class="chart-title" style="margin-bottom:14px">🎓 Naše 4 strategije — market-state router (TraderaEdge arhitektura)</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">
+        Bot na svakom 15m closeu klasificira stanje marketa po simbolu i bira strategiju.
+        Sve strategije dijele iste zaštite: rizik 1% banke, break-even @ +1R, partial $1, trail 1% ispod vrha, time-stop 12h.
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px">
+        <div style="background:var(--bg-secondary);border:1px solid var(--border);border-left:3px solid #34d399;border-radius:10px;padding:14px">
+          <div style="font-weight:800;margin-bottom:6px">📈 TREND (pullback) <span style="font-size:10px;color:var(--text-muted)">· ADX ≥ 22</span></div>
+          <div style="font-size:12px;color:var(--text-muted);line-height:1.6">
+            Ulaz u smjeru trenda na povlačenju do zone. Treba <b>min 5/8 signala</b> (E50, MACD, E145, PWHL, RDIV, MSTR, DEMA, LHUNT)
+            + VWAP potvrda + <b>confluence</b>: cijena unutar 1.5% potpore/otpora ("ne jurimo cijenu").
+            SL: HTF zona → 15m pivot → ATR. TP 1:2 (JAKO režim 1:3). Leverage do 30x.
+          </div>
+        </div>
+        <div style="background:var(--bg-secondary);border:1px solid var(--border);border-left:3px solid #7dd3fc;border-radius:10px;padding:14px">
+          <div style="font-weight:800;margin-bottom:6px">🚀 MOMENTUM (breakout) <span style="font-size:10px;color:var(--text-muted)">· ADX ≥ 18</span></div>
+          <div style="font-size:12px;color:var(--text-muted);line-height:1.6">
+            Proboj s VWAP crossoverom i jakim volumenom — jedina strategija koja smije "juriti".
+            Viši prag signala jer je rizičnija od pullbacka. Daily EMA10 mora biti na strani trejda (Smart Hub konfirmacija).
+          </div>
+        </div>
+        <div style="background:var(--bg-secondary);border:1px solid var(--border);border-left:3px solid #fcd34d;border-radius:10px;padding:14px">
+          <div style="font-weight:800;margin-bottom:6px">🎪 RANGE / Smart Hub <span style="font-size:10px;color:var(--text-muted)">· ADX &lt; 22 (zona)</span></div>
+          <div style="font-size:12px;color:var(--text-muted);line-height:1.6">
+            Kad trenda nema: bounce s donjeg ruba zone (RSI &lt; 45 i okreće gore) ili rejection s gornjeg (RSI &gt; 55).
+            Zona = potvrđeni S/R pivoti, širina 1.5–8%. SL iza ruba, TP na suprotnom rubu (min 1:1.5).
+            Izuzeta od BTC regime filtera — zonska trgovina je kontra-trend po prirodi.
+          </div>
+        </div>
+        <div style="background:var(--bg-secondary);border:1px solid var(--border);border-left:3px solid #c4b5fd;border-radius:10px;padding:14px">
+          <div style="font-weight:800;margin-bottom:6px">🏹 LIQUIDITY HUNT (sweep) <span style="font-size:10px;color:var(--text-muted)">· bilo koji ADX</span></div>
+          <div style="font-size:12px;color:var(--text-muted);line-height:1.6">
+            Skidanje likvidnosti s HTF zone (PWL/PWH, monthly/weekly/yearly open, Friday close, 60k) u zadnjih 48h
+            + <b>reclaim</b> natrag preko zone + RSI okreće → kontra ulaz. SL iza sweep ekstrema (0.6–4%).
+            TP 1:2. Uski stop → leverage do <b>50x</b>. TraderaEdge: "u zadnjem low impulsa stavi stop loss".
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:14px;font-size:11px;color:var(--text-muted);background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:10px 14px;line-height:1.7">
+        <b>🛡️ Zaštitni slojevi (svi ulazi):</b> DEMA gate (LONG samo iznad daily EMA10) · BTC dEMA10 globalno za altove ·
+        Strong/Weak vs BTC (💪 long / 🐌 short) · 60k tjedna razina (kripto short tek ispod) · 🐋 whale alignment (×1.2/×0.7) ·
+        day range (LONG blok &gt;80% dana) · max 3 kripto istog smjera · cooldowni (smjer 4h / simbol 24h) ·
+        noćni blok 22–08h · vikend minSig+1 · CHILL mode (BTC raspon &lt;2.5% → minSig+1, size ×0.7) · dnevni loss limit 3%.
+      </div>
     </div>
   </div>
 
@@ -2087,6 +2138,10 @@ window.toggleScanFilter = function(btn) {
 })();
 
 // ── Legend toggle ─────────────────────────────────────────────────────────────
+function toggleStrategije() {
+  const el = document.getElementById('strat-panel');
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
 function toggleLegend() {
   const el = document.getElementById('sig-legend');
   if (!el) return;

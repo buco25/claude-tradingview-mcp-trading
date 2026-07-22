@@ -5905,10 +5905,22 @@ export async function run() {
 
         // SL/TP — S/R-based (zadnji pivot ispod/iznad cijene) + ATR fallback + tier guardrails
         const symSltp = rules.symbol_sltp?.[symbol] || {};
+        // ATR-vezani strop (27.07.): analiza 57 tradeova pokazala 56% pomaka cijene
+        // 1.5-3%, dok je min TP cilj bio 5%+ — geometrijski nedostižan u ovom volumenu.
+        // Tier max se sada skalira prema stvarnoj ATR% (ne fiksnih +1%/+2%), dodatno
+        // suženo u CHILL modu (tanko tržište → još manji dosežni ciljevi).
+        const _atrPctRaw = (atrTrend?.currentAtr && price > 0) ? (atrTrend.currentAtr / price * 100) : null;
+        const _chillTight = pDef.params._chillMode && !isStockSym(symbol);
+        const _atrSlCap  = _atrPctRaw != null ? Math.max(0.8, _atrPctRaw * (_chillTight ? 1.5 : 2.2)) : null;
         const tierSlMin = symSltp.slPct ?? 1.0;        // floor: ne smije biti manji od tier SL
-        const tierSlMax = (symSltp.slPct ?? SL_PCT) + 1.0;  // cap: ne smije biti veći od tier SL + 1%
+        const tierSlMax = _atrSlCap != null
+          ? Math.min((symSltp.slPct ?? SL_PCT) + 1.0, Math.max(tierSlMin, _atrSlCap))
+          : (symSltp.slPct ?? SL_PCT) + 1.0;  // cap: ne smije biti veći od tier SL + 1% (ili ATR strop ako je uži)
         const tierTpMin = symSltp.tpPct ?? 1.5;
-        const tierTpMax = (symSltp.tpPct ?? TP_PCT) + 2.0;
+        const tierTpMax = _atrSlCap != null
+          ? Math.min((symSltp.tpPct ?? TP_PCT) + 2.0, Math.max(tierTpMin, tierSlMax * 2.2))
+          : (symSltp.tpPct ?? TP_PCT) + 2.0;
+        if (_atrPctRaw != null) console.log(`  📏 [ATR-CAP] ${symbol} — ATR ${_atrPctRaw.toFixed(2)}% → SL max ${tierSlMax.toFixed(2)}% / TP max ${tierTpMax.toFixed(2)}%${_chillTight?" (CHILL suženo)":""}`);
         const SR_BUFFER = 0.003;  // 0.3% buffer ispod supporta / iznad resistancea
 
         let slPct, tpPct, sl, tp;
@@ -6022,7 +6034,9 @@ export async function run() {
         if (!_rsiOkForStrong) console.log(`  ⚠️  [RSI-4H] ${symbol} — BTC 4H RSI ${_rsi4h.toFixed(1)} ekstrem → nije JAKO (TP ×2, standardni rizik)`);
         if (_rsiOkForStrong && !_weeklyOkForStrong) console.log(`  ⚠️  [W-EMA] ${symbol} — tjedna makro-faza suprotna signalu → nije JAKO (TP ×2, standardni rizik)`);
         const _tpMult     = _isStrong ? STRONG_TP_MULT : NORMAL_TP_MULT;
-        const _dynTpPct   = slPct * _tpMult;
+        // ATR strop vrijedi i ovdje — JAKO x3 inače napuhne TP preko dosežnog raspona
+        // (isti razlog kao gore: 56% tradeova pomakne cijenu samo 1.5-3%)
+        const _dynTpPct   = _atrSlCap != null ? Math.min(slPct * _tpMult, tierTpMax) : slPct * _tpMult;
         const signalStrength = _isStrong ? "strong" : "normal";
 
         if (_dynTpPct > tpPct && !result._tpPrice) {  // RANGE/SWEEP TP je vezan uz zonu — ne rastezati

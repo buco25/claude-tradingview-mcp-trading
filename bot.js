@@ -5954,7 +5954,11 @@ export async function run() {
           //    monthly low, weekly/monthly open...), dublje i teže za sweep od 15m pivota.
           //    Najbliža zona ispod cijene (LONG) / iznad (SHORT), do max 4% udaljenosti.
           if (slMethod === "tier" && result._zonesSL) {
-            const HTF_SL_MAX = 4.0;
+            // 28.07.: HTF_SL_MAX je bio fiksan 4% neovisno o ATR-u — ALGO trade s SL 3.7%
+            // dok je ATR cap nalagao ~0.8% otkrio rupu. Sad zona mora poštivati isti ATR
+            // strop kao i tier/S-R putevi (tierSlMax), inače prava zona vrijedi kao izuzetak
+            // samo do 4% ako je ATR cap širi (npr. u volatilnijem tržištu).
+            const HTF_SL_MAX = Math.min(4.0, tierSlMax);
             const _z = result._zonesSL;
             const _htfCands = (signal === "LONG"
               ? [_z.pwl, _z.monthlyLow, _z.weeklyOpen, _z.monthlyOpen, _z.fridayClose, _z.yearlyOpen].filter(v => v != null && v > 0 && v < price).sort((a, b) => b - a)

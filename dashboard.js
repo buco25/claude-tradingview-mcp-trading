@@ -13,7 +13,7 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   getDeribitPutCall, getLiquidationRisk, getEconEvents, isEconBlocked, calcVWAP,
   getLongShortRatio, getStablecoinInflow, getBtcPerpBasis, getAltcoinSeason,
   generateDailyReport, autoFixCsvFromBitget, SYMBOL_COMBOS,
-  getBtcWeeklyVsKey, getRelStrengthVsBtc, isStockSym, getBtcChillMode, getBtcDailyVsInvalidation } from "./bot.js";
+  getBtcWeeklyVsKey, getRelStrengthVsBtc, isStockSym, getBtcChillMode, getBtcDailyVsInvalidation, getBtcWeeklyEmaPhase } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -1455,6 +1455,11 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div style="font-size:22px;font-weight:800" id="btc-inval-val">—</div>
         <div style="font-size:10px;color:#9ca3af;margin-top:2px" id="btc-inval-sub">dnevni close vs razina</div>
       </div>
+      <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px;text-align:center">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">Tjedna makro-faza</div>
+        <div style="font-size:22px;font-weight:800" id="btc-wema-val">—</div>
+        <div style="font-size:10px;color:#9ca3af;margin-top:2px" id="btc-wema-sub">W-EMA10 vs W-EMA20</div>
+      </div>
     </div>
   </div>
 <script>
@@ -1563,6 +1568,16 @@ window.toggleScanFilter = function(btn) {
         document.getElementById('btc-inval-sub').textContent =
           'D-close $' + Math.round(iv.lastClose||0).toLocaleString() + ' vs $' + Math.round(iv.level).toLocaleString() +
           (ok ? '' : ' · LONG +1 minSig');
+      }
+
+      // Tjedna makro-faza (automatski EMA10/EMA20 cross)
+      const we = d.weeklyEma;
+      const weEl = document.getElementById('btc-wema-val');
+      if (we && we.ema10 && weEl) {
+        weEl.textContent = we.bullPhase ? '🐂 BULL' : '🐻 BEAR';
+        weEl.style.color = we.bullPhase ? '#059669' : '#dc2626';
+        document.getElementById('btc-wema-sub').textContent =
+          'E10 $' + Math.round(we.ema10).toLocaleString() + (we.bullPhase ? ' > ' : ' < ') + 'E20 $' + Math.round(we.ema20).toLocaleString();
       }
     } catch(e) {
       document.getElementById('btc-status-ts').textContent = 'Greška: ' + e.message;
@@ -4313,6 +4328,11 @@ const server = http.createServer(async (req, res) => {
       // Trend-invalidacijska razina (kraći, dnevni signal)
       try {
         result.invalLevel = await getBtcDailyVsInvalidation();
+      } catch {}
+
+      // Tjedna makro-faza (automatski EMA10/EMA20 cross)
+      try {
+        result.weeklyEma = await getBtcWeeklyEmaPhase();
       } catch {}
 
       // Režim bota — CHILL / noćni blok / survival

@@ -350,6 +350,26 @@ export async function getBtcWeeklyVsKey() {
   return _btcWeeklyKeyCache;
 }
 
+// BTC tjedni EMA10/EMA20 cross — potpuno automatski makro-fazni signal (TG 27.07.):
+// "EMA10 probije EMA20 (uz volumen) = nova bull faza. Obrnuto = trend slabi/bear faza.
+// Vaznije je biti na pravoj strani dugorocnog trenda nego gadjati svaki vrh/dno."
+// Ne treba rucni unos razine — cisto racunanje iz tjednih svijeca.
+let _btcWeeklyEmaCache = { bullPhase: null, ema10: null, ema20: null, ts: 0 };
+export async function getBtcWeeklyEmaPhase() {
+  if (Date.now() - _btcWeeklyEmaCache.ts < 60 * 60 * 1000 && _btcWeeklyEmaCache.bullPhase !== null) return _btcWeeklyEmaCache;
+  try {
+    // Binance public — Bitget ima samo ~13 tjedana povijesti, premalo za EMA20
+    const d = await fetch(`https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1w&limit=120`).then(r => r.json());
+    const cl = Array.isArray(d) ? d.map(k => parseFloat(k[4])) : [];
+    if (cl.length >= 25) {
+      const ema = (arr, p) => { const k = 2 / (p + 1); let e = arr.slice(0, p).reduce((a, b) => a + b, 0) / p; for (let i = p; i < arr.length; i++) e = arr[i] * k + e * (1 - k); return e; };
+      const e10 = ema(cl, 10), e20 = ema(cl, 20);
+      _btcWeeklyEmaCache = { bullPhase: e10 > e20, ema10: e10, ema20: e20, ts: Date.now() };
+    }
+  } catch {}
+  return _btcWeeklyEmaCache;
+}
+
 // BTC kraća trend-invalidacijska razina (odvojena od btc_key_level — ciklus linije).
 // TraderaEdge 23.07: "gubitak ove zone i pretvaranje u otpor = prvi ozbiljan signal
 // slabljenja trenda, fokus prebacujem na short". Dnevni close ispod = pooštri LONG.
@@ -5168,6 +5188,10 @@ export async function run() {
       const _invalSt = await getBtcDailyVsInvalidation();
       pDef.params._invalBoost = _invalSt.belowInval === true;
       if (_invalSt.belowInval) console.log(`  ⚠️  [INVAL] BTC daily close $${_invalSt.lastClose?.toFixed(0)} < $${_invalSt.level} → trend slabi, kripto LONG +1 minSig`);
+      // BTC tjedni EMA10/EMA20 makro-fazni signal (27.07.) — automatski, bez ručnog unosa
+      const _weeklyEma = await getBtcWeeklyEmaPhase();
+      pDef.params._weeklyBullPhase = _weeklyEma.bullPhase;
+      if (_weeklyEma.bullPhase !== null) console.log(`  📅 [W-EMA] BTC tjedni EMA10 ${_weeklyEma.ema10?.toFixed(0)} ${_weeklyEma.bullPhase ? ">" : "<"} EMA20 ${_weeklyEma.ema20?.toFixed(0)} → ${_weeklyEma.bullPhase ? "BULL faza" : "BEAR faza"}`);
     }
 
     // ── 1. USDT.D proxy — Stablecoin Inflow/Outflow ──────────────────────────
@@ -5987,10 +6011,16 @@ export async function run() {
         // tržište (post-mortem 05.07.: RSI 71.6 + JAKO → TP ×3 na vrhu poteza)
         const _rsi4h = _regimeCache?.btcRsi4h ?? 50;
         const _rsiOkForStrong = signal === "LONG" ? _rsi4h < 70 : _rsi4h > 30;
-        const _isStrong = _rsiOkForStrong &&
+        // Tjedni EMA makro-faza mora biti usklađena (27.07.): "vaznije biti na pravoj
+        // strani dugorocnog trenda" — JAKO LONG samo u tjednoj BULL fazi, SHORT u BEAR fazi
+        const _weeklyPhase = pDef.params._weeklyBullPhase;
+        const _weeklyOkForStrong = _weeklyPhase === null ? true
+          : (signal === "LONG" ? _weeklyPhase === true : _weeklyPhase === false);
+        const _isStrong = _rsiOkForStrong && _weeklyOkForStrong &&
                           ((_btcRegime === "BULL" && signal === "LONG") ||
                            (_btcRegime === "BEAR" && signal === "SHORT"));
         if (!_rsiOkForStrong) console.log(`  ⚠️  [RSI-4H] ${symbol} — BTC 4H RSI ${_rsi4h.toFixed(1)} ekstrem → nije JAKO (TP ×2, standardni rizik)`);
+        if (_rsiOkForStrong && !_weeklyOkForStrong) console.log(`  ⚠️  [W-EMA] ${symbol} — tjedna makro-faza suprotna signalu → nije JAKO (TP ×2, standardni rizik)`);
         const _tpMult     = _isStrong ? STRONG_TP_MULT : NORMAL_TP_MULT;
         const _dynTpPct   = slPct * _tpMult;
         const signalStrength = _isStrong ? "strong" : "normal";

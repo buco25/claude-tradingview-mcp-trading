@@ -5940,11 +5940,16 @@ export async function run() {
           }
 
           // 00. Strategy override — RANGE/SWEEP donose vlastiti SL/TP (rub zone / sweep ekstrem)
+          // 28.07.: fiksne granice 0.5-4.5% nisu poštivale ATR strop (AVAX SL 3.56%/TP 7.12%
+          // dok je ATR nalagao ~0.9%) — isti _atrSlCap disciplina kao tier/S-R/HTF putevi.
           if (slMethod === "tier" && result._slPrice && result._tpPrice) {
             const _oSlPct = Math.abs(price - result._slPrice) / price * 100;
-            if (_oSlPct >= 0.5 && _oSlPct <= 4.5) {
+            const _oSlCeil = Math.min(4.5, tierSlMax);
+            if (_oSlPct >= 0.5 && _oSlPct <= _oSlCeil) {
               sl = result._slPrice; slPct = _oSlPct;
-              tp = result._tpPrice; tpPct = Math.abs(tp - price) / price * 100;
+              const _oTpPctRaw = Math.abs(result._tpPrice - price) / price * 100;
+              tpPct = Math.min(_oTpPctRaw, tierTpMax);
+              tp = signal === "LONG" ? price * (1 + tpPct / 100) : price * (1 - tpPct / 100);
               slMethod = result._strategy ?? "STRAT";
               console.log(`  🎪 [${result._strategy}] ${symbol} ${signal}: SL ${fmtPrice(sl)} (${slPct.toFixed(2)}%) | TP ${fmtPrice(tp)} (${tpPct.toFixed(2)}%) RR=${(tpPct/slPct).toFixed(1)}x`);
             }

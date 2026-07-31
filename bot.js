@@ -5917,8 +5917,16 @@ export async function run() {
           ? Math.min((symSltp.slPct ?? SL_PCT) + 1.0, Math.max(tierSlMin, _atrSlCap))
           : (symSltp.slPct ?? SL_PCT) + 1.0;  // cap: ne smije biti veći od tier SL + 1% (ili ATR strop ako je uži)
         const tierTpMin = symSltp.tpPct ?? 1.5;
-        const tierTpMax = _atrSlCap != null
-          ? Math.min((symSltp.tpPct ?? TP_PCT) + 2.0, Math.max(tierTpMin, tierSlMax * 2.2))
+        // 31.07.: TP strop je i dalje bio flat "tpPct_base + 2.0%" (~5% za većinu simbola)
+        // jer je taj broj skoro uvijek manji od tierSlMax×2.2 pa je on pobjeđivao — u
+        // niskoj volatilnosti (npr. ATR 1.37%) TP je i dalje ciljao ~5%, isti problem
+        // koji je 27.07. analiza (56% pomaka cijene 1.5-3%) već označila kao nedostižan.
+        // Dodan DIREKTAN ATR-vezani TP strop (ATR×3.0, isti multiplier kao ATR fallback
+        // TP niže u kodu) koji stvarno steže cilj kad je tržište tanko; flat +2.0% sad
+        // služi samo kao vanjska sigurnosna granica za slučaj ATR skoka.
+        const _atrTpCap = _atrPctRaw != null ? Math.max(tierTpMin, _atrPctRaw * (_chillTight ? 2.0 : 3.0)) : null;
+        const tierTpMax = _atrTpCap != null
+          ? Math.min((symSltp.tpPct ?? TP_PCT) + 2.0, _atrTpCap)
           : (symSltp.tpPct ?? TP_PCT) + 2.0;
         if (_atrPctRaw != null) console.log(`  📏 [ATR-CAP] ${symbol} — ATR ${_atrPctRaw.toFixed(2)}% → SL max ${tierSlMax.toFixed(2)}% / TP max ${tierTpMax.toFixed(2)}%${_chillTight?" (CHILL suženo)":""}`);
         const SR_BUFFER = 0.003;  // 0.3% buffer ispod supporta / iznad resistancea

@@ -44,6 +44,11 @@ const MAX_OPEN_STOCKS = 3;  // max otvorenih pozicija na dionicama (xStocks)
 const MAX_OPEN_PER_PORTFOLIO = MAX_OPEN_CRYPTO + MAX_OPEN_STOCKS;  // ukupni cap = 9
 export const isStockSym = (s) => (SYMBOL_SECTORS[s] || "").startsWith("STOCK_");
 const MAX_PYRAMID           = 1;   // max 1 adicija u istom smjeru (BTC only mode)
+// 03.08.: VIP pyramid (score≥7/8) nije imao gornju granicu — jedna BTC pozicija je
+// narasla kroz 7 uzastopnih adicija ($40→$280 notional, 50x) dok margin nije postao
+// toliko tanak da je "Emergency close (pre-likvidacija)" morao intervenirati $550+
+// prije stvarnog SL-a. Strop sad sprječava da VIP pyramid ikad opet naraste toliko.
+const MAX_VIP_PYRAMID        = 4;   // ukupno legs (initial + adicije) čak i uz VIP score≥7/8
 const MAX_NEW_ENTRIES_PER_SCAN = 2; // max NOVIH ulaza po scan ciklusu (08.07.: 4 longa u istom scanu = 1 oklada ×4)
 const MAX_SAME_DIR_CRYPTO = 3;      // max kripto pozicija u ISTOM smjeru — svi altovi su jedan BTC-beta trade
 
@@ -5497,9 +5502,12 @@ export async function run() {
           if (existingPosList.length >= MAX_PYRAMID) {
             const _pyScore = signal === "LONG" ? (result.bullScore ?? 0) : (result.bearScore ?? 0);
             const _pyComboLen = SYMBOL_COMBOS[symbol]?.sigIdx?.length ?? 8;
-            if (symbol === BTC_EXCEPTION && _pyScore >= 7 && _pyComboLen >= 8) {
-              console.log(`  ⭐ [VIP PYRAMID] ${symbol} ${signal} — score ${_pyScore}/${_pyComboLen} ≥ 7 → dodatna adicija ${existingPosList.length + 1} iznad limita`);
+            if (symbol === BTC_EXCEPTION && _pyScore >= 7 && _pyComboLen >= 8 && existingPosList.length < MAX_VIP_PYRAMID) {
+              console.log(`  ⭐ [VIP PYRAMID] ${symbol} ${signal} — score ${_pyScore}/${_pyComboLen} ≥ 7 → dodatna adicija ${existingPosList.length + 1}/${MAX_VIP_PYRAMID} iznad limita`);
               result._vipSlot = true;
+            } else if (symbol === BTC_EXCEPTION && _pyScore >= 7 && _pyComboLen >= 8) {
+              console.log(`  ⏭️  [${pDef.name}] ${symbol} — VIP pyramid strop (${existingPosList.length}/${MAX_VIP_PYRAMID}) dostignut, preskačem`);
+              continue;
             } else {
               console.log(`  ⏭️  [${pDef.name}] ${symbol} — max pyramid (${existingPosList.length}/${MAX_PYRAMID}) dostignut, preskačem`);
               continue;

@@ -797,6 +797,35 @@ function checkVolumeAnomaly(candles) {
   };
 }
 
+// ─── Velocity — post-kapitulacijska akceleracija (ROC-of-ROC) ────────────────
+// Gann/TraderaEdge teorija (03.08.): cijena < vrijeme < volumen < velocity po važnosti.
+// Velocity ovdje NIJE obična brzina nego brzina PROMJENE SMJERA nakon iscrpljivanja
+// prodavača/kupaca (V-shape recovery) — usporedi ROC zadnjih VEL_WINDOW svijeća s ROC-om
+// prethodnog jednako dugog perioda. LOG-ONLY faza — ne utječe na ulaze, samo promatramo
+// ponašanje uživo prije nego se ožiči kao bonus u sweep/reclaim (LHUNT) logici.
+const VEL_WINDOW    = 4;    // broj svijeća po prozoru (15m TF → 1h svaki prozor)
+const VEL_CAPIT_PCT = 0.8;  // % — prethodni prozor mora se pomaknuti barem ovoliko da se zove "kapitulacija/euforija"
+const VEL_ACCEL_PCT = 1.2;  // % — minimalna promjena ROC-a (akceleracija) da se zove "velocity" obrat
+function checkVelocity(candles) {
+  if (candles.length < VEL_WINDOW * 2 + 3) return { sig: 0, accel: 0, rocRecent: 0, rocPrior: 0 };
+  // koristi zatvorene svijeće (isključi aktivnu, kao i checkVolumeAnomaly)
+  const closes = candles.slice(0, -1).map(c => c.close);
+  const n = closes.length;
+  const cNow   = closes[n - 1];
+  const cMid   = closes[n - 1 - VEL_WINDOW];
+  const cPrior = closes[n - 1 - VEL_WINDOW * 2];
+  const rocRecent = cMid   > 0 ? (cNow - cMid)   / cMid   * 100 : 0;
+  const rocPrior  = cPrior > 0 ? (cMid - cPrior) / cPrior * 100 : 0;
+  const accel = rocRecent - rocPrior;
+  let sig = 0;
+  if (rocPrior <= -VEL_CAPIT_PCT && accel >= VEL_ACCEL_PCT) sig = 1;        // kapitulacija dolje → nagli V-recovery
+  else if (rocPrior >= VEL_CAPIT_PCT && accel <= -VEL_ACCEL_PCT) sig = -1; // euforija gore → nagli obrat dolje
+  return {
+    sig, accel: parseFloat(accel.toFixed(2)),
+    rocRecent: parseFloat(rocRecent.toFixed(2)), rocPrior: parseFloat(rocPrior.toFixed(2)),
+  };
+}
+
 // ─── Deribit Put/Call Ratio ───────────────────────────────────────────────────
 // P/C > 1.5 = tržište kupuje zaštitu od pada (strah) = potencijalni bottom
 // P/C < 0.5 = previše calls = euforija = potencijalni vrh
@@ -5356,6 +5385,12 @@ export async function run() {
           continue;
         }
         if (volAnomaly.high) console.log(`  📈 [VOL] ${symbol} — visok volumen ${volAnomaly.ratio}x! (breakout signal)`);
+
+        // ── Velocity (log-only, 03.08.) — ne utječe na ulaze, samo promatramo ────
+        const velocity = checkVelocity(candles);
+        if (velocity.sig !== 0) {
+          console.log(`  ⚡ [VELOCITY] ${symbol} — ${velocity.sig > 0 ? "BULL" : "BEAR"} obrat! prior ROC ${velocity.rocPrior}% → recent ROC ${velocity.rocRecent}% (accel ${velocity.accel > 0 ? "+" : ""}${velocity.accel}%)`);
+        }
 
         // Bounce mode: smanji minSig na 3 (tržište oversold, manji prag za LONG)
         const _bounceParams = _bounceMode

@@ -3990,9 +3990,15 @@ async function fetchLivePrices(symbols) {
   return prices;
 }
 
-// ─── Break-Even Stop — pomakni SL na entry+buffer kad je 50% TP dostignuto ────
-const BE_TRIGGER_PCT = 40;   // % TP-a koji mora biti dostignut
-const BE_BUFFER_PCT  = 0.2;  // % iznad/ispod entry za SL (pokrije fees)
+// ─── Break-Even Stop — pomakni SL na entry+buffer kad je X% TP dostignuto ─────
+// 06.08.: analiza 34 tradea (14 dana, MFE iz stvarnog OHLCV-a) — samo 12% je ikad
+// dotaklo puni TP, dok je 59% dotaklo barem 40% TP puta (stari trigger) pa se BE-stop
+// palio prerano na normalan pullback prije nego trade dobije priliku razviti se.
+// Tradeovi koji stvarno stignu do TP-a ne staju blizu 100%, nego ga probiju s
+// viškom (102-202%) — kasniji trigger im daje više prostora. Buffer podignut da
+// zaključana dobit bude smislenija kad se BE-stop ipak okine.
+const BE_TRIGGER_PCT = 70;   // % TP-a koji mora biti dostignut (bio 40)
+const BE_BUFFER_PCT  = 0.5;  // % iznad/ispod entry za SL (bio 0.2 — pokrivao tek fee, ne stvarnu dobit)
 
 async function moveSLtoBreakEven(pos) {
   if (pos.beMoved) return false;

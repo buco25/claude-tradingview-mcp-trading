@@ -6118,8 +6118,16 @@ export async function run() {
 
         // Risk-based position sizing: SL gubitak = dinamički 0.5–1.5% equity
         // 1.5% — regime aligned (JAKO) + score ≥ minSig+2 | 0.5% — minimalni score | 1.0% — ostalo
-        const startCap   = pDef.startCapital ?? START_CAPITAL;
-        const equity     = getPortfolioEquity(pid, startCap);
+        // 06.08.: position sizing je koristio CSV-tracked equity (startCapital + suma
+        // closed P&L), potpuno odvojeno od stvarnog Bitget balansa — ručne uplate/
+        // isplate se nisu odrazavale na velicinu pozicija (primjer: CSV equity $80 vs
+        // stvarni Bitget $269 nakon uplate $150). Sad koristi isti live Bitget equity
+        // kao drawdown zastita (fetchBitgetEquity, 60s cache) — CSV equity ostaje
+        // samo fallback za paper mod ili ako API poziv padne.
+        const startCap    = pDef.startCapital ?? START_CAPITAL;
+        const _liveEquity = await fetchBitgetEquity();
+        const equity      = _liveEquity ?? getPortfolioEquity(pid, startCap);
+        const _equitySrc  = _liveEquity !== null ? "BitGet" : "CSV";
 
         const _entryScore  = signal === "LONG" ? (result.bullScore ?? 0) : (result.bearScore ?? 0);
         const _comboMinSig = SYMBOL_COMBOS[symbol]?.minSig ?? 5;
@@ -6129,7 +6137,7 @@ export async function run() {
         else                                                   _dynRiskPct = RISK_PCT;
         const _symRiskPct = rules.symbol_sltp?.[symbol]?.riskPct ?? _dynRiskPct;
         const riskAmount = equity * (_symRiskPct / 100);
-        console.log(`  🎚️  [RISK] ${symbol} — score ${_entryScore}/${SYMBOL_COMBOS[symbol]?.sigIdx?.length ?? 8}, ${_isStrong ? "JAKO" : "normalno"} → rizik $${riskAmount.toFixed(2)} (${_symRiskPct}% banke)`);
+        console.log(`  🎚️  [RISK] ${symbol} — score ${_entryScore}/${SYMBOL_COMBOS[symbol]?.sigIdx?.length ?? 8}, ${_isStrong ? "JAKO" : "normalno"} → rizik $${riskAmount.toFixed(2)} (${_symRiskPct}% od $${equity.toFixed(2)} [${_equitySrc}])`);
         // Ukupni size mult (macro + stable + vwap + oi) ne smije pasti ispod 0.5
         // — inače stack multiplikatora spusti rizik daleko ispod RISK_PCT_MIN
         const _rawMult   = (atrTrend?.sizeMult ?? 1) * (_oiSizeMult ?? 1) * (_vwapSizeMult ?? 1) * (_stableSizeMult ?? 1) * (_macroSizeMult ?? 1);

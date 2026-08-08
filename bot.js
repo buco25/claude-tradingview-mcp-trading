@@ -1305,6 +1305,24 @@ async function getFearGreed() {
 }
 export { getFearGreed };
 
+// ─── Crypto vijesti (Cointelegraph RSS, bez API ključa) ───────────────────────
+// 07.08.: preuzeto iz portable/morning-report.mjs (ULTRA Bot v3) za dnevni Telegram izvještaj.
+async function fetchCryptoNews(limit = 5) {
+  try {
+    const res = await fetch("https://cointelegraph.com/rss", {
+      headers: { "User-Agent": "MorningReport/1.0", "Accept": "application/rss+xml" },
+      signal: AbortSignal.timeout(8000),
+    });
+    const d = await res.text();
+    const items = d.match(/<item>[\s\S]*?<\/item>/g) || [];
+    return items.slice(0, limit).map(item => {
+      const tm = item.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/) || item.match(/<title>(.*?)<\/title>/);
+      const lm = item.match(/<link><!\[CDATA\[(.*?)\]\]><\/link>/) || item.match(/<guid[^>]*>(https?:\/\/[^<]+)<\/guid>/) || item.match(/<link>(.*?)<\/link>/);
+      return { title: (tm?.[1] || "?").trim(), url: (lm?.[1] || "").trim() };
+    });
+  } catch { return []; }
+}
+
 // ─── BTC Dominance ────────────────────────────────────────────────────────────
 let _domCache = { btc: null, change: null, ts: 0 };
 const DOM_TTL = 15 * 60 * 1000;
@@ -6256,6 +6274,20 @@ export async function run() {
     }
   }
 
+  // Dnevni izvještaj — 07:00 UTC (09:00 HR), svaki dan (guard fajl) (07.08.)
+  {
+    const _nd = new Date();
+    if (_nd.getUTCHours() === 7) {
+      const _df = `${DATA_DIR}/daily_report_last.txt`;
+      const _today = _nd.toISOString().slice(0, 10);
+      let _last = null;
+      try { _last = readFileSync(_df, "utf8").trim(); } catch {}
+      if (_last !== _today) {
+        try { writeFileSync(_df, _today); await generateDailyReport(); } catch (_) {}
+      }
+    }
+  }
+
   writeHeartbeat("ok", { portfolios: nPort, symbols: totalSymbols, leverage: LEVERAGE });
 }
 
@@ -6387,7 +6419,7 @@ function _analyzeMMPhase(sym, candles) {
   };
 }
 
-function _buildReport(dateStr, stats, symReports) {
+function _buildReport(dateStr, stats, symReports, fg, news) {
   const phaseEmoji = {
     "AKUMULACIJA": "🔵", "NEUTRALNO": "⬜", "MARKUP": "🟡",
     "DISTRIBUCIJA": "🔴", "CRASH/PANIC": "💥", "N/A": "❓",
@@ -6422,6 +6454,9 @@ function _buildReport(dateStr, stats, symReports) {
   // ── Telegram message (max ~2000 char) ──────────────────────────────────────
   let tgMsg = `📊 <b>ULTRA Jutarnji Brief — ${dateStr}</b>\n\n`;
 
+  const fgEmoji = !fg || fg.value == null ? "❓" : fg.value >= 75 ? "🤑" : fg.value >= 55 ? "😊" : fg.value >= 45 ? "😐" : fg.value >= 25 ? "😨" : "😱";
+  tgMsg += `${fgEmoji} <b>Fear &amp; Greed:</b> ${fg && fg.value != null ? `${fg.value}/100 — ${fg.label}` : "N/A"}\n\n`;
+
   if (stats && stats.total > 0) {
     tgMsg += `📈 <b>Performance (7 dana)</b>\n`;
     tgMsg += `Tradovi: ${stats.total} (L:${stats.longs}/S:${stats.shorts}) | WR: <b>${stats.wr}%</b> | R:R: <b>${stats.rr}</b>\n`;
@@ -6451,9 +6486,18 @@ function _buildReport(dateStr, stats, symReports) {
 
   tgMsg += `\n⚖️ Strategija: <b>${verdict}</b> — ${verdictReason}`;
 
+  if (news && news.length > 0) {
+    tgMsg += `\n\n📰 <b>Top vijesti</b>\n` + news.map((n, i) => `${i + 1}. <a href="${n.url}">${n.title}</a>`).join("\n");
+  }
+
   // ── Markdown report ────────────────────────────────────────────────────────
   let md = `# ULTRA Daily MM/Algo Report — ${dateStr}\n`;
   md += `**Generirano:** ${new Date().toISOString()} UTC\n\n`;
+  md += `**Fear & Greed:** ${fg && fg.value != null ? `${fg.value}/100 (${fg.label})` : "N/A"}\n\n`;
+  if (news && news.length > 0) {
+    md += `## 📰 Top vijesti\n\n`;
+    md += news.map((n, i) => `${i + 1}. [${n.title}](${n.url})`).join("\n") + "\n\n";
+  }
 
   // Performance
   md += `## 📈 Performance (zadnjih 7 dana)\n\n`;
@@ -6601,8 +6645,14 @@ export async function generateDailyReport() {
     }
   }));
 
+  // 2b. Fear&Greed + crypto vijesti (07.08., iz portable/morning-report.mjs)
+  const [fg, news] = await Promise.all([
+    getFearGreed().catch(() => null),
+    fetchCryptoNews(5),
+  ]);
+
   // 3. Build report
-  const report = _buildReport(dateStr, stats, symReports);
+  const report = _buildReport(dateStr, stats, symReports, fg, news);
 
   // 4. Spremi u fajl
   try {

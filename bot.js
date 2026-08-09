@@ -3027,9 +3027,22 @@ function applyTrail(pos, currentPrice) {
     ? (currentPrice - entry) / entry * 100
     : (entry - currentPrice) / entry * 100;
 
+  // origTpPct treba se znati PRIJE trigger-gatea (09.08.) — vidi napomenu ispod.
+  const origTpPct = pos.origTpPct ?? (pos.side === "LONG"
+    ? (pos.origTp ?? pos.tp - entry) / entry * 100
+    : (entry - (pos.origTp ?? pos.tp)) / entry * 100);
+
   // ── Break-even @ +1R (TraderaEdge AMA: "čim ode na 100%, break even") ──────
   // Kad profit dosegne 1× rizik (slPct), SL ide na entry (+0.05% za fee)
   const _riskPct = parseFloat(pos.slPct) || 2.0;
+  // 09.08.: TRAIL_TRIGGER (2.5% fiksno) je bio veći od TP-a kod uskih tradeova
+  // (npr. NVDAUSDT TP 1.51%) — trail produženje TP-a se NIKAD nije aktiviralo prije
+  // nego je sirova tpHit provjera u softExitMonitor-u (svakih 5s) puno zatvorila
+  // poziciju čim dotakne ORIGINALNI TP, bez obzira što je cijena nastavila rasti.
+  // Trigger sad skalira s TP-om tradea (65% TP puta) kad je TP uzak, umjesto da
+  // uvijek čeka fiksnih 2.5% koji uski TP nikad ne dosegne.
+  const effectiveTrigger = Math.min(TRAIL_TRIGGER, origTpPct * 0.65);
+
   if (!pos.beApplied && gainPct >= _riskPct) {
     const beSl = pos.side === "LONG" ? entry * 1.0005 : entry * 0.9995;
     const improved = pos.side === "LONG" ? beSl > pos.sl : beSl < pos.sl;
@@ -3037,16 +3050,13 @@ function applyTrail(pos, currentPrice) {
     if (improved) {
       pos.sl = beSl;
       console.log(`  🛡️  [BE] ${pos.symbol} ${pos.side} — +1R (${gainPct.toFixed(2)}% ≥ ${_riskPct}%) → SL na break-even ${fmtPrice(beSl)}`);
-      if (gainPct < TRAIL_TRIGGER) return true;  // BE primijenjen, trail još nije
+      if (gainPct < effectiveTrigger) return true;  // BE primijenjen, trail još nije
     }
   }
 
-  if (gainPct < TRAIL_TRIGGER) return false;
+  if (gainPct < effectiveTrigger) return false;
 
-  const steps     = Math.floor((gainPct - TRAIL_TRIGGER) / TRAIL_STEP);
-  const origTpPct = pos.side === "LONG"
-    ? (pos.origTp ?? pos.tp - entry) / entry * 100   // origTp za referentni TP
-    : (entry - (pos.origTp ?? pos.tp)) / entry * 100;
+  const steps = Math.floor((gainPct - effectiveTrigger) / TRAIL_STEP);
 
   // Peak-based trail: SL prati vrh s TRAIL_GIVEBACK prostora (ne stoji na cijeni)
   // Pod: nikad ispod break-evena (+0.3% za fee) — aktivirani trail je uvijek u plusu

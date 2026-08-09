@@ -355,21 +355,22 @@ export async function getBtcWeeklyVsKey() {
   return _btcWeeklyKeyCache;
 }
 
-// BTC tjedni EMA10/EMA20 cross — potpuno automatski makro-fazni signal (TG 27.07.):
-// "EMA10 probije EMA20 (uz volumen) = nova bull faza. Obrnuto = trend slabi/bear faza.
+// BTC tjedni EMA10/EMA21 cross — potpuno automatski makro-fazni signal (TG 27.07.,
+// EMA21 na zahtjev 09.08. umjesto EMA20):
+// "EMA10 probije EMA21 (uz volumen) = nova bull faza. Obrnuto = trend slabi/bear faza.
 // Vaznije je biti na pravoj strani dugorocnog trenda nego gadjati svaki vrh/dno."
 // Ne treba rucni unos razine — cisto racunanje iz tjednih svijeca.
-let _btcWeeklyEmaCache = { bullPhase: null, ema10: null, ema20: null, ts: 0 };
+let _btcWeeklyEmaCache = { bullPhase: null, ema10: null, ema21: null, ts: 0 };
 export async function getBtcWeeklyEmaPhase() {
   if (Date.now() - _btcWeeklyEmaCache.ts < 60 * 60 * 1000 && _btcWeeklyEmaCache.bullPhase !== null) return _btcWeeklyEmaCache;
   try {
-    // Binance public — Bitget ima samo ~13 tjedana povijesti, premalo za EMA20
+    // Binance public — Bitget ima samo ~13 tjedana povijesti, premalo za EMA21
     const d = await fetch(`https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1w&limit=120`).then(r => r.json());
     const cl = Array.isArray(d) ? d.map(k => parseFloat(k[4])) : [];
-    if (cl.length >= 25) {
+    if (cl.length >= 26) {
       const ema = (arr, p) => { const k = 2 / (p + 1); let e = arr.slice(0, p).reduce((a, b) => a + b, 0) / p; for (let i = p; i < arr.length; i++) e = arr[i] * k + e * (1 - k); return e; };
-      const e10 = ema(cl, 10), e20 = ema(cl, 20);
-      _btcWeeklyEmaCache = { bullPhase: e10 > e20, ema10: e10, ema20: e20, ts: Date.now() };
+      const e10 = ema(cl, 10), e21 = ema(cl, 21);
+      _btcWeeklyEmaCache = { bullPhase: e10 > e21, ema10: e10, ema21: e21, ts: Date.now() };
     }
   } catch {}
   return _btcWeeklyEmaCache;
@@ -5256,10 +5257,10 @@ export async function run() {
       const _invalSt = await getBtcDailyVsInvalidation();
       pDef.params._invalBoost = _invalSt.belowInval === true;
       if (_invalSt.belowInval) console.log(`  ⚠️  [INVAL] BTC daily close $${_invalSt.lastClose?.toFixed(0)} < $${_invalSt.level} → trend slabi, kripto LONG +1 minSig`);
-      // BTC tjedni EMA10/EMA20 makro-fazni signal (27.07.) — automatski, bez ručnog unosa
+      // BTC tjedni EMA10/EMA21 makro-fazni signal (27.07., EMA21 od 09.08.) — automatski, bez ručnog unosa
       const _weeklyEma = await getBtcWeeklyEmaPhase();
       pDef.params._weeklyBullPhase = _weeklyEma.bullPhase;
-      if (_weeklyEma.bullPhase !== null) console.log(`  📅 [W-EMA] BTC tjedni EMA10 ${_weeklyEma.ema10?.toFixed(0)} ${_weeklyEma.bullPhase ? ">" : "<"} EMA20 ${_weeklyEma.ema20?.toFixed(0)} → ${_weeklyEma.bullPhase ? "BULL faza" : "BEAR faza"}`);
+      if (_weeklyEma.bullPhase !== null) console.log(`  📅 [W-EMA] BTC tjedni EMA10 ${_weeklyEma.ema10?.toFixed(0)} ${_weeklyEma.bullPhase ? ">" : "<"} EMA21 ${_weeklyEma.ema21?.toFixed(0)} → ${_weeklyEma.bullPhase ? "BULL faza" : "BEAR faza"}`);
     }
 
     // ── 1. USDT.D proxy — Stablecoin Inflow/Outflow ──────────────────────────

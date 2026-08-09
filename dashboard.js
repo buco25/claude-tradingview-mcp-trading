@@ -1458,7 +1458,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px;text-align:center">
         <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">Tjedna makro-faza</div>
         <div style="font-size:22px;font-weight:800" id="btc-wema-val">—</div>
-        <div style="font-size:10px;color:#9ca3af;margin-top:2px" id="btc-wema-sub">W-EMA10 vs W-EMA20</div>
+        <div style="font-size:10px;color:#9ca3af;margin-top:2px" id="btc-wema-sub">W-EMA10 vs W-EMA21</div>
       </div>
     </div>
   </div>
@@ -1570,14 +1570,14 @@ window.toggleScanFilter = function(btn) {
           (ok ? '' : ' · LONG +1 minSig');
       }
 
-      // Tjedna makro-faza (automatski EMA10/EMA20 cross)
+      // Tjedna makro-faza (automatski EMA10/EMA21 cross)
       const we = d.weeklyEma;
       const weEl = document.getElementById('btc-wema-val');
       if (we && we.ema10 && weEl) {
         weEl.textContent = we.bullPhase ? '🐂 BULL' : '🐻 BEAR';
         weEl.style.color = we.bullPhase ? '#059669' : '#dc2626';
         document.getElementById('btc-wema-sub').textContent =
-          'E10 $' + Math.round(we.ema10).toLocaleString() + (we.bullPhase ? ' > ' : ' < ') + 'E20 $' + Math.round(we.ema20).toLocaleString();
+          'E10 $' + Math.round(we.ema10).toLocaleString() + (we.bullPhase ? ' > ' : ' < ') + 'E21 $' + Math.round(we.ema21).toLocaleString();
       }
     } catch(e) {
       document.getElementById('btc-status-ts').textContent = 'Greška: ' + e.message;
@@ -4330,7 +4330,7 @@ const server = http.createServer(async (req, res) => {
         result.invalLevel = await getBtcDailyVsInvalidation();
       } catch {}
 
-      // Tjedna makro-faza (automatski EMA10/EMA20 cross)
+      // Tjedna makro-faza (automatski EMA10/EMA21 cross)
       try {
         result.weeklyEma = await getBtcWeeklyEmaPhase();
       } catch {}

@@ -2847,17 +2847,10 @@ async function loadMarketContext() {
       document.getElementById('gates-grid').innerHTML = html;
     }
 
-    // ── Long/Short Ratio ──────────────────────────────────────────────────
-    if (d.ls) {
-      const lr = parseFloat(d.ls.longRatio);
-      const lsCol = lr > 70 ? '#dc2626' : lr < 40 ? '#059669' : '#9ca3af';
-      const lsWarn = lr > 70 ? ' ⚠️ Contrarian SHORT' : lr < 40 ? ' 💡 Contrarian LONG' : '';
-      document.getElementById('ls-val').textContent = '⬆ ' + d.ls.longRatio + '% / ⬇ ' + d.ls.shortRatio + '%';
-      document.getElementById('ls-val').style.color = lsCol;
-      document.getElementById('ls-bar').style.width = d.ls.longRatio + '%';
-      document.getElementById('ls-bar').style.background = lr > 70 ? '#dc2626' : lr < 40 ? '#059669' : '#3b82f6';
-      document.getElementById('ls-sub').textContent = 'Trend: ' + (d.ls.trend || '—') + lsWarn;
-    }
+    // ── Long/Short Ratio — prikazuje se u BTC Status panelu (btc-lsr-val), ne ovdje.
+    // 14.08.: ls-val/ls-bar/ls-sub ne postoje u HTML-u — document.getElementById()
+    // vraćao null pa je .textContent na njemu rušio OSTATAK ove funkcije (Circuit
+    // Breaker, Daily P&L, Funding Rate, Fear&Greed, Session su ostajali zauvijek na "…").
 
     // ── Countdown — spremi econ evente za timer ───────────────────────────
     if (d.econ && d.econ.events) { window._econEventsForCountdown = d.econ.events; }
@@ -2920,27 +2913,10 @@ async function loadMarketContext() {
       document.getElementById('fg-label').style.color = fgColor;
     }
 
-    // BTC Dominance
-    if (d.dom && d.dom.btc !== null) {
-      document.getElementById('dom-val').textContent = d.dom.btc + '%';
-    }
-
-    // DXY
-    if (d.dxy) {
-      const dxyV = d.dxy.change4h;
-      const dxyEl = document.getElementById('dxy-val');
-      const dxySubEl = document.getElementById('dxy-sub');
-      if (dxyV !== null && dxyV !== undefined) {
-        const dxyColor = dxyV > 0.3 ? '#dc2626' : dxyV < -0.3 ? '#059669' : '#94a3b8';
-        dxyEl.textContent = (dxyV > 0 ? '+' : '') + dxyV + '%';
-        dxyEl.style.color = dxyColor;
-        dxySubEl.textContent = d.dxy.direction + ' | >+0.3% = LONG risk';
-      } else {
-        dxyEl.textContent = 'N/A';
-        dxyEl.style.color = '#6b7280';
-        dxySubEl.textContent = '>+0.3% = LONG risk · API nedostupan';
-      }
-    }
+    // BTC Dominance i DXY — kartice uklonjene iz UI-a (dom-val/dxy-val/dxy-sub ne
+    // postoje), podaci se i dalje koriste u gate scoringu niže u kodu (getBtcDominance/
+    // getDxyData). 14.08.: uklonjen mrtvi update-kod koji je rušio ostatak funkcije
+    // isto kao ls-val blok gore.
 
     // Session Info
     if (d.session) {

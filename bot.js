@@ -3592,7 +3592,24 @@ async function checkPortfolioPositions(pid) {
                   const _pctClosed = (_closeQty / _bp1R.total * 100).toFixed(0);
                   pos.partial1R = true;
                   pos.quantity  = Math.max(_bp1R.total - _closeQty, 0);
+                  // 14.08.: totalUSD (Notional) se nikad nije ažurirao nakon partial close —
+                  // dashboard je i dalje prikazivao puni original notional/qty/margin dok je
+                  // stvarna Bitget pozicija bila upola manja. Sad se recomputa iz preostale
+                  // qty × entry, i sprema ODMAH (fresh load+patch+save, isti obrazac kao
+                  // TP-HIT blok niže) da se smanji prozor za race s 5s fast monitorom.
+                  pos.totalUSD  = pos.quantity * pos.entryPrice;
                   pos.sl = pos.side === "LONG" ? pos.entryPrice * 1.0005 : pos.entryPrice * 0.9995;
+                  {
+                    const _allPos1R = loadPositions(pid);
+                    const _pIdx1R   = _allPos1R.findIndex(p => p.symbol === pos.symbol && p.side === pos.side);
+                    if (_pIdx1R >= 0) {
+                      _allPos1R[_pIdx1R].partial1R = true;
+                      _allPos1R[_pIdx1R].quantity  = pos.quantity;
+                      _allPos1R[_pIdx1R].totalUSD  = pos.totalUSD;
+                      _allPos1R[_pIdx1R].sl        = pos.sl;
+                      savePositions(pid, _allPos1R);
+                    }
+                  }
                   writeExitCsv(pid, { ...pos, quantity: _closeQty }, liveP, `Partial TP +1R (${_pctClosed}%)`, _pnl1R);
                   console.log(`  💰 [1R] ${pos.symbol} ${pos.side} — +1R (${_gain1R.toFixed(2)}%) → ${_pctClosed}% zatvoreno (+$${_pnl1R.toFixed(2)}), SL na BE`);
                   await tg(`💰 <b>PARTIAL +1R</b> ${pos.symbol} ${pos.side}\n${_pctClosed}% zatvoreno @ ${fmtPrice(liveP)} → +$${_pnl1R.toFixed(2)} zaključano\nOstatak: SL na break-even, trail lovi trend`);
@@ -3732,7 +3749,13 @@ async function checkPortfolioPositions(pid) {
               pos.partialClosed = true;
               pos.trailActive   = true;
               pos.trailPeak     = liveP;
-              const _newQty = (pos.quantity ?? (pos.totalUSD / pos.entryPrice)) * (1 - PARTIAL_CLOSE_PCT / 100);
+              // 14.08.: _newQty i totalUSD sad dolaze iz partialClosePosition-ove FRESH
+              // Bitget baze (pClosed.remainingQty), ne iz pretpostavljenog lokalnog qty —
+              // popravlja bug gdje je Notional/Qty na dashboardu ostajao na punom
+              // originalu jer se totalUSD nikad nije ažurirao nakon partial closea.
+              const _newQty = _pClosed.remainingQty;
+              pos.quantity = _newQty;
+              pos.totalUSD = _newQty * pos.entryPrice;
               const _allPos = loadPositions(pid);
               const _pIdx   = _allPos.findIndex(p => p.symbol === pos.symbol && p.side === pos.side);
               if (_pIdx >= 0) {
@@ -3740,6 +3763,7 @@ async function checkPortfolioPositions(pid) {
                 _allPos[_pIdx].trailActive   = true;
                 _allPos[_pIdx].trailPeak     = liveP;
                 _allPos[_pIdx].quantity      = _newQty;
+                _allPos[_pIdx].totalUSD      = pos.totalUSD;
                 savePositions(pid, _allPos);
               }
               // Postavi Ghost SL na Bitgetu za preostalu 50% poziciju
@@ -4059,7 +4083,16 @@ async function moveSLtoBreakEven(pos) {
 async function partialClosePosition(pos, closePct = PARTIAL_CLOSE_PCT) {
   if (PAPER_TRADING) return false;
   if (pos.partialClosed) return false;
-  const qty       = (pos.quantity ?? (pos.totalUSD / pos.entryPrice)) * (closePct / 100);
+  // 14.08.: baza za % izračun sad dolazi iz FRESH Bitget fetcha, ne iz lokalnog
+  // pos.quantity/totalUSD koji je znao biti zastario (race s drugim writerima —
+  // npr. +1R partial blok i fast trail monitor oba rade svoj load→patch→save nad
+  // istim JSON-om). Zastario qty bi ovdje mogao poslati close nalog VEĆI od stvarne
+  // pozicije. Vraća { closedQty, remainingQty } umjesto true/false da pozivatelj
+  // može spremiti STVARNU preostalu količinu, ne pretpostavljenu.
+  const bp = await fetchBitgetPositionSize(pos.symbol, pos.side);
+  if (!bp || bp.error || !(bp.total > 0)) return false;
+  const baseQty   = bp.total;
+  const qty       = baseQty * (closePct / 100);
   const closeSide = pos.side === "LONG" ? "buy" : "sell";  // Bitget v2 hedge: close nosi side ISTOG smjera kao pozicija
   try {
     const res = await bitgetPost("/api/v2/mix/order/place-order", {
@@ -4072,7 +4105,7 @@ async function partialClosePosition(pos, closePct = PARTIAL_CLOSE_PCT) {
     if (res.code === "00000") {
       console.log(`  📦 [PARTIAL-TP] ${pos.symbol} ${pos.side} — zatvoreno ${closePct}% (qty: ${qty.toFixed(4)}) | ostatak čeka TP`);
       await tg(`📦 <b>PARTIAL-TP [ULTRA]</b> ${pos.symbol} ${pos.side}\nZatvoreno ${closePct}% pozicije (${qty.toFixed(4)} jed)\nOstatak čeka puni TP.`);
-      return true;
+      return { closedQty: qty, remainingQty: Math.max(baseQty - qty, 0) };
     }
     console.log(`  ⚠️  [PARTIAL-TP] ${pos.symbol} fail: ${res.code} ${res.msg}`);
     return false;

@@ -1642,7 +1642,8 @@ window.toggleScanFilter = function(btn) {
         { icon: '📆', name: 'Weekly Open',    val: lhz.weeklyOpen  },
         { icon: '⬆️', name: 'Prev Week High', val: lhz.pwh         },
         { icon: '⬇️', name: 'Prev Week Low',  val: lhz.pwl         },
-      ].filter(function(z){ return z.val; });
+      ].concat((lhz.supportZones || []).map(function(v, i){ return { icon: '💎', name: 'S' + (i + 1) + ' Support (TraderaEdge)', val: v }; }))
+       .filter(function(z){ return z.val; });
       zones.sort(function(a,b){ return Math.abs(a.val-price)-Math.abs(b.val-price); });
       var rows = zones.map(function(z){ return zoneRow(z.icon, z.name, z.val, price); }).join('');
       document.getElementById('lhz-body').innerHTML = rows || '<tr><td colspan="4" style="text-align:center;color:#4b5563;padding:8px">—</td></tr>';
@@ -4350,6 +4351,14 @@ const server = http.createServer(async (req, res) => {
           const janCandle = mdR.data.find(k => parseInt(k[0]) >= yearStart);
           if (janCandle) lhz.yearlyOpen = parseFloat(janCandle[1]);
         }
+        // 14.08.: S1/S2/S3 (btc_support_zones, ručno iz TraderaEdge LTF analize) —
+        // ista LHUNT zona-tablica, dodatne razine unutar range-a (vidi bot.js).
+        try {
+          const rulesSz = JSON.parse(readFileSync("rules.json", "utf8"));
+          if (Array.isArray(rulesSz.btc_support_zones)) {
+            lhz.supportZones = rulesSz.btc_support_zones.filter(v => typeof v === "number" && v > 0);
+          }
+        } catch {}
         if (Object.keys(lhz).length > 0) result.lhz = lhz;
       } catch {}
 

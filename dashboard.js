@@ -2115,7 +2115,7 @@ window.toggleScanFilter = function(btn) {
 
   <!-- Equity curve -->
   <div class="chart-card">
-    <div class="chart-title">📈 Kumulativni Trading P&amp;L — ULTRA <span style="font-size:10px;color:#9ca3af;font-weight:400">(bez uplata/isplata)</span></div>
+    <div class="chart-title">📈 Kumulativni Trading P&amp;L — ULTRA <span style="font-size:10px;color:#9ca3af;font-weight:400">(baza: početni kapital, ne prati naknadne uplate/isplate)</span></div>
     <div class="chart-wrap" style="height:180px"><canvas id="eqChart"></canvas></div>
   </div>
 

@@ -12,7 +12,7 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   getSessionInfo, calcAtrTrend, getSp500Data, calcSymbolCorrelation,
   getDeribitPutCall, getLiquidationRisk, getEconEvents, isEconBlocked, calcVWAP,
   getLongShortRatio, getStablecoinInflow, getBtcPerpBasis, getAltcoinSeason,
-  generateDailyReport, autoFixCsvFromBitget, SYMBOL_COMBOS, getBtcDailyPivots,
+  generateDailyReport, autoFixCsvFromBitget, SYMBOL_COMBOS, getBtcDailyPivots, getAccountTransfers,
   getBtcWeeklyVsKey, getRelStrengthVsBtc, isStockSym, getBtcChillMode, getBtcDailyVsInvalidation, getBtcWeeklyEmaPhase } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
@@ -2137,31 +2137,92 @@ window.toggleScanFilter = function(btn) {
 
 <script>
 // ── Equity krivulja ────────────────────────────────────────────────────────────
-(function(){
+(async function(){
   const labels = ${curveLabels};
   const data   = ${curveData};
+
+  // 14.08.: uplate/isplate na futures racun kao tocke na grafu (Bitget transfer
+  // bill, getAccountTransfers) — bez ovoga graf izgleda kao veci gubitak nego sto
+  // jest jer ne zna za novac unesen/izvucen usput.
+  let depositPts = new Array(labels.length).fill(null);
+  let withdrawPts = new Array(labels.length).fill(null);
+  try {
+    const tr = await fetch('/api/account-transfers').then(function(r){ return r.json(); });
+    (tr.transfers || []).forEach(function(t){
+      const dstr = new Date(t.ts).toISOString().slice(0,10);
+      if (labels.length === 0) return;
+      // nadji najblizi label po datumu (curve ima tocku po tradeu, ne po danu)
+      let bestIdx = 0, bestDiff = Infinity;
+      for (let i = 0; i < labels.length; i++) {
+        const diff = Math.abs(new Date(labels[i]).getTime() - new Date(dstr).getTime());
+        if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+      }
+      const y = data[bestIdx];
+      if (t.type === 'deposit') depositPts[bestIdx] = { y, amount: t.amount };
+      else withdrawPts[bestIdx] = { y, amount: t.amount };
+    });
+  } catch(e) {}
+
   new Chart(document.getElementById("eqChart").getContext("2d"), {
     type: "line",
     data: {
       labels,
-      datasets: [{
-        label: "Equity ($)",
-        data,
-        borderColor: "#db2777",
-        backgroundColor: "rgba(232,93,154,0.08)",
-        borderWidth: 2,
-        pointRadius: data.length > 50 ? 0 : 3,
-        pointBackgroundColor: "#db2777",
-        tension: 0.3,
-        fill: true,
-      }]
+      datasets: [
+        {
+          label: "Equity ($)",
+          data,
+          borderColor: "#db2777",
+          backgroundColor: "rgba(232,93,154,0.08)",
+          borderWidth: 2,
+          pointRadius: data.length > 50 ? 0 : 3,
+          pointBackgroundColor: "#db2777",
+          tension: 0.3,
+          fill: true,
+          order: 2,
+        },
+        {
+          label: "Uplata",
+          data: depositPts.map(function(p){ return p ? p.y : null; }),
+          showLine: false,
+          pointStyle: "triangle",
+          rotation: 0,
+          pointRadius: 8,
+          pointBackgroundColor: "#059669",
+          pointBorderColor: "#d1fae5",
+          pointBorderWidth: 1.5,
+          order: 1,
+          _amounts: depositPts.map(function(p){ return p ? p.amount : null; }),
+        },
+        {
+          label: "Isplata",
+          data: withdrawPts.map(function(p){ return p ? p.y : null; }),
+          showLine: false,
+          pointStyle: "triangle",
+          rotation: 180,
+          pointRadius: 8,
+          pointBackgroundColor: "#dc2626",
+          pointBorderColor: "#fee2e2",
+          pointBorderWidth: 1.5,
+          order: 1,
+          _amounts: withdrawPts.map(function(p){ return p ? p.amount : null; }),
+        },
+      ]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: {
-        legend: { display: false },
+        legend: {
+          display: true,
+          labels: { color: "#9ca3af", filter: function(item){ return item.text !== "Equity ($)"; }, boxWidth: 10, font: { size: 10 } }
+        },
         tooltip: {
-          callbacks: { label: ctx => "$" + ctx.raw.toFixed(2) }
+          callbacks: {
+            label: function(ctx) {
+              const amt = ctx.dataset._amounts ? ctx.dataset._amounts[ctx.dataIndex] : null;
+              if (amt != null) return (ctx.dataset.label === "Uplata" ? "+" : "") + "$" + amt.toFixed(2) + " " + ctx.dataset.label.toLowerCase();
+              return "$" + ctx.raw.toFixed(2);
+            }
+          }
         }
       },
       scales: {
@@ -4372,6 +4433,19 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(result));
     } catch(e) {
+      res.writeHead(500);
+      res.end(JSON.stringify({ error: e.message }));
+    }
+    return;
+  }
+
+  // Uplate/isplate na futures racun (14.08.) — za tocke na equity/PnL grafu
+  if (url.pathname === "/api/account-transfers") {
+    try {
+      const transfers = await getAccountTransfers();
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ transfers }));
+    } catch (e) {
       res.writeHead(500);
       res.end(JSON.stringify({ error: e.message }));
     }

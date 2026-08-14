@@ -406,6 +406,37 @@ export async function getBtcDailyPivots() {
   return _btcPivotsCache;
 }
 
+// ─── Uplate/isplate na futures račun (14.08.) — za overlay na equity/PnL grafu ──
+// Bitget "trans_from_exchange" = novac IZ spot walleta U futures (uplata, +iznos),
+// "trans_to_exchange" = novac IZ futures U spot (isplata, -iznos). API limit 90 dana
+// po pozivu — dovoljno za graf koji prati zadnjih par mjeseci.
+let _transfersCache = { list: null, ts: 0 };
+export async function getAccountTransfers() {
+  if (Date.now() - _transfersCache.ts < 15 * 60 * 1000 && _transfersCache.list !== null) return _transfersCache.list;
+  const list = [];
+  try {
+    const endTime = Date.now(), startTime = endTime - 89 * 24 * 3600 * 1000;
+    for (const businessType of ["trans_from_exchange", "trans_to_exchange"]) {
+      const path = `/api/v2/mix/account/bill?productType=USDT-FUTURES&coin=USDT&businessType=${businessType}&startTime=${startTime}&endTime=${endTime}&limit=100`;
+      const ts = Date.now().toString();
+      const sign = signBitGet(ts, "GET", path);
+      const r = await fetch(`${BITGET.baseUrl}${path}`, {
+        headers: { "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": sign,
+          "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET.passphrase, "Content-Type": "application/json" },
+      });
+      const d = await r.json();
+      if (d.code === "00000" && Array.isArray(d.data?.bills)) {
+        for (const b of d.data.bills) {
+          list.push({ ts: parseInt(b.cTime), amount: parseFloat(b.amount), type: businessType === "trans_from_exchange" ? "deposit" : "withdrawal" });
+        }
+      }
+    }
+    list.sort((a, b) => a.ts - b.ts);
+  } catch {}
+  _transfersCache = { list, ts: Date.now() };
+  return list;
+}
+
 // BTC kraća trend-invalidacijska razina (odvojena od btc_key_level — ciklus linije).
 // TraderaEdge 23.07: "gubitak ove zone i pretvaranje u otpor = prvi ozbiljan signal
 // slabljenja trenda, fokus prebacujem na short". Dnevni close ispod = pooštri LONG.

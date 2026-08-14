@@ -2951,16 +2951,10 @@ async function loadMarketContext() {
       }
     }
 
-    // SP500
-    if (d.sp500 && d.sp500.change4h !== null) {
-      const sp = d.sp500;
-      const spColor = sp.regime === 'RISK_OFF' ? '#dc2626' : sp.regime === 'RISK_ON' ? '#059669' : '#94a3b8';
-      const spIcon  = sp.regime === 'RISK_OFF' ? '🚨' : sp.regime === 'RISK_ON' ? '🟢' : '➡️';
-      document.getElementById('sp500-val').textContent = (sp.change4h > 0 ? '+' : '') + sp.change4h + '%';
-      document.getElementById('sp500-val').style.color = spColor;
-      document.getElementById('sp500-sub').textContent =
-        spIcon + ' ' + sp.regime + (sp.regime === 'RISK_OFF' ? ' — LONG ulazi blokirani!' : ' | ES=F @ ' + (sp.last || ''));
-    }
+    // SP500 — kartica uklonjena iz UI-a (sp500-val/sp500-sub ne postoje), podaci se
+    // i dalje koriste u gate scoringu niže u kodu. 14.08.: uklonjen mrtvi update-kod
+    // koji je rušio ostatak funkcije (Liquidation Risk, Session Info dolje su ostajali
+    // na "…" istim uzrokom kao ls-val/dom-val/dxy-val ranije).
 
     // Liquidation Risk + OI trend
     if (d.liq && d.liq.overall !== null) {

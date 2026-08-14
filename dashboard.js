@@ -691,6 +691,7 @@ async function runScan(rules) {
         } catch(e) { /* ignoriraj — PWHL ostaje 0 */ }
         const _zones  = await fetchLhZones(sym);
         const s       = scanSymbol(sym, candles, {}, {}, {}, ultraCfg, _pwh, _pwl, _zones);
+        s.isStock = isStockSym(sym);  // 14.08.: za odvajanje dionica/kripta u scanner tablici
         // Strong/Weak vs BTC (samo kripto altovi; 30-min cache u bot.js)
         s.relStr = (sym !== "BTCUSDT" && !isStockSym(sym))
           ? await getRelStrengthVsBtc(sym).catch(() => null) : null;
@@ -2700,7 +2701,9 @@ async function doScan() {
       breadthSb.textContent = 'od ' + total + ' simbola s ADX≥30 u trendu';
     }
 
-    tbody.innerHTML = results.map((s, i) => {
+    // 14.08.: dionice odvojene od kripta u tablici — dva bloka, svaki sortiran
+    // istim rank pravilom, s naslovnim retkom izmedju.
+    function rowHtml(s, i) {
       if (s.error) return '<tr><td colspan="8" style="color:#dc2626;padding:6px 10px">' + s.symbol + ': ' + s.error + '</td></tr>';
 
       const rsiNum = parseFloat(s.rsi);
@@ -2768,7 +2771,16 @@ async function doScan() {
         '<td style="padding:4px 6px;text-align:center">' + scoreBox(s.ultraBull||0, s.ultraBear||0, s.ultraSig, s.ultraMinSig) + '</td>' +
         '<td style="padding:4px 6px">' + statusBox(s) + '</td>' +
         '</tr>';
-    }).join("");
+    }
+
+    function sectionHeader(label, count) {
+      return '<tr><td colspan="8" style="padding:10px 8px 5px;color:#60a5fa;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;border-top:2px solid #374151;background:rgba(96,165,250,0.05)">' + label + ' (' + count + ')</td></tr>';
+    }
+    const cryptoResults = results.filter(function(s){ return !s.isStock; });
+    const stockResults  = results.filter(function(s){ return s.isStock; });
+    tbody.innerHTML =
+      (cryptoResults.length ? sectionHeader('🪙 Kripto', cryptoResults.length) + cryptoResults.map(rowHtml).join('') : '') +
+      (stockResults.length  ? sectionHeader('📈 Dionice', stockResults.length) + stockResults.map(rowHtml).join('')  : '');
 
     // ── Ažuriraj MM Filteri karticu ─────────────────────────────────────────
     const mmGrid = document.getElementById('mm-filters-grid');

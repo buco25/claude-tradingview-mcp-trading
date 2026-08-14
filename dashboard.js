@@ -1612,7 +1612,7 @@ window.toggleScanFilter = function(btn) {
   </div>
 <script>
 (function lhzCard() {
-  function zoneRow(icon, name, val, price) {
+  function zoneRow(icon, name, val, price, isPivot) {
     var dist = (val - price) / price * 100;
     var absDist = Math.abs(dist);
     var above = dist > 0;
@@ -1621,9 +1621,14 @@ window.toggleScanFilter = function(btn) {
     var distStr     = (dist > 0 ? '+' : '') + dist.toFixed(2) + '%';
     var statusLabel = near ? '⚡ NEAR' : above ? '↑ Resistance' : '↓ Support';
     var statusColor = near ? '#f59e0b' : above ? '#059669' : '#dc2626';
-    return '<tr style="border-top:1px solid #374151">' +
-      '<td style="padding:5px 8px;color:#e5e7eb">' + icon + ' ' + name + '</td>' +
-      '<td style="padding:5px 8px;text-align:right;font-family:monospace;color:#f3f4f6;font-weight:600">$' + Math.round(val).toLocaleString() + '</td>' +
+    // 14.08.: pivot razine (S1-3/R1-3, dnevni rolling) vizualno odvojene od
+    // mjesečnih/tjednih/godišnjih referentnih razina (statične do sljedeće promjene) —
+    // ljubičasti left-border + podebljano ime, na zahtjev.
+    var rowStyle = 'border-top:1px solid #374151' + (isPivot ? ';border-left:3px solid #a855f7;background:rgba(168,85,247,0.06)' : '');
+    var nameStyle = 'padding:5px 8px;color:#e5e7eb' + (isPivot ? ';font-weight:700' : '');
+    return '<tr style="' + rowStyle + '">' +
+      '<td style="' + nameStyle + '">' + icon + ' ' + name + '</td>' +
+      '<td style="padding:5px 8px;text-align:right;font-family:monospace;color:#f3f4f6;font-weight:' + (isPivot ? '800' : '600') + '">$' + Math.round(val).toLocaleString() + '</td>' +
       '<td style="padding:5px 8px;text-align:right;font-family:monospace;color:' + distColor + ';font-weight:700">' + distStr + '</td>' +
       '<td style="padding:5px 8px;color:' + statusColor + ';font-size:11px">' + statusLabel + '</td>' +
       '</tr>';
@@ -1642,11 +1647,11 @@ window.toggleScanFilter = function(btn) {
         { icon: '📆', name: 'Weekly Open',    val: lhz.weeklyOpen  },
         { icon: '⬆️', name: 'Prev Week High', val: lhz.pwh         },
         { icon: '⬇️', name: 'Prev Week Low',  val: lhz.pwl         },
-      ].concat((lhz.supportZones || []).map(function(v, i){ return { icon: '💎', name: 'S' + (i + 1) + ' Support', val: v }; }))
-       .concat((lhz.resistanceZones || []).map(function(v, i){ return { icon: '🔶', name: 'R' + (i + 1) + ' Resistance', val: v }; }))
+      ].concat((lhz.supportZones || []).map(function(v, i){ return { icon: '💎', name: 'S' + (i + 1) + ' Support', val: v, pivot: true }; }))
+       .concat((lhz.resistanceZones || []).map(function(v, i){ return { icon: '🔶', name: 'R' + (i + 1) + ' Resistance', val: v, pivot: true }; }))
        .filter(function(z){ return z.val; });
       zones.sort(function(a,b){ return Math.abs(a.val-price)-Math.abs(b.val-price); });
-      var rows = zones.map(function(z){ return zoneRow(z.icon, z.name, z.val, price); }).join('');
+      var rows = zones.map(function(z){ return zoneRow(z.icon, z.name, z.val, price, z.pivot); }).join('');
       document.getElementById('lhz-body').innerHTML = rows || '<tr><td colspan="4" style="text-align:center;color:#4b5563;padding:8px">—</td></tr>';
     } catch(e) {
       document.getElementById('lhz-ts').textContent = 'Greška';

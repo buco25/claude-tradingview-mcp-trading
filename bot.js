@@ -302,6 +302,7 @@ function getBtcDrawdownPct(price) {
 }
 
 export async function getBtcRegimeExport() { return getBtcRegime(); }
+export async function getBtcRegime1HExport() { return getBtcRegime1H(); }
 
 // ─── BTC 1H regime — brži od 4H ───────────────────────────────────────────────
 async function getBtcRegime1H() {
@@ -6508,7 +6509,48 @@ function _analyzeMMPhase(sym, candles) {
   };
 }
 
-function _buildReport(dateStr, stats, symReports, fg, news, pivots) {
+// ─── Dnevni Outlook — sintetizira sve makro-signale u jedan bias (14.08.) ────
+// Isti pristup kao ručna analiza u chatu: broji koliko od 4 direkcijska signala
+// (1H regime, tjedna EMA faza, ključna razina, dnevna invalidacija) je bull/bear,
+// + L/S ratio kao KONTRARIJANSKO upozorenje (extreme long/short = squeeze rizik
+// u suprotnom smjeru), + najbliži pivot za kontekst. Deterministički, ne subjektivno.
+function _buildDailyOutlook({ regime1h, weeklyEma, weeklyVsKey, dailyVsInvalidation, lsr, pivots, price }) {
+  let bull = 0, bear = 0;
+  const notes = [];
+  if (regime1h?.regime === "BULL")      { bull++; notes.push("1H regime BULL"); }
+  else if (regime1h?.regime === "BEAR") { bear++; notes.push("1H regime BEAR"); }
+  if (weeklyEma?.bullPhase === true)       { bull++; notes.push("tjedna EMA faza BULL"); }
+  else if (weeklyEma?.bullPhase === false) { bear++; notes.push("tjedna EMA faza BEAR"); }
+  if (weeklyVsKey?.belowKey === false)      { bull++; notes.push(`iznad ključne razine $${Math.round(weeklyVsKey.key).toLocaleString()}`); }
+  else if (weeklyVsKey?.belowKey === true)  { bear++; notes.push(`ispod ključne razine $${Math.round(weeklyVsKey.key).toLocaleString()}`); }
+  if (dailyVsInvalidation?.belowInval === false)      { bull++; notes.push("iznad dnevne invalidacije"); }
+  else if (dailyVsInvalidation?.belowInval === true)  { bear++; notes.push("ispod dnevne invalidacije (LONG +1 minSig)"); }
+
+  const bias      = bull > bear ? "BULLISH" : bear > bull ? "BEARISH" : "MIJEŠANO";
+  const biasEmoji = bias === "BULLISH" ? "🟢" : bias === "BEARISH" ? "🔴" : "🟡";
+
+  let lsWarn = null;
+  if (lsr) {
+    const lr = parseFloat(lsr.longRatio);
+    if (lr >= 65)      lsWarn = `⚠️ L/S ${lr}% long — "long trap", crowd pretežak na jednu stranu (squeeze rizik dolje)`;
+    else if (lr <= 35) lsWarn = `⚠️ L/S ${lr}% long (${lsr.shortRatio}% short) — crowd pretežak na short (squeeze rizik gore)`;
+  }
+
+  let nearZone = null;
+  if (pivots?.p != null && price) {
+    const zones = [
+      { name: "R3", v: pivots.r3 }, { name: "R2", v: pivots.r2 }, { name: "R1", v: pivots.r1 },
+      { name: "S1", v: pivots.s1 }, { name: "S2", v: pivots.s2 }, { name: "S3", v: pivots.s3 },
+    ];
+    const nearest = zones.reduce((a, b) => Math.abs(b.v - price) < Math.abs(a.v - price) ? b : a);
+    const dist = (nearest.v - price) / price * 100;
+    nearZone = `${nearest.name} $${Math.round(nearest.v).toLocaleString()} (${dist >= 0 ? "+" : ""}${dist.toFixed(2)}%)`;
+  }
+
+  return { bias, biasEmoji, bull, bear, notes, lsWarn, nearZone };
+}
+
+function _buildReport(dateStr, stats, symReports, fg, news, pivots, outlook) {
   const phaseEmoji = {
     "AKUMULACIJA": "🔵", "NEUTRALNO": "⬜", "MARKUP": "🟡",
     "DISTRIBUCIJA": "🔴", "CRASH/PANIC": "💥", "N/A": "❓",
@@ -6542,6 +6584,16 @@ function _buildReport(dateStr, stats, symReports, fg, news, pivots) {
 
   // ── Telegram message (max ~2000 char) ──────────────────────────────────────
   let tgMsg = `📊 <b>ULTRA Jutarnji Brief — ${dateStr}</b>\n\n`;
+
+  // Dnevni Outlook — sintetizirani bias iz 1H regime + tjedna faza + ključna razina
+  // + invalidacija + L/S ratio (14.08., _buildDailyOutlook). Deterministički.
+  if (outlook) {
+    tgMsg += `${outlook.biasEmoji} <b>Dnevni Outlook: ${outlook.bias}</b> (${outlook.bull}↑/${outlook.bear}↓ signala)\n`;
+    if (outlook.notes.length) tgMsg += outlook.notes.map(n => `• ${n}`).join("\n") + "\n";
+    if (outlook.lsWarn) tgMsg += `${outlook.lsWarn}\n`;
+    if (outlook.nearZone) tgMsg += `Najbliži pivot: ${outlook.nearZone}\n`;
+    tgMsg += "\n";
+  }
 
   const fgEmoji = !fg || fg.value == null ? "❓" : fg.value >= 75 ? "🤑" : fg.value >= 55 ? "😊" : fg.value >= 45 ? "😐" : fg.value >= 25 ? "😨" : "😱";
   tgMsg += `${fgEmoji} <b>Fear &amp; Greed:</b> ${fg && fg.value != null ? `${fg.value}/100 — ${fg.label}` : "N/A"}\n\n`;
@@ -6589,6 +6641,13 @@ function _buildReport(dateStr, stats, symReports, fg, news, pivots) {
   // ── Markdown report ────────────────────────────────────────────────────────
   let md = `# ULTRA Daily MM/Algo Report — ${dateStr}\n`;
   md += `**Generirano:** ${new Date().toISOString()} UTC\n\n`;
+  if (outlook) {
+    md += `## ${outlook.biasEmoji} Dnevni Outlook: ${outlook.bias} (${outlook.bull}↑/${outlook.bear}↓ signala)\n\n`;
+    if (outlook.notes.length) md += outlook.notes.map(n => `- ${n}`).join("\n") + "\n";
+    if (outlook.lsWarn) md += `- ${outlook.lsWarn}\n`;
+    if (outlook.nearZone) md += `- Najbliži pivot: ${outlook.nearZone}\n`;
+    md += "\n";
+  }
   md += `**Fear & Greed:** ${fg && fg.value != null ? `${fg.value}/100 (${fg.label})` : "N/A"}\n\n`;
   if (pivots && pivots.p !== null) {
     md += `## 📐 BTC Dnevni Pivot Points (Classic, iz jučerašnjeg H/L/C)\n\n`;
@@ -6757,8 +6816,18 @@ export async function generateDailyReport() {
   // 2c. BTC dnevni Pivot Points S1/S2/S3 + R1/R2/R3 (14.08., getBtcDailyPivots)
   const pivots = await getBtcDailyPivots().catch(() => null);
 
+  // 2d. Dnevni Outlook — sintetiziraj sve makro-signale u jedan bias (14.08.)
+  const [regime1h, weeklyEma, weeklyVsKey, dailyVsInvalidation, lsr] = await Promise.all([
+    getBtcRegime1HExport().catch(() => null),
+    getBtcWeeklyEmaPhase().catch(() => null),
+    getBtcWeeklyVsKey().catch(() => null),
+    getBtcDailyVsInvalidation().catch(() => null),
+    getLongShortRatio("BTCUSDT").catch(() => null),
+  ]);
+  const outlook = _buildDailyOutlook({ regime1h, weeklyEma, weeklyVsKey, dailyVsInvalidation, lsr, pivots, price: regime1h?.currentPrice });
+
   // 3. Build report
-  const report = _buildReport(dateStr, stats, symReports, fg, news, pivots);
+  const report = _buildReport(dateStr, stats, symReports, fg, news, pivots, outlook);
 
   // 4. Spremi u fajl
   try {

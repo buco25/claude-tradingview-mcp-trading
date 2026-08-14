@@ -2411,11 +2411,14 @@ function analyzeUltra(candles, cfg) {
   const recentHighsLH = candles.slice(-192).map(c => c.high);
   // Sakupi sve dostupne LH razine (+ ključna ciklus-razina za BTC, npr. 60k —
   // TraderaEdge 07/2026: "svaki satoshi ispod 60k agresivno kupljen; očekuje se fakeout")
+  // + btc_support_zones (14.08., S1/S2/S3 iz TraderaEdge LTF range analize) —
+  // iste sweep+reclaim mehanike, dodatne razine unutar 60-70k rangea.
   const _lhLevels = [
     _monthlyOpen, _weeklyOpen, _yearlyOpen, _fridayClose,
     _monthlyHigh, _monthlyLow,
     cfg._pwh ?? null, cfg._pwl ?? null,
-    cfg._keyLevel ?? null
+    cfg._keyLevel ?? null,
+    ...(cfg._supportZones ?? [])
   ].filter(v => v !== null && v > 0);
   let _sweepInfo = null;  // za Liquidity Hunt strategiju (standalone ulaz)
   if (_lhLevels.length > 0) {
@@ -2686,7 +2689,7 @@ function analyzeUltra(candles, cfg) {
     // Zone confluence (TG 21.07. Korak #2: "ne juri market cenu — čekaj da market dođe tebi")
     // Trend LONG samo uz potporu: 15m pivot sup ili HTF zona unutar 1.5% ispod/na cijeni
     {
-      const _confL = [nearSup, cfg._pwl, _monthlyLow, _weeklyOpen, _monthlyOpen, _fridayClose, _yearlyOpen, cfg._keyLevel]
+      const _confL = [nearSup, cfg._pwl, _monthlyLow, _weeklyOpen, _monthlyOpen, _fridayClose, _yearlyOpen, cfg._keyLevel, ...(cfg._supportZones ?? [])]
         .filter(v => v != null && v > 0 && v <= price * 1.002);
       if (!_confL.some(l => (price - l) / price <= 0.015)) {
         return { price, signal: "NEUTRAL", bullScore, bearScore, nearSup, nearRes, vwap: vwapVal,
@@ -2883,12 +2886,18 @@ async function analyzeUltraPullback(symbol, candles, cfg) {
 
   // Pokreni analizu (proslijedi symbol + PWH/PWL + daily signali)
   // Ključna ciklus-razina (samo BTC) — iz rules.json (btc_key_level, npr. 60000)
-  let _keyLevel = null;
+  // 14.08.: + btc_support_zones (S1/S2/S3, ručno iz TraderaEdge LTF analiza) — iste
+  // sweep+reclaim LHUNT mehanike kao key level, samo dodatne razine za range trading.
+  let _keyLevel = null, _supportZones = [];
   if (symbol === "BTCUSDT") {
-    try { _keyLevel = JSON.parse(readFileSync("rules.json", "utf8")).btc_key_level ?? null; } catch {}
+    try {
+      const _r = JSON.parse(readFileSync("rules.json", "utf8"));
+      _keyLevel = _r.btc_key_level ?? null;
+      _supportZones = Array.isArray(_r.btc_support_zones) ? _r.btc_support_zones.filter(v => typeof v === "number" && v > 0) : [];
+    } catch {}
   }
 
-  const result = analyzeUltra(candles, { ...cfg, symbol, _pwh, _pwl, _dailyEma10, _dailyEma20, _monthlyOpen, _monthlyHigh, _monthlyLow, _weeklyOpen, _yearlyOpen, _fridayClose, _keyLevel });
+  const result = analyzeUltra(candles, { ...cfg, symbol, _pwh, _pwl, _dailyEma10, _dailyEma20, _monthlyOpen, _monthlyHigh, _monthlyLow, _weeklyOpen, _yearlyOpen, _fridayClose, _keyLevel, _supportZones });
 
   if (result.signal === "LONG" || result.signal === "SHORT") {
     console.log(`  ✅ [ULTRA] ${symbol} ${result.signal} @ ${fmtPrice(price)} — (${result.bullScore ?? 0}↑/${result.bearScore ?? 0}↓)`);

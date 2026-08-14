@@ -2122,7 +2122,7 @@ window.toggleScanFilter = function(btn) {
 
   <!-- Equity curve -->
   <div class="chart-card">
-    <div class="chart-title">📈 Kumulativni Trading P&amp;L — ULTRA <span style="font-size:10px;color:#9ca3af;font-weight:400">(baza: početni kapital, ne prati naknadne uplate/isplate)</span></div>
+    <div class="chart-title">📈 Equity Krivulja — ULTRA <span style="font-size:10px;color:#9ca3af;font-weight:400">(uključuje uplate/isplate zadnjih 89 dana — Bitget API limit)</span></div>
     <div class="chart-wrap" style="height:180px"><canvas id="eqChart"></canvas></div>
   </div>
 
@@ -2142,23 +2142,28 @@ window.toggleScanFilter = function(btn) {
   const labels = ${curveLabels};
   const data   = ${curveData};
 
-  // 14.08.: uplate/isplate na futures racun kao tocke na grafu (Bitget transfer
-  // bill, getAccountTransfers) — bez ovoga graf izgleda kao veci gubitak nego sto
-  // jest jer ne zna za novac unesen/izvucen usput.
+  // 14.08.: uplate/isplate na futures racun POMICU samu liniju (ne samo tocke) —
+  // bez ovoga je linija i dalje bila cisti trading P&L pa je zavrsavala na ~$150
+  // dok je stvarni equity ~$253. Svaka uplata/isplata se sad TRAJNO doda/oduzme
+  // od te tocke nadalje (kao stvarna promjena stanja racuna), kao pravi equity graf.
+  const adjustedData = data.slice();
   let depositPts = new Array(labels.length).fill(null);
   let withdrawPts = new Array(labels.length).fill(null);
   try {
     const tr = await fetch('/api/account-transfers').then(function(r){ return r.json(); });
-    (tr.transfers || []).forEach(function(t){
-      const dstr = new Date(t.ts).toISOString().slice(0,10);
+    const transfers = (tr.transfers || []).slice().sort(function(a,b){ return a.ts - b.ts; });
+    transfers.forEach(function(t){
       if (labels.length === 0) return;
+      const dstr = new Date(t.ts).toISOString().slice(0,10);
       // nadji najblizi label po datumu (curve ima tocku po tradeu, ne po danu)
       let bestIdx = 0, bestDiff = Infinity;
       for (let i = 0; i < labels.length; i++) {
         const diff = Math.abs(new Date(labels[i]).getTime() - new Date(dstr).getTime());
         if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
       }
-      const y = data[bestIdx];
+      // pomakni sve tocke OD ovog trenutka nadalje za iznos transfera (trajna promjena)
+      for (let i = bestIdx; i < adjustedData.length; i++) adjustedData[i] += t.amount;
+      const y = adjustedData[bestIdx];
       if (t.type === 'deposit') depositPts[bestIdx] = { y, amount: t.amount };
       else withdrawPts[bestIdx] = { y, amount: t.amount };
     });
@@ -2171,11 +2176,11 @@ window.toggleScanFilter = function(btn) {
       datasets: [
         {
           label: "Equity ($)",
-          data,
+          data: adjustedData,
           borderColor: "#db2777",
           backgroundColor: "rgba(232,93,154,0.08)",
           borderWidth: 2,
-          pointRadius: data.length > 50 ? 0 : 3,
+          pointRadius: adjustedData.length > 50 ? 0 : 3,
           pointBackgroundColor: "#db2777",
           tension: 0.3,
           fill: true,

@@ -1642,7 +1642,7 @@ window.toggleScanFilter = function(btn) {
         { icon: '📆', name: 'Weekly Open',    val: lhz.weeklyOpen  },
         { icon: '⬆️', name: 'Prev Week High', val: lhz.pwh         },
         { icon: '⬇️', name: 'Prev Week Low',  val: lhz.pwl         },
-      ].concat((lhz.supportZones || []).map(function(v, i){ return { icon: '💎', name: 'S' + (i + 1) + ' Support (TraderaEdge)', val: v }; }))
+      ].concat((lhz.supportZones || []).map(function(v, i){ return { icon: '💎', name: 'S' + (i + 1) + ' Support', val: v }; }))
        .filter(function(z){ return z.val; });
       zones.sort(function(a,b){ return Math.abs(a.val-price)-Math.abs(b.val-price); });
       var rows = zones.map(function(z){ return zoneRow(z.icon, z.name, z.val, price); }).join('');

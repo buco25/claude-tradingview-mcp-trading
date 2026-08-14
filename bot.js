@@ -376,6 +376,35 @@ export async function getBtcWeeklyEmaPhase() {
   return _btcWeeklyEmaCache;
 }
 
+// BTC dnevni Pivot Points (Classic/Floor Trader formula) — potpuno automatski,
+// zamjenjuje ručni btc_support_zones (14.08.: dešifrirano da TraderaEdgeov S1/S2/S3
+// i R1/R2/R3 na 4H chartu NISU subjektivna analiza nego standardni rolling dnevni
+// pivot iz PRETHODNOG DANA OHLC-a — mijenja se svaki dan, pa ručno kopiranje brojki
+// zastari za 24h. P=(H+L+C)/3, R1=2P-L, S1=2P-H, R2=P+(H-L), S2=P-(H-L),
+// R3=H+2(P-L), S3=L-2(H-P). Test 14.08. protiv njegovog charta: S2/S3 unutar $1-55.
+let _btcPivotsCache = { p: null, r1: null, r2: null, r3: null, s1: null, s2: null, s3: null, ts: 0 };
+export async function getBtcDailyPivots() {
+  if (Date.now() - _btcPivotsCache.ts < 30 * 60 * 1000 && _btcPivotsCache.p !== null) return _btcPivotsCache;
+  try {
+    const d = await fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1Dutc&limit=3`).then(r => r.json());
+    const candles = d?.data ?? [];
+    if (candles.length >= 2) {
+      // Bitget ascending — pretposljednja svijeća = ZATVORENI prethodni dan (zadnja je danas, u tijeku)
+      const prev = candles[candles.length - 2];
+      const H = parseFloat(prev[2]), L = parseFloat(prev[3]), C = parseFloat(prev[4]);
+      const P = (H + L + C) / 3;
+      _btcPivotsCache = {
+        p: P,
+        r1: 2 * P - L, s1: 2 * P - H,
+        r2: P + (H - L), s2: P - (H - L),
+        r3: H + 2 * (P - L), s3: L - 2 * (H - P),
+        ts: Date.now(),
+      };
+    }
+  } catch {}
+  return _btcPivotsCache;
+}
+
 // BTC kraća trend-invalidacijska razina (odvojena od btc_key_level — ciklus linije).
 // TraderaEdge 23.07: "gubitak ove zone i pretvaranje u otpor = prvi ozbiljan signal
 // slabljenja trenda, fokus prebacujem na short". Dnevni close ispod = pooštri LONG.
@@ -2411,14 +2440,14 @@ function analyzeUltra(candles, cfg) {
   const recentHighsLH = candles.slice(-192).map(c => c.high);
   // Sakupi sve dostupne LH razine (+ ključna ciklus-razina za BTC, npr. 60k —
   // TraderaEdge 07/2026: "svaki satoshi ispod 60k agresivno kupljen; očekuje se fakeout")
-  // + btc_support_zones (14.08., S1/S2/S3 iz TraderaEdge LTF range analize) —
-  // iste sweep+reclaim mehanike, dodatne razine unutar 60-70k rangea.
+  // + automatski dnevni Pivot Points S1/S2/S3 + R1/R2/R3 (14.08., getBtcDailyPivots) —
+  // iste sweep+reclaim mehanike, dodatne razine unutar dnevnog rangea.
   const _lhLevels = [
     _monthlyOpen, _weeklyOpen, _yearlyOpen, _fridayClose,
     _monthlyHigh, _monthlyLow,
     cfg._pwh ?? null, cfg._pwl ?? null,
     cfg._keyLevel ?? null,
-    ...(cfg._supportZones ?? [])
+    ...(cfg._supportZones ?? []), ...(cfg._resistanceZones ?? [])
   ].filter(v => v !== null && v > 0);
   let _sweepInfo = null;  // za Liquidity Hunt strategiju (standalone ulaz)
   if (_lhLevels.length > 0) {
@@ -2713,7 +2742,7 @@ function analyzeUltra(candles, cfg) {
     }
     // Zone confluence — trend SHORT samo uz otpor (15m pivot res ili HTF zona ≤1.5% iznad)
     {
-      const _confS = [nearRes, cfg._pwh, _monthlyHigh, _weeklyOpen, _monthlyOpen, _fridayClose, _yearlyOpen, cfg._keyLevel]
+      const _confS = [nearRes, cfg._pwh, _monthlyHigh, _weeklyOpen, _monthlyOpen, _fridayClose, _yearlyOpen, cfg._keyLevel, ...(cfg._resistanceZones ?? [])]
         .filter(v => v != null && v > 0 && v >= price * 0.998);
       if (!_confS.some(l => (l - price) / price <= 0.015)) {
         return { price, signal: "NEUTRAL", bullScore, bearScore, nearSup, nearRes, vwap: vwapVal,
@@ -2886,18 +2915,25 @@ async function analyzeUltraPullback(symbol, candles, cfg) {
 
   // Pokreni analizu (proslijedi symbol + PWH/PWL + daily signali)
   // Ključna ciklus-razina (samo BTC) — iz rules.json (btc_key_level, npr. 60000)
-  // 14.08.: + btc_support_zones (S1/S2/S3, ručno iz TraderaEdge LTF analiza) — iste
-  // sweep+reclaim LHUNT mehanike kao key level, samo dodatne razine za range trading.
-  let _keyLevel = null, _supportZones = [];
+  // 14.08.: + S1/S2/S3 i R1/R2/R3 — AUTOMATSKI dnevni Pivot Points (getBtcDailyPivots),
+  // ne više ručni btc_support_zones. Isti sweep+reclaim LHUNT mehanizam kao key level,
+  // support ide u LONG confluence (_confL), resistance u SHORT confluence (_confS).
+  let _keyLevel = null, _supportZones = [], _resistanceZones = [];
   if (symbol === "BTCUSDT") {
     try {
       const _r = JSON.parse(readFileSync("rules.json", "utf8"));
       _keyLevel = _r.btc_key_level ?? null;
-      _supportZones = Array.isArray(_r.btc_support_zones) ? _r.btc_support_zones.filter(v => typeof v === "number" && v > 0) : [];
+    } catch {}
+    try {
+      const _piv = await getBtcDailyPivots();
+      if (_piv.p !== null) {
+        _supportZones    = [_piv.s1, _piv.s2, _piv.s3];
+        _resistanceZones = [_piv.r1, _piv.r2, _piv.r3];
+      }
     } catch {}
   }
 
-  const result = analyzeUltra(candles, { ...cfg, symbol, _pwh, _pwl, _dailyEma10, _dailyEma20, _monthlyOpen, _monthlyHigh, _monthlyLow, _weeklyOpen, _yearlyOpen, _fridayClose, _keyLevel, _supportZones });
+  const result = analyzeUltra(candles, { ...cfg, symbol, _pwh, _pwl, _dailyEma10, _dailyEma20, _monthlyOpen, _monthlyHigh, _monthlyLow, _weeklyOpen, _yearlyOpen, _fridayClose, _keyLevel, _supportZones, _resistanceZones });
 
   if (result.signal === "LONG" || result.signal === "SHORT") {
     console.log(`  ✅ [ULTRA] ${symbol} ${result.signal} @ ${fmtPrice(price)} — (${result.bullScore ?? 0}↑/${result.bearScore ?? 0}↓)`);
@@ -6472,7 +6508,7 @@ function _analyzeMMPhase(sym, candles) {
   };
 }
 
-function _buildReport(dateStr, stats, symReports, fg, news) {
+function _buildReport(dateStr, stats, symReports, fg, news, pivots) {
   const phaseEmoji = {
     "AKUMULACIJA": "🔵", "NEUTRALNO": "⬜", "MARKUP": "🟡",
     "DISTRIBUCIJA": "🔴", "CRASH/PANIC": "💥", "N/A": "❓",
@@ -6509,6 +6545,13 @@ function _buildReport(dateStr, stats, symReports, fg, news) {
 
   const fgEmoji = !fg || fg.value == null ? "❓" : fg.value >= 75 ? "🤑" : fg.value >= 55 ? "😊" : fg.value >= 45 ? "😐" : fg.value >= 25 ? "😨" : "😱";
   tgMsg += `${fgEmoji} <b>Fear &amp; Greed:</b> ${fg && fg.value != null ? `${fg.value}/100 — ${fg.label}` : "N/A"}\n\n`;
+
+  // BTC dnevni Pivot Points (14.08., automatski iz jučerašnjeg H/L/C — Classic formula)
+  if (pivots && pivots.p !== null) {
+    tgMsg += `📐 <b>BTC Dnevni Pivoti</b> (P $${Math.round(pivots.p).toLocaleString()})\n`;
+    tgMsg += `R3 $${Math.round(pivots.r3).toLocaleString()} · R2 $${Math.round(pivots.r2).toLocaleString()} · R1 $${Math.round(pivots.r1).toLocaleString()}\n`;
+    tgMsg += `S1 $${Math.round(pivots.s1).toLocaleString()} · S2 $${Math.round(pivots.s2).toLocaleString()} · S3 $${Math.round(pivots.s3).toLocaleString()}\n\n`;
+  }
 
   if (stats && stats.total > 0) {
     tgMsg += `📈 <b>Performance (7 dana)</b>\n`;
@@ -6547,6 +6590,13 @@ function _buildReport(dateStr, stats, symReports, fg, news) {
   let md = `# ULTRA Daily MM/Algo Report — ${dateStr}\n`;
   md += `**Generirano:** ${new Date().toISOString()} UTC\n\n`;
   md += `**Fear & Greed:** ${fg && fg.value != null ? `${fg.value}/100 (${fg.label})` : "N/A"}\n\n`;
+  if (pivots && pivots.p !== null) {
+    md += `## 📐 BTC Dnevni Pivot Points (Classic, iz jučerašnjeg H/L/C)\n\n`;
+    md += `| Razina | Cijena |\n|---|---|\n`;
+    md += `| R3 | $${Math.round(pivots.r3).toLocaleString()} |\n| R2 | $${Math.round(pivots.r2).toLocaleString()} |\n| R1 | $${Math.round(pivots.r1).toLocaleString()} |\n`;
+    md += `| **P** | **$${Math.round(pivots.p).toLocaleString()}** |\n`;
+    md += `| S1 | $${Math.round(pivots.s1).toLocaleString()} |\n| S2 | $${Math.round(pivots.s2).toLocaleString()} |\n| S3 | $${Math.round(pivots.s3).toLocaleString()} |\n\n`;
+  }
   if (news && news.length > 0) {
     md += `## 📰 Top vijesti\n\n`;
     md += news.map((n, i) => `${i + 1}. [${n.title}](${n.url})`).join("\n") + "\n\n";
@@ -6704,8 +6754,11 @@ export async function generateDailyReport() {
     fetchCryptoNews(5),
   ]);
 
+  // 2c. BTC dnevni Pivot Points S1/S2/S3 + R1/R2/R3 (14.08., getBtcDailyPivots)
+  const pivots = await getBtcDailyPivots().catch(() => null);
+
   // 3. Build report
-  const report = _buildReport(dateStr, stats, symReports, fg, news);
+  const report = _buildReport(dateStr, stats, symReports, fg, news, pivots);
 
   // 4. Spremi u fajl
   try {

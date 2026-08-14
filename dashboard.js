@@ -12,7 +12,7 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   getSessionInfo, calcAtrTrend, getSp500Data, calcSymbolCorrelation,
   getDeribitPutCall, getLiquidationRisk, getEconEvents, isEconBlocked, calcVWAP,
   getLongShortRatio, getStablecoinInflow, getBtcPerpBasis, getAltcoinSeason,
-  generateDailyReport, autoFixCsvFromBitget, SYMBOL_COMBOS,
+  generateDailyReport, autoFixCsvFromBitget, SYMBOL_COMBOS, getBtcDailyPivots,
   getBtcWeeklyVsKey, getRelStrengthVsBtc, isStockSym, getBtcChillMode, getBtcDailyVsInvalidation, getBtcWeeklyEmaPhase } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
@@ -1643,6 +1643,7 @@ window.toggleScanFilter = function(btn) {
         { icon: '⬆️', name: 'Prev Week High', val: lhz.pwh         },
         { icon: '⬇️', name: 'Prev Week Low',  val: lhz.pwl         },
       ].concat((lhz.supportZones || []).map(function(v, i){ return { icon: '💎', name: 'S' + (i + 1) + ' Support', val: v }; }))
+       .concat((lhz.resistanceZones || []).map(function(v, i){ return { icon: '🔶', name: 'R' + (i + 1) + ' Resistance', val: v }; }))
        .filter(function(z){ return z.val; });
       zones.sort(function(a,b){ return Math.abs(a.val-price)-Math.abs(b.val-price); });
       var rows = zones.map(function(z){ return zoneRow(z.icon, z.name, z.val, price); }).join('');
@@ -4351,12 +4352,13 @@ const server = http.createServer(async (req, res) => {
           const janCandle = mdR.data.find(k => parseInt(k[0]) >= yearStart);
           if (janCandle) lhz.yearlyOpen = parseFloat(janCandle[1]);
         }
-        // 14.08.: S1/S2/S3 (btc_support_zones, ručno iz TraderaEdge LTF analize) —
-        // ista LHUNT zona-tablica, dodatne razine unutar range-a (vidi bot.js).
+        // 14.08.: S1/S2/S3 + R1/R2/R3 — automatski dnevni Pivot Points (getBtcDailyPivots
+        // u bot.js), zamjenjuje ranije ručni btc_support_zones. Ista LHUNT zona-tablica.
         try {
-          const rulesSz = JSON.parse(readFileSync("rules.json", "utf8"));
-          if (Array.isArray(rulesSz.btc_support_zones)) {
-            lhz.supportZones = rulesSz.btc_support_zones.filter(v => typeof v === "number" && v > 0);
+          const piv = await getBtcDailyPivots();
+          if (piv.p !== null) {
+            lhz.supportZones    = [piv.s1, piv.s2, piv.s3];
+            lhz.resistanceZones = [piv.r1, piv.r2, piv.r3];
           }
         } catch {}
         if (Object.keys(lhz).length > 0) result.lhz = lhz;

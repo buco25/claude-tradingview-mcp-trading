@@ -795,7 +795,7 @@ const VOL_HIGH_MULT = 2.0;
 // ─── Liq Zone kalkulator — koristi već dohvaćene 1H candle ──────────────────
 // Pronalazi pivot highs/lows i računa gdje su leveraged pozicije u opasnosti od liq.
 // Vraća: { danger: "CLEAR"|"CAUTION"|"DANGER", minDist, closestLong, closestShort }
-function calcLiqZones(candles) {
+export function calcLiqZones(candles) {
   const PIVOT_LEN = 8;   // bar-ova lijevo/desno za pivot detekciju (1H: 8h prozor)
   const N_PIVOTS  = 4;   // max pivota koje koristimo
   const RANGE_PCT = 12.0; // max % od cijene za prikaz zona

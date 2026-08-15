@@ -12,7 +12,7 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   getSessionInfo, calcAtrTrend, getSp500Data, calcSymbolCorrelation,
   getDeribitPutCall, getLiquidationRisk, getEconEvents, isEconBlocked, calcVWAP,
   getLongShortRatio, getStablecoinInflow, getBtcPerpBasis, getAltcoinSeason,
-  generateDailyReport, autoFixCsvFromBitget, SYMBOL_COMBOS, getBtcDailyPivots, getAccountTransfers,
+  generateDailyReport, autoFixCsvFromBitget, SYMBOL_COMBOS, getBtcDailyPivots, getAccountTransfers, calcLiqZones,
   getBtcWeeklyVsKey, getRelStrengthVsBtc, isStockSym, getBtcChillMode, getBtcDailyVsInvalidation, getBtcWeeklyEmaPhase } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
@@ -3262,7 +3262,11 @@ async function loadLiqRisk() {
 
     let anyDanger = false, anyCaution = false;
     let html = '';
+    let compactHtml = '';
 
+    // 14.08.: prosireno na cijelu watchlistu — pun detaljni card samo za simbole s
+    // otvorenom pozicijom (ili leverage-zone DANGER/CAUTION), ostali kompaktan red
+    // (inace bi 32 prazne "Nema pozicije" kartice zatrpale karticu).
     for (const sym of d.results || []) {
       if (sym.error) continue;
       const name = sym.sym.replace('USDT','');
@@ -3272,6 +3276,24 @@ async function loadLiqRisk() {
       let symRisk = 'CLEAR';
       if (sym.myPositions?.some(p => p.risk === 'DANGER'))   { symRisk = 'DANGER';  anyDanger  = true; }
       else if (sym.myPositions?.some(p => p.risk === 'CAUTION')) { symRisk = 'CAUTION'; anyCaution = true; }
+
+      const lz = sym.leverageZones;
+      const lzDanger = lz ? lz.danger : 'CLEAR';
+      if (!sym.myPositions?.length) {
+        // Kompaktan red — nema otvorene pozicije na ovom simbolu
+        const lzIcon = lzDanger === 'DANGER' ? '🔴' : lzDanger === 'CAUTION' ? '🟡' : '🟢';
+        const lzCol  = lzDanger === 'DANGER' ? '#dc2626' : lzDanger === 'CAUTION' ? '#d97706' : '#6b7280';
+        const longTxt  = lz?.closestLong  ? lz.closestLong.price.toLocaleString()  + ' (' + lz.closestLong.dist.toFixed(1)  + '% · ' + lz.closestLong.lev  + 'x)' : '—';
+        const shortTxt = lz?.closestShort ? lz.closestShort.price.toLocaleString() + ' (' + lz.closestShort.dist.toFixed(1) + '% · ' + lz.closestShort.lev + 'x)' : '—';
+        compactHtml += '<div style="display:flex;align-items:center;gap:10px;padding:5px 8px;border-bottom:1px solid #1f2937;font-size:11px">' +
+          '<span style="width:16px">' + lzIcon + '</span>' +
+          '<span style="font-weight:700;color:#e5e7eb;min-width:70px">' + name + '</span>' +
+          '<span style="color:#9ca3af;min-width:80px">' + price.toLocaleString() + '</span>' +
+          '<span style="color:#dc2626;flex:1">▲ Short liq: ' + longTxt + '</span>' +
+          '<span style="color:#059669;flex:1">▼ Long liq: ' + shortTxt + '</span>' +
+          '</div>';
+        continue;
+      }
 
       const riskColor  = symRisk === 'DANGER' ? '#dc2626' : symRisk === 'CAUTION' ? '#d97706' : '#059669';
       const riskIcon   = symRisk === 'DANGER' ? '🔴' : symRisk === 'CAUTION' ? '🟡' : '🟢';
@@ -3342,10 +3364,24 @@ async function loadLiqRisk() {
         html += '<div style="margin-top:6px;font-size:10px;color:#6b7280">PDH: <span style="color:#9ca3af">' + (sym.pdh||'–').toLocaleString() + '</span> &nbsp;|&nbsp; PDL: <span style="color:#9ca3af">' + (sym.pdl||'–').toLocaleString() + '</span></div>';
       }
 
+      // Leverage-tier likvidacijske zone (14.08., calcLiqZones — 10-100x tierovi)
+      if (lz && (lz.closestLong || lz.closestShort)) {
+        html += '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #1f2937;font-size:10px;color:#6b7280">⚡ Leverage zone (procjena):';
+        if (lz.closestLong)  html += ' <span style="color:#059669">LONG liq ' + lz.closestLong.price.toLocaleString()  + ' (' + lz.closestLong.dist.toFixed(1)  + '% · ' + lz.closestLong.lev  + 'x)</span>';
+        if (lz.closestShort) html += ' <span style="color:#dc2626">SHORT liq ' + lz.closestShort.price.toLocaleString() + ' (' + lz.closestShort.dist.toFixed(1) + '% · ' + lz.closestShort.lev + 'x)</span>';
+        html += '</div>';
+      }
+
       html += '</div>';  // card za simbol
     }
 
-    bodyEl.innerHTML = html || '<div style="color:#6b7280">Nema podataka</div>';
+    const compactSection = compactHtml
+      ? '<div style="margin-top:' + (html ? '12px' : '0') + '">' +
+          '<div style="font-size:9px;color:#6b7280;text-transform:uppercase;margin-bottom:4px">Ostatak watchliste (bez otvorene pozicije)</div>' +
+          '<div style="max-height:280px;overflow-y:auto;border:1px solid #1f2937;border-radius:6px">' + compactHtml + '</div>' +
+        '</div>'
+      : '';
+    bodyEl.innerHTML = (html + compactSection) || '<div style="color:#6b7280">Nema podataka</div>';
 
     // Boja ruba kartice
     if (cardEl) {
@@ -4118,7 +4154,13 @@ const server = http.createServer(async (req, res) => {
   // Za svaki simbol: swing pivoti iz 4H, round numbers, PDH/PDL
   // Uspoređuje s otvorenim pozicijama bota → flag DANGER/CAUTION/CLEAR
   if (url.pathname === "/api/sweepRisk") {
-    const WATCH = ["BTCUSDT"];
+    // 14.08.: prosireno s BTC-only na cijelu watchlistu, na zahtjev — "imamo li mi
+    // ovo za BTC i ostale asete". WATCH sad = watchlist_synapse_t (32 simbola).
+    let WATCH = ["BTCUSDT"];
+    try {
+      const rulesWl = JSON.parse(readFileSync("rules.json", "utf8"));
+      if (Array.isArray(rulesWl.watchlist_synapse_t) && rulesWl.watchlist_synapse_t.length) WATCH = rulesWl.watchlist_synapse_t;
+    } catch(_) {}
     const PIVOT_WING = 5;  // koliko bara lijevo/desno za pivot
     const ZONE_BUFFER = 0.004;  // ±0.4% — zona oko pivota = likvidacijski magnet
 
@@ -4241,11 +4283,20 @@ const server = http.createServer(async (req, res) => {
           };
         });
 
+        // 14.08.: leverage-tier likvidacijske zone (10/20/25/50/100x) — ista funkcija
+        // koju bot vec koristi za LIQ_DANGER gate na ulazu (calcLiqZones u bot.js),
+        // ovdje samo za prikaz. Mapira c4 (h/l/cl) u {high,low,close} koje funkcija ocekuje.
+        let leverageZones = null;
+        try {
+          leverageZones = calcLiqZones(c4.map(c => ({ high: c.h, low: c.l, close: c.cl })));
+        } catch(_) {}
+
         return {
           sym, price, pdh, pdl,
           zonesAbove: zonesAbove.slice(0, 5),
           zonesBelow: zonesBelow.slice(0, 5),
           myPositions: posRisk,
+          leverageZones,
         };
       } catch(e) { return { sym, error: e.message }; }
     }));

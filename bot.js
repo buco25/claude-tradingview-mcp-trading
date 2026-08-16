@@ -4825,7 +4825,6 @@ async function cancelAllPlanOrders(symbol, side) {
 //   5. Ažurira postojeći JSON zapis (ne dodaje novi)
 async function addToPyramid(pid, existingPos, signal, newTradeSize, slPct, tpPct, isLive, symSltp) {
   const { symbol, side, entryPrice: oldEntry, quantity: oldQty, totalUSD: oldNotional } = existingPos;
-  const holdSide = side === "LONG" ? "long" : "short";
 
   if (isLive && !PAPER_TRADING) {
     // ── LIVE: otvori dodatnu količinu na BitGetu ──
@@ -4859,7 +4858,7 @@ async function addToPyramid(pid, existingPos, signal, newTradeSize, slPct, tpPct
       if (det.code === "00000" && det.data?.priceAvg) fillPrice = parseFloat(det.data.priceAvg);
     } catch(e) { console.log(`  ⚠️  [PYRAMID] Fill fetch: ${e.message}`); }
 
-    // 3. Otkaži stare SL/TP naloge
+    // 3. Otkaži stare SL/TP naloge (čisti hard naloge od prije 16.08. fixa, ako ima)
     await cancelAllPlanOrders(symbol, side);
 
     // 4. Prosječna ulazna cijena
@@ -4867,39 +4866,16 @@ async function addToPyramid(pid, existingPos, signal, newTradeSize, slPct, tpPct
     const avgEntry  = (oldQty * oldEntry + newQty * fillPrice) / totalQty;
     const totalUSD  = oldNotional + newTradeSize;
 
-    // 5. Novi SL/TP od avg entry
+    // 5. Novi SL/TP od avg entry — SOFT (16.08.): usklađeno s placeBitGetOrder-om, NE
+    // stavljamo hard/trailing naloge na Bitget (MM ne vidi razine). softExitMonitor
+    // prati pos.sl/pos.tp lokalno, isto kao za sve regularne (non-pyramid) ulaze.
     const _slPct = slPct ?? SL_PCT;
     const _tpPct = tpPct ?? TP_PCT;
     const newSl = side === "LONG" ? avgEntry * (1 - _slPct / 100) : avgEntry * (1 + _slPct / 100);
     const newTp = side === "LONG" ? avgEntry * (1 + _tpPct / 100) : avgEntry * (1 - _tpPct / 100);
+    console.log(`  🛡️  Soft SL @ ${fmtPrice(newSl, symbol)} | Soft TP @ ${fmtPrice(newTp, symbol)} (praćeno lokalno, nije na Bitgetu)`);
 
-    // 6. Postavi novi hard SL
-    await bitgetPost("/api/v2/mix/order/place-tpsl-order", {
-      symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
-      planType: "pos_loss",
-      triggerPrice: fmtPrice(newSl, symbol),
-      triggerType: "mark_price", holdSide,
-    });
-    // 7. Postavi novi trailing stop (aktivacija na TP razini)
-    try {
-      const trailCallbackRatio = String((_slPct / 100).toFixed(4));
-      await bitgetPost("/api/v2/mix/order/place-tpsl-order", {
-        symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
-        planType: "track_stop",
-        triggerPrice: fmtPrice(newTp, symbol),
-        callbackRatio: trailCallbackRatio, holdSide,
-      });
-    } catch(e) {
-      // Fallback: fiksni TP
-      await bitgetPost("/api/v2/mix/order/place-tpsl-order", {
-        symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
-        planType: "pos_profit",
-        triggerPrice: fmtPrice(newTp, symbol),
-        triggerType: "mark_price", holdSide,
-      });
-    }
-
-    // 8. Ažuriraj JSON zapis — jedan merged zapis, ne dva
+    // 6. Ažuriraj JSON zapis — jedan merged zapis, ne dva
     const allPos = loadPositions(pid);
     const idx = allPos.findIndex(p => p.symbol === symbol && p.side === side);
     if (idx >= 0) {
@@ -5420,7 +5396,10 @@ export async function run() {
         // Ako signal nije u istom smjeru — skip
         // (signal još nije poznat ovdje, provjerava se ispod nakon analize)
         // Placeholder: ako smjer ne odgovara, skip odmah u analizi
-        const pyramidCount = existingPosList.length;
+        // existingPosList.length je UVIJEK 1 (pyramid adicije se mergiraju u jedan JSON
+        // zapis, ne dodaju nove retke) — stvarna dubina je u pyramidCount polju (16.08. bug:
+        // stari gate je gledao existingPosList.length pa MAX_VIP_PYRAMID strop nikad nije radio).
+        const pyramidCount = existingPos.pyramidCount || 1;
         // BTC VIP iznimka (26.07.): score se provjerava kasnije nakon analize — ovdje
         // samo BTC-u dopuštamo proći dalje i kad je normalni pyramid limit dosegnut.
         if (pyramidCount >= MAX_PYRAMID && symbol !== BTC_EXCEPTION) {
@@ -5679,21 +5658,23 @@ export async function run() {
         }
         if (existingPos && existingPos.side === signal) {
           // BTC VIP pyramid (26.07.): score >=7/8 dobiva dodatnu adiciju iznad MAX_PYRAMID
-          if (existingPosList.length >= MAX_PYRAMID) {
+          // Dubina = existingPos.pyramidCount, NE existingPosList.length (uvijek 1, vidi gore, 16.08. bug).
+          const _pyramidDepth = existingPos.pyramidCount || 1;
+          if (_pyramidDepth >= MAX_PYRAMID) {
             const _pyScore = signal === "LONG" ? (result.bullScore ?? 0) : (result.bearScore ?? 0);
             const _pyComboLen = SYMBOL_COMBOS[symbol]?.sigIdx?.length ?? 8;
-            if (symbol === BTC_EXCEPTION && _pyScore >= 7 && _pyComboLen >= 8 && existingPosList.length < MAX_VIP_PYRAMID) {
-              console.log(`  ⭐ [VIP PYRAMID] ${symbol} ${signal} — score ${_pyScore}/${_pyComboLen} ≥ 7 → dodatna adicija ${existingPosList.length + 1}/${MAX_VIP_PYRAMID} iznad limita`);
+            if (symbol === BTC_EXCEPTION && _pyScore >= 7 && _pyComboLen >= 8 && _pyramidDepth < MAX_VIP_PYRAMID) {
+              console.log(`  ⭐ [VIP PYRAMID] ${symbol} ${signal} — score ${_pyScore}/${_pyComboLen} ≥ 7 → dodatna adicija ${_pyramidDepth + 1}/${MAX_VIP_PYRAMID} iznad limita`);
               result._vipSlot = true;
             } else if (symbol === BTC_EXCEPTION && _pyScore >= 7 && _pyComboLen >= 8) {
-              console.log(`  ⏭️  [${pDef.name}] ${symbol} — VIP pyramid strop (${existingPosList.length}/${MAX_VIP_PYRAMID}) dostignut, preskačem`);
+              console.log(`  ⏭️  [${pDef.name}] ${symbol} — VIP pyramid strop (${_pyramidDepth}/${MAX_VIP_PYRAMID}) dostignut, preskačem`);
               continue;
             } else {
-              console.log(`  ⏭️  [${pDef.name}] ${symbol} — max pyramid (${existingPosList.length}/${MAX_PYRAMID}) dostignut, preskačem`);
+              console.log(`  ⏭️  [${pDef.name}] ${symbol} — max pyramid (${_pyramidDepth}/${MAX_PYRAMID}) dostignut, preskačem`);
               continue;
             }
           } else {
-            console.log(`  🔺 [PYRAMID] ${symbol} ${signal} — adicija ${existingPosList.length + 1}/${MAX_PYRAMID} u trendu`);
+            console.log(`  🔺 [PYRAMID] ${symbol} ${signal} — adicija ${_pyramidDepth + 1}/${MAX_PYRAMID} u trendu`);
           }
         }
 
@@ -6313,7 +6294,7 @@ export async function run() {
               symbol, side: signal,
               price: fmtPrice(pyramidResult.avgEntry), sl: fmtPrice(pyramidResult.newSl), tp: fmtPrice(pyramidResult.newTp),
               quantity: pyramidResult.totalQty.toFixed(4), totalUSD: (existingPos.totalUSD + tradeSize).toFixed(2),
-              notes: `PYRAMID +${existingPosList.length + 1} | avg entry ${fmtPrice(pyramidResult.avgEntry)} | SL ${slPct.toFixed(1)}% TP ${tpPct.toFixed(1)}%`,
+              notes: `PYRAMID +${(existingPos.pyramidCount || 1) + 1} | avg entry ${fmtPrice(pyramidResult.avgEntry)} | SL ${slPct.toFixed(1)}% TP ${tpPct.toFixed(1)}%`,
               orderId: `${isLive?"LIVE":"PAPER"}-PYR-${Date.now()}`,
               mode: isLive ? (BITGET_DEMO ? "DEMO" : "LIVE") : "PAPER",
             });

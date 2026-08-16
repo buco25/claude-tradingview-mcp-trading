@@ -23,12 +23,12 @@ const TIMEFRAME     = "1H";
 const LEVERAGE      = 50;     // 50x default → SL 1.5% = 75% margine (više prostora za šum)
 const BTC_LEVERAGE  = 75;    // BTC posebno — 75x
 const START_CAPITAL = 1000;   // po portfoliju
-// SURVIVAL MODE (20.07.): fiksni 1% dok ne dođe prvi profitabilan tjedan ILI proboj
-// strukture (tjedni close < 60k / potvrđen breakout > 65.7k). Očuvanje kapitala za
-// trending market. Vratiti na 1.0/1.5/2.0 kad se režim promijeni.
-const RISK_PCT      = 1.0;    // bazni % banke po tradeu
-const RISK_PCT_MIN  = 1.0;    // minimalni setup
-const RISK_PCT_MAX  = 1.0;    // jak setup (survival: bez povećanja)
+// SURVIVAL MODE ukinut (16.08.) — prvi profitabilan tjedan potvrđen (dedupliciranom
+// metodologijom): WR 78-81%, R:R ~1:1, Total P&L pozitivan 7 dana zaredom. Uvjet iz
+// starog komentara (20.07.) ispunjen → vraćeno na 1.0/1.5/2.0 kako je i planirano.
+export const RISK_PCT      = 1.5;    // bazni % banke po tradeu
+export const RISK_PCT_MIN  = 1.0;    // minimalni setup
+export const RISK_PCT_MAX  = 2.0;    // jak setup (score ≥ comboMinSig+2)
 const SL_PCT        = 2.0;    // fallback SL % (Tier 1) — override per-simbol u symbol_sltp
 const TP_PCT        = 3.0;    // fallback TP % (Tier 1, 1.5×SL) — override per-simbol u symbol_sltp
 

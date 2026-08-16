@@ -13,7 +13,8 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   getDeribitPutCall, getLiquidationRisk, getEconEvents, isEconBlocked, calcVWAP,
   getLongShortRatio, getStablecoinInflow, getBtcPerpBasis, getAltcoinSeason,
   generateDailyReport, autoFixCsvFromBitget, SYMBOL_COMBOS, getBtcDailyPivots, getAccountTransfers, calcLiqZones,
-  getBtcWeeklyVsKey, getRelStrengthVsBtc, isStockSym, getBtcChillMode, getBtcDailyVsInvalidation, getBtcWeeklyEmaPhase } from "./bot.js";
+  getBtcWeeklyVsKey, getRelStrengthVsBtc, isStockSym, getBtcChillMode, getBtcDailyVsInvalidation, getBtcWeeklyEmaPhase,
+  RISK_PCT, RISK_PCT_MIN, RISK_PCT_MAX } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -861,12 +862,41 @@ function parseCsvFile(pid) {
   }).filter(r => r["Symbol"]);
 }
 
+// Bitget sync ponekad upiše 2-3 duplicirana CLOSE retka za isti Order ID (isti qty,
+// blago drugačiji P&L, unutar par sekundi). Isti qty unutar istog Order ID = duplikat
+// (uzmi kronološki zadnji, najprecizniji); različit qty = prava odvojena noga partial
+// closea (zadrži obje). Ista metodologija kao _parseTradeCsv u bot.js (popravljeno 15.08.),
+// primijenjena ovdje jer buildPortfolioStats taj fix nikad nije dobio (16.08. bug).
+function dedupeExitRows(exits) {
+  const byOrder = new Map();
+  for (const r of exits) {
+    const oid = r["Order ID"] || `_noid_${r.Date}_${r["Time (UTC)"]}_${r.Symbol}_${r.Quantity}`;
+    if (!byOrder.has(oid)) byOrder.set(oid, []);
+    byOrder.get(oid).push(r);
+  }
+  const out = [];
+  for (const group of byOrder.values()) {
+    const byQty = new Map();
+    for (const r of group) {
+      const q = (parseFloat(r["Quantity"]) || 0).toFixed(6);
+      if (!byQty.has(q)) byQty.set(q, []);
+      byQty.get(q).push(r);
+    }
+    for (const sameQtyRows of byQty.values()) {
+      sameQtyRows.sort((a, b) => new Date(`${a.Date}T${a["Time (UTC)"]}Z`) - new Date(`${b.Date}T${b["Time (UTC)"]}Z`));
+      out.push(sameQtyRows[sameQtyRows.length - 1]);
+    }
+  }
+  out.sort((a, b) => new Date(`${a.Date}T${a["Time (UTC)"]}Z`) - new Date(`${b.Date}T${b["Time (UTC)"]}Z`));
+  return out;
+}
+
 function buildPortfolioStats(pid) {
   const def   = PORTFOLIO_DEFS.find(d => d.id === pid) || {};
   const startCap = def.startCapital ?? START_CAPITAL;
 
   const rows  = parseCsvFile(pid);
-  const exits = rows.filter(r => r["Side"] === "CLOSE_LONG" || r["Side"] === "CLOSE_SHORT");
+  const exits = dedupeExitRows(rows.filter(r => r["Side"] === "CLOSE_LONG" || r["Side"] === "CLOSE_SHORT"));
   const entries= rows.filter(r => r["Side"] === "LONG" || r["Side"] === "SHORT");
 
   const wins     = exits.filter(r => parseFloat(r["Net P&L"] || 0) >= 0);
@@ -1369,7 +1399,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="logo">⚡</div>
       <div>
         <div class="title">ULTRA · Future Bot</div>
-        <div class="subtitle"><span class="live-dot"></span>${ALL_SYMBOLS.length} simbola (kripto + dionice) · rizik 1% (survival) · combo 5/8 signala · RR 1:2 (JAKO 1:3) · break-even @ +1R · max 6 kripto + 3 dionice</div>
+        <div class="subtitle"><span class="live-dot"></span>${ALL_SYMBOLS.length} simbola (kripto + dionice) · rizik ${RISK_PCT_MIN}-${RISK_PCT_MAX}% (baza ${RISK_PCT}%) · combo 5/8 signala · RR 1:2 (JAKO 1:3) · break-even @ +1R · max 6 kripto + 3 dionice</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -1539,7 +1569,7 @@ window.toggleScanFilter = function(btn) {
       const bmEl = document.getElementById('bot-mode-bar');
       if (bm && bmEl) {
         const parts = [];
-        if (bm.survival) parts.push('<span style="color:#fcd34d">🛡️ SURVIVAL — rizik 1%</span>');
+        if (bm.survival) parts.push('<span style="color:#fcd34d">🛡️ SURVIVAL — rizik ' + (bm.riskPct ?? 1) + '%</span>');
         if (bm.chill) parts.push('<span style="color:#7dd3fc">😴 CHILL — BTC 24h raspon ' + (bm.rangePct ?? '?') + '% — samo 6/8+ setupi, size ×0.7</span>');
         if (bm.night) parts.push('<span style="color:#c4b5fd">🌙 NOĆNI BLOK — bez novih kripto ulaza do 08:00</span>');
         if (bm.weekend) parts.push('<span style="color:#8b96ab">📅 VIKEND — minSig +1, size ×0.5</span>');
@@ -4448,7 +4478,8 @@ const server = http.createServer(async (req, res) => {
         result.botMode = {
           chill: _ch.chill, rangePct: _ch.rangePct,
           night: _h >= 20 || _h < 6,
-          survival: true,
+          survival: RISK_PCT <= 1.0,
+          riskPct: RISK_PCT,
           weekend: [0, 6].includes(new Date().getUTCDay()),
         };
       } catch {}

@@ -6431,44 +6431,78 @@ export async function checkBreakouts() {
 
 const REPORT_SYMBOLS = ["BTCUSDT","ETHUSDT","SOLUSDT","TAOUSDT","AAVEUSDT"];
 
+// 15.08.: _parseTradeCsv je brojao svaki CSV RED kao poseban trade — ali partial-TP
+// (npr. "84% zatvoreno" pa ostatak kasnije) je JEDAN trade zapisan u DVA reda, i
+// Bitget sync bug zna upisati isti izlaz duplo. Zato je dnevni izvještaj prikazivao
+// 17 "tradeova" umjesto stvarnih 12, umjetno napuhavajući WR i cijepajući svaki
+// pravi dobitak na dva manja (Avg Win $0.67 umjesto stvarnih $1.18). Sad grupira po
+// Order ID: isti qty = duplicate sync red (uzmi zadnji), različit qty = prava
+// odvojena noga partial closea (zbroji obje) — ista logika kao position-sizing fix.
 function _parseTradeCsv(days = 7) {
   const pid = "synapse_t";
   const f   = csvFilePath(pid);
   if (!existsSync(f)) return null;
   const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
 
+  function parseCsvLine(line) {
+    const out = []; let cur = "", inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') { inQ = !inQ; continue; }
+      if (c === "," && !inQ) { out.push(cur); cur = ""; continue; }
+      cur += c;
+    }
+    out.push(cur);
+    return out;
+  }
+
+  const lines = readFileSync(f, "utf8").trim().split("\n");
+  const byOrder = new Map();
+  for (let i = 1; i < lines.length; i++) {
+    const cols = parseCsvLine(lines[i]);
+    if (cols.length < 13) continue;
+    const orderId = cols[12]?.trim();
+    if (!orderId) continue;
+    if (!byOrder.has(orderId)) byOrder.set(orderId, []);
+    byOrder.get(orderId).push(cols);
+  }
+
   let total = 0, wins = 0, longs = 0, shorts = 0;
   let totalWinUsd = 0, totalLossUsd = 0, winCount = 0, lossCount = 0;
   const slBySymbol = {}, slByHour = {};
 
-  const lines = readFileSync(f, "utf8").trim().split("\n");
-  for (let i = 1; i < lines.length; i++) {
-    // CSV cols: Date,Time(UTC),Exchange,Symbol,Side,Qty,Price,TotalUSD,Fee,NetP&L,SL,TP,...
-    const cols = lines[i].split(",");
-    if (cols.length < 10) continue;
-    const side = cols[4]?.trim();
-    // Uzimamo samo exit redove (CLOSE_LONG / CLOSE_SHORT)
-    if (!side?.startsWith("CLOSE")) continue;
-    const dateStr = cols[0]?.trim(), timeStr = cols[1]?.trim();
-    if (!dateStr || !timeStr) continue;
-    const ts = new Date(`${dateStr}T${timeStr}Z`).getTime();
-    if (isNaN(ts) || ts < cutoff) continue;
+  for (const [, rowsForOrder] of byOrder) {
+    const opens  = rowsForOrder.filter(c => c[4] === "LONG" || c[4] === "SHORT");
+    const closes = rowsForOrder.filter(c => c[4]?.startsWith("CLOSE"));
+    if (opens.length === 0 || closes.length === 0) continue;
 
-    const symbol = cols[3]?.trim();
-    const netPnl = parseFloat(cols[9]);
-    if (isNaN(netPnl)) continue;
+    closes.sort((a, b) => `${a[0]}T${a[1]}`.localeCompare(`${b[0]}T${b[1]}`));
+    const lastClose = closes[closes.length - 1];
+    const closeTs = new Date(`${lastClose[0]}T${lastClose[1]}Z`).getTime();
+    if (isNaN(closeTs) || closeTs < cutoff) continue;
+
+    // isti qty = duplikat istog izlaza (uzmi zadnji, najprecizniji) — različit qty = prava odvojena noga
+    const legsByQty = new Map();
+    for (const c of closes) {
+      const q = (parseFloat(c[5]) || 0).toFixed(6);
+      if (!legsByQty.has(q)) legsByQty.set(q, []);
+      legsByQty.get(q).push(c);
+    }
+    const legs = [...legsByQty.values()].map(rs => rs[rs.length - 1]);
+    const netPnl = legs.reduce((s, c) => s + (parseFloat(c[9]) || 0), 0);
+    const symbol = opens[0][3]?.trim();
+    const side   = opens[0][4]?.trim();
 
     total++;
-    if (side === "CLOSE_LONG")  longs++;
-    else                        shorts++;
+    if (side === "LONG") longs++; else shorts++;
 
     if (netPnl >= 0) {
       wins++; winCount++; totalWinUsd += netPnl;
     } else {
       lossCount++; totalLossUsd += Math.abs(netPnl);
       if (symbol) slBySymbol[symbol] = (slBySymbol[symbol] || 0) + 1;
-      const hour = timeStr.slice(0, 2);
-      slByHour[hour] = (slByHour[hour] || 0) + 1;
+      const hour = lastClose[1]?.slice(0, 2);
+      if (hour) slByHour[hour] = (slByHour[hour] || 0) + 1;
     }
   }
 

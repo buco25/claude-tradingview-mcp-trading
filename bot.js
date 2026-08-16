@@ -3071,6 +3071,10 @@ function addPosition(pid, entry) {
     tpPct:      entry.tpPct ?? null,    // za BE-STOP threshold
     sigMask:    entry.sigMask ?? null,  // za signal analitiku
     entryMode:  entry.entryMode || "PBK",  // "MOM" ili "PBK"
+    // vipSlot MORA se perzistirati — 16.08. bug: bez ovog polja _vipUsed provjera u
+    // korelacijskom capu (max 1 VIP adicija iznad MAX_SAME_DIR_CRYPTO) nikad ne vidi
+    // da je VIP slot vec iskoristen, pa strop postaje efektivno neogranicen.
+    vipSlot:    entry.vipSlot === true,
     orderId:    entry.orderId,
     mode:       entry.mode || (PAPER_TRADING ? "PAPER" : BITGET_DEMO ? "DEMO" : "LIVE"),
     openedAt:   entry.timestamp,

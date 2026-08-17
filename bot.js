@@ -2556,10 +2556,13 @@ function analyzeUltra(candles, cfg) {
   const _pwhMstrBonusBear = (_pwhInCombo && _mstrInCombo && sigs[4] === -1 && sigs[6] === -1) ? 1 : 0;
   const bullScore = bullCnt + _premiumBonusBull + _pwhMstrBonusBull;
   const bearScore = bearCnt + _premiumBonusBear + _pwhMstrBonusBear;
-  // Vikend: +1 signal — subotom/nedjeljom tanka likvidnost, samo najjači setupi
-  // (post-mortem 05.07.: svi likvidirani ulazi bili subotnji minimalni 5/8)
+  // Vikend: +2 signala — subotom/nedjeljom tanka likvidnost, samo najjači setupi.
+  // (post-mortem 05.07.: svi likvidirani ulazi bili subotnji minimalni 5/8 → +1 uveden,
+  // ali 16.08. opet cijeli vikend batch (SOL/RENDER/BTC) u SL-u na minimalnom +1 pragu.
+  // +2 diže prag na isti "VIP"/jak-signal prag (score≥7/8) koji bot već koristi svugdje
+  // drugdje za "dovoljno jak da opravda iznimku" — na korisnikov zahtjev.)
   const _dowMC = new Date().getUTCDay();
-  const _weekendBoost = (_dowMC === 0 || _dowMC === 6) ? 1 : 0;
+  const _weekendBoost = (_dowMC === 0 || _dowMC === 6) ? 2 : 0;
   // CHILL mode: mrtvo tržište → kripto traži +1 signal (dionice izuzete — ne prate BTC)
   const _chillBoost = (cfg._chillMode && !isStockSym(_sym)) ? 1 : 0;
   const MIN_CONFIRM = (_combo?.minSig ?? minSig) + _weekendBoost + _chillBoost;

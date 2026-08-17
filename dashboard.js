@@ -1572,7 +1572,7 @@ window.toggleScanFilter = function(btn) {
         if (bm.survival) parts.push('<span style="color:#fcd34d">🛡️ SURVIVAL — rizik ' + (bm.riskPct ?? 1) + '%</span>');
         if (bm.chill) parts.push('<span style="color:#7dd3fc">😴 CHILL — BTC 24h raspon ' + (bm.rangePct ?? '?') + '% — samo 6/8+ setupi, size ×0.7</span>');
         if (bm.night) parts.push('<span style="color:#c4b5fd">🌙 NOĆNI BLOK — bez novih kripto ulaza do 08:00</span>');
-        if (bm.weekend) parts.push('<span style="color:#8b96ab">📅 VIKEND — minSig +1, size ×0.5</span>');
+        if (bm.weekend) parts.push('<span style="color:#8b96ab">📅 VIKEND — minSig +2, size ×0.5</span>');
         if (parts.length) { bmEl.innerHTML = '🤖 Režim bota: &nbsp;' + parts.join(' &nbsp;·&nbsp; '); bmEl.style.display = 'block'; }
         else { bmEl.innerHTML = '🤖 Režim bota: <span style="color:#34d399">✅ NORMALAN — svi sustavi aktivni</span>'; bmEl.style.display = 'block'; }
       }

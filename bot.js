@@ -3675,13 +3675,27 @@ async function checkPortfolioPositions(pid) {
                   const _pnl1R = _gainPerUnit * _closeQty;
                   const _pctClosed = (_closeQty / _bp1R.total * 100).toFixed(0);
                   pos.partial1R = true;
-                  pos.quantity  = Math.max(_bp1R.total - _closeQty, 0);
+                  // 19.08.: fresh re-fetch NAKON naloga umjesto oduzimanja (_bp1R.total -
+                  // _closeQty) — oduzimanje pretpostavlja da je Bitget fillao TOČNO traženu
+                  // količinu, ali stvarni fill može blago odstupati (zaokruživanje na exchange
+                  // strani), što uzrokuje drift lokalnog tracka od stvarne pozicije (npr. TSLA
+                  // 19.08.: dashboard pokazivao 0.5330 dok je Bitget stvarno imao 0.54).
+                  const _oldQty1R   = pos.quantity;
+                  const _bpAfter1R  = await fetchBitgetPositionSize(pos.symbol, pos.side);
+                  const _newQty1R   = (_bpAfter1R && !_bpAfter1R.error && _bpAfter1R.total > 0)
+                    ? _bpAfter1R.total
+                    : Math.max(_bp1R.total - _closeQty, 0);  // fallback ako fresh fetch padne
+                  pos.quantity  = _newQty1R;
                   // 14.08.: totalUSD (Notional) se nikad nije ažurirao nakon partial close —
                   // dashboard je i dalje prikazivao puni original notional/qty/margin dok je
                   // stvarna Bitget pozicija bila upola manja. Sad se recomputa iz preostale
                   // qty × entry, i sprema ODMAH (fresh load+patch+save, isti obrazac kao
                   // TP-HIT blok niže) da se smanji prozor za race s 5s fast monitorom.
                   pos.totalUSD  = pos.quantity * pos.entryPrice;
+                  // 19.08.: margin se NIKAD nije ažurirala nakon partial close — dashboard je
+                  // stalno prikazivao punu originalnu maržu (i time pogrešan ROE%) za manju
+                  // preostalu poziciju. Margin skalira linearno s qty (isti leverage/entry).
+                  if (pos.margin && _oldQty1R > 0) pos.margin = pos.margin * (_newQty1R / _oldQty1R);
                   pos.sl = pos.side === "LONG" ? pos.entryPrice * 1.0005 : pos.entryPrice * 0.9995;
                   {
                     const _allPos1R = loadPositions(pid);
@@ -3690,6 +3704,7 @@ async function checkPortfolioPositions(pid) {
                       _allPos1R[_pIdx1R].partial1R = true;
                       _allPos1R[_pIdx1R].quantity  = pos.quantity;
                       _allPos1R[_pIdx1R].totalUSD  = pos.totalUSD;
+                      _allPos1R[_pIdx1R].margin    = pos.margin;
                       _allPos1R[_pIdx1R].sl        = pos.sl;
                       savePositions(pid, _allPos1R);
                     }
@@ -3837,9 +3852,14 @@ async function checkPortfolioPositions(pid) {
               // Bitget baze (pClosed.remainingQty), ne iz pretpostavljenog lokalnog qty —
               // popravlja bug gdje je Notional/Qty na dashboardu ostajao na punom
               // originalu jer se totalUSD nikad nije ažurirao nakon partial closea.
+              const _oldQtyTP = pos.quantity;
               const _newQty = _pClosed.remainingQty;
               pos.quantity = _newQty;
               pos.totalUSD = _newQty * pos.entryPrice;
+              // 19.08.: margin se NIKAD nije ažurirala nakon partial close — dashboard je
+              // stalno prikazivao punu originalnu maržu (i time pogrešan ROE%) za manju
+              // preostalu poziciju. Margin skalira linearno s qty (isti leverage/entry).
+              if (pos.margin && _oldQtyTP > 0) pos.margin = pos.margin * (_newQty / _oldQtyTP);
               const _allPos = loadPositions(pid);
               const _pIdx   = _allPos.findIndex(p => p.symbol === pos.symbol && p.side === pos.side);
               if (_pIdx >= 0) {
@@ -3848,6 +3868,7 @@ async function checkPortfolioPositions(pid) {
                 _allPos[_pIdx].trailPeak     = liveP;
                 _allPos[_pIdx].quantity      = _newQty;
                 _allPos[_pIdx].totalUSD      = pos.totalUSD;
+                _allPos[_pIdx].margin        = pos.margin;
                 savePositions(pid, _allPos);
               }
               // Postavi Ghost SL na Bitgetu za preostalu 50% poziciju
@@ -4189,7 +4210,15 @@ async function partialClosePosition(pos, closePct = PARTIAL_CLOSE_PCT) {
     if (res.code === "00000") {
       console.log(`  📦 [PARTIAL-TP] ${pos.symbol} ${pos.side} — zatvoreno ${closePct}% (qty: ${qty.toFixed(4)}) | ostatak čeka TP`);
       await tg(`📦 <b>PARTIAL-TP [ULTRA]</b> ${pos.symbol} ${pos.side}\nZatvoreno ${closePct}% pozicije (${qty.toFixed(4)} jed)\nOstatak čeka puni TP.`);
-      return { closedQty: qty, remainingQty: Math.max(baseQty - qty, 0) };
+      // 19.08.: fresh re-fetch NAKON naloga umjesto oduzimanja (baseQty - qty) — oduzimanje
+      // pretpostavlja da je Bitget fillao TOČNO traženu količinu, ali stvarni fill može
+      // blago odstupati (zaokruživanje na exchange strani), što uzrokuje drift lokalnog
+      // tracka od stvarne pozicije (isti bug nađen i popravljen u +1R partial bloku).
+      const bpAfter = await fetchBitgetPositionSize(pos.symbol, pos.side);
+      const remainingQty = (bpAfter && !bpAfter.error && bpAfter.total > 0)
+        ? bpAfter.total
+        : Math.max(baseQty - qty, 0);  // fallback ako fresh fetch padne
+      return { closedQty: qty, remainingQty };
     }
     console.log(`  ⚠️  [PARTIAL-TP] ${pos.symbol} fail: ${res.code} ${res.msg}`);
     return false;

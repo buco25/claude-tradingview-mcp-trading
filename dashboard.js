@@ -1173,19 +1173,6 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     if (s.recentExits.length === 0)
       return `<div class="section-label" style="color:${def.color}">🎯 ULTRA — nema zatvorenih tradova</div>`;
 
-    const rows = s.recentExits.map(r => {
-      const pnl = parseFloat(r["Net P&L"] || 0);
-      const win = pnl >= 0;
-      return `<tr class="${win ? "win-row" : "loss-row"}">
-        <td>${r["Date"] || ""}</td>
-        <td style="font-weight:700">${r["Symbol"] || ""}</td>
-        <td><span class="badge ${r["Side"].includes("LONG") ? "badge-long" : "badge-short"}">${r["Side"]?.replace("CLOSE_","") || ""}</span></td>
-        <td>${r["Price"] || ""}</td>
-        <td style="color:${win?"#059669":"#dc2626"};font-weight:700">${win?"+":""}$${pnl.toFixed(4)}</td>
-        <td>${r["Notes"]?.replace(/"/g,"").split("|")[0].trim() || ""}</td>
-      </tr>`;
-    }).join("");
-
     // Per-symbol statistika
     const symRows = s.symbolStatsArr.map(sym => {
       const wr = sym.total > 0 ? (sym.wins / sym.total * 100).toFixed(0) : 0;
@@ -1217,23 +1204,9 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         </div>
       </div>
 
-      <div id="collhdr-t20" onclick="colToggle('t20')"
-        style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;padding:8px 0;margin-top:10px;margin-bottom:4px">
-        <span class="section-label" style="color:${def.color};margin:0">🎯 ULTRA — Zadnjih ${s.recentExits.length} tradova</span>
-        <span id="collcaret-t20" style="color:#9ca3af;font-size:11px">▶</span>
-      </div>
-      <div id="collbody-t20" style="display:none">
-        <div class="table-wrap">
-          <table class="trade-table">
-            <thead><tr><th>Datum</th><th>Symbol</th><th>Side</th><th>Cijena</th><th>P&amp;L</th><th>Info</th></tr></thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </div>
-      </div>
-
       <div id="collhdr-bghist" onclick="colToggle('bghist')"
         style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;padding:8px 0;margin-top:10px;margin-bottom:4px">
-        <span class="section-label" style="color:${def.color};margin:0">✅ Stvarni Bitget rezultati (izvor: burza, ne CSV)</span>
+        <span class="section-label" style="color:${def.color};margin:0">🎯 ULTRA — Zadnjih 20 tradova (Bitget, stvarni P&amp;L)</span>
         <span id="collcaret-bghist" style="color:#9ca3af;font-size:11px">▶</span>
       </div>
       <div id="collbody-bghist" style="display:none">
@@ -1282,7 +1255,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
           });
         }
         (function restoreCollState() {
-          ['wl','t20','bghist'].forEach(function(key) {
+          ['wl','bghist'].forEach(function(key) {
             try {
               if (sessionStorage.getItem('coll_' + key) === '1') {
                 var body = document.getElementById('collbody-' + key);
@@ -2169,13 +2142,13 @@ window.toggleScanFilter = function(btn) {
 
   </div>
 
-  <!-- Period P&L -->
+  <!-- Period P&L — Danas/7D/30D vuku live iz Bitgeta (history-position), Godina ostaje CSV-based -->
   ${(() => {
     const periods = [
-      { label: "Danas",    pnl: s.pnlDay,   trades: s.tradesDay },
-      { label: "7 dana",   pnl: s.pnlWeek,  trades: s.tradesWeek },
-      { label: "30 dana",  pnl: s.pnlMonth, trades: s.tradesMonth },
-      { label: "Godina",   pnl: s.pnlYear,  trades: s.tradesYear },
+      { id: "danas",   label: "Danas",    pnl: s.pnlDay,   trades: s.tradesDay,   bitget: true },
+      { id: "7dana",   label: "7 dana",   pnl: s.pnlWeek,  trades: s.tradesWeek,  bitget: true },
+      { id: "30dana",  label: "30 dana",  pnl: s.pnlMonth, trades: s.tradesMonth, bitget: true },
+      { id: "godina",  label: "Godina",   pnl: s.pnlYear,  trades: s.tradesYear,  bitget: false },
     ];
     return `
   <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
@@ -2183,14 +2156,37 @@ window.toggleScanFilter = function(btn) {
       const col = p.pnl > 0 ? "#059669" : p.pnl < 0 ? "#dc2626" : "#94a3b8";
       const icon = p.pnl > 0 ? "▲" : p.pnl < 0 ? "▼" : "—";
       const pct = def.startCapital > 0 ? (p.pnl / def.startCapital * 100).toFixed(2) : "0.00";
+      const srcNote = p.bitget ? '<div style="font-size:9px;color:#6b7280;margin-top:2px">izvor: Bitget</div>' : "";
       return `<div style="background:#2d3748;border:1px solid #374151;border-radius:10px;padding:14px 18px">
         <div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">${p.label}</div>
-        <div style="font-size:22px;font-weight:800;color:${col}">${p.pnl >= 0 ? "+" : ""}$${p.pnl.toFixed(2)}</div>
-        <div style="font-size:12px;color:${col};margin-top:2px">${icon} ${p.pnl >= 0 ? "+" : ""}${pct}%</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px">${p.trades} zatvorenih</div>
+        <div id="pnl-${p.id}-val" style="font-size:22px;font-weight:800;color:${col}">${p.pnl >= 0 ? "+" : ""}$${p.pnl.toFixed(2)}</div>
+        <div id="pnl-${p.id}-pct" style="font-size:12px;color:${col};margin-top:2px">${icon} ${p.pnl >= 0 ? "+" : ""}${pct}%</div>
+        <div id="pnl-${p.id}-trades" style="font-size:11px;color:#9ca3af;margin-top:4px">${p.trades} zatvorenih</div>
+        ${srcNote}
       </div>`;
     }).join("")}
-  </div>`;
+  </div>
+  <script>
+    (function(){
+      fetch('/api/bitget-period-pnl').then(function(r){ return r.json(); }).then(function(d){
+        if (!d.ok) return;
+        var startCap = ${def.startCapital || 0};
+        ['danas','7dana','30dana'].forEach(function(id){
+          var p = d[id];
+          if (!p) return;
+          var col = p.pnl > 0 ? '#059669' : p.pnl < 0 ? '#dc2626' : '#94a3b8';
+          var icon = p.pnl > 0 ? '▲' : p.pnl < 0 ? '▼' : '—';
+          var pct = startCap > 0 ? (p.pnl / startCap * 100).toFixed(2) : '0.00';
+          var valEl = document.getElementById('pnl-' + id + '-val');
+          var pctEl = document.getElementById('pnl-' + id + '-pct');
+          var trEl  = document.getElementById('pnl-' + id + '-trades');
+          if (valEl) { valEl.style.color = col; valEl.textContent = (p.pnl >= 0 ? '+' : '') + '$' + p.pnl.toFixed(2); }
+          if (pctEl) { pctEl.style.color = col; pctEl.textContent = icon + ' ' + (p.pnl >= 0 ? '+' : '') + pct + '%'; }
+          if (trEl)  { trEl.textContent = p.trades + ' zatvorenih'; }
+        });
+      }).catch(function(){});
+    })();
+  </script>`;
   })()}
 
   <!-- Equity curve -->
@@ -3604,6 +3600,49 @@ const server = http.createServer(async (req, res) => {
     } catch (e) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: e.message, wins:0, losses:0, total:0, wr:0 }));
+    }
+    return;
+  }
+
+  // Danas/7D/30D P&L direktno s Bitgeta (22.08., na zahtjev — Bitget-ov "Estimated
+  // assets" panel već prikazuje ove brojke nativno). history-position podržava
+  // startTime/endTime pa se svaki prozor dohvaća posebnim pozivom, sum(netProfit).
+  if (url.pathname === "/api/bitget-period-pnl") {
+    try {
+      const BITGET_KEY    = (process.env.BITGET_API_KEY    || "").trim();
+      const BITGET_SECRET = (process.env.BITGET_SECRET_KEY || "").trim();
+      const BITGET_PASS   = (process.env.BITGET_PASSPHRASE || "").trim();
+      const BITGET_BASE   = (process.env.BITGET_BASE_URL   || "https://api.bitget.com").trim();
+      const { createHmac } = await import("crypto");
+      const now = Date.now();
+      const todayStart = new Date(); todayStart.setUTCHours(0, 0, 0, 0);
+      const windows = {
+        danas:  now - todayStart.getTime(),
+        "7dana": 7 * 86400000,
+        "30dana": 30 * 86400000,
+      };
+      async function fetchWindow(msBack) {
+        const startTime = now - msBack;
+        const path = `/api/v2/mix/position/history-position?productType=USDT-FUTURES&startTime=${startTime}&endTime=${now}&limit=100`;
+        const ts   = Date.now().toString();
+        const sign = createHmac("sha256", BITGET_SECRET).update(`${ts}GET${path}`).digest("base64");
+        const r = await fetch(`${BITGET_BASE}${path}`, {
+          headers: { "ACCESS-KEY": BITGET_KEY, "ACCESS-SIGN": sign,
+            "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET_PASS, "Content-Type": "application/json" },
+        });
+        const d = await r.json();
+        const list = d?.data?.list ?? [];
+        const pnl = list.reduce((s, p) => s + parseFloat(p.netProfit || 0), 0);
+        return { pnl: parseFloat(pnl.toFixed(2)), trades: list.length };
+      }
+      const [danas, d7, d30] = await Promise.all([
+        fetchWindow(windows.danas), fetchWindow(windows["7dana"]), fetchWindow(windows["30dana"]),
+      ]);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, danas, "7dana": d7, "30dana": d30 }));
+    } catch (e) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e.message }));
     }
     return;
   }

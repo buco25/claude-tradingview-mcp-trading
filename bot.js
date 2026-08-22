@@ -455,6 +455,81 @@ export async function getBtcDailyVsInvalidation() {
   return _btcInvalCache;
 }
 
+// ─── Wyckoff BTC akumulacija→markup detektor (22.08., na zahtjev) ────────────
+// V1: samo BTC, 90-dnevni dnevni lookback definira Trading Range (TR).
+// Support = min(low) 90d, Resistance = max(high) 90d.
+// SPRING: dnevni low probije TR support, pa se close vrati IZNAD supporta unutar
+//   3 dana (klasični Wyckoff shakeout — zadnji "trap" prije markupa).
+// SOS (Sign of Strength): dnevni close probije TR resistance uz volumen ≥1.5×
+//   20-dnevnog prosjeka — potvrđuje da je akumulacija gotova, markup počeo.
+// LPS (Last Point of Support): NAKON potvrđenog SOS-a, povlačenje koje drži
+//   iznad bivšeg resistancea (sad support) na SMANJENOM volumenu od SOS-a —
+//   zadnja niskorizična točka prije nastavka markupa.
+// Bonus signal (isti obrazac kao CVD+E145/PWHL+MSTR bonus, vidi analyzeUltra) —
+// NE mijenja duljinu comba niti minSig, samo +1 bullScore kad je Spring/LPS aktivan.
+// Samo bullish strana (akumulacija→markup) — distribucijska zrcalna strana
+// (UTAD/SOW/LPSY) namjerno izostavljena u V1, moze se dodati kasnije.
+let _wyckoffCache = { bullish: false, event: null, support: null, resistance: null, ts: 0 };
+export async function getBtcWyckoffSignal() {
+  if (Date.now() - _wyckoffCache.ts < 60 * 60 * 1000 && _wyckoffCache.ts > 0) return _wyckoffCache;
+  try {
+    const d = await fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1Dutc&limit=95`).then(r => r.json());
+    if (d.code !== "00000" || !d.data?.length) return _wyckoffCache;
+    const all = d.data.map(c => ({
+      ts: parseInt(c[0]), high: parseFloat(c[2]), low: parseFloat(c[3]),
+      close: parseFloat(c[4]), volume: parseFloat(c[5]),
+    }));
+    // Bitget ascending (najstarija prva) — izbaci zadnju (danas, još u tijeku), uzmi zadnjih 90 ZATVORENIH
+    const closed = all.slice(0, -1).slice(-90);
+    if (closed.length < 60) return _wyckoffCache;
+
+    // TR (support/resistance) MORA doći iz STARIJEG dijela prozora (dani -90..-31) — ne
+    // smije uključivati recentne dane koji se provjeravaju za breakout, inače je self-
+    // referentno (dan proboja bi bio dio range-a koji sam sebe definira kao strop, pa
+    // "close > resistance" nikad ne bi moglo biti istinito). established/recent split.
+    const established = closed.slice(0, -30);
+    const recent30     = closed.slice(-30);
+    const support    = Math.min(...established.map(c => c.low));
+    const resistance = Math.max(...established.map(c => c.high));
+    const avgVol20   = established.slice(-20).reduce((s, c) => s + c.volume, 0) / 20;
+
+    // Nađi zadnji potvrđen SOS unutar zadnjih 30 dana (close > resistance, volumen ≥1.5x prosjeka)
+    let sosIdx = -1, sosVolume = null;
+    for (let i = 0; i < recent30.length; i++) {
+      const c = recent30[i];
+      if (c.close > resistance && c.volume >= avgVol20 * 1.5) { sosIdx = i; sosVolume = c.volume; }
+    }
+
+    let event = null, bullish = false;
+
+    // LPS: nakon SOS-a, povlačenje koje drži oko/iznad bivšeg resistancea, na manjem volumenu od SOS-a
+    if (sosIdx >= 0 && sosIdx < recent30.length - 1) {
+      const afterSos = recent30.slice(sosIdx + 1);
+      const heldSupport   = afterSos.some(c => c.low <= resistance * 1.01 && c.close >= resistance * 0.995);
+      const lowerVolume   = afterSos.some(c => c.low <= resistance * 1.01 && c.volume < sosVolume);
+      if (heldSupport && lowerVolume) { event = "LPS"; bullish = true; }
+    }
+
+    // Spring: low probije support, close se vrati iznad supporta unutar 3 dana (zadnjih 10 dana)
+    if (!bullish) {
+      const last10 = closed.slice(-10);
+      outer:
+      for (let i = 0; i < last10.length; i++) {
+        if (last10[i].low < support) {
+          for (let j = i + 1; j <= Math.min(i + 3, last10.length - 1); j++) {
+            if (last10[j].close > support) { event = "Spring"; bullish = true; break outer; }
+          }
+        }
+      }
+    }
+
+    _wyckoffCache = { bullish, event, support, resistance, ts: Date.now() };
+  } catch (e) {
+    console.log(`  ⚠️  [WYCKOFF] fetch greška: ${e.message}`);
+  }
+  return _wyckoffCache;
+}
+
 // ─── CHILL mode — mrtvo tržište (ljetni režim) ───────────────────────────────
 // TraderaEdge 14.07: "letnji režim, nizak volumen — nisam bio preterano aktivan,
 // CHILL mode". Bot analiza 7d: 23 tradea, -8 USDT dok je mentor odradio 2-3.
@@ -2554,7 +2629,10 @@ function analyzeUltra(candles, cfg) {
   const _mstrInCombo = _comboIdx.includes(6);
   const _pwhMstrBonusBull = (_pwhInCombo && _mstrInCombo && sigs[4] === 1  && sigs[6] === 1)  ? 1 : 0;
   const _pwhMstrBonusBear = (_pwhInCombo && _mstrInCombo && sigs[4] === -1 && sigs[6] === -1) ? 1 : 0;
-  const bullScore = bullCnt + _premiumBonusBull + _pwhMstrBonusBull;
+  // Bonus 3: Wyckoff Spring/LPS na BTC (22.08.) — samo bullish strana, samo BTC.
+  // Ne mijenja duljinu comba niti minSig, isti obrazac kao bonusi iznad.
+  const _wyckoffBonusBull = (_sym === "BTCUSDT" && cfg._wyckoffBullish === true) ? 1 : 0;
+  const bullScore = bullCnt + _premiumBonusBull + _pwhMstrBonusBull + _wyckoffBonusBull;
   const bearScore = bearCnt + _premiumBonusBear + _pwhMstrBonusBear;
   // Vikend: +2 signala — subotom/nedjeljom tanka likvidnost, samo najjači setupi.
   // (post-mortem 05.07.: svi likvidirani ulazi bili subotnji minimalni 5/8 → +1 uveden,
@@ -5383,6 +5461,11 @@ export async function run() {
       const _weeklyEma = await getBtcWeeklyEmaPhase();
       pDef.params._weeklyBullPhase = _weeklyEma.bullPhase;
       if (_weeklyEma.bullPhase !== null) console.log(`  📅 [W-EMA] BTC tjedni EMA10 ${_weeklyEma.ema10?.toFixed(0)} ${_weeklyEma.bullPhase ? ">" : "<"} EMA21 ${_weeklyEma.ema21?.toFixed(0)} → ${_weeklyEma.bullPhase ? "BULL faza" : "BEAR faza"}`);
+      // Wyckoff Spring/SOS/LPS bonus (22.08., samo BTC) — vidi getBtcWyckoffSignal
+      const _wyckoff = await getBtcWyckoffSignal();
+      pDef.params._wyckoffBullish = _wyckoff.bullish;
+      pDef.params._wyckoffEvent   = _wyckoff.event;
+      if (_wyckoff.bullish) console.log(`  🐂 [WYCKOFF] BTC ${_wyckoff.event} potvrđen (TR ${_wyckoff.support?.toFixed(0)}–${_wyckoff.resistance?.toFixed(0)}) → bonus bullScore`);
     }
 
     // ── 1. USDT.D proxy — Stablecoin Inflow/Outflow ──────────────────────────

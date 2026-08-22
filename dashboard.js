@@ -14,6 +14,7 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   getLongShortRatio, getStablecoinInflow, getBtcPerpBasis, getAltcoinSeason,
   generateDailyReport, autoFixCsvFromBitget, SYMBOL_COMBOS, getBtcDailyPivots, getAccountTransfers, calcLiqZones,
   getBtcWeeklyVsKey, getRelStrengthVsBtc, isStockSym, getBtcChillMode, getBtcDailyVsInvalidation, getBtcWeeklyEmaPhase,
+  getBtcWyckoffSignal,
   RISK_PCT, RISK_PCT_MIN, RISK_PCT_MAX } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
@@ -1507,6 +1508,11 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
         <div style="font-size:22px;font-weight:800" id="btc-wema-val">—</div>
         <div style="font-size:10px;color:#9ca3af;margin-top:2px" id="btc-wema-sub">W-EMA10 vs W-EMA21</div>
       </div>
+      <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px;text-align:center">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">Wyckoff (90d TR)</div>
+        <div style="font-size:22px;font-weight:800" id="btc-wyckoff-val">—</div>
+        <div style="font-size:10px;color:#9ca3af;margin-top:2px" id="btc-wyckoff-sub">Spring/SOS/LPS bonus</div>
+      </div>
     </div>
   </div>
 <script>
@@ -1625,6 +1631,21 @@ window.toggleScanFilter = function(btn) {
         weEl.style.color = we.bullPhase ? '#059669' : '#dc2626';
         document.getElementById('btc-wema-sub').textContent =
           'E10 $' + Math.round(we.ema10).toLocaleString() + (we.bullPhase ? ' > ' : ' < ') + 'E21 $' + Math.round(we.ema21).toLocaleString();
+      }
+
+      // Wyckoff Spring/SOS/LPS (samo BTC, bonus signal)
+      const wy = d.wyckoff;
+      const wyEl = document.getElementById('btc-wyckoff-val');
+      if (wy && wy.support && wyEl) {
+        if (wy.bullish) {
+          wyEl.textContent = wy.event === 'Spring' ? '🌱 Spring' : '📍 LPS';
+          wyEl.style.color = '#059669';
+        } else {
+          wyEl.textContent = '⚪ nema';
+          wyEl.style.color = '#9ca3af';
+        }
+        document.getElementById('btc-wyckoff-sub').textContent =
+          'TR $' + Math.round(wy.support).toLocaleString() + '–$' + Math.round(wy.resistance).toLocaleString();
       }
     } catch(e) {
       document.getElementById('btc-status-ts').textContent = 'Greška: ' + e.message;
@@ -4590,6 +4611,11 @@ const server = http.createServer(async (req, res) => {
       // Tjedna makro-faza (automatski EMA10/EMA21 cross)
       try {
         result.weeklyEma = await getBtcWeeklyEmaPhase();
+      } catch {}
+
+      // Wyckoff Spring/SOS/LPS detektor (22.08., samo BTC)
+      try {
+        result.wyckoff = await getBtcWyckoffSignal();
       } catch {}
 
       // Režim bota — CHILL / noćni blok / survival

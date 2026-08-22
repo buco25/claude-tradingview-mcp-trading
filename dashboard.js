@@ -1230,6 +1230,20 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
           </table>
         </div>
       </div>
+
+      <div id="collhdr-bghist" onclick="colToggle('bghist')"
+        style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;padding:8px 0;margin-top:10px;margin-bottom:4px">
+        <span class="section-label" style="color:${def.color};margin:0">✅ Stvarni Bitget rezultati (izvor: burza, ne CSV)</span>
+        <span id="collcaret-bghist" style="color:#9ca3af;font-size:11px">▶</span>
+      </div>
+      <div id="collbody-bghist" style="display:none">
+        <div class="table-wrap">
+          <table class="trade-table" id="bghist-table">
+            <thead><tr><th>Zatvoreno</th><th>Symbol</th><th>Side</th><th>Entry→Close</th><th>Qty</th><th>Net P&amp;L</th></tr></thead>
+            <tbody id="bghist-tbody"><tr><td colspan="6" style="color:#9ca3af">Učitavam…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
       <script>
         function colToggle(key) {
           var body = document.getElementById('collbody-' + key);
@@ -1238,14 +1252,43 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
           body.style.display = open ? 'block' : 'none';
           caret.textContent = open ? '▼' : '▶';
           try { sessionStorage.setItem('coll_' + key, open ? '1' : '0'); } catch(e) {}
+          if (key === 'bghist' && open) loadBitgetHistory();
+        }
+        var _bghistLoaded = false;
+        function loadBitgetHistory() {
+          if (_bghistLoaded) return;
+          _bghistLoaded = true;
+          fetch('/api/bitget-history').then(function(r){ return r.json(); }).then(function(d){
+            var tbody = document.getElementById('bghist-tbody');
+            if (!d.ok || !d.list || !d.list.length) {
+              tbody.innerHTML = '<tr><td colspan="6" style="color:#9ca3af">' + (d.error || 'Nema podataka') + '</td></tr>';
+              return;
+            }
+            tbody.innerHTML = d.list.map(function(p){
+              var win = p.netProfit >= 0;
+              var closeD = new Date(p.closeTs);
+              var dateStr = closeD.toISOString().slice(0,10) + ' ' + closeD.toISOString().slice(11,16);
+              return '<tr class="' + (win ? 'win-row' : 'loss-row') + '">' +
+                '<td>' + dateStr + '</td>' +
+                '<td style="font-weight:700">' + p.symbol + '</td>' +
+                '<td><span class="badge ' + (p.side === 'long' ? 'badge-long' : 'badge-short') + '">' + p.side.toUpperCase() + '</span></td>' +
+                '<td>' + p.entry + ' → ' + p.close + '</td>' +
+                '<td>' + p.qty + '</td>' +
+                '<td style="color:' + (win?'#059669':'#dc2626') + ';font-weight:700">' + (win?'+':'') + '$' + p.netProfit.toFixed(4) + '</td>' +
+              '</tr>';
+            }).join('');
+          }).catch(function(e){
+            document.getElementById('bghist-tbody').innerHTML = '<tr><td colspan="6" style="color:#dc2626">Greška: ' + e.message + '</td></tr>';
+          });
         }
         (function restoreCollState() {
-          ['wl','t20'].forEach(function(key) {
+          ['wl','t20','bghist'].forEach(function(key) {
             try {
               if (sessionStorage.getItem('coll_' + key) === '1') {
                 var body = document.getElementById('collbody-' + key);
                 var caret = document.getElementById('collcaret-' + key);
                 if (body) { body.style.display = 'block'; caret.textContent = '▼'; }
+                if (key === 'bghist') loadBitgetHistory();
               }
             } catch(e) {}
           });
@@ -3561,6 +3604,45 @@ const server = http.createServer(async (req, res) => {
     } catch (e) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: e.message, wins:0, losses:0, total:0, wr:0 }));
+    }
+    return;
+  }
+
+  // Stvarna Bitget povijest zatvorenih pozicija (19.08.) — izvor istine za P&L,
+  // za usporedbu s lokalnim CSV-om koji zna drift-ati (partial close, fill-price fetch).
+  if (url.pathname === "/api/bitget-history") {
+    try {
+      const BITGET_KEY    = (process.env.BITGET_API_KEY    || "").trim();
+      const BITGET_SECRET = (process.env.BITGET_SECRET_KEY || "").trim();
+      const BITGET_PASS   = (process.env.BITGET_PASSPHRASE || "").trim();
+      const BITGET_BASE   = (process.env.BITGET_BASE_URL   || "https://api.bitget.com").trim();
+      const path = "/api/v2/mix/position/history-position?productType=USDT-FUTURES&limit=30";
+      const ts   = Date.now().toString();
+      const { createHmac } = await import("crypto");
+      const sign = createHmac("sha256", BITGET_SECRET).update(`${ts}GET${path}`).digest("base64");
+      const r = await fetch(`${BITGET_BASE}${path}`, {
+        headers: {
+          "ACCESS-KEY": BITGET_KEY, "ACCESS-SIGN": sign,
+          "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET_PASS,
+          "Content-Type": "application/json",
+        },
+      });
+      const d = await r.json();
+      const list = (d?.data?.list ?? [])
+        .sort((a, b) => parseInt(b.utime) - parseInt(a.utime))
+        .slice(0, 20)
+        .map(p => ({
+          symbol: p.symbol, side: p.holdSide,
+          entry: parseFloat(p.openAvgPrice), close: parseFloat(p.closeAvgPrice),
+          qty: parseFloat(p.closeTotalPos), netProfit: parseFloat(p.netProfit),
+          fees: parseFloat(p.openFee) + parseFloat(p.closeFee), funding: parseFloat(p.totalFunding),
+          openTs: parseInt(p.ctime), closeTs: parseInt(p.utime),
+        }));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: d.code === "00000", error: d.code !== "00000" ? `Bitget ${d.code}: ${d.msg}` : undefined, list }));
+    } catch (e) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e.message, list: [] }));
     }
     return;
   }

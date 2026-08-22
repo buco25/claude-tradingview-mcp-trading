@@ -455,21 +455,34 @@ export async function getBtcDailyVsInvalidation() {
   return _btcInvalCache;
 }
 
-// ─── Wyckoff BTC akumulacija→markup detektor (22.08., na zahtjev) ────────────
-// V1: samo BTC, 90-dnevni dnevni lookback definira Trading Range (TR).
-// Support = min(low) 90d, Resistance = max(high) 90d.
-// SPRING: dnevni low probije TR support, pa se close vrati IZNAD supporta unutar
-//   3 dana (klasični Wyckoff shakeout — zadnji "trap" prije markupa).
-// SOS (Sign of Strength): dnevni close probije TR resistance uz volumen ≥1.5×
-//   20-dnevnog prosjeka — potvrđuje da je akumulacija gotova, markup počeo.
-// LPS (Last Point of Support): NAKON potvrđenog SOS-a, povlačenje koje drži
-//   iznad bivšeg resistancea (sad support) na SMANJENOM volumenu od SOS-a —
-//   zadnja niskorizična točka prije nastavka markupa.
+// ─── Wyckoff BTC akumulacija↔distribucija detektor (22.08., na zahtjev) ──────
+// V1+V2: samo BTC, 90-dnevni dnevni lookback definira Trading Range (TR).
+// Support/Resistance dolaze iz STARIJEG dijela prozora (established, dani -90..-31)
+// — recentni dani (recent30) se provjeravaju za proboj TE established zone. Ovo je
+// namjerno: da je TR definiran nad ISTIM prozorom koji uključuje recentne dane, dan
+// proboja bi postao dio range-a koji sam sebe definira kao strop/pod, pa proboj
+// nikad ne bi mogao biti istinit (self-referenca — nađeno i popravljeno u testu).
+//
+// BULLISH strana (akumulacija→markup):
+//   SPRING: dnevni low probije TR support, close se vrati IZNAD supporta unutar
+//     3 dana (klasični shakeout — zadnji "trap" prije markupa).
+//   SOS (Sign of Strength): dnevni close probije TR resistance uz volumen ≥1.5×
+//     20-dnevnog prosjeka established perioda — akumulacija gotova, markup počeo.
+//   LPS (Last Point of Support): NAKON potvrđenog SOS-a, povlačenje koje drži
+//     iznad bivšeg resistancea (sad support) na SMANJENOM volumenu od SOS-a.
+//
+// BEARISH strana (distribucija→markdown, zrcalno):
+//   UTAD (Upthrust After Distribution): dnevni high probije TR resistance, close
+//     se vrati ISPOD resistancea unutar 3 dana — lažni proboj gore, trapa kasne longove.
+//   SOW (Sign of Weakness): dnevni close probije TR support uz volumen ≥1.5×
+//     prosjeka — distribucija gotova, markdown počeo.
+//   LPSY (Last Point of Supply): NAKON potvrđenog SOW-a, odbijanje koje ostaje
+//     ispod bivšeg supporta (sad resistance) na SMANJENOM volumenu od SOW-a.
+//
 // Bonus signal (isti obrazac kao CVD+E145/PWHL+MSTR bonus, vidi analyzeUltra) —
-// NE mijenja duljinu comba niti minSig, samo +1 bullScore kad je Spring/LPS aktivan.
-// Samo bullish strana (akumulacija→markup) — distribucijska zrcalna strana
-// (UTAD/SOW/LPSY) namjerno izostavljena u V1, moze se dodati kasnije.
-let _wyckoffCache = { bullish: false, event: null, support: null, resistance: null, ts: 0 };
+// NE mijenja duljinu comba niti minSig, samo +1 bullScore (Spring/LPS) ili
+// +1 bearScore (UTAD/LPSY) kad je aktivan.
+let _wyckoffCache = { bullish: false, bullEvent: null, bearish: false, bearEvent: null, support: null, resistance: null, ts: 0 };
 export async function getBtcWyckoffSignal() {
   if (Date.now() - _wyckoffCache.ts < 60 * 60 * 1000 && _wyckoffCache.ts > 0) return _wyckoffCache;
   try {
@@ -483,47 +496,63 @@ export async function getBtcWyckoffSignal() {
     const closed = all.slice(0, -1).slice(-90);
     if (closed.length < 60) return _wyckoffCache;
 
-    // TR (support/resistance) MORA doći iz STARIJEG dijela prozora (dani -90..-31) — ne
-    // smije uključivati recentne dane koji se provjeravaju za breakout, inače je self-
-    // referentno (dan proboja bi bio dio range-a koji sam sebe definira kao strop, pa
-    // "close > resistance" nikad ne bi moglo biti istinito). established/recent split.
     const established = closed.slice(0, -30);
     const recent30     = closed.slice(-30);
     const support    = Math.min(...established.map(c => c.low));
     const resistance = Math.max(...established.map(c => c.high));
     const avgVol20   = established.slice(-20).reduce((s, c) => s + c.volume, 0) / 20;
 
-    // Nađi zadnji potvrđen SOS unutar zadnjih 30 dana (close > resistance, volumen ≥1.5x prosjeka)
+    // ── BULLISH: SOS → LPS, inače Spring ──────────────────────────────────
     let sosIdx = -1, sosVolume = null;
     for (let i = 0; i < recent30.length; i++) {
       const c = recent30[i];
       if (c.close > resistance && c.volume >= avgVol20 * 1.5) { sosIdx = i; sosVolume = c.volume; }
     }
-
-    let event = null, bullish = false;
-
-    // LPS: nakon SOS-a, povlačenje koje drži oko/iznad bivšeg resistancea, na manjem volumenu od SOS-a
+    let bullEvent = null, bullish = false;
     if (sosIdx >= 0 && sosIdx < recent30.length - 1) {
       const afterSos = recent30.slice(sosIdx + 1);
-      const heldSupport   = afterSos.some(c => c.low <= resistance * 1.01 && c.close >= resistance * 0.995);
-      const lowerVolume   = afterSos.some(c => c.low <= resistance * 1.01 && c.volume < sosVolume);
-      if (heldSupport && lowerVolume) { event = "LPS"; bullish = true; }
+      const heldSupport = afterSos.some(c => c.low <= resistance * 1.01 && c.close >= resistance * 0.995);
+      const lowerVolume = afterSos.some(c => c.low <= resistance * 1.01 && c.volume < sosVolume);
+      if (heldSupport && lowerVolume) { bullEvent = "LPS"; bullish = true; }
     }
-
-    // Spring: low probije support, close se vrati iznad supporta unutar 3 dana (zadnjih 10 dana)
     if (!bullish) {
       const last10 = closed.slice(-10);
-      outer:
+      outerBull:
       for (let i = 0; i < last10.length; i++) {
         if (last10[i].low < support) {
           for (let j = i + 1; j <= Math.min(i + 3, last10.length - 1); j++) {
-            if (last10[j].close > support) { event = "Spring"; bullish = true; break outer; }
+            if (last10[j].close > support) { bullEvent = "Spring"; bullish = true; break outerBull; }
           }
         }
       }
     }
 
-    _wyckoffCache = { bullish, event, support, resistance, ts: Date.now() };
+    // ── BEARISH (zrcalno): SOW → LPSY, inače UTAD ─────────────────────────
+    let sowIdx = -1, sowVolume = null;
+    for (let i = 0; i < recent30.length; i++) {
+      const c = recent30[i];
+      if (c.close < support && c.volume >= avgVol20 * 1.5) { sowIdx = i; sowVolume = c.volume; }
+    }
+    let bearEvent = null, bearish = false;
+    if (sowIdx >= 0 && sowIdx < recent30.length - 1) {
+      const afterSow = recent30.slice(sowIdx + 1);
+      const heldResistance = afterSow.some(c => c.high >= support * 0.99 && c.close <= support * 1.005);
+      const lowerVolume    = afterSow.some(c => c.high >= support * 0.99 && c.volume < sowVolume);
+      if (heldResistance && lowerVolume) { bearEvent = "LPSY"; bearish = true; }
+    }
+    if (!bearish) {
+      const last10 = closed.slice(-10);
+      outerBear:
+      for (let i = 0; i < last10.length; i++) {
+        if (last10[i].high > resistance) {
+          for (let j = i + 1; j <= Math.min(i + 3, last10.length - 1); j++) {
+            if (last10[j].close < resistance) { bearEvent = "UTAD"; bearish = true; break outerBear; }
+          }
+        }
+      }
+    }
+
+    _wyckoffCache = { bullish, bullEvent, bearish, bearEvent, support, resistance, ts: Date.now() };
   } catch (e) {
     console.log(`  ⚠️  [WYCKOFF] fetch greška: ${e.message}`);
   }
@@ -2629,11 +2658,12 @@ function analyzeUltra(candles, cfg) {
   const _mstrInCombo = _comboIdx.includes(6);
   const _pwhMstrBonusBull = (_pwhInCombo && _mstrInCombo && sigs[4] === 1  && sigs[6] === 1)  ? 1 : 0;
   const _pwhMstrBonusBear = (_pwhInCombo && _mstrInCombo && sigs[4] === -1 && sigs[6] === -1) ? 1 : 0;
-  // Bonus 3: Wyckoff Spring/LPS na BTC (22.08.) — samo bullish strana, samo BTC.
+  // Bonus 3: Wyckoff Spring/LPS (bull) i UTAD/LPSY (bear) na BTC (22.08.), samo BTC.
   // Ne mijenja duljinu comba niti minSig, isti obrazac kao bonusi iznad.
   const _wyckoffBonusBull = (_sym === "BTCUSDT" && cfg._wyckoffBullish === true) ? 1 : 0;
+  const _wyckoffBonusBear = (_sym === "BTCUSDT" && cfg._wyckoffBearish === true) ? 1 : 0;
   const bullScore = bullCnt + _premiumBonusBull + _pwhMstrBonusBull + _wyckoffBonusBull;
-  const bearScore = bearCnt + _premiumBonusBear + _pwhMstrBonusBear;
+  const bearScore = bearCnt + _premiumBonusBear + _pwhMstrBonusBear + _wyckoffBonusBear;
   // Vikend: +2 signala — subotom/nedjeljom tanka likvidnost, samo najjači setupi.
   // (post-mortem 05.07.: svi likvidirani ulazi bili subotnji minimalni 5/8 → +1 uveden,
   // ali 16.08. opet cijeli vikend batch (SOL/RENDER/BTC) u SL-u na minimalnom +1 pragu.
@@ -5461,11 +5491,14 @@ export async function run() {
       const _weeklyEma = await getBtcWeeklyEmaPhase();
       pDef.params._weeklyBullPhase = _weeklyEma.bullPhase;
       if (_weeklyEma.bullPhase !== null) console.log(`  📅 [W-EMA] BTC tjedni EMA10 ${_weeklyEma.ema10?.toFixed(0)} ${_weeklyEma.bullPhase ? ">" : "<"} EMA21 ${_weeklyEma.ema21?.toFixed(0)} → ${_weeklyEma.bullPhase ? "BULL faza" : "BEAR faza"}`);
-      // Wyckoff Spring/SOS/LPS bonus (22.08., samo BTC) — vidi getBtcWyckoffSignal
+      // Wyckoff Spring/SOS/LPS (bull) + UTAD/SOW/LPSY (bear) bonus (22.08., samo BTC)
       const _wyckoff = await getBtcWyckoffSignal();
       pDef.params._wyckoffBullish = _wyckoff.bullish;
-      pDef.params._wyckoffEvent   = _wyckoff.event;
-      if (_wyckoff.bullish) console.log(`  🐂 [WYCKOFF] BTC ${_wyckoff.event} potvrđen (TR ${_wyckoff.support?.toFixed(0)}–${_wyckoff.resistance?.toFixed(0)}) → bonus bullScore`);
+      pDef.params._wyckoffBullEvent = _wyckoff.bullEvent;
+      pDef.params._wyckoffBearish = _wyckoff.bearish;
+      pDef.params._wyckoffBearEvent = _wyckoff.bearEvent;
+      if (_wyckoff.bullish) console.log(`  🐂 [WYCKOFF] BTC ${_wyckoff.bullEvent} potvrđen (TR ${_wyckoff.support?.toFixed(0)}–${_wyckoff.resistance?.toFixed(0)}) → bonus bullScore`);
+      if (_wyckoff.bearish) console.log(`  🐻 [WYCKOFF] BTC ${_wyckoff.bearEvent} potvrđen (TR ${_wyckoff.support?.toFixed(0)}–${_wyckoff.resistance?.toFixed(0)}) → bonus bearScore`);
     }
 
     // ── 1. USDT.D proxy — Stablecoin Inflow/Outflow ──────────────────────────

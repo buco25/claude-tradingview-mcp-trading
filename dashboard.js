@@ -1633,13 +1633,18 @@ window.toggleScanFilter = function(btn) {
           'E10 $' + Math.round(we.ema10).toLocaleString() + (we.bullPhase ? ' > ' : ' < ') + 'E21 $' + Math.round(we.ema21).toLocaleString();
       }
 
-      // Wyckoff Spring/SOS/LPS (samo BTC, bonus signal)
+      // Wyckoff Spring/SOS/LPS (bull) + UTAD/SOW/LPSY (bear) — samo BTC, bonus signal
       const wy = d.wyckoff;
       const wyEl = document.getElementById('btc-wyckoff-val');
       if (wy && wy.support && wyEl) {
+        const bullIcon = { Spring: '🌱 Spring', LPS: '📍 LPS' };
+        const bearIcon = { UTAD: '⚠️ UTAD', LPSY: '📍 LPSY' };
         if (wy.bullish) {
-          wyEl.textContent = wy.event === 'Spring' ? '🌱 Spring' : '📍 LPS';
+          wyEl.textContent = bullIcon[wy.bullEvent] || ('🌱 ' + wy.bullEvent);
           wyEl.style.color = '#059669';
+        } else if (wy.bearish) {
+          wyEl.textContent = bearIcon[wy.bearEvent] || ('⚠️ ' + wy.bearEvent);
+          wyEl.style.color = '#dc2626';
         } else {
           wyEl.textContent = '⚪ nema';
           wyEl.style.color = '#9ca3af';

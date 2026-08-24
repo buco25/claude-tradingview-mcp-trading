@@ -1988,14 +1988,6 @@ window.toggleScanFilter = function(btn) {
     const bl = existsSync(blPath) ? (() => { try { return JSON.parse(readFileSync(blPath,"utf8")); } catch { return {}; } })() : {};
     const blActive = Object.entries(bl).filter(([,v]) => Date.now() < v.until);
 
-    // Učitaj signal stats
-    const ssPath = `${DATA_DIR}/signal_stats.json`;
-    const ss = existsSync(ssPath) ? (() => { try { return JSON.parse(readFileSync(ssPath,"utf8")); } catch { return {}; } })() : {};
-    const ssRows = Object.entries(ss)
-      .filter(([,v]) => v.total >= 3)
-      .map(([k,v]) => ({ name: k, wr: (v.wins/v.total*100).toFixed(0), total: v.total }))
-      .sort((a,b) => b.wr - a.wr);
-
     // Učitaj recent WR (zadnjih 10 trejdova DANAS) za dinamički ADX
     // VAŽNO: samo današnji trejdovi — usklađeno s bot.js getDynamicAdx()
     const csvPath = `${DATA_DIR}/trades_synapse_t.csv`;
@@ -2045,26 +2037,6 @@ window.toggleScanFilter = function(btn) {
             }).join("")
         }
         <div style="font-size:10px;color:#9ca3af;margin-top:6px">Trigger: 3 uzastopna SL → 24h ban</div>
-      </div>
-
-      <!-- Signal Analiza -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">📈 Signal WR (top 6)</div>
-        ${ssRows.length === 0
-          ? `<div style="font-size:12px;color:#9ca3af">Nema dovoljno podataka (treba 3+ trejdova)</div>`
-          : ssRows.slice(0,6).map(r => {
-              const col = r.wr >= 40 ? "#059669" : r.wr >= 30 ? "#d97706" : "#dc2626";
-              const bar = Math.round(r.wr/10);
-              return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;font-size:11px">
-                <span style="color:#9ca3af;width:38px;font-family:monospace">${r.name}</span>
-                <div style="flex:1;background:#374151;border-radius:2px;height:6px">
-                  <div style="width:${r.wr}%;background:${col};height:6px;border-radius:2px"></div>
-                </div>
-                <span style="color:${col};width:30px;text-align:right">${r.wr}%</span>
-                <span style="color:#444;font-size:10px">${r.total}</span>
-              </div>`;
-            }).join("")
-        }
       </div>
 
     </div>

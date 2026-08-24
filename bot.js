@@ -5896,8 +5896,14 @@ export async function run() {
             _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: `BTC_REGIME(${_effectiveRegime})`, reason: `BTC 1H BULL, simbol 1H ${_sym1hTrend||"?"} → SHORT blokiran` });
             continue;
           }
+          // Divergencija (BTC BULL/Recovery ali simbol 1H BEAR) je do 24.08. ovdje PROLAZILA
+          // (samo log, bez continue) — korisnik ukinuo: nije TraderaEdge-sourced (calcTrend1H
+          // je čisti bot EMA20 izračun), a jedini poznat trade kroz nju (BTC 24.08.) izgubio
+          // -$1.50 protiv dominantnog trenda. Sad blokira kao i ostala dva SHORT gatea iznad.
           if (signal === "SHORT" && (_effectiveRegime === "BULL" || _btcAboveEma50) && _sym1hTrend === "BEAR") {
-            console.log(`  ⚡ [REGIME] ${symbol} — BTC BULL/Recovery ali simbol 1H BEAR → SHORT dopušten (divergencija)`);
+            console.log(`  🌤️  [REGIME] ${symbol} — BTC BULL/Recovery, simbol 1H BEAR (divergencija ukinuta 24.08.) → SHORT blokiran`);
+            _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: `BTC_REGIME_DIVERGENCE`, reason: `BTC BULL/Recovery, simbol 1H BEAR → SHORT blokiran (divergencija ukinuta)` });
+            continue;
           }
           // Bounce mode: blokira SHORT (tražimo samo LONG reversal)
           if (signal === "SHORT" && _bounceMode) {

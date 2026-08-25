@@ -1645,12 +1645,19 @@ window.toggleScanFilter = function(btn) {
         } else if (wy.bearish) {
           wyEl.textContent = bearIcon[wy.bearEvent] || ('⚠️ ' + wy.bearEvent);
           wyEl.style.color = '#dc2626';
+        } else if (wy.sosPending) {
+          wyEl.textContent = '🔶 SOS čeka LPS';
+          wyEl.style.color = '#d97706';
+        } else if (wy.sowPending) {
+          wyEl.textContent = '🔶 SOW čeka LPSY';
+          wyEl.style.color = '#d97706';
         } else {
           wyEl.textContent = '⚪ nema';
           wyEl.style.color = '#9ca3af';
         }
         document.getElementById('btc-wyckoff-sub').textContent =
-          'TR $' + Math.round(wy.support).toLocaleString() + '–$' + Math.round(wy.resistance).toLocaleString();
+          'TR $' + Math.round(wy.support).toLocaleString() + '–$' + Math.round(wy.resistance).toLocaleString() +
+          (wy.sosPending || wy.sowPending ? ' · +2 minSig oprez aktivan' : '');
       }
     } catch(e) {
       document.getElementById('btc-status-ts').textContent = 'Greška: ' + e.message;

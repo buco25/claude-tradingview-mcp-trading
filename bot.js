@@ -43,6 +43,9 @@ const MAX_OPEN_CRYPTO = 6;  // max otvorenih kripto pozicija
 const MAX_OPEN_STOCKS = 3;  // max otvorenih pozicija na dionicama (xStocks)
 const MAX_OPEN_PER_PORTFOLIO = MAX_OPEN_CRYPTO + MAX_OPEN_STOCKS;  // ukupni cap = 9
 export const isStockSym = (s) => (SYMBOL_SECTORS[s] || "").startsWith("STOCK_");
+// Metali (PAXG/XAU/XAG, 26.08.) — zlato ne prati BTC kao altcoini, izuzeti iz
+// BTC-korelacijskih gateova (weekly key-level SHORT, BTC dEMA10 LONG, REL-STR vs BTC).
+export const isMetalSym = (s) => SYMBOL_SECTORS[s] === "METAL";
 const MAX_PYRAMID           = 1;   // max 1 adicija u istom smjeru (BTC only mode)
 // 03.08.: VIP pyramid (score≥7/8) nije imao gornju granicu — jedna BTC pozicija je
 // narasla kroz 7 uzastopnih adicija ($40→$280 notional, 50x) dok margin nije postao
@@ -63,6 +66,7 @@ const SYMBOL_SECTORS = {
   "DOGEUSDT":   "MEME",  "PEPEUSDT": "MEME",
   "SUIUSDT":    "L1",    "WLDUSDT": "AI", "VVVUSDT": "AI", "KAITOUSDT": "AI", "VIRTUALUSDT": "AI",
   "INJUSDT":    "DEFI",
+  "PAXGUSDT":   "METAL", "XAUUSDT": "METAL", "XAGUSDT": "METAL",
   // Dionice
   "TSLAUSDT":   "STOCK_TECH", "NVDAUSDT": "STOCK_TECH", "PLTRUSDT": "STOCK_TECH",
   "MSTRUSDT":   "STOCK_CRYPTO", "COINUSDT": "STOCK_CRYPTO", "HOODUSDT": "STOCK_CRYPTO",
@@ -151,6 +155,9 @@ export const SYMBOL_COMBOS = {
   "VVVUSDT":    { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
   "KAITOUSDT":  { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
   "VIRTUALUSDT": { sigIdx: TE_COMBO, minSig: 5, btcAlign: true },
+  "PAXGUSDT":   { sigIdx: TE_COMBO, minSig: 5, btcAlign: false },
+  "XAUUSDT":    { sigIdx: TE_COMBO, minSig: 5, btcAlign: false },
+  "XAGUSDT":    { sigIdx: TE_COMBO, minSig: 5, btcAlign: false },
   // ── Extra (dobar WR history) ────────────────────────────────────────────────
   "TAOUSDT":    { sigIdx: TE_COMBO, minSig: 4 },
   "AAVEUSDT":   { sigIdx: TE_COMBO, minSig: 4 },
@@ -482,7 +489,7 @@ export async function getBtcDailyVsInvalidation() {
 // Bonus signal (isti obrazac kao CVD+E145/PWHL+MSTR bonus, vidi analyzeUltra) —
 // NE mijenja duljinu comba niti minSig, samo +1 bullScore (Spring/LPS) ili
 // +1 bearScore (UTAD/LPSY) kad je aktivan.
-let _wyckoffCache = { bullish: false, bullEvent: null, bearish: false, bearEvent: null, support: null, resistance: null, ts: 0 };
+let _wyckoffCache = { bullish: false, bullEvent: null, bearish: false, bearEvent: null, sosPending: false, sowPending: false, support: null, resistance: null, ts: 0 };
 export async function getBtcWyckoffSignal() {
   if (Date.now() - _wyckoffCache.ts < 60 * 60 * 1000 && _wyckoffCache.ts > 0) return _wyckoffCache;
   try {
@@ -552,7 +559,14 @@ export async function getBtcWyckoffSignal() {
       }
     }
 
-    _wyckoffCache = { bullish, bullEvent, bearish, bearEvent, support, resistance, ts: Date.now() };
+    // sosPending/sowPending: proboj potvrđen ali retest (LPS/LPSY) JOŠ NIJE — "impuls u
+    // tijeku, korekcija još nije testirana" (26.08., na zahtjev nakon promašenog BTC LONG-a
+    // koji je otvoren baš u toj fazi dok je TraderaEdge eksplicitno čekao korekciju/21W EMA
+    // retest prije novih ulaza — "ne juriti cenu"). Koristi se za dodatno pooštravanje ispod.
+    const sosPending = sosIdx >= 0 && bullEvent !== "LPS";
+    const sowPending = sowIdx >= 0 && bearEvent !== "LPSY";
+
+    _wyckoffCache = { bullish, bullEvent, bearish, bearEvent, sosPending, sowPending, support, resistance, ts: Date.now() };
   } catch (e) {
     console.log(`  ⚠️  [WYCKOFF] fetch greška: ${e.message}`);
   }
@@ -2676,7 +2690,14 @@ function analyzeUltra(candles, cfg) {
   const MIN_CONFIRM = (_combo?.minSig ?? minSig) + _weekendBoost + _chillBoost;
   // BTC trend-invalidacija: dnevni close ispod razine = prvi signal slabljenja → pooštri LONG
   const _invalBoost = (cfg._invalBoost && !isStockSym(_sym)) ? 1 : 0;
-  const MIN_CONFIRM_LONG = MIN_CONFIRM + _invalBoost;
+  // Wyckoff SOS/SOW potvrđen ali retest (LPS/LPSY) još nije (26.08., na zahtjev nakon
+  // promašenog BTC LONG-a dok je TraderaEdge čekao korekciju) — "impuls u tijeku, ne
+  // juriti cenu" → +2 minSig na SVE kripto ulaze u tom smjeru, ne samo BTC (isti VIP
+  // prag kao vikend). Dionice i metali izuzeti — ne prate BTC-ov impuls ciklus.
+  const _wyckoffLongBoost  = (cfg._wyckoffSosPending === true && !isStockSym(_sym) && !isMetalSym(_sym)) ? 2 : 0;
+  const _wyckoffShortBoost = (cfg._wyckoffSowPending === true && !isStockSym(_sym) && !isMetalSym(_sym)) ? 2 : 0;
+  const MIN_CONFIRM_LONG  = MIN_CONFIRM + _invalBoost + _wyckoffLongBoost;
+  const MIN_CONFIRM_SHORT = MIN_CONFIRM + _wyckoffShortBoost;
 
   // ══ OBAVEZNI GATEVI (3) ══
 
@@ -2873,7 +2894,7 @@ function analyzeUltra(candles, cfg) {
       nearSup, nearRes, vwap: vwapVal,
       reason: `ULTRA LONG ↑${bullCnt}/8 ADX:${adx.toFixed(0)}✓ RSI:${rsi.toFixed(0)}✓ VWAP✓${bonusTag}${_newSigsBull?" "+_newSigsBull:""}` };
   }
-  if (!LONG_ONLY && bearScore >= MIN_CONFIRM && rsiShortOk) {
+  if (!LONG_ONLY && bearScore >= MIN_CONFIRM_SHORT && rsiShortOk) {
     if (!vwapVal || vwapVal <= 0) {
       return { price, signal: "NEUTRAL", bullScore, bearScore,
         reason: `PBK SHORT blokiran: VWAP nedostupan` };
@@ -5497,8 +5518,12 @@ export async function run() {
       pDef.params._wyckoffBullEvent = _wyckoff.bullEvent;
       pDef.params._wyckoffBearish = _wyckoff.bearish;
       pDef.params._wyckoffBearEvent = _wyckoff.bearEvent;
+      pDef.params._wyckoffSosPending = _wyckoff.sosPending;
+      pDef.params._wyckoffSowPending = _wyckoff.sowPending;
       if (_wyckoff.bullish) console.log(`  🐂 [WYCKOFF] BTC ${_wyckoff.bullEvent} potvrđen (TR ${_wyckoff.support?.toFixed(0)}–${_wyckoff.resistance?.toFixed(0)}) → bonus bullScore`);
       if (_wyckoff.bearish) console.log(`  🐻 [WYCKOFF] BTC ${_wyckoff.bearEvent} potvrđen (TR ${_wyckoff.support?.toFixed(0)}–${_wyckoff.resistance?.toFixed(0)}) → bonus bearScore`);
+      if (_wyckoff.sosPending) console.log(`  ⚠️  [WYCKOFF] BTC SOS potvrđen ali LPS još NIJE — impuls u tijeku, korekcija netestirana (TraderaEdge: "ne juriti cenu") → LONG +2 minSig svugdje`);
+      if (_wyckoff.sowPending) console.log(`  ⚠️  [WYCKOFF] BTC SOW potvrđen ali LPSY još NIJE — pad u tijeku, retest netestiran → SHORT +2 minSig svugdje`);
     }
 
     // ── 1. USDT.D proxy — Stablecoin Inflow/Outflow ──────────────────────────
@@ -5957,7 +5982,7 @@ export async function run() {
           // BTC ključna ciklus-razina (60k) — TraderaEdge macro pravilo, prošireno 20.07.:
           // SVI kripto trend SHORTOVI tek NAKON tjednog closea ispod razine (analiza 3 tjedna:
           // short WR 26%, -9.9 USDT — shortali smo akumulaciju). SWEEP/RANGE izuzeti.
-          if (!isStockSym(symbol) && signal === "SHORT" && !_stratBypass) {
+          if (!isStockSym(symbol) && !isMetalSym(symbol) && signal === "SHORT" && !_stratBypass) {
             const _wk = await getBtcWeeklyVsKey();
             if (_wk.belowKey === false) {
               console.log(`  🏛️  [KEY-LVL] ${symbol} — BTC tjedni close $${_wk.lastClose?.toFixed(0)} ≥ $${_wk.key} → kripto trend SHORT blokiran (akumulacija)`);
@@ -5969,7 +5994,7 @@ export async function run() {
 
           // BTC daily EMA10 — globalni kripto filter: BTC ispod svog dEMA10 → alt LONG blokiran
           // (altovi prate BTC; per-simbol DEMA gate ovo ne hvata dok alt još nije probio svoju EMA)
-          if (!isStockSym(symbol) && symbol !== "BTCUSDT" && signal === "LONG" && !_stratBypass) {
+          if (!isStockSym(symbol) && !isMetalSym(symbol) && symbol !== "BTCUSDT" && signal === "LONG" && !_stratBypass) {
             const _btcDema = await getBtcDailyEma10();
             if (_btcDema.above === false) {
               console.log(`  🌐 [BTC-dEMA10] ${symbol} — BTC ispod svog daily EMA10 ($${_btcDema.ema10?.toFixed(0)}) → alt LONG blokiran`);
@@ -5980,7 +6005,7 @@ export async function run() {
 
           // Strong/Weak relativna snaga vs BTC (TraderaEdge): LONG samo STRONG altove,
           // SHORT samo WEAK altove ("shortuj slabe shitcoine kad BTC pada, ne lidere")
-          if (!isStockSym(symbol) && symbol !== "BTCUSDT" && !_stratBypass) {
+          if (!isStockSym(symbol) && !isMetalSym(symbol) && symbol !== "BTCUSDT" && !_stratBypass) {
             const _relStr = await getRelStrengthVsBtc(symbol);
             if (_relStr === "WEAK" && signal === "LONG") {
               console.log(`  🐌 [REL-STR] ${symbol} — WEAK vs BTC → LONG blokiran (long samo strong altove)`);

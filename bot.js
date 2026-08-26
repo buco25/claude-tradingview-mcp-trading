@@ -2989,16 +2989,19 @@ function analyzeUltra(candles, cfg) {
       reason: `MOMENTUM SHORT ↓${momBearBase}/8 | ADX:${adx.toFixed(0)}✓ RSI:${rsi.toFixed(0)}✓${_strongTrendS?" [STRONG]":""}${sigRsiDiv===-1?" RDIV✓":""}${sigMktStr===-1?" MSTR✓":""}${sigFVG===-1?" FVG✓":""}` };
   }
 
-  // Dijagnoza zašto nema signala
+  // Dijagnoza zašto nema signala. Napomena: "/N" ispod prati stvarnu duljinu comba
+  // (_comboIdx.length, TE_COMBO=8) — bilo hardkodirano na "/9" (relikt starog seta),
+  // ispravljeno 26.08. nakon što je korisnik primijetio nesklad s "Score: X/8" prikazom.
+  const _comboLen = _comboIdx.length;
   const dirStr = scaleOkLong ? `LONG(${scaleUp}/6)` : scaleOkShort ? `SHORT(${scaleDn}/6)` : `6Sc✗`;
   const _rsiLongPrag  = _strongTrend  ? 85 : 72;
   const _rsiShortPrag = _strongTrendS ? 15 : 30;
   const whyNot = bullCnt >= bearCnt
-    ? `↑${bullCnt}/9 ${dirStr}${!rsiLongOk  ? ` RSI${rsi.toFixed(0)}≥${_rsiLongPrag}✗`  : ""} | MOM:${momBull}/9`
-    : `↓${bearCnt}/9 ${dirStr}${!rsiShortOk ? ` RSI${rsi.toFixed(0)}≤${_rsiShortPrag}✗` : ""} | MOM:${momBear}/9`;
+    ? `↑${bullCnt}/${_comboLen} ${dirStr}${!rsiLongOk  ? ` RSI${rsi.toFixed(0)}≥${_rsiLongPrag}✗`  : ""} | MOM:${momBull}/${_comboLen}`
+    : `↓${bearCnt}/${_comboLen} ${dirStr}${!rsiShortOk ? ` RSI${rsi.toFixed(0)}≤${_rsiShortPrag}✗` : ""} | MOM:${momBear}/${_comboLen}`;
   return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
     momBull, momBear,
-    reason: `ULTRA: ${whyNot} (treba ${MIN_CONFIRM}/9 pullback ili ${MOM_MIN}/9 momentum)` };
+    reason: `ULTRA: ${whyNot} (treba ${MIN_CONFIRM}/${_comboLen} pullback ili ${MOM_MIN}/${_comboLen} momentum)` };
 }
 
 // ─── ULTRA Immediate Entry ─────────────────────────────────────────────────────

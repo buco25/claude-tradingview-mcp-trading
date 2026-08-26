@@ -1875,14 +1875,13 @@ window.toggleScanFilter = function(btn) {
             <th>Symbol</th>
             <th>Cijena</th>
             <th style="color:#d97706;text-align:center">1H</th>
-            <th style="color:#d97706;text-align:center">1OB <span style="font-weight:400;font-size:10px;color:#94a3b8">ADX</span></th>
-            <th style="color:#db2777;text-align:center">6 Signala</th>
+            <th style="color:#db2777;text-align:center">Signali <span style="font-weight:400;font-size:10px;color:#94a3b8">ADX + 8 combo</span></th>
             <th style="color:#db2777;text-align:center;width:60px">↑↓</th>
             <th style="min-width:160px">Status</th>
           </tr>
         </thead>
         <tbody id="scan-tbody">
-          <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted)">Klikni "Skeniraj" za prikaz ULTRA signala</td></tr>
+          <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted)">Klikni "Skeniraj" za prikaz ULTRA signala</td></tr>
         </tbody>
       </table>
     </div>
@@ -2798,7 +2797,7 @@ async function doScan() {
     // 14.08.: dionice odvojene od kripta u tablici — dva bloka, svaki sortiran
     // istim rank pravilom, s naslovnim retkom izmedju.
     function rowHtml(s, i) {
-      if (s.error) return '<tr><td colspan="8" style="color:#dc2626;padding:6px 10px">' + s.symbol + ': ' + s.error + '</td></tr>';
+      if (s.error) return '<tr><td colspan="7" style="color:#dc2626;padding:6px 10px">' + s.symbol + ': ' + s.error + '</td></tr>';
 
       const rsiNum = parseFloat(s.rsi);
       const rsiCol = isNaN(rsiNum) ? "#94a3b8" : rsiNum > 70 ? "#dc2626" : rsiNum < 30 ? "#059669" : rsiNum > 60 ? "#ea580c" : rsiNum < 40 ? "#0284c7" : "#475569";
@@ -2856,15 +2855,14 @@ async function doScan() {
           '<div style="font-size:9px;color:' + slTpCol + ';font-weight:500;margin-top:1px">' + slTp + '</div>' + rsiAdxInfo + '</td>' +
         '<td style="font-weight:600;white-space:nowrap;font-size:12px;padding:6px 8px">' + fmtLive(s.price) + entryInfo + '</td>' +
         '<td style="text-align:center;font-weight:800;color:' + t1hCol + ';font-size:13px;padding:6px 4px" title="1H EMA20: ' + t1h + '">' + t1hIcon + '</td>' +
-        '<td style="padding:4px 6px;border-right:1px solid #d9770633">' + mandatoryBoxes(s) + '</td>' +
-        '<td style="padding:4px 4px">' + sigBoxes(s.ultraSigs16, s.symbol) + '</td>' +
+        '<td style="padding:4px 4px">' + mandatoryBoxes(s) + sigBoxes(s.ultraSigs16, s.symbol) + '</td>' +
         '<td style="padding:4px 6px;text-align:center">' + scoreBox(s.ultraBull||0, s.ultraBear||0, s.ultraSig, s.ultraMinSig) + '</td>' +
         '<td style="padding:4px 6px">' + statusBox(s) + '</td>' +
         '</tr>';
     }
 
     function sectionHeader(label, count) {
-      return '<tr><td colspan="8" style="padding:10px 8px 5px;color:#60a5fa;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;border-top:2px solid #374151;background:rgba(96,165,250,0.05)">' + label + ' (' + count + ')</td></tr>';
+      return '<tr><td colspan="7" style="padding:10px 8px 5px;color:#60a5fa;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;border-top:2px solid #374151;background:rgba(96,165,250,0.05)">' + label + ' (' + count + ')</td></tr>';
     }
     const cryptoResults = results.filter(function(s){ return !s.isStock; });
     const stockResults  = results.filter(function(s){ return s.isStock; });
@@ -2891,7 +2889,7 @@ async function doScan() {
     }
 
   } catch(e) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#dc2626;padding:24px">Greška: ' + e.message + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#dc2626;padding:24px">Greška: ' + e.message + '</td></tr>';
   }
 
   btn.disabled = false;

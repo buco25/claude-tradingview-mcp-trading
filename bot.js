@@ -835,6 +835,33 @@ export function calcVWAP(candles) {
   return sumV > 0 ? sumPV / sumV : null;
 }
 
+// ─── Fixed Range Volume Profile — High Volume Node (HVN) razine ─────────────
+// TraderaEdge edukacija (MACD/Fixed Range Volume video): trading zapis (volume profile)
+// pokazuje gdje je bilo najviše kupovine/prodaje — te zone drže kao jak support/resistance,
+// dok proboj kroz zone niskog volumena ide brzo, bez otpora. Vraća top-K HVN cjenovnih
+// razina iz zadanog raspona svijeća — koristi se kao dodatni izvor S/R razina u
+// zone-confluence gateu (_confL/_confS u analyzeUltra), uz postojeće pivot/weekly/monthly.
+function calcVolumeProfileHVN(candles, { bins = 24, lookback = 150, topK = 2 } = {}) {
+  const slice = candles.slice(-Math.min(lookback, candles.length));
+  if (slice.length < 20) return [];
+  const hi = Math.max(...slice.map(c => c.high));
+  const lo = Math.min(...slice.map(c => c.low));
+  if (!(hi > lo)) return [];
+  const binSize = (hi - lo) / bins;
+  const volByBin = new Array(bins).fill(0);
+  for (const c of slice) {
+    const typical = (c.high + c.low + c.close) / 3;
+    let idx = Math.floor((typical - lo) / binSize);
+    if (idx < 0) idx = 0; else if (idx >= bins) idx = bins - 1;
+    volByBin[idx] += (c.volume || 0);
+  }
+  return volByBin
+    .map((v, idx) => ({ level: lo + (idx + 0.5) * binSize, vol: v }))
+    .sort((a, b) => b.vol - a.vol)
+    .slice(0, topK)
+    .map(x => x.level);
+}
+
 // ─── Open Interest promjena — wrapper koji koristi postojeći getOpenInterest ──
 async function getOiChange(symbol) {
   try {
@@ -1684,7 +1711,7 @@ export function getDirLossStreak(pid, side) {
 // Čitamo nakon izlaza koji signal je bio aktivan i označavamo win/loss
 // Svaka 10. analiza ispisuje per-signal WR u konzolu
 
-const SIG_NAMES = ["E50","CVD","MACD","E145","PWHL","RDIV","MSTR","FVG","OB","DEMA","LHUNT"];
+const SIG_NAMES = ["E50","CVD","MACD","E145","PWHL","RDIV","MSTR","FVG","OB","DEMA","LHUNT","MDIV"];
 const getSigStatsFile = () => `${DATA_DIR}/signal_stats.json`;
 
 function loadSigStats() {
@@ -2397,6 +2424,9 @@ function analyzeUltra(candles, cfg) {
   const nearSup  = supBelow[0] ?? null;
   const srZone   = 0.012;   // 1.2% = unutar zone
 
+  // Volume Profile HVN razine (Fixed Range) — dodatni izvor S/R za zone-confluence gate niže
+  const _hvnLevels = calcVolumeProfileHVN(candles);
+
   // sig17: Bounce/Rejection od S/R razine (cijena reagira na zonu)
   let sig17sr = 0;
   if (nearSup !== null && (price - nearSup) / price < srZone && rsiRising)   sig17sr =  1;
@@ -2450,6 +2480,56 @@ function analyzeUltra(candles, cfg) {
       const priceDiff = (l1.price - l2.price) / l1.price;
       const rsiDiff   = l2.rsi - l1.rsi;  // l2 viši RSI, l1 niži = divergencija
       if (priceDiff > DIV_MIN_PRICE_DIFF && rsiDiff > DIV_MIN_RSI_DIFF) sigRsiDiv = 1;
+    }
+  }
+
+  // ── MDIV: MACD histogram divergencija ─────────────────────────────────────────
+  // TraderaEdge edukacija (MACD video): isti princip kao RDIV (RSI div.), ali na MACD
+  // histogramu — hvata divergencije koje RSI ne vidi jer je drugi oscilator (trend-momentum
+  // umjesto range-momentum). Bearish: cijena HH ali MACD histogram LH → SHORT (momentum
+  // slabi na vrhu). Bullish: cijena LL ali MACD histogram HL → LONG (momentum slabi na dnu).
+  let sigMacdDiv = 0;
+  {
+    // candle index i ↔ histVals[i - macdOffset] (histVals[zadnji] = macdHist = candle n-1)
+    const macdOffset = n - histVals.length;
+    const macdAt = (i) => (i >= macdOffset && i - macdOffset < histVals.length) ? histVals[i - macdOffset] : null;
+    const MDIV_LOOKBACK = 40, MDIV_WING = 3, MDIV_MIN_PRICE_DIFF = 0.005;
+    const mStart = Math.max(MDIV_WING, n - MDIV_LOOKBACK);
+    const mEnd   = n - MDIV_WING - 1;
+    const mSwingHighs = [], mSwingLows = [];
+    for (let i = mStart; i <= mEnd; i++) {
+      const hv = macdAt(i);
+      if (hv === null) continue;
+      const hi = candles[i].high, lo = candles[i].low;
+      let isHigh = true, isLow = true;
+      for (let j = i - MDIV_WING; j <= i + MDIV_WING; j++) {
+        if (j === i) continue;
+        if (candles[j].high >= hi) isHigh = false;
+        if (candles[j].low  <= lo) isLow  = false;
+      }
+      if (isHigh) mSwingHighs.push({ i, price: hi, hist: hv });
+      if (isLow)  mSwingLows.push({  i, price: lo, hist: hv });
+    }
+    // Prag razlike u histogramu skalira se s tipičnom magnitudom TOG simbola (MACD
+    // apsolutne jedinice variraju za redove veličine — BTC ~$80000 vs PEPE ~$0.00001 —
+    // pa fiksni broj kao kod RSI-ja ne bi imao smisla).
+    const histWindow = mSwingHighs.concat(mSwingLows).map(s => Math.abs(s.hist));
+    const avgAbsHist = histWindow.length ? histWindow.reduce((a,b)=>a+b,0) / histWindow.length : 0;
+    const MDIV_MIN_HIST_DIFF = avgAbsHist * 0.15;
+
+    if (mSwingHighs.length >= 2) {
+      const h1 = mSwingHighs[mSwingHighs.length - 2];
+      const h2 = mSwingHighs[mSwingHighs.length - 1];
+      const priceDiff = (h2.price - h1.price) / h1.price;
+      const histDiff  = h1.hist - h2.hist;  // h1 veci histogram, h2 manji = divergencija
+      if (priceDiff > MDIV_MIN_PRICE_DIFF && histDiff > MDIV_MIN_HIST_DIFF) sigMacdDiv = -1;
+    }
+    if (mSwingLows.length >= 2 && sigMacdDiv === 0) {
+      const l1 = mSwingLows[mSwingLows.length - 2];
+      const l2 = mSwingLows[mSwingLows.length - 1];
+      const priceDiff = (l1.price - l2.price) / l1.price;
+      const histDiff  = l2.hist - l1.hist;  // l2 veci histogram, l1 manji = divergencija
+      if (priceDiff > MDIV_MIN_PRICE_DIFF && histDiff > MDIV_MIN_HIST_DIFF) sigMacdDiv = 1;
     }
   }
 
@@ -2651,6 +2731,7 @@ function analyzeUltra(candles, cfg) {
     sigOB,                                             //  9. OB    Order Block (SMC institucijska zona)
     sigDailyEMA,                                       // 10. DEMA  Daily EMA10/20 retest (TraderaEdge Smart Hub)
     sigMOPEN,                                          // 11. LHUNT Liquidity Hunt: MOpen+WOpen+YOpen+MH/ML+PWH/PWL
+    sigMacdDiv,                                         // 12. MDIV  MACD histogram divergencija (bonus-only, vidi ispod)
   ];
 
   // Per-simbol combo filter — koristi samo signale iz SYMBOL_COMBOS
@@ -2676,8 +2757,12 @@ function analyzeUltra(candles, cfg) {
   // Ne mijenja duljinu comba niti minSig, isti obrazac kao bonusi iznad.
   const _wyckoffBonusBull = (_sym === "BTCUSDT" && cfg._wyckoffBullish === true) ? 1 : 0;
   const _wyckoffBonusBear = (_sym === "BTCUSDT" && cfg._wyckoffBearish === true) ? 1 : 0;
-  const bullScore = bullCnt + _premiumBonusBull + _pwhMstrBonusBull + _wyckoffBonusBull;
-  const bearScore = bearCnt + _premiumBonusBear + _pwhMstrBonusBear + _wyckoffBonusBear;
+  // Bonus 4: MDIV (MACD histogram divergencija), svi simboli. Bonus-only isto kao Wyckoff —
+  // ne mijenja duljinu comba niti minSig, samo dodaje +1 kad je detektirana.
+  const _macdDivBonusBull = (sigMacdDiv === 1)  ? 1 : 0;
+  const _macdDivBonusBear = (sigMacdDiv === -1) ? 1 : 0;
+  const bullScore = bullCnt + _premiumBonusBull + _pwhMstrBonusBull + _wyckoffBonusBull + _macdDivBonusBull;
+  const bearScore = bearCnt + _premiumBonusBear + _pwhMstrBonusBear + _wyckoffBonusBear + _macdDivBonusBear;
   // Vikend: +2 signala — subotom/nedjeljom tanka likvidnost, samo najjači setupi.
   // (post-mortem 05.07.: svi likvidirani ulazi bili subotnji minimalni 5/8 → +1 uveden,
   // ali 16.08. opet cijeli vikend batch (SOL/RENDER/BTC) u SL-u na minimalnom +1 pragu.
@@ -2812,13 +2897,15 @@ function analyzeUltra(candles, cfg) {
   const _bonusBullTag = [
     _premiumBonusBull   ? "CVD+E145" : "",
     _pwhMstrBonusBull   ? "PWH+MSTR" : "",
+    _macdDivBonusBull   ? "MDIV" : "",
   ].filter(Boolean).join(",");
   const _bonusBearTag = [
     _premiumBonusBear   ? "CVD+E145" : "",
     _pwhMstrBonusBear   ? "PWH+MSTR" : "",
+    _macdDivBonusBear   ? "MDIV" : "",
   ].filter(Boolean).join(",");
-  const bonusTag = _bonusBullTag ? ` [+${_premiumBonusBull+_pwhMstrBonusBull}:${_bonusBullTag}]`
-                : _bonusBearTag ? ` [+${_premiumBonusBear+_pwhMstrBonusBear}:${_bonusBearTag}]` : "";
+  const bonusTag = _bonusBullTag ? ` [+${_premiumBonusBull+_pwhMstrBonusBull+_macdDivBonusBull}:${_bonusBullTag}]`
+                : _bonusBearTag ? ` [+${_premiumBonusBear+_pwhMstrBonusBear+_macdDivBonusBear}:${_bonusBearTag}]` : "";
 
   // Dodaj extra info za nove signale u reason
   const _newSigsBull = [sigPWHL===1?"PWL✓":"", sigMktStr===1?"MSTR✓":"", sigFVG===1?"FVG✓":""].filter(Boolean).join(" ");
@@ -2828,7 +2915,7 @@ function analyzeUltra(candles, cfg) {
     // Zone confluence (TG 21.07. Korak #2: "ne juri market cenu — čekaj da market dođe tebi")
     // Trend LONG samo uz potporu: 15m pivot sup ili HTF zona unutar 1.5% ispod/na cijeni
     {
-      const _confL = [nearSup, cfg._pwl, _monthlyLow, _weeklyOpen, _monthlyOpen, _fridayClose, _yearlyOpen, cfg._keyLevel, ...(cfg._supportZones ?? [])]
+      const _confL = [nearSup, cfg._pwl, _monthlyLow, _weeklyOpen, _monthlyOpen, _fridayClose, _yearlyOpen, cfg._keyLevel, ...(cfg._supportZones ?? []), ..._hvnLevels]
         .filter(v => v != null && v > 0 && v <= price * 1.002);
       if (!_confL.some(l => (price - l) / price <= 0.015)) {
         return { price, signal: "NEUTRAL", bullScore, bearScore, nearSup, nearRes, vwap: vwapVal,
@@ -2843,7 +2930,7 @@ function analyzeUltra(candles, cfg) {
   if (!LONG_ONLY && bearScore >= MIN_CONFIRM_SHORT && rsiShortOk) {
     // Zone confluence — trend SHORT samo uz otpor (15m pivot res ili HTF zona ≤1.5% iznad)
     {
-      const _confS = [nearRes, cfg._pwh, _monthlyHigh, _weeklyOpen, _monthlyOpen, _fridayClose, _yearlyOpen, cfg._keyLevel, ...(cfg._resistanceZones ?? [])]
+      const _confS = [nearRes, cfg._pwh, _monthlyHigh, _weeklyOpen, _monthlyOpen, _fridayClose, _yearlyOpen, cfg._keyLevel, ...(cfg._resistanceZones ?? []), ..._hvnLevels]
         .filter(v => v != null && v > 0 && v >= price * 0.998);
       if (!_confS.some(l => (l - price) / price <= 0.015)) {
         return { price, signal: "NEUTRAL", bullScore, bearScore, nearSup, nearRes, vwap: vwapVal,

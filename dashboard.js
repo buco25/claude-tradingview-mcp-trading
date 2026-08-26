@@ -193,6 +193,35 @@ function _macdHistTail(closes, tail=3, fast=12, slow=26, sig=9) {
   return histArr.slice(-tail);
 }
 
+// Full MACD histogram series (candle index i ↔ histArr[i - (n - histArr.length)]),
+// isti offset kao _macdHistTail ali vraća cijeli niz umjesto samo zadnjih `tail` — treba
+// za MDIV divergenciju (identično bot.js).
+function _macdHistSeries(closes, fast=12, slow=26, sig=9) {
+  const n = closes.length;
+  if (n < slow+sig) return [];
+  const fk = 2/(fast+1);
+  let fv = closes.slice(0, fast).reduce((a,b)=>a+b,0)/fast;
+  const fArr = new Array(n).fill(null); fArr[fast-1] = fv;
+  for (let i = fast; i < n; i++) { fv = closes[i]*fk + fv*(1-fk); fArr[i] = fv; }
+  const sk = 2/(slow+1);
+  let sv = closes.slice(0, slow).reduce((a,b)=>a+b,0)/slow;
+  const sArr = new Array(n).fill(null); sArr[slow-1] = sv;
+  for (let i = slow; i < n; i++) { sv = closes[i]*sk + sv*(1-sk); sArr[i] = sv; }
+  const diffs = [];
+  for (let i = slow-1; i < n; i++) {
+    if (fArr[i] !== null && sArr[i] !== null) diffs.push(fArr[i] - sArr[i]);
+  }
+  if (diffs.length < sig) return [];
+  const sigK = 2/(sig+1);
+  let sgv = diffs.slice(0, sig).reduce((a,b)=>a+b,0)/sig;
+  const histArr = [];
+  for (let j = sig; j < diffs.length; j++) {
+    sgv = diffs[j]*sigK + sgv*(1-sigK);
+    histArr.push(diffs[j] - sgv);
+  }
+  return histArr;
+}
+
 // ─── Scanner — run all 3 strategies on one symbol ──────────────────────────────
 
 // Compute full EMA series — koristi za detekciju crossa u zadnjih N barova
@@ -371,6 +400,41 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
     if (dLows.length >= 2 && sigRsiDivD === 0) {
       const l1 = dLows[dLows.length-2], l2 = dLows[dLows.length-1];
       if ((l1.price - l2.price) / l1.price > DIV_MP && (l2.rsi - l1.rsi) > DIV_MRSI) sigRsiDivD = 1;
+    }
+  }
+
+  // ── MACD histogram divergencija (identično bot.js sigMacdDiv, dodano 26.08.) ──
+  let sigMacdDivD = 0;
+  {
+    const _histArr = _macdHistSeries(closes);
+    const _macdOffset = n - _histArr.length;
+    const _macdAt = (i) => (i >= _macdOffset && i - _macdOffset < _histArr.length) ? _histArr[i - _macdOffset] : null;
+    const MDIV_LB = 40, MDIV_WING = 3, MDIV_MP = 0.005;
+    const mStart = Math.max(MDIV_WING, n - MDIV_LB), mEnd = n - MDIV_WING - 1;
+    const mHighs = [], mLows = [];
+    for (let i = mStart; i <= mEnd; i++) {
+      const hv = _macdAt(i);
+      if (hv === null) continue;
+      const hi = candles[i].high, lo = candles[i].low;
+      let isH = true, isL = true;
+      for (let j = i - MDIV_WING; j <= i + MDIV_WING; j++) {
+        if (j === i) continue;
+        if (candles[j].high >= hi) isH = false;
+        if (candles[j].low  <= lo) isL = false;
+      }
+      if (isH) mHighs.push({ i, price: hi, hist: hv });
+      if (isL) mLows.push({  i, price: lo, hist: hv });
+    }
+    const _histWin = mHighs.concat(mLows).map(s => Math.abs(s.hist));
+    const _avgAbsHist = _histWin.length ? _histWin.reduce((a,b)=>a+b,0) / _histWin.length : 0;
+    const MDIV_MH = _avgAbsHist * 0.15;
+    if (mHighs.length >= 2) {
+      const h1 = mHighs[mHighs.length-2], h2 = mHighs[mHighs.length-1];
+      if ((h2.price - h1.price) / h1.price > MDIV_MP && (h1.hist - h2.hist) > MDIV_MH) sigMacdDivD = -1;
+    }
+    if (mLows.length >= 2 && sigMacdDivD === 0) {
+      const l1 = mLows[mLows.length-2], l2 = mLows[mLows.length-1];
+      if ((l1.price - l2.price) / l1.price > MDIV_MP && (l2.hist - l1.hist) > MDIV_MH) sigMacdDivD = 1;
     }
   }
 
@@ -575,7 +639,10 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
         }
       }
 
-      // 11 signala: E50, CVD, MACD, E145, PWHL, RDIV, MSTR, FVG, OB, DEMA, LHUNT
+      // 12 signala: E50, CVD, MACD, E145, PWHL, RDIV, MSTR, FVG, OB, DEMA, LHUNT, MDIV
+      // Napomena: MDIV (12.) je u bot.js bonus-only (ne broji se u ultraBull/ultraBear
+      // combo score, isto kao Wyckoff/CVD+E145/PWH+MSTR bonusi koje ovaj preview scanner
+      // ne implementira) — ovdje prikazan samo kao info box, ne ulazi u _comboIdxD zbroj.
       ultraSigs16 = [
         ema50 ? (price > ema50 ? 1 : -1) : 0,             //  1. E50  TREND
         cvdSum > 0 ? 1 : -1,                              //  2. CVD  TREND
@@ -588,6 +655,7 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
         sigOBD,                                            //  9. OB Order Block
         sigDEMAD,                                          // 10. DEMA Smart Hub
         sigLHUNTD,                                         // 11. LHUNT Liquidity Hunt
+        sigMacdDivD,                                       // 12. MDIV MACD divergencija (bonus-only, info)
       ];
 
       const _activeSigsD = _comboIdxD.map(i => ultraSigs16[i]);
@@ -616,6 +684,7 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
           sigOBD,
           sigDEMAD,
           sigLHUNTD,
+          sigMacdDivD,
         ];
         const _momActiveSigsD = _comboIdxD.map(i => momSigsD[i]);
         const momBullD = _momActiveSigsD.filter(s => s === 1).length;
@@ -2463,7 +2532,7 @@ async function resetOne(pid) {
 // Maknuti 2025-05: E55⟳ (duplikat E50), VOL⟳ (asimetričan — nikad +1 za LONG)
 // Maknuti Option C: RSI (redundantan s RSI gate-om), CHP (redundantan s ADX gate-om)
 // ULTRA v4 — TraderaEdge: E50, MACD, E145, PWHL, RDIV, MSTR, DEMA, LHUNT (CVD/FVG/OB više nisu u combu)
-const SIG_NAMES = ['E50','CVD','MACD','E145','PWHL','RDIV','MSTR','FVG','OB','DEMA','LHUNT'];
+const SIG_NAMES = ['E50','CVD','MACD','E145','PWHL','RDIV','MSTR','FVG','OB','DEMA','LHUNT','MDIV'];
 
 const SIG_COND_BULL = [
   'Cijena > EMA50 — bullish trend potvrđen',                             //  1. E50 TREND

@@ -10,7 +10,7 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   getAllFundingRates, getDailyPnlExport, getSymbolStats, getOIForSymbols,
   getFearGreed, getBtcDominance, getDxyData, getConsecutiveLossCount,
   getSessionInfo, calcAtrTrend, getSp500Data, calcSymbolCorrelation,
-  getDeribitPutCall, getLiquidationRisk, getEconEvents, isEconBlocked, calcVWAP,
+  getDeribitPutCall, getLiquidationRisk, getEconEvents, isEconBlocked,
   getLongShortRatio, getStablecoinInflow, getBtcPerpBasis, getAltcoinSeason,
   generateDailyReport, autoFixCsvFromBitget, SYMBOL_COMBOS, getBtcDailyPivots, getAccountTransfers, calcLiqZones,
   getBtcWeeklyVsKey, getRelStrengthVsBtc, isStockSym, getBtcChillMode, getBtcDailyVsInvalidation, getBtcWeeklyEmaPhase,
@@ -452,7 +452,7 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
 
   // ── ULTRA v3 — 8 signala + 3 gateva (identično bot.js analyzeUltra) ──
   // Signali: E50↑, CVD↑, MACD, E145, PWHL, RDIV, MSTR, FVG
-  // Gatevi (obvezni, ne broje se u score): ADX≥22, VOL_EXH, VWAP
+  // Gatevi (obvezni, ne broje se u score): ADX≥22, VOL_EXH
 
   // PWHL signal (Previous Weekly High/Low)
   let sigPWHLD = 0;
@@ -729,9 +729,6 @@ async function runScan(rules) {
           }
         } catch { /* ignoriraj */ }
 
-        const vwap = calcVWAP(candles);
-        const vwapDistPct = vwap ? parseFloat(((candles[candles.length-1].close - vwap) / vwap * 100).toFixed(2)) : null;
-
         // ── MM/Algo filter detekcija (preview — identična logika bot.js) ──────
         const mmFilters = [];
         const nC = candles.length;
@@ -775,7 +772,7 @@ async function runScan(rules) {
           }
         }
 
-        results.push({ symbol: sym, ...s, pending, slPct, tpPct, trend1h, vwap: vwap ? parseFloat(vwap.toFixed(6)) : null, vwapDistPct, volRatio: parseFloat(volRatio.toFixed(2)), volLow, volHigh, volExhThreshold, mmFilters });
+        results.push({ symbol: sym, ...s, pending, slPct, tpPct, trend1h, volRatio: parseFloat(volRatio.toFixed(2)), volLow, volHigh, volExhThreshold, mmFilters });
       } catch (e) {
         results.push({ symbol: sym, error: e.message });
       }
@@ -1809,7 +1806,7 @@ window.toggleScanFilter = function(btn) {
             <th>Symbol</th>
             <th>Cijena</th>
             <th style="color:#d97706;text-align:center">1H</th>
-            <th style="color:#d97706;text-align:center">4OB <span style="font-weight:400;font-size:10px;color:#94a3b8">ADX·6Sc·RSI·VWAP</span></th>
+            <th style="color:#d97706;text-align:center">3OB <span style="font-weight:400;font-size:10px;color:#94a3b8">ADX·6Sc·RSI</span></th>
             <th style="color:#db2777;text-align:center">6 Signala</th>
             <th style="color:#db2777;text-align:center;width:60px">↑↓</th>
             <th style="min-width:160px">Status</th>
@@ -1835,14 +1832,14 @@ window.toggleScanFilter = function(btn) {
           <div style="font-weight:800;margin-bottom:6px">📈 TREND (pullback) <span style="font-size:10px;color:var(--text-muted)">· ADX ≥ 22</span></div>
           <div style="font-size:12px;color:var(--text-muted);line-height:1.6">
             Ulaz u smjeru trenda na povlačenju do zone. Treba <b>min 5/8 signala</b> (E50, MACD, E145, PWHL, RDIV, MSTR, DEMA, LHUNT)
-            + VWAP potvrda + <b>confluence</b>: cijena unutar 1.5% potpore/otpora ("ne jurimo cijenu").
+            + <b>confluence</b>: cijena unutar 1.5% potpore/otpora ("ne jurimo cijenu").
             SL: HTF zona → 15m pivot → ATR. TP 1:2 (JAKO režim 1:3). Leverage do 30x.
           </div>
         </div>
         <div style="background:var(--bg-secondary);border:1px solid var(--border);border-left:3px solid #7dd3fc;border-radius:10px;padding:14px">
           <div style="font-weight:800;margin-bottom:6px">🚀 MOMENTUM (breakout) <span style="font-size:10px;color:var(--text-muted)">· ADX ≥ 18</span></div>
           <div style="font-size:12px;color:var(--text-muted);line-height:1.6">
-            Proboj s VWAP crossoverom i jakim volumenom — jedina strategija koja smije "juriti".
+            Proboj uz jak volumen — jedina strategija koja smije "juriti".
             Viši prag signala jer je rizičnija od pullbacka. Daily EMA10 mora biti na strani trejda (Smart Hub konfirmacija).
           </div>
         </div>
@@ -1878,7 +1875,7 @@ window.toggleScanFilter = function(btn) {
       <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — Future combo · gate-ovi (ADX/VOL) + 8 signala · min 5/8 za ulaz (TAO/AAVE 4/8)</div>
       <div style="margin-bottom:10px;font-size:11px;color:#f59e0b;background:#2d2000;border:1px solid #d97706;border-radius:6px;padding:8px 12px">
         ⚙️ <b>GATEVI (obvezni — blokiraju neovisno o score-u):</b>
-        &nbsp; ADX ≥ 22 (trend jačina) &nbsp;·&nbsp; VOL_EXH (volumen ispod threshold-a) &nbsp;·&nbsp; VWAP cross/rejection (cijena na ispravnoj strani)
+        &nbsp; ADX ≥ 22 (trend jačina) &nbsp;·&nbsp; VOL_EXH (volumen ispod threshold-a)
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:8px;font-size:12px">
         ${[
@@ -2123,17 +2120,6 @@ window.toggleScanFilter = function(btn) {
         <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="session-sub">01-06 UTC = dead zone blokiran</div>
       </div>
 
-
-      <!-- VWAP Status -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">📊 VWAP Status</div>
-        <div style="font-size:16px;font-weight:800" id="vwap-val">…</div>
-        <div style="background:#374151;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
-          <div id="vwap-bar" style="height:100%;border-radius:4px;background:#00c48c;transition:width .5s,background .5s;width:0%"></div>
-        </div>
-        <div style="font-size:11px;color:#9ca3af" id="vwap-sub">Simboli unutar ±2.5% VWAP</div>
-        <div id="vwap-list" style="margin-top:6px;font-size:10px;color:#ef4444"></div>
-      </div>
 
       <!-- Countdown do sljedećeg eventa -->
       <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
@@ -2557,17 +2543,6 @@ function mandatoryBoxes(s) {
     ? (rsiShortOk ? ' > 30 ✓ (nije oversold)' : ' ≤ 30 ✗ — oversold')
     : (rsiLongOk  ? ' < 72 ✓ (nije overbought)' : ' ≥ 72 ✗ — overbought'));
 
-  // 4. VWAP gate — LONG iznad VWAP, SHORT ispod VWAP
-  const vwapDist = s.vwapDistPct ?? null;
-  const vwapLongOk  = vwapDist === null || vwapDist >= 0;   // cijena iznad VWAP
-  const vwapShortOk = vwapDist === null || vwapDist <= 0;   // cijena ispod VWAP
-  const vwapOk = isShortSig ? vwapShortOk : vwapLongOk;
-  const vwapCol = vwapDist === null ? '#94a3b8' : vwapOk ? '#059669' : '#dc2626';
-  const vwapBg  = vwapDist === null ? '#1c2128' : vwapOk ? '#0d3d26' : '#3d0d0d';
-  const vwapDistStr = vwapDist !== null ? (vwapDist >= 0 ? '+' : '') + vwapDist.toFixed(1) + '%' : '?';
-  const vwapTip = 'VWAP gate: cijena ' + vwapDistStr + ' od VWAP' +
-    (vwapOk ? ' ✓ — ispravna strana' : ' ✗ — pogrešna strana, BLOKIRAN');
-
   function badge(label, col, bg, tip) {
     return '<span title="' + tip + '" style="display:inline-flex;flex-direction:column;align-items:center;background:' + bg +
       ';color:' + col + ';border:1px solid ' + col + '44;padding:2px 5px;font-size:10px;font-weight:700;border-radius:3px;margin:1px;min-width:36px;text-align:center">' +
@@ -2576,8 +2551,7 @@ function mandatoryBoxes(s) {
 
   return badge('ADX', adxCol, adxBg, adxTip) +
          badge('6Sc', scaleCol, scaleBg, scaleTip) +
-         badge('RSI', rsiCol, rsiBg, rsiTip) +
-         badge('VWAP', vwapCol, vwapBg, vwapTip);
+         badge('RSI', rsiCol, rsiBg, rsiTip);
 }
 
 function sigBoxes(sigs, symbol) {
@@ -2799,10 +2773,6 @@ async function doScan() {
       const slTpTier = s.slPct && s.tpPct ? '(tier ' + s.slPct + '/' + s.tpPct + '%)' : '';
       const slTp = 'ATR-based <span style="font-size:9px;color:#6b7280">' + slTpTier + '</span>';
 
-      // VWAP distanca
-      const vwapDist = s.vwapDistPct;
-      const vwapAbove25 = vwapDist !== null && Math.abs(vwapDist) > 2.5;
-
       const t1h = s.trend1h || 'UNKNOWN';
       const t1hCol  = t1h === 'BULL' ? '#10b981' : t1h === 'BEAR' ? '#ef4444' : '#6b7280';
       const t1hIcon = t1h === 'BULL' ? '▲' : t1h === 'BEAR' ? '▼' : '·';
@@ -2876,31 +2846,6 @@ async function doScan() {
           return '<div style="background:#374151;border-radius:6px;padding:6px 10px;font-size:11px">' +
             '<span style="color:#f9fafb;font-weight:700;margin-right:6px">' + sym + '</span>' + badges + '</div>';
         }).join('');
-      }
-    }
-
-    // ── Ažuriraj VWAP karticu ────────────────────────────────────────────────
-    const withVwap = results.filter(s => s.vwapDistPct !== null && s.vwapDistPct !== undefined);
-    if (withVwap.length > 0) {
-      const inRange   = withVwap.filter(s => Math.abs(s.vwapDistPct) <= 2.5).length;
-      const overextended = withVwap.filter(s => Math.abs(s.vwapDistPct) > 2.5);
-      const pct = Math.round(inRange / withVwap.length * 100);
-      const vwapCol = pct >= 70 ? '#10b981' : pct >= 50 ? '#d97706' : '#ef4444';
-      const vEl = document.getElementById('vwap-val');
-      const vBar = document.getElementById('vwap-bar');
-      const vSub = document.getElementById('vwap-sub');
-      const vList = document.getElementById('vwap-list');
-      if (vEl)  { vEl.textContent = inRange + '/' + withVwap.length + ' unutar ranga'; vEl.style.color = vwapCol; }
-      if (vBar) { vBar.style.width = pct + '%'; vBar.style.background = vwapCol; }
-      if (vSub) vSub.textContent = 'Simboli unutar ±2.5% od VWAP-a';
-      if (vList && overextended.length > 0) {
-        vList.innerHTML = overextended.map(s => {
-          const d = s.vwapDistPct > 0 ? '+' + s.vwapDistPct : s.vwapDistPct;
-          const col = s.vwapDistPct > 0 ? '#f59e0b' : '#60a5fa';
-          return '<span style="color:' + col + ';margin-right:8px">' + s.symbol.replace('USDT','') + ' ' + d + '%</span>';
-        }).join('');
-      } else if (vList) {
-        vList.innerHTML = '<span style="color:#10b981">Svi unutar ranga ✓</span>';
       }
     }
 

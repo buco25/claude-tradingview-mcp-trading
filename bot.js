@@ -2804,55 +2804,10 @@ function analyzeUltra(candles, cfg) {
     console.log(`  ⚡ [VOL_EXH bypass] ${_sym} — max score, ignoriramo VOL_EXH (${volRatioNow.toFixed(2)}x)`);
   }
 
-  // 5. VWAP crossover + potvrda
-  // Ulaz SAMO kad je:
-  //   - Svjeća N-2: bila na suprotnoj strani VWAP
-  //   - Svjeća N-1: probila VWAP (zatvorila na novoj strani)
-  //   - Svjeća N (trenutna): potvrdila proboj (zatvara na istoj strani)
-  // Ako VWAP nije dostupan → blokira
+  // VWAP — više nije obavezan gate (26.08.: TraderaEdge ne koristi VWAP, backtest pokazao
+  // da gate ne poboljšava WR/PF, samo reže ~17% inače validnih combo signala). Vrijednost
+  // se i dalje računa i vraća kao info polje (scan_log.csv VwapDist% kolona, dashboard).
   const vwapVal = calcVWAP(candles);
-  if (!vwapVal || vwapVal <= 0) {
-    console.log(`  ⚠️  [VWAP] ${_sym} — VWAP nije dostupan, blokiran`);
-  }
-  // ── VWAP entry detekcija: Cross ILI Rejection ────────────────────────────────
-  // 1. Cross + potvrda: probijena VWAP + iduća svjeća potvrđuje
-  const _vwapCrossUp   = vwapVal && n >= 3
-    && closes[n-3] < vwapVal        // N-2: bio ispod
-    && closes[n-2] > vwapVal        // N-1: probio iznad
-    && closes[n-1] > vwapVal;       // N:   potvrdio → LONG
-  const _vwapCrossDown = vwapVal && n >= 3
-    && closes[n-3] > vwapVal        // N-2: bio iznad
-    && closes[n-2] < vwapVal        // N-1: probio ispod
-    && closes[n-1] < vwapVal;       // N:   potvrdio → SHORT
-
-  // 2. Rejection: cijena ispod VWAP, zelena svjeća ne probije, slijedeća crvena → SHORT
-  //              cijena iznad VWAP, crvena svjeća ne padne ispod, slijedeća zelena → LONG
-  const _prevOpen  = candles[n-2]?.open  ?? closes[n-2];
-  const _prevClose = candles[n-2]?.close ?? closes[n-2];
-  const _currOpen  = candles[n-1]?.open  ?? closes[n-1];
-  const _currClose = candles[n-1]?.close ?? closes[n-1];
-  const _prevGreen = _prevClose > _prevOpen;  // zelena svjeća
-  const _prevRed   = _prevClose < _prevOpen;  // crvena svjeća
-  const _currGreen = _currClose > _currOpen;
-  const _currRed   = _currClose < _currOpen;
-
-  const _vwapRejectShort = vwapVal && n >= 2
-    && _currClose < vwapVal    // trenutno ispod VWAP
-    && _prevGreen              // prethodna zelena (pokušala gore)
-    && _prevClose < vwapVal    // ali nije prešla VWAP
-    && _currRed;               // ova crvena = odbijanje → SHORT
-
-  const _vwapRejectLong = vwapVal && n >= 2
-    && _currClose > vwapVal    // trenutno iznad VWAP
-    && _prevRed                // prethodna crvena (pokušala dolje)
-    && _prevClose > vwapVal    // ali nije prešla VWAP
-    && _currGreen;             // ova zelena = odbijanje → LONG
-
-  // 3. Proximity fallback: cijena unutar ±0.5% od VWAP = na VWAP razini, ok za ulaz
-  const _vwapProximity = vwapVal && Math.abs(price - vwapVal) / vwapVal <= 0.005;
-
-  const _vwapLongOk  = _vwapCrossUp   || _vwapRejectLong  || _vwapProximity;
-  const _vwapShortOk = _vwapCrossDown || _vwapRejectShort || _vwapProximity;
 
   const _bonusBullTag = [
     _premiumBonusBull   ? "CVD+E145" : "",
@@ -2870,15 +2825,6 @@ function analyzeUltra(candles, cfg) {
   const _newSigsBear = [sigPWHL===-1?"PWH✓":"", sigMktStr===-1?"MSTR✓":"", sigFVG===-1?"FVG✓":""].filter(Boolean).join(" ");
 
   if (bullScore >= MIN_CONFIRM_LONG && rsiLongOk) {
-    if (!vwapVal || vwapVal <= 0) {
-      return { price, signal: "NEUTRAL", bullScore, bearScore,
-        reason: `PBK LONG blokiran: VWAP nedostupan` };
-    }
-    if (!_vwapLongOk) {
-      const vd = ((price - vwapVal) / vwapVal * 100).toFixed(1);
-      return { price, signal: "NEUTRAL", bullScore, bearScore, vwap: vwapVal,
-        reason: `PBK LONG blokiran: nema VWAP crossover potvrde (cijena ${vd}% od VWAP)` };
-    }
     // Zone confluence (TG 21.07. Korak #2: "ne juri market cenu — čekaj da market dođe tebi")
     // Trend LONG samo uz potporu: 15m pivot sup ili HTF zona unutar 1.5% ispod/na cijeni
     {
@@ -2892,18 +2838,9 @@ function analyzeUltra(candles, cfg) {
     const sigMask = sigs.reduce((mask, v, i) => v === 1 ? mask | (1 << i) : mask, 0);
     return { price, signal: "LONG", bullScore, bearScore, sigMask,
       nearSup, nearRes, vwap: vwapVal,
-      reason: `ULTRA LONG ↑${bullCnt}/8 ADX:${adx.toFixed(0)}✓ RSI:${rsi.toFixed(0)}✓ VWAP✓${bonusTag}${_newSigsBull?" "+_newSigsBull:""}` };
+      reason: `ULTRA LONG ↑${bullCnt}/8 ADX:${adx.toFixed(0)}✓ RSI:${rsi.toFixed(0)}✓${bonusTag}${_newSigsBull?" "+_newSigsBull:""}` };
   }
   if (!LONG_ONLY && bearScore >= MIN_CONFIRM_SHORT && rsiShortOk) {
-    if (!vwapVal || vwapVal <= 0) {
-      return { price, signal: "NEUTRAL", bullScore, bearScore,
-        reason: `PBK SHORT blokiran: VWAP nedostupan` };
-    }
-    if (!_vwapShortOk) {
-      const vd = ((price - vwapVal) / vwapVal * 100).toFixed(1);
-      return { price, signal: "NEUTRAL", bullScore, bearScore, vwap: vwapVal,
-        reason: `PBK SHORT blokiran: nema VWAP crossover potvrde (cijena ${vd}% od VWAP)` };
-    }
     // Zone confluence — trend SHORT samo uz otpor (15m pivot res ili HTF zona ≤1.5% iznad)
     {
       const _confS = [nearRes, cfg._pwh, _monthlyHigh, _weeklyOpen, _monthlyOpen, _fridayClose, _yearlyOpen, cfg._keyLevel, ...(cfg._resistanceZones ?? [])]
@@ -2915,7 +2852,7 @@ function analyzeUltra(candles, cfg) {
     }
     return { price, signal: "SHORT", bullScore, bearScore,
       nearSup, nearRes, vwap: vwapVal,
-      reason: `ULTRA SHORT ↓${bearCnt}/8 ADX:${adx.toFixed(0)}✓ RSI:${rsi.toFixed(0)}✓ VWAP✓${bonusTag}${_newSigsBear?" "+_newSigsBear:""}` };
+      reason: `ULTRA SHORT ↓${bearCnt}/8 ADX:${adx.toFixed(0)}✓ RSI:${rsi.toFixed(0)}✓${bonusTag}${_newSigsBear?" "+_newSigsBear:""}` };
   }
   if (LONG_ONLY && bearScore >= MIN_CONFIRM && rsiShortOk) {
     return { price, signal: "NEUTRAL", bullScore, bearScore,
@@ -2955,32 +2892,14 @@ function analyzeUltra(candles, cfg) {
   const MOM_ADX_MIN = 20;
 
   if (momBull >= MOM_MIN && rsiLongOk && adx >= MOM_ADX_MIN) {
-    if (!vwapVal || vwapVal <= 0) {
-      return { price, signal: "NEUTRAL", bullScore: momBull, bearScore: momBear,
-        reason: `MOM LONG blokiran: VWAP nedostupan` };
-    }
-    if (!_vwapLongOk) {
-      const _mvd = ((price - vwapVal) / vwapVal * 100).toFixed(1);
-      return { price, signal: "NEUTRAL", bullScore: momBull, bearScore: momBear, vwap: vwapVal,
-        reason: `MOM LONG blokiran: nema VWAP crossover potvrde (cijena ${_mvd}% od VWAP)` };
-    }
     return { price, signal: "LONG", bullScore: momBull, bearScore: momBear,
       nearSup, nearRes, isMomentum: true, vwap: vwapVal,
-      reason: `MOMENTUM LONG ↑${momBullBase}/8 | VWAP cross✓ ADX:${adx.toFixed(0)}✓ RSI:${rsi.toFixed(0)}✓${_strongTrend?" [STRONG]":""}${sigRsiDiv===1?" RDIV✓":""}${sigMktStr===1?" MSTR✓":""}${sigFVG===1?" FVG✓":""}` };
+      reason: `MOMENTUM LONG ↑${momBullBase}/8 | ADX:${adx.toFixed(0)}✓ RSI:${rsi.toFixed(0)}✓${_strongTrend?" [STRONG]":""}${sigRsiDiv===1?" RDIV✓":""}${sigMktStr===1?" MSTR✓":""}${sigFVG===1?" FVG✓":""}` };
   }
   if (!LONG_ONLY && momBear >= MOM_MIN && rsiShortOk && adx >= MOM_ADX_MIN) {
-    if (!vwapVal || vwapVal <= 0) {
-      return { price, signal: "NEUTRAL", bullScore: momBull, bearScore: momBear,
-        reason: `MOM SHORT blokiran: VWAP nedostupan` };
-    }
-    if (!_vwapShortOk) {
-      const _svd = ((price - vwapVal) / vwapVal * 100).toFixed(1);
-      return { price, signal: "NEUTRAL", bullScore: momBull, bearScore: momBear, vwap: vwapVal,
-        reason: `MOM SHORT blokiran: nema VWAP crossover potvrde (cijena ${_svd}% od VWAP)` };
-    }
     return { price, signal: "SHORT", bullScore: momBull, bearScore: momBear,
       nearSup, nearRes, isMomentum: true, vwap: vwapVal,
-      reason: `MOMENTUM SHORT ↓${momBearBase}/8 | VWAP cross✓ ADX:${adx.toFixed(0)}✓ RSI:${rsi.toFixed(0)}✓${_strongTrendS?" [STRONG]":""}${sigRsiDiv===-1?" RDIV✓":""}${sigMktStr===-1?" MSTR✓":""}${sigFVG===-1?" FVG✓":""}` };
+      reason: `MOMENTUM SHORT ↓${momBearBase}/8 | ADX:${adx.toFixed(0)}✓ RSI:${rsi.toFixed(0)}✓${_strongTrendS?" [STRONG]":""}${sigRsiDiv===-1?" RDIV✓":""}${sigMktStr===-1?" MSTR✓":""}${sigFVG===-1?" FVG✓":""}` };
   }
 
   // Dijagnoza zašto nema signala

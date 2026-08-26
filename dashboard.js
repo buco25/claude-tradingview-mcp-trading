@@ -1875,7 +1875,7 @@ window.toggleScanFilter = function(btn) {
             <th>Symbol</th>
             <th>Cijena</th>
             <th style="color:#d97706;text-align:center">1H</th>
-            <th style="color:#d97706;text-align:center">3OB <span style="font-weight:400;font-size:10px;color:#94a3b8">ADX·6Sc·RSI</span></th>
+            <th style="color:#d97706;text-align:center">1OB <span style="font-weight:400;font-size:10px;color:#94a3b8">ADX</span></th>
             <th style="color:#db2777;text-align:center">6 Signala</th>
             <th style="color:#db2777;text-align:center;width:60px">↑↓</th>
             <th style="min-width:160px">Status</th>
@@ -2575,42 +2575,16 @@ const SIG_COND_NEUT = [
 ];
 
 function mandatoryBoxes(s) {
-  const rsiNum  = parseFloat(s.rsi) || 50;
   const adxNum  = parseFloat(s.adx) || 0;
-  const sig     = s.ultraSig;
-  const sigs13  = s.ultraSigs16 || [];  // ultraSigs16 sada ima 9 elemenata
 
-  // 1. ADX ≥ 22 — jak trend (obavezan). Bot koristi 22/27/32 ovisno o WR
+  // Jedini stvarni obavezni gate u analyzeUltra (bot.js) — 6Sc i RSI su tamo eksplicitno
+  // "info only, više nije obavezan gate" (rsiLongOk/rsiShortOk hardkodirani na true, scaleUp/
+  // scaleDn se koriste samo za dijagnostički tekst) — maknuti odavde 26.08. da dashboard ne
+  // prikazuje zavaravajući ✓/✗ "BLOKIRAN" status za nešto što stvarno ne blokira ulaz.
   const adxOk  = adxNum >= 22;
   const adxCol = adxOk ? '#059669' : '#dc2626';
   const adxBg  = adxOk ? '#0d3d26' : '#3d0d0d';
   const adxTip = 'ADX ' + adxNum.toFixed(1) + (adxOk ? ' ≥ 22 ✓ — jak trend' : ' < 22 ✗ — slab trend, nema ulaza');
-
-  // 2. 6Sc: 4/6 multi-EMA parova poravnato (obavezan, WR potvrđen 43.6%)
-  //    Direktno iz scaleUp/scaleDn koji se sada vraćaju iz scanSymbol()
-  const scUp = s.scaleUp ?? 0;
-  const scDn = s.scaleDn ?? 0;
-  const scaleOkLong  = scUp >= 4;
-  const scaleOkShort = scDn >= 4;
-  // Zeleno=LONG smjer, narančasto=SHORT smjer, crveno=nema jasnog smjera
-  const scaleCol = scaleOkLong ? '#059669' : scaleOkShort ? '#d97706' : '#dc2626';
-  const scaleBg  = scaleOkLong ? '#0d3d26' : scaleOkShort ? '#3d2200' : '#3d0d0d';
-  const scaleDir = scaleOkLong ? scUp + '/6↑' : scaleOkShort ? scDn + '/6↓' : scUp + '/6';
-  const scaleTip = '6-Scale: ' + scUp + '↑ / ' + scDn + '↓ od 6 EMA parova (treba ≥4)' +
-    (scaleOkLong ? ' — LONG smjer ✓' : scaleOkShort ? ' — SHORT smjer ✓' : ' ✗ — nedovoljan smjer');
-
-  // 3. RSI asimetričan — LONG: RSI<72, SHORT: RSI>30
-  const isLongSig  = sig === "LONG"  || sig === "SETUP↑" || sig === "MOM↑";
-  const isShortSig = sig === "SHORT" || sig === "SETUP↓" || sig === "MOM↓";
-
-  const rsiLongOk  = rsiNum < 72;
-  const rsiShortOk = rsiNum > 30;
-  const rsiOk  = isShortSig ? rsiShortOk : rsiLongOk;
-  const rsiCol = rsiOk ? '#059669' : '#dc2626';
-  const rsiBg  = rsiOk ? '#0d3d26' : '#3d0d0d';
-  const rsiTip = 'RSI ' + rsiNum.toFixed(1) + (isShortSig
-    ? (rsiShortOk ? ' > 30 ✓ (nije oversold)' : ' ≤ 30 ✗ — oversold')
-    : (rsiLongOk  ? ' < 72 ✓ (nije overbought)' : ' ≥ 72 ✗ — overbought'));
 
   function badge(label, col, bg, tip) {
     return '<span title="' + tip + '" style="display:inline-flex;flex-direction:column;align-items:center;background:' + bg +
@@ -2618,9 +2592,7 @@ function mandatoryBoxes(s) {
       label + '</span>';
   }
 
-  return badge('ADX', adxCol, adxBg, adxTip) +
-         badge('6Sc', scaleCol, scaleBg, scaleTip) +
-         badge('RSI', rsiCol, rsiBg, rsiTip);
+  return badge('ADX', adxCol, adxBg, adxTip);
 }
 
 function sigBoxes(sigs, symbol) {

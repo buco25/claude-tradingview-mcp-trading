@@ -231,5 +231,5 @@
   ],
   "btc_key_level": 57392,
   "btc_invalidation_level": 57392,
-  "btc_target_note": "TraderaEdge 24.08.: Wyckoff SOS target/otpor zona 82,695, support/invalidacija 57,392 (poklapa se s botovim vlastitim Wyckoff established-range supportom $57,770). Cijena ~77-79k, blizu targeta — ne loviti nove longove, whale L/S omjer hladi (20%→7% top traderi vs retail), TraderaEdge čeka korektivan potez/short squeeze test prije nastavka. Stare razine (60000/63578) davno probijene, zamijenjene ovim."
+  "btc_target_note": "TraderaEdge 27.08. (Anarcho Economy): $83,700 je nova ključna otpor/target razina za pratiti — 'clean reclaim and hold above it could open door for next leg higher'. Top-trader (whale) pozicioniranje ~68% long, masivno odvojeno od gotovo neutralne globalne mase (~49%) — divergencija podržava bullish tezu (implementirano 27.08. kao WHALE bonus signal, getBtcWhaleDivergence u bot.js). Podržava invalidacija/support i dalje 57,392 (nepromijenjeno). Stara 82,695 target razina (24.08.) zamijenjena ovom."
 }

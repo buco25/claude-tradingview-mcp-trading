@@ -490,21 +490,33 @@ export async function getBtcDailyVsInvalidation() {
 // NE mijenja duljinu comba niti minSig, samo +1 bullScore (Spring/LPS) ili
 // +1 bearScore (UTAD/LPSY) kad je aktivan.
 let _wyckoffCache = { bullish: false, bullEvent: null, bearish: false, bearEvent: null, sosPending: false, sowPending: false, support: null, resistance: null, ts: 0 };
+// 27.08.: lookback skraćen 90→60 dana (established 60→40, recent 30→20) na korisnikov
+// zahtjev — brže reagira na strukturu. TRADEOFF (eksplicitno naglašeno korisniku): kraći
+// prozor = manje "macro" karaktera, malo veći rizik reagiranja na šum umjesto prave
+// strukture — upravo ono što je ovaj sustav 26.08. trebao izbjeći. Ublaženo staleness-
+// expirijem ispod da barem pending-caution ne ostane zaglavljen unedogled.
+const WYCKOFF_LOOKBACK_DAYS = 60;
+const WYCKOFF_RECENT_DAYS   = 20;
+// Staleness: ako je cijena otišla >15% iznad/ispod razine bez LPS/LPSY retesta, proboj se
+// već sam potvrdio kroz nastavak — daljnje čekanje retesta više ne dodaje vrijednost, samo
+// nepotrebno drži oprez (minSig boost) zauvijek aktivnim.
+const WYCKOFF_STALE_PCT = 0.15;
+
 export async function getBtcWyckoffSignal() {
   if (Date.now() - _wyckoffCache.ts < 60 * 60 * 1000 && _wyckoffCache.ts > 0) return _wyckoffCache;
   try {
-    const d = await fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1Dutc&limit=95`).then(r => r.json());
+    const d = await fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1Dutc&limit=${WYCKOFF_LOOKBACK_DAYS + 5}`).then(r => r.json());
     if (d.code !== "00000" || !d.data?.length) return _wyckoffCache;
     const all = d.data.map(c => ({
       ts: parseInt(c[0]), high: parseFloat(c[2]), low: parseFloat(c[3]),
       close: parseFloat(c[4]), volume: parseFloat(c[5]),
     }));
-    // Bitget ascending (najstarija prva) — izbaci zadnju (danas, još u tijeku), uzmi zadnjih 90 ZATVORENIH
-    const closed = all.slice(0, -1).slice(-90);
-    if (closed.length < 60) return _wyckoffCache;
+    // Bitget ascending (najstarija prva) — izbaci zadnju (danas, još u tijeku), uzmi zadnjih N ZATVORENIH
+    const closed = all.slice(0, -1).slice(-WYCKOFF_LOOKBACK_DAYS);
+    if (closed.length < Math.floor(WYCKOFF_LOOKBACK_DAYS * 2 / 3)) return _wyckoffCache;
 
-    const established = closed.slice(0, -30);
-    const recent30     = closed.slice(-30);
+    const established = closed.slice(0, -WYCKOFF_RECENT_DAYS);
+    const recent30     = closed.slice(-WYCKOFF_RECENT_DAYS);
     const support    = Math.min(...established.map(c => c.low));
     const resistance = Math.max(...established.map(c => c.high));
     const avgVol20   = established.slice(-20).reduce((s, c) => s + c.volume, 0) / 20;
@@ -563,8 +575,14 @@ export async function getBtcWyckoffSignal() {
     // tijeku, korekcija još nije testirana" (26.08., na zahtjev nakon promašenog BTC LONG-a
     // koji je otvoren baš u toj fazi dok je TraderaEdge eksplicitno čekao korekciju/21W EMA
     // retest prije novih ulaza — "ne juriti cenu"). Koristi se za dodatno pooštravanje ispod.
-    const sosPending = sosIdx >= 0 && bullEvent !== "LPS";
-    const sowPending = sowIdx >= 0 && bearEvent !== "LPSY";
+    // 27.08.: staleness-expiry — ako je cijena otišla >15% dalje od razine bez retesta, proboj
+    // se već sam potvrdio kroz nastavak (da je bio lažan, ne bi nastavio bez povratka), pa
+    // caution prestaje (spriječava da minSig boost ostane zaglavljen unedogled).
+    const currentPrice = closed[closed.length - 1].close;
+    const sosStale = resistance > 0 && (currentPrice - resistance) / resistance > WYCKOFF_STALE_PCT;
+    const sowStale = support > 0 && (support - currentPrice) / support > WYCKOFF_STALE_PCT;
+    const sosPending = sosIdx >= 0 && bullEvent !== "LPS" && !sosStale;
+    const sowPending = sowIdx >= 0 && bearEvent !== "LPSY" && !sowStale;
 
     _wyckoffCache = { bullish, bullEvent, bearish, bearEvent, sosPending, sowPending, support, resistance, ts: Date.now() };
   } catch (e) {
@@ -1366,6 +1384,39 @@ export async function getLongShortRatio(symbol = "BTCUSDT") {
   } catch (e) {
     return null;
   }
+}
+
+// ─── Top Trader (Whale) vs Global L/S Ratio divergencija ────────────────────
+// TraderaEdge (Anarcho Economy, 27.08. post): "Top-trader positioning has surged to 2.256,
+// massively decoupling from the global crowd's near-neutral stance. That divergence
+// matters." — kad su najveći računi (kitovi) jako pozicionirani u jednom smjeru dok je
+// šira masa (retail) blizu neutralno, to je jači signal nego flat globalni L/S ratio.
+// Binance topLongShortPositionRatio = najveći računi po veličini pozicije (ne broj računa).
+let _whaleDivCache = { ts: 0, data: null };
+const WHALE_DIV_TTL = 15 * 60 * 1000;
+export async function getBtcWhaleDivergence() {
+  if (Date.now() - _whaleDivCache.ts < WHALE_DIV_TTL && _whaleDivCache.data) return _whaleDivCache.data;
+  try {
+    const [topD, globalD] = await Promise.all([
+      fetch(`https://fapi.binance.com/futures/data/topLongShortPositionRatio?symbol=BTCUSDT&period=1h&limit=1`).then(r => r.json()),
+      getLongShortRatio("BTCUSDT"),
+    ]);
+    if (!Array.isArray(topD) || topD.length === 0 || !globalD) return _whaleDivCache.data;
+    const topRatio    = parseFloat(topD[topD.length - 1].longShortRatio);  // npr. 2.256 = long:short 2.26:1
+    const topLongPct  = topRatio / (1 + topRatio) * 100;                    // ratio → %
+    const globalLongPct = parseFloat(globalD.longRatio);
+    const divergence  = topLongPct - globalLongPct;  // pozitivno = kitovi puno bullisniji od mase
+    // Prag: kitovi >60% long/short I odmak >15pp od globalne mase = "masivna decoupling"
+    let bias = "NEUTRAL";
+    if (divergence > 15  && topLongPct > 60) bias = "BULLISH";
+    if (divergence < -15 && topLongPct < 40) bias = "BEARISH";
+    const data = {
+      topRatio: +topRatio.toFixed(3), topLongPct: +topLongPct.toFixed(1),
+      globalLongPct: +globalLongPct.toFixed(1), divergence: +divergence.toFixed(1), bias,
+    };
+    _whaleDivCache = { ts: Date.now(), data };
+    return data;
+  } catch { return _whaleDivCache.data; }
 }
 
 // ─── BTC Perp Basis (Futures premium vs Spot) ────────────────────────────────
@@ -2761,8 +2812,13 @@ function analyzeUltra(candles, cfg) {
   // ne mijenja duljinu comba niti minSig, samo dodaje +1 kad je detektirana.
   const _macdDivBonusBull = (sigMacdDiv === 1)  ? 1 : 0;
   const _macdDivBonusBear = (sigMacdDiv === -1) ? 1 : 0;
-  const bullScore = bullCnt + _premiumBonusBull + _pwhMstrBonusBull + _wyckoffBonusBull + _macdDivBonusBull;
-  const bearScore = bearCnt + _premiumBonusBear + _pwhMstrBonusBear + _wyckoffBonusBear + _macdDivBonusBear;
+  // Bonus 5: Whale (top-trader) vs global L/S ratio divergencija na BTC (27.08.), samo BTC.
+  // Isti bonus-only obrazac — TraderaEdge: "kad se top-trader pozicioniranje masivno odvoji
+  // od gotovo neutralne šire mase, ta divergencija je značajna".
+  const _whaleBonusBull = (_sym === "BTCUSDT" && cfg._whaleBias === "BULLISH") ? 1 : 0;
+  const _whaleBonusBear = (_sym === "BTCUSDT" && cfg._whaleBias === "BEARISH") ? 1 : 0;
+  const bullScore = bullCnt + _premiumBonusBull + _pwhMstrBonusBull + _wyckoffBonusBull + _macdDivBonusBull + _whaleBonusBull;
+  const bearScore = bearCnt + _premiumBonusBear + _pwhMstrBonusBear + _wyckoffBonusBear + _macdDivBonusBear + _whaleBonusBear;
   // Vikend: +2 signala — subotom/nedjeljom tanka likvidnost, samo najjači setupi.
   // (post-mortem 05.07.: svi likvidirani ulazi bili subotnji minimalni 5/8 → +1 uveden,
   // ali 16.08. opet cijeli vikend batch (SOL/RENDER/BTC) u SL-u na minimalnom +1 pragu.
@@ -2904,14 +2960,16 @@ function analyzeUltra(candles, cfg) {
     _premiumBonusBull   ? "CVD+E145" : "",
     _pwhMstrBonusBull   ? "PWH+MSTR" : "",
     _macdDivBonusBull   ? "MDIV" : "",
+    _whaleBonusBull     ? "WHALE" : "",
   ].filter(Boolean).join(",");
   const _bonusBearTag = [
     _premiumBonusBear   ? "CVD+E145" : "",
     _pwhMstrBonusBear   ? "PWH+MSTR" : "",
     _macdDivBonusBear   ? "MDIV" : "",
+    _whaleBonusBear     ? "WHALE" : "",
   ].filter(Boolean).join(",");
-  const bonusTag = _bonusBullTag ? ` [+${_premiumBonusBull+_pwhMstrBonusBull+_macdDivBonusBull}:${_bonusBullTag}]`
-                : _bonusBearTag ? ` [+${_premiumBonusBear+_pwhMstrBonusBear+_macdDivBonusBear}:${_bonusBearTag}]` : "";
+  const bonusTag = _bonusBullTag ? ` [+${_premiumBonusBull+_pwhMstrBonusBull+_macdDivBonusBull+_whaleBonusBull}:${_bonusBullTag}]`
+                : _bonusBearTag ? ` [+${_premiumBonusBear+_pwhMstrBonusBear+_macdDivBonusBear+_whaleBonusBear}:${_bonusBearTag}]` : "";
 
   // Dodaj extra info za nove signale u reason
   const _newSigsBull = [sigPWHL===1?"PWL✓":"", sigMktStr===1?"MSTR✓":"", sigFVG===1?"FVG✓":""].filter(Boolean).join(" ");
@@ -5546,6 +5604,11 @@ export async function run() {
       if (_wyckoff.bearish) console.log(`  🐻 [WYCKOFF] BTC ${_wyckoff.bearEvent} potvrđen (TR ${_wyckoff.support?.toFixed(0)}–${_wyckoff.resistance?.toFixed(0)}) → bonus bearScore`);
       if (_wyckoff.sosPending) console.log(`  ⚠️  [WYCKOFF] BTC SOS potvrđen ali LPS još NIJE — impuls u tijeku, korekcija netestirana (TraderaEdge: "ne juriti cenu") → LONG +2 minSig svugdje`);
       if (_wyckoff.sowPending) console.log(`  ⚠️  [WYCKOFF] BTC SOW potvrđen ali LPSY još NIJE — pad u tijeku, retest netestiran → SHORT +2 minSig svugdje`);
+      // Whale (top-trader) vs global L/S ratio divergencija (27.08., samo BTC)
+      const _whaleDiv = await getBtcWhaleDivergence();
+      pDef.params._whaleBias = _whaleDiv?.bias ?? "NEUTRAL";
+      if (_whaleDiv?.bias === "BULLISH") console.log(`  🐋 [WHALE] BTC top traderi ${_whaleDiv.topLongPct}% long vs globalno ${_whaleDiv.globalLongPct}% (+${_whaleDiv.divergence}pp) → bonus bullScore`);
+      if (_whaleDiv?.bias === "BEARISH") console.log(`  🐋 [WHALE] BTC top traderi ${_whaleDiv.topLongPct}% long vs globalno ${_whaleDiv.globalLongPct}% (${_whaleDiv.divergence}pp) → bonus bearScore`);
     }
 
     // ── 1. USDT.D proxy — Stablecoin Inflow/Outflow ──────────────────────────

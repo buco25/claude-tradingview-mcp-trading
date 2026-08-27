@@ -2996,12 +2996,19 @@ function analyzeUltra(candles, cfg) {
   const dirStr = scaleOkLong ? `LONG(${scaleUp}/6)` : scaleOkShort ? `SHORT(${scaleDn}/6)` : `6Sc✗`;
   const _rsiLongPrag  = _strongTrend  ? 85 : 72;
   const _rsiShortPrag = _strongTrendS ? 15 : 30;
-  const whyNot = bullCnt >= bearCnt
-    ? `↑${bullCnt}/${_comboLen} ${dirStr}${!rsiLongOk  ? ` RSI${rsi.toFixed(0)}≥${_rsiLongPrag}✗`  : ""} | MOM:${momBull}/${_comboLen}`
-    : `↓${bearCnt}/${_comboLen} ${dirStr}${!rsiShortOk ? ` RSI${rsi.toFixed(0)}≤${_rsiShortPrag}✗` : ""} | MOM:${momBear}/${_comboLen}`;
-  return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
+  // Prikaži bullScore/bearScore (S bonusima — Wyckoff/CVD+E145/PWH+MSTR/MDIV) i STVARNI
+  // prag te strane (MIN_CONFIRM_LONG za bull, MIN_CONFIRM_SHORT za bear — uključuje Wyckoff
+  // SOS/SOW-pending/CHILL/vikend/invalidacija boost), ne generički MIN_CONFIRM — inače poruka
+  // tvrdi "treba 5/8" dok je stvarni prag zbog npr. Wyckoff busta zapravo 7 ili 8 (zbunilo
+  // korisnika 27.08. kad je dashboard preview pokazao "SIGNAL AKTIVIRAN 6/8" a bot odbio).
+  const _isBullSide = bullScore >= bearScore;
+  const _sideConfirm = _isBullSide ? MIN_CONFIRM_LONG : MIN_CONFIRM_SHORT;
+  const whyNot = _isBullSide
+    ? `↑${bullScore}/${_comboLen} ${dirStr}${!rsiLongOk  ? ` RSI${rsi.toFixed(0)}≥${_rsiLongPrag}✗`  : ""} | MOM:${momBull}/${_comboLen}`
+    : `↓${bearScore}/${_comboLen} ${dirStr}${!rsiShortOk ? ` RSI${rsi.toFixed(0)}≤${_rsiShortPrag}✗` : ""} | MOM:${momBear}/${_comboLen}`;
+  return { price, signal: "NEUTRAL", bullScore, bearScore,
     momBull, momBear,
-    reason: `ULTRA: ${whyNot} (treba ${MIN_CONFIRM}/${_comboLen} pullback ili ${MOM_MIN}/${_comboLen} momentum)` };
+    reason: `ULTRA: ${whyNot} (treba ${_sideConfirm}/${_comboLen} pullback ili ${MOM_MIN}/${_comboLen} momentum)` };
 }
 
 // ─── ULTRA Immediate Entry ─────────────────────────────────────────────────────

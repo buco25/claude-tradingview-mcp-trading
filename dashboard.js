@@ -2646,6 +2646,23 @@ function statusBox(s) {
       '⛔ bot: ' + s.botBlock.blocker + (s.botBlock.reason ? ' — ' + s.botBlock.reason : '') + '</div>';
   }
 
+  // Dashboardov lokalni preview NE uključuje dinamičke pragove koje bot.js primjenjuje uživo
+  // (CHILL mode, Wyckoff SOS/SOW-pending, vikend, trend-invalidacija) — pa može pokazati
+  // "SIGNAL AKTIVIRAN" na sirovom minSig dok stvarni bot (scan_log, zadnjih 45min) isti
+  // simbol s pravom odbija jer je pravi prag trenutno viši. Kad je to slučaj, prikaži
+  // botovu stvarnu odluku umjesto lažno-pozitivnog zelenog/plavog boxa.
+  const botRejected = s.botBlock && s.botBlock.blocker !== "ENTERED";
+  if ((sig === "LONG" || sig === "SHORT" || sig === "MOM↑" || sig === "MOM↓") && botRejected) {
+    const _isLongDir = sig === "LONG" || sig === "MOM↑";
+    const dirLbl   = _isLongDir ? "▲ LONG" : "▼ SHORT";
+    const scoreVal = _isLongDir ? (s.ultraBull||0) : (s.ultraBear||0);
+    return '<div style="background:rgba(148,163,184,0.08);border:1px solid #47556950;border-radius:8px;padding:8px 10px">' +
+      '<div style="font-size:11px;color:#94a3b8;font-weight:700;margin-bottom:4px">🔍 Preview ' + dirLbl + ' (' + scoreVal + '/8) — bot čeka</div>' +
+      '<div style="font-size:10px;color:#9ca3af">Dashboard vidi setup, ali stvarni bot (zadnji scan) ga NIJE otvorio — dinamički prag (CHILL/Wyckoff/vikend/invalidacija) trenutno je stroži od prikazanog minSig</div>' +
+      volWarning +
+      '</div>';
+  }
+
   // Aktivan signal — bot ulazi odmah na close svjećice
   if (sig === "LONG") {
     return '<div style="background:rgba(5,150,105,0.1);border:1px solid ' + (s.volLow ? '#f59e0b' : '#059669') + ';border-radius:8px;padding:8px 10px">' +

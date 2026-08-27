@@ -2772,7 +2772,6 @@ function analyzeUltra(candles, cfg) {
   const _weekendBoost = (_dowMC === 0 || _dowMC === 6) ? 2 : 0;
   // CHILL mode: mrtvo tržište → kripto traži +1 signal (dionice izuzete — ne prate BTC)
   const _chillBoost = (cfg._chillMode && !isStockSym(_sym)) ? 1 : 0;
-  const MIN_CONFIRM = (_combo?.minSig ?? minSig) + _weekendBoost + _chillBoost;
   // BTC trend-invalidacija: dnevni close ispod razine = prvi signal slabljenja → pooštri LONG
   const _invalBoost = (cfg._invalBoost && !isStockSym(_sym)) ? 1 : 0;
   // Wyckoff SOS/SOW potvrđen ali retest (LPS/LPSY) još nije (26.08., na zahtjev nakon
@@ -2781,8 +2780,15 @@ function analyzeUltra(candles, cfg) {
   // prag kao vikend). Dionice i metali izuzeti — ne prate BTC-ov impuls ciklus.
   const _wyckoffLongBoost  = (cfg._wyckoffSosPending === true && !isStockSym(_sym) && !isMetalSym(_sym)) ? 2 : 0;
   const _wyckoffShortBoost = (cfg._wyckoffSowPending === true && !isStockSym(_sym) && !isMetalSym(_sym)) ? 2 : 0;
-  const MIN_CONFIRM_LONG  = MIN_CONFIRM + _invalBoost + _wyckoffLongBoost;
-  const MIN_CONFIRM_SHORT = MIN_CONFIRM + _wyckoffShortBoost;
+  // 27.08.: bustovi se NE zbrajaju (moglo bi prijeći 8/8 i postati matematički nemoguće —
+  // npr. vikend+chill+Wyckoff istovremeno = 5, nedostižno). Svaki predstavlja isti zaključak
+  // ("market je neizvjestan") iz različitog izvora, ne nezavisni rizik koji se doslovno
+  // zbraja — uzima se MAX aktivnog razloga za oprez, ne zbroj. Wyckoff +2 ostaje netaknut
+  // kad je jedini aktivan (kalibriran na stvarni incident), samo se ne gomila s ostalima.
+  const _comboBase = _combo?.minSig ?? minSig;
+  const MIN_CONFIRM      = _comboBase + Math.max(_weekendBoost, _chillBoost);
+  const MIN_CONFIRM_LONG  = _comboBase + Math.max(_weekendBoost, _chillBoost, _invalBoost, _wyckoffLongBoost);
+  const MIN_CONFIRM_SHORT = _comboBase + Math.max(_weekendBoost, _chillBoost, _wyckoffShortBoost);
 
   // ══ OBAVEZNI GATEVI (3) ══
 

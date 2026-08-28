@@ -1362,10 +1362,15 @@ function getDailyPnl(pid) {
 export function getDailyPnlExport(pid) { return getDailyPnl(pid); }
 
 // ─── Long/Short Ratio (Binance Futures — public endpoint, no auth) ────────────
-let _lsCache = { data: null, ts: 0 };
+// 28.08.: cache popravljen na per-symbol (bio je jedan dijeljeni _lsCache bez obzira na
+// symbol — bezopasno dok se pozivalo samo za BTC, ali otkriveno kad je getWhaleDivergence
+// prošmuch proširen na sve kripto simbole: drugi simbol bi unutar TTL-a dobio TUĐI keširani
+// rezultat, npr. ETHUSDT bi vratio BTC-ov ratio ako je BTC upravo keširan).
+const _lsCache = {};  // symbol → { data, ts }
 const LS_TTL = 5 * 60 * 1000;
 export async function getLongShortRatio(symbol = "BTCUSDT") {
-  if (Date.now() - _lsCache.ts < LS_TTL && _lsCache.data) return _lsCache.data;
+  const c = _lsCache[symbol];
+  if (c && Date.now() - c.ts < LS_TTL && c.data) return c.data;
   try {
     // Binance public futures L/S ratio — global accounts, 1h period
     const url = `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=1h&limit=2`;
@@ -1379,7 +1384,7 @@ export async function getLongShortRatio(symbol = "BTCUSDT") {
     const prevLong   = prev ? parseFloat(prev.longAccount) * 100 : longRatio;
     const trend = longRatio > prevLong + 1 ? "RASTE" : longRatio < prevLong - 1 ? "PADA" : "STABILAN";
     const data = { longRatio: longRatio.toFixed(1), shortRatio: shortRatio.toFixed(1), trend };
-    _lsCache = { data, ts: Date.now() };
+    _lsCache[symbol] = { data, ts: Date.now() };
     return data;
   } catch (e) {
     return null;
@@ -1387,21 +1392,24 @@ export async function getLongShortRatio(symbol = "BTCUSDT") {
 }
 
 // ─── Top Trader (Whale) vs Global L/S Ratio divergencija ────────────────────
-// TraderaEdge (Anarcho Economy, 27.08. post): "Top-trader positioning has surged to 2.256,
+// TraderaEdge (Anarcho Economy, 27.08. posts): "Top-trader positioning has surged to 2.256,
 // massively decoupling from the global crowd's near-neutral stance. That divergence
-// matters." — kad su najveći računi (kitovi) jako pozicionirani u jednom smjeru dok je
-// šira masa (retail) blizu neutralno, to je jači signal nego flat globalni L/S ratio.
-// Binance topLongShortPositionRatio = najveći računi po veličini pozicije (ne broj računa).
-let _whaleDivCache = { ts: 0, data: null };
+// matters." + "Pratim aktivnost kitova za BTC, SOL, ETH, HYPE, XRP, DOGE, ADA, SUI, LINK"
+// — kad su najveći računi (kitovi) jako pozicionirani u jednom smjeru dok je šira masa
+// (retail) blizu neutralno, to je jači signal nego flat globalni L/S ratio. Binance
+// topLongShortPositionRatio = najveći računi po veličini pozicije (ne broj računa).
+// 28.08.: proširen s BTC-only na sve kripto simbole (na korisnikov zahtjev).
+const _whaleDivCache = {};  // symbol → { ts, data }
 const WHALE_DIV_TTL = 15 * 60 * 1000;
-export async function getBtcWhaleDivergence() {
-  if (Date.now() - _whaleDivCache.ts < WHALE_DIV_TTL && _whaleDivCache.data) return _whaleDivCache.data;
+export async function getWhaleDivergence(symbol = "BTCUSDT") {
+  const c = _whaleDivCache[symbol];
+  if (c && Date.now() - c.ts < WHALE_DIV_TTL && c.data) return c.data;
   try {
     const [topD, globalD] = await Promise.all([
-      fetch(`https://fapi.binance.com/futures/data/topLongShortPositionRatio?symbol=BTCUSDT&period=1h&limit=1`).then(r => r.json()),
-      getLongShortRatio("BTCUSDT"),
+      fetch(`https://fapi.binance.com/futures/data/topLongShortPositionRatio?symbol=${symbol}&period=1h&limit=1`).then(r => r.json()),
+      getLongShortRatio(symbol),
     ]);
-    if (!Array.isArray(topD) || topD.length === 0 || !globalD) return _whaleDivCache.data;
+    if (!Array.isArray(topD) || topD.length === 0 || !globalD) return c?.data ?? null;
     const topRatio    = parseFloat(topD[topD.length - 1].longShortRatio);  // npr. 2.256 = long:short 2.26:1
     const topLongPct  = topRatio / (1 + topRatio) * 100;                    // ratio → %
     const globalLongPct = parseFloat(globalD.longRatio);
@@ -1414,9 +1422,22 @@ export async function getBtcWhaleDivergence() {
       topRatio: +topRatio.toFixed(3), topLongPct: +topLongPct.toFixed(1),
       globalLongPct: +globalLongPct.toFixed(1), divergence: +divergence.toFixed(1), bias,
     };
-    _whaleDivCache = { ts: Date.now(), data };
+    _whaleDivCache[symbol] = { ts: Date.now(), data };
     return data;
-  } catch { return _whaleDivCache.data; }
+  } catch { return c?.data ?? null; }
+}
+
+// Batch — dohvati whale divergenciju za listu simbola (paralelno, blago razmaknuto
+// zbog Binance rate limita). Vraća { SYMBOL: {bias, topLongPct, globalLongPct, divergence}, ... }.
+export async function getWhaleDivergenceMap(symbols) {
+  const map = {};
+  for (let i = 0; i < symbols.length; i += 5) {
+    const batch = symbols.slice(i, i + 5);
+    const results = await Promise.all(batch.map(s => getWhaleDivergence(s).catch(() => null)));
+    batch.forEach((s, j) => { if (results[j]) map[s] = results[j]; });
+    if (i + 5 < symbols.length) await new Promise(r => setTimeout(r, 150));
+  }
+  return map;
 }
 
 // ─── BTC Perp Basis (Futures premium vs Spot) ────────────────────────────────
@@ -2812,11 +2833,13 @@ function analyzeUltra(candles, cfg) {
   // ne mijenja duljinu comba niti minSig, samo dodaje +1 kad je detektirana.
   const _macdDivBonusBull = (sigMacdDiv === 1)  ? 1 : 0;
   const _macdDivBonusBear = (sigMacdDiv === -1) ? 1 : 0;
-  // Bonus 5: Whale (top-trader) vs global L/S ratio divergencija na BTC (27.08.), samo BTC.
-  // Isti bonus-only obrazac — TraderaEdge: "kad se top-trader pozicioniranje masivno odvoji
+  // Bonus 5: Whale (top-trader) vs global L/S ratio divergencija — 27.08. BTC-only,
+  // 28.08. prošireno na sve kripto simbole (cfg._whaleBiasMap, dionice/metali izuzeti —
+  // Binance top-trader podaci su futures-only, nemaju smisla za xStocks/metale). Isti
+  // bonus-only obrazac — TraderaEdge: "kad se top-trader pozicioniranje masivno odvoji
   // od gotovo neutralne šire mase, ta divergencija je značajna".
-  const _whaleBonusBull = (_sym === "BTCUSDT" && cfg._whaleBias === "BULLISH") ? 1 : 0;
-  const _whaleBonusBear = (_sym === "BTCUSDT" && cfg._whaleBias === "BEARISH") ? 1 : 0;
+  const _whaleBonusBull = (cfg._whaleBiasMap?.[_sym] === "BULLISH") ? 1 : 0;
+  const _whaleBonusBear = (cfg._whaleBiasMap?.[_sym] === "BEARISH") ? 1 : 0;
   const bullScore = bullCnt + _premiumBonusBull + _pwhMstrBonusBull + _wyckoffBonusBull + _macdDivBonusBull + _whaleBonusBull;
   const bearScore = bearCnt + _premiumBonusBear + _pwhMstrBonusBear + _wyckoffBonusBear + _macdDivBonusBear + _whaleBonusBear;
   // Vikend: +2 signala — subotom/nedjeljom tanka likvidnost, samo najjači setupi.
@@ -5604,11 +5627,15 @@ export async function run() {
       if (_wyckoff.bearish) console.log(`  🐻 [WYCKOFF] BTC ${_wyckoff.bearEvent} potvrđen (TR ${_wyckoff.support?.toFixed(0)}–${_wyckoff.resistance?.toFixed(0)}) → bonus bearScore`);
       if (_wyckoff.sosPending) console.log(`  ⚠️  [WYCKOFF] BTC SOS potvrđen ali LPS još NIJE — impuls u tijeku, korekcija netestirana (TraderaEdge: "ne juriti cenu") → LONG +2 minSig svugdje`);
       if (_wyckoff.sowPending) console.log(`  ⚠️  [WYCKOFF] BTC SOW potvrđen ali LPSY još NIJE — pad u tijeku, retest netestiran → SHORT +2 minSig svugdje`);
-      // Whale (top-trader) vs global L/S ratio divergencija (27.08., samo BTC)
-      const _whaleDiv = await getBtcWhaleDivergence();
-      pDef.params._whaleBias = _whaleDiv?.bias ?? "NEUTRAL";
-      if (_whaleDiv?.bias === "BULLISH") console.log(`  🐋 [WHALE] BTC top traderi ${_whaleDiv.topLongPct}% long vs globalno ${_whaleDiv.globalLongPct}% (+${_whaleDiv.divergence}pp) → bonus bullScore`);
-      if (_whaleDiv?.bias === "BEARISH") console.log(`  🐋 [WHALE] BTC top traderi ${_whaleDiv.topLongPct}% long vs globalno ${_whaleDiv.globalLongPct}% (${_whaleDiv.divergence}pp) → bonus bearScore`);
+      // Whale (top-trader) vs global L/S ratio divergencija (27.08. BTC-only → 28.08.
+      // prošireno na sve kripto simbole, na korisnikov zahtjev nakon TraderaEdge posta
+      // koji prati kitove i na SOL/ETH/HYPE/XRP/DOGE/ADA/SUI/LINK)
+      const _cryptoSyms = Object.keys(SYMBOL_COMBOS).filter(s => !isStockSym(s) && !isMetalSym(s));
+      const _whaleFull = await getWhaleDivergenceMap(_cryptoSyms);
+      pDef.params._whaleBiasMap = Object.fromEntries(Object.entries(_whaleFull).map(([s, v]) => [s, v.bias]));
+      for (const [sym, v] of Object.entries(_whaleFull)) {
+        if (v.bias !== "NEUTRAL") console.log(`  🐋 [WHALE] ${sym} — top traderi ${v.topLongPct}% long vs globalno ${v.globalLongPct}% (${v.divergence>0?"+":""}${v.divergence}pp) → bonus ${v.bias === "BULLISH" ? "bullScore" : "bearScore"}`);
+      }
     }
 
     // ── 1. USDT.D proxy — Stablecoin Inflow/Outflow ──────────────────────────

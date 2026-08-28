@@ -84,9 +84,13 @@ const MAX_PER_SECTOR = 2;  // max otvorenih pozicija istog sektora
 // ─── 4. Market Breadth ─────────────────────────────────────────────────────────
 const BREADTH_STRONG = 5;   // ≥ 5 simbola u istom smjeru = jako tržište (pojačava TP×3)
 
-// ─── 6. Partial TP — 50% na TP razini, 50% ostaje na trail SL ────────────────
+// ─── 6. Partial TP — 25% na TP razini, 75% ostaje na trail SL ────────────────
+// 28.08.: 50→25 na korisnikov zahtjev — "uzmimo što više" umjesto da pola pozicije
+// stane na originalni TP, veći dio (75%) sad jaše produženi trail da uhvati veći dio
+// dužih trendova (npr. višednevni BTC/altcoin rally). Tradeoff: manje zaključanog
+// profita odmah — ako cijena naglo okrene odmah nakon TP-a, manje je "u sigurnom".
 const PARTIAL_TP_TRIGGER = 100;  // % TP puta → pali na pravom TP (100% = cijena dosegla TP)
-const PARTIAL_CLOSE_PCT  = 50;   // % pozicije koji se zatvara na TP
+const PARTIAL_CLOSE_PCT  = 25;   // % pozicije koji se zatvara na TP
 
 // ─── ULTRA strategija — zaštitni parametri ────────────────────────────────────
 const LONG_ONLY      = false;         // SHORT dozvoljeni kada BTC regime BEAR/NEUTRAL
@@ -4067,7 +4071,7 @@ async function checkPortfolioPositions(pid) {
           }
         }
 
-        // ── TP HIT: zatvori 50% na TP razini, aktiviraj trail za ostatak 50% ──
+        // ── TP HIT: zatvori PARTIAL_CLOSE_PCT% na TP razini, aktiviraj trail za ostatak ──
         // Pali se kad cijena dosegne TP (100% TP puta). Otkazuje Bitget plan naloge
         // da track_stop ne zatvori cijelu poziciju, pa trail preuzima ostatak.
         if (!pos.partialClosed && !pos.trailActive && isLivePortfolio) {
@@ -4111,7 +4115,7 @@ async function checkPortfolioPositions(pid) {
               }
               // Postavi Ghost SL na Bitgetu za preostalu 50% poziciju
               await updateTrailSL(pos, pos.sl);
-              await tg(`✅ <b>TP HIT [ULTRA]</b> ${pos.symbol} ${pos.side}\n+${_pricePctP.toFixed(1)}% @ ${fmtPrice(liveP)}\n\n💰 50% pozicije ZATVORENO — profit zaključan\n📈 50% ostaje — trail SL ${TRAIL_SL_PCT}% ispod vrha\nTrail peak start: ${fmtPrice(liveP)}`);
+              await tg(`✅ <b>TP HIT [ULTRA]</b> ${pos.symbol} ${pos.side}\n+${_pricePctP.toFixed(1)}% @ ${fmtPrice(liveP)}\n\n💰 ${PARTIAL_CLOSE_PCT}% pozicije ZATVORENO — profit zaključan\n📈 ${100 - PARTIAL_CLOSE_PCT}% ostaje — trail SL ${TRAIL_SL_PCT}% ispod vrha\nTrail peak start: ${fmtPrice(liveP)}`);
             }
           }
         }

@@ -53,7 +53,13 @@ const MAX_PYRAMID           = 1;   // max 1 adicija u istom smjeru (BTC only mod
 // prije stvarnog SL-a. Strop sad sprječava da VIP pyramid ikad opet naraste toliko.
 const MAX_VIP_PYRAMID        = 4;   // ukupno legs (initial + adicije) čak i uz VIP score≥7/8
 const MAX_NEW_ENTRIES_PER_SCAN = 2; // max NOVIH ulaza po scan ciklusu (08.07.: 4 longa u istom scanu = 1 oklada ×4)
-const MAX_SAME_DIR_CRYPTO = 3;      // max kripto pozicija u ISTOM smjeru — svi altovi su jedan BTC-beta trade
+const MAX_SAME_DIR_CRYPTO = 4;      // max kripto pozicija u ISTOM smjeru — svi altovi su jedan BTC-beta trade
+                                     // (28.08.: 3→4 na korisnikov zahtjev nakon analize 20.08. rallyja gdje je
+                                     // ETH+WLD+AAVE istovremeno pogodilo stari cap od 3 i odbilo daljnje longove)
+const MAX_VIP_SAME_DIR = 2;         // 28.08.: 1→2 — koliko VIP slotova (score≥7/8) smije istovremeno
+                                     // biti iznad MAX_SAME_DIR_CRYPTO. Max ukupno 4+2=6 istog smjera —
+                                     // svjesno se vraća blizu izvornog "6 = jedna oklada ×6" problema (08.07.)
+                                     // koji je i uveo cap, ali samo za VISOKO-konviktne (≥7/8) signale.
 
 // ─── 7. Korelacijski filter — sektori ─────────────────────────────────────────
 const SYMBOL_SECTORS = {
@@ -6079,9 +6085,9 @@ export async function run() {
               const _score = signal === "LONG" ? (result.bullScore ?? 0) : (result.bearScore ?? 0);
               const _comboLen = SYMBOL_COMBOS[symbol]?.sigIdx?.length ?? 8;
               const _vipEligible = _score >= 7 && _comboLen >= 8;
-              const _vipUsed = _openCrypto.some(p => p.vipSlot === true);
-              if (_vipEligible && !_vipUsed) {
-                console.log(`  ⭐ [VIP] ${symbol} — score ${_score}/${_comboLen} ≥ 7 → VIP slot (${_sameDir}/${MAX_SAME_DIR_CRYPTO}+1)`);
+              const _vipCount = _openCrypto.filter(p => p.vipSlot === true).length;
+              if (_vipEligible && _vipCount < MAX_VIP_SAME_DIR) {
+                console.log(`  ⭐ [VIP] ${symbol} — score ${_score}/${_comboLen} ≥ 7 → VIP slot (${_sameDir}/${MAX_SAME_DIR_CRYPTO}, VIP ${_vipCount+1}/${MAX_VIP_SAME_DIR})`);
                 result._vipSlot = true;
               } else {
                 console.log(`  🔗 [SAME-DIR] ${symbol} — već ${_sameDir} kripto ${signal} pozicija (max ${MAX_SAME_DIR_CRYPTO}) → preskačem`);

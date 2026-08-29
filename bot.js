@@ -1450,6 +1450,70 @@ export async function getWhaleDivergenceMap(symbols) {
   return map;
 }
 
+// ─── Bull Market Support Band (20W SMA + 21W EMA) — dip-buy zona ────────────
+// TraderaEdge edukacija (Bollinger/BMSB/Envelope video): "kombinacija 20-tjednog SMA i
+// 21-tjednog EMA... dok je cijena iznad trake, bull trend. Dodir trake odozgo tijekom
+// bull trenda je dobar ulaz." Kripto-standardni indikator (Benjamin Cowen), nepovezan
+// s postojećim tjednim EMA10/21 makro-faznim signalom (drugi par, druga svrha — ovo je
+// zona za ulaz, ne fazni prekidač).
+let _bmsbCache = {};  // symbol → { ts, data }
+const BMSB_TTL = 60 * 60 * 1000;  // tjedni indikator, sat vremena cache je dovoljno svježe
+export async function getBullMarketSupportBand(symbol = "BTCUSDT") {
+  const c = _bmsbCache[symbol];
+  if (c && Date.now() - c.ts < BMSB_TTL && c.data) return c.data;
+  try {
+    // Bitget USDT-FUTURES 1W candlesi imaju samo ~13 tjedana povijesti (provjereno 29.08. —
+    // limit parametar se ignorira, oldest candle je uvijek isti bez obzira traži li se 35 ili
+    // 200), nedovoljno za 20-tjedni SMA. Binance fapi ima 40+ tjedana za sve simbole u
+    // watchlisti (testirano i na BTC i na novijim tokenima poput KAITO) — koristi se SAMO za
+    // ovaj tjedni izračun, isti simbol string radi identično kao i za whale/L-S ratio pozive.
+    const d = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=1w&limit=26`).then(r => r.json());
+    if (!Array.isArray(d) || d.length === 0) return c?.data ?? null;
+    const all = d.map(k => parseFloat(k[4]));  // ascending — close (index 4 u Binance kline formatu)
+    // Zadnja svijeća je tekući tjedan (u tijeku) — izbaci je, radi na ZATVORENIM tjednima
+    const closes = all.slice(0, -1);
+    if (closes.length < 21) return c?.data ?? null;  // treba dovoljno povijesti za stabilan EMA21
+
+    const sma20 = closes.slice(-20).reduce((a, b) => a + b, 0) / 20;
+    const k21 = 2 / 22;
+    let ema21 = closes.slice(0, 21).reduce((a, b) => a + b, 0) / 21;
+    for (let i = 21; i < closes.length; i++) ema21 = closes[i] * k21 + ema21 * (1 - k21);
+
+    const bandLow  = Math.min(sma20, ema21);
+    const bandHigh = Math.max(sma20, ema21);
+    const price = closes[closes.length - 1];
+
+    // Trend prije zadnjeg tjedna — je li cijena bila jasno iznad/ispod trake (5 tjedana prije)
+    const priorCloses = closes.slice(-6, -1);
+    const avgPrior = priorCloses.reduce((a, b) => a + b, 0) / priorCloses.length;
+    const wasUptrend   = avgPrior > bandHigh;
+    const wasDowntrend = avgPrior < bandLow;
+    // "Dodir" trake — cijena unutar ili tik uz traku (ne probijena daleko kroz nju)
+    const touchingFromAbove = price <= bandHigh * 1.01 && price >= bandLow * 0.985;
+    const touchingFromBelow = price >= bandLow * 0.99  && price <= bandHigh * 1.015;
+
+    let bias = "NEUTRAL";
+    if (wasUptrend && touchingFromAbove)     bias = "BULLISH";  // dip-buy zona
+    else if (wasDowntrend && touchingFromBelow) bias = "BEARISH";  // rejection zona
+
+    const data = { bias, bandLow: +bandLow.toFixed(6), bandHigh: +bandHigh.toFixed(6), price: +price.toFixed(6) };
+    _bmsbCache[symbol] = { ts: Date.now(), data };
+    return data;
+  } catch { return c?.data ?? null; }
+}
+
+// Batch — isti obrazac kao getWhaleDivergenceMap
+export async function getBullMarketSupportBandMap(symbols) {
+  const map = {};
+  for (let i = 0; i < symbols.length; i += 5) {
+    const batch = symbols.slice(i, i + 5);
+    const results = await Promise.all(batch.map(s => getBullMarketSupportBand(s).catch(() => null)));
+    batch.forEach((s, j) => { if (results[j]) map[s] = results[j]; });
+    if (i + 5 < symbols.length) await new Promise(r => setTimeout(r, 150));
+  }
+  return map;
+}
+
 // ─── BTC Perp Basis (Futures premium vs Spot) ────────────────────────────────
 let _basisCache = { data: null, ts: 0 };
 const BASIS_TTL = 5 * 60 * 1000;
@@ -2850,8 +2914,13 @@ function analyzeUltra(candles, cfg) {
   // od gotovo neutralne šire mase, ta divergencija je značajna".
   const _whaleBonusBull = (cfg._whaleBiasMap?.[_sym] === "BULLISH") ? 1 : 0;
   const _whaleBonusBear = (cfg._whaleBiasMap?.[_sym] === "BEARISH") ? 1 : 0;
-  const bullScore = bullCnt + _premiumBonusBull + _pwhMstrBonusBull + _wyckoffBonusBull + _macdDivBonusBull + _whaleBonusBull;
-  const bearScore = bearCnt + _premiumBonusBear + _pwhMstrBonusBear + _wyckoffBonusBear + _macdDivBonusBear + _whaleBonusBear;
+  // Bonus 6: Bull Market Support Band (20W SMA + 21W EMA) dip-buy/rejection zona (29.08.,
+  // svi kripto simboli). TraderaEdge edukacija: dodir trake odozgo tijekom established
+  // uptrenda = dip-buy; dodir odozdo tijekom downtrenda = rejection. Isti bonus-only obrazac.
+  const _bmsbBonusBull = (cfg._bmsbBiasMap?.[_sym] === "BULLISH") ? 1 : 0;
+  const _bmsbBonusBear = (cfg._bmsbBiasMap?.[_sym] === "BEARISH") ? 1 : 0;
+  const bullScore = bullCnt + _premiumBonusBull + _pwhMstrBonusBull + _wyckoffBonusBull + _macdDivBonusBull + _whaleBonusBull + _bmsbBonusBull;
+  const bearScore = bearCnt + _premiumBonusBear + _pwhMstrBonusBear + _wyckoffBonusBear + _macdDivBonusBear + _whaleBonusBear + _bmsbBonusBear;
   // Vikend: +2 signala — subotom/nedjeljom tanka likvidnost, samo najjači setupi.
   // (post-mortem 05.07.: svi likvidirani ulazi bili subotnji minimalni 5/8 → +1 uveden,
   // ali 16.08. opet cijeli vikend batch (SOL/RENDER/BTC) u SL-u na minimalnom +1 pragu.
@@ -2994,15 +3063,17 @@ function analyzeUltra(candles, cfg) {
     _pwhMstrBonusBull   ? "PWH+MSTR" : "",
     _macdDivBonusBull   ? "MDIV" : "",
     _whaleBonusBull     ? "WHALE" : "",
+    _bmsbBonusBull      ? "BMSB" : "",
   ].filter(Boolean).join(",");
   const _bonusBearTag = [
     _premiumBonusBear   ? "CVD+E145" : "",
     _pwhMstrBonusBear   ? "PWH+MSTR" : "",
     _macdDivBonusBear   ? "MDIV" : "",
     _whaleBonusBear     ? "WHALE" : "",
+    _bmsbBonusBear      ? "BMSB" : "",
   ].filter(Boolean).join(",");
-  const bonusTag = _bonusBullTag ? ` [+${_premiumBonusBull+_pwhMstrBonusBull+_macdDivBonusBull+_whaleBonusBull}:${_bonusBullTag}]`
-                : _bonusBearTag ? ` [+${_premiumBonusBear+_pwhMstrBonusBear+_macdDivBonusBear+_whaleBonusBear}:${_bonusBearTag}]` : "";
+  const bonusTag = _bonusBullTag ? ` [+${_premiumBonusBull+_pwhMstrBonusBull+_macdDivBonusBull+_whaleBonusBull+_bmsbBonusBull}:${_bonusBullTag}]`
+                : _bonusBearTag ? ` [+${_premiumBonusBear+_pwhMstrBonusBear+_macdDivBonusBear+_whaleBonusBear+_bmsbBonusBear}:${_bonusBearTag}]` : "";
 
   // Dodaj extra info za nove signale u reason
   const _newSigsBull = [sigPWHL===1?"PWL✓":"", sigMktStr===1?"MSTR✓":"", sigFVG===1?"FVG✓":""].filter(Boolean).join(" ");
@@ -5645,6 +5716,13 @@ export async function run() {
       pDef.params._whaleBiasMap = Object.fromEntries(Object.entries(_whaleFull).map(([s, v]) => [s, v.bias]));
       for (const [sym, v] of Object.entries(_whaleFull)) {
         if (v.bias !== "NEUTRAL") console.log(`  🐋 [WHALE] ${sym} — top traderi ${v.topLongPct}% long vs globalno ${v.globalLongPct}% (${v.divergence>0?"+":""}${v.divergence}pp) → bonus ${v.bias === "BULLISH" ? "bullScore" : "bearScore"}`);
+      }
+      // Bull Market Support Band (20W SMA + 21W EMA) dip-buy/rejection zona (29.08.,
+      // svi kripto simboli — isti obrazac kao whale)
+      const _bmsbFull = await getBullMarketSupportBandMap(_cryptoSyms);
+      pDef.params._bmsbBiasMap = Object.fromEntries(Object.entries(_bmsbFull).map(([s, v]) => [s, v.bias]));
+      for (const [sym, v] of Object.entries(_bmsbFull)) {
+        if (v.bias !== "NEUTRAL") console.log(`  📊 [BMSB] ${sym} — cijena ${v.price} dodiruje traku ${v.bandLow.toFixed(4)}-${v.bandHigh.toFixed(4)} → bonus ${v.bias === "BULLISH" ? "bullScore (dip-buy)" : "bearScore (rejection)"}`);
       }
     }
 

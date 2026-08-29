@@ -231,5 +231,5 @@
   ],
   "btc_key_level": 57392,
   "btc_invalidation_level": 57392,
-  "btc_target_note": "TraderaEdge 27.08. (Anarcho Economy): $83,700 je nova ključna otpor/target razina za pratiti — 'clean reclaim and hold above it could open door for next leg higher'. Top-trader (whale) pozicioniranje ~68% long, masivno odvojeno od gotovo neutralne globalne mase (~49%) — divergencija podržava bullish tezu (implementirano 27.08. kao WHALE bonus signal, getBtcWhaleDivergence u bot.js). Podržava invalidacija/support i dalje 57,392 (nepromijenjeno). Stara 82,695 target razina (24.08.) zamijenjena ovom."
+  "btc_target_note": "TraderaEdge 28.08. video: $83,780 potvrđena kao likvidnosna zona koju još treba 'sweepati' prije korekcije (blizu ranije 27.08. $83,700 razine, sad precizirano). Nakon sweepa očekuje pullback/korekciju na ~$70,000 — konfluencija njegovog 21-tjednog i 200-dnevnog moving averagea (isti par MA koji se poklopio na početku prošlog bull cikla). Njegov trenutni trading plan: short na test 76k-ish → dugi long swing prema 83,780 sweepu → novi short swing prema ~70k. Support/invalidacija i dalje 57,392 (nepromijenjeno, mnogo niže od ovog pullback targeta — 70k je zdrav pullback unutar i dalje bullish strukture, ne invalidacija). Top-trader whale divergencija (27.08.) i dalje bullish-podržavajuća, implementirano kao WHALE bonus signal."
 }

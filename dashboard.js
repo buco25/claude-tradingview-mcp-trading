@@ -14,7 +14,7 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   getLongShortRatio, getStablecoinInflow, getBtcPerpBasis, getAltcoinSeason,
   generateDailyReport, autoFixCsvFromBitget, SYMBOL_COMBOS, getBtcDailyPivots, getAccountTransfers, calcLiqZones,
   getBtcWeeklyVsKey, getRelStrengthVsBtc, isStockSym, isMetalSym, getBtcChillMode, getBtcDailyVsInvalidation, getBtcWeeklyEmaPhase,
-  getBtcWyckoffSignal, getWhaleDivergence,
+  getBtcWyckoffSignal, getWhaleDivergence, getBullMarketSupportBand,
   RISK_PCT, RISK_PCT_MIN, RISK_PCT_MAX } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
@@ -770,6 +770,9 @@ async function runScan(rules) {
         // uključen (28.08., 15-min cache u bot.js)
         s.whale = (!isStockSym(sym) && !isMetalSym(sym))
           ? await getWhaleDivergence(sym).catch(() => null) : null;
+        // Bull Market Support Band (20W SMA + 21W EMA) dip-buy/rejection — svi kripto (29.08.)
+        s.bmsb = (!isStockSym(sym) && !isMetalSym(sym))
+          ? await getBullMarketSupportBand(sym).catch(() => null) : null;
         const pending = pendingList.find(p => p.symbol === sym) || null;
         const symSltp = rules.symbol_sltp?.[sym] || {};
         const slPct   = symSltp.slPct ?? 1.5;
@@ -2874,6 +2877,7 @@ async function doScan() {
         '<td style="font-weight:800;font-size:13px;white-space:nowrap;padding:6px 8px">' + s.symbol.replace("USDT","") + '<span style="color:#94a3b8;font-size:10px;font-weight:400">USDT</span>' +
           (s.relStr ? ' <span title="Relativna snaga vs BTC (7d ratio vs EMA20): ' + s.relStr + ' — LONG samo STRONG, SHORT samo WEAK" style="font-size:10px">' + (s.relStr === 'STRONG' ? '💪' : '🐌') + '</span>' : '') +
           (s.whale && s.whale.bias !== 'NEUTRAL' ? ' <span title="Whale (top-trader) vs globalni L/S ratio: top ' + s.whale.topLongPct + '% long, globalno ' + s.whale.globalLongPct + '% (' + (s.whale.divergence>0?'+':'') + s.whale.divergence + 'pp odmak) — bonus ' + (s.whale.bias === 'BULLISH' ? 'bullScore' : 'bearScore') + '" style="font-size:10px">🐋' + (s.whale.bias === 'BULLISH' ? '▲' : '▼') + '</span>' : '') +
+          (s.bmsb && s.bmsb.bias !== 'NEUTRAL' ? ' <span title="Bull Market Support Band (20W SMA + 21W EMA): traka ' + s.bmsb.bandLow.toFixed(4) + '-' + s.bmsb.bandHigh.toFixed(4) + ', cijena ' + s.bmsb.price.toFixed(4) + ' — ' + (s.bmsb.bias === 'BULLISH' ? 'dip-buy zona, bonus bullScore' : 'rejection zona, bonus bearScore') + '" style="font-size:10px">📊' + (s.bmsb.bias === 'BULLISH' ? '▲' : '▼') + '</span>' : '') +
           '<div style="font-size:9px;color:' + slTpCol + ';font-weight:500;margin-top:1px">' + slTp + '</div>' + rsiAdxInfo + '</td>' +
         '<td style="font-weight:600;white-space:nowrap;font-size:12px;padding:6px 8px">' + fmtLive(s.price) + entryInfo + '</td>' +
         '<td style="text-align:center;font-weight:800;color:' + t1hCol + ';font-size:13px;padding:6px 4px" title="1H EMA20: ' + t1h + '">' + t1hIcon + '</td>' +

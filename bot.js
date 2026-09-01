@@ -4304,6 +4304,11 @@ function writeEntryCsv(pid, entry) {
   const fee  = (entry.tradeSize * 0.0006).toFixed(4);  // Bitget taker 0.06%
   const mode = PAPER_TRADING ? "PAPER" : BITGET_DEMO ? "DEMO" : "LIVE";
   const entryMode = entry.entryMode || "PBK";
+  // 01.09.: "/13" je bilo hardkodirano (isti relikt kao "/9" bug u analyzeUltra whyNot
+  // stringu, popravljen 27.08.) — sigCount broji setirane bitove u sigMask koji je grâen
+  // iz PUNOG sigs[] niza (SIG_NAMES.length elemenata, sad 12 nakon MDIV-a), ne iz 13.
+  // NAPOMENA: ovo je raw popcount svih bullish signala u punom nizu, NIJE isto što i
+  // TE_COMBO-scoped X/8 score korišten za minSig prag — različita brojka, ne uspoređivati.
   const sigCount  = entry.sigMask != null
     ? entry.sigMask.toString(2).split("").filter(b => b === "1").length
     : "?";
@@ -4314,7 +4319,7 @@ function writeEntryCsv(pid, entry) {
     fee, "OPEN",
     fmtPrice(entry.sl), fmtPrice(entry.tp),
     entry.orderId || "", mode, pid,
-    `"${entry.strategy} | ${entryMode} | Sig ${sigCount}/13 | SL ${entry.slPct??SL_PCT}% TP ${entry.tpPct??TP_PCT}%"`,
+    `"${entry.strategy} | ${entryMode} | Sig ${sigCount}/${SIG_NAMES.length} | SL ${entry.slPct??SL_PCT}% TP ${entry.tpPct??TP_PCT}%"`,
   ].join(",");
 
   appendFileSync(csvFilePath(pid), row + "\n");

@@ -5233,6 +5233,10 @@ async function addToPyramid(pid, existingPos, signal, newTradeSize, slPct, tpPct
     const allPos = loadPositions(pid);
     const idx = allPos.findIndex(p => p.symbol === symbol && p.side === side);
     if (idx >= 0) {
+      // 06.09.: margin nikad nije bila skalirana nakon pyramid adicije (ista vrsta buga
+      // kao partial-close margin fix 19.08.) — ostajala je na iznosu prve noge dok su
+      // entryPrice/qty/totalUSD ispravno rasli. Skalira se proporcionalno rastu qty-a.
+      if (allPos[idx].margin && oldQty > 0) allPos[idx].margin = allPos[idx].margin * (totalQty / oldQty);
       allPos[idx].entryPrice = parseFloat(avgEntry.toFixed(6));
       allPos[idx].quantity   = totalQty;
       allPos[idx].totalUSD   = totalUSD;
@@ -5265,6 +5269,7 @@ async function addToPyramid(pid, existingPos, signal, newTradeSize, slPct, tpPct
     const idx = allPos.findIndex(p => p.symbol === symbol && p.side === side);
     if (idx >= 0) {
       const prevCount = allPos[idx].pyramidCount || 1;
+      if (allPos[idx].margin && oldQty > 0) allPos[idx].margin = allPos[idx].margin * (totalQty / oldQty);
       allPos[idx].entryPrice   = parseFloat(avgEntry.toFixed(6));
       allPos[idx].quantity     = totalQty;
       allPos[idx].totalUSD     = totalUSD;

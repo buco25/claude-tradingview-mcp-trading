@@ -5897,7 +5897,7 @@ export async function run() {
         }
         if (volAnomaly.high) console.log(`  📈 [VOL] ${symbol} — visok volumen ${volAnomaly.ratio}x! (breakout signal)`);
 
-        // ── Velocity (log-only, 03.08.) — ne utječe na ulaze, samo promatramo ────
+        // ── Velocity (log-only od 03.08., gate dodan 07.09. — vidi VELOCITY_COUNTER niže) ──
         const velocity = checkVelocity(candles);
         if (velocity.sig !== 0) {
           console.log(`  ⚡ [VELOCITY] ${symbol} — ${velocity.sig > 0 ? "BULL" : "BEAR"} obrat! prior ROC ${velocity.rocPrior}% → recent ROC ${velocity.rocRecent}% (accel ${velocity.accel > 0 ? "+" : ""}${velocity.accel}%)`);
@@ -6246,6 +6246,25 @@ export async function run() {
             }
             if (signal === "SHORT" && _effectiveRegime !== "BEAR") {
               console.log(`  🔒 [BTC ALIGN] ${symbol} — SHORT zahtijeva BTC BEAR, trenutno ${_effectiveRegime} → blokiram`);
+              continue;
+            }
+          }
+
+          // Velocity kontra-signal gate (07.09., na korisnikov zahtjev nakon KAITOUSDT
+          // incidenta) — checkVelocity je bio log-only od 03.08., ali retroaktivna provjera
+          // pokazala da bi TOČNO uhvatio taj slučaj: KAITOUSDT SHORT otvoren 12:03 baš kad je
+          // velocity već pokazivao BULL obrat (prior ROC -1.29% kapitulacija + akceleracija
+          // +1.32% nazad gore) — lagging trend signal (EMA/MACD) je ušao PROTIV već obrnutog
+          // momentuma, trade odmah krenuo u gubitak. Sad blokira suprotan smjer.
+          if (velocity.sig !== 0 && !_stratBypass) {
+            if (signal === "LONG" && velocity.sig === -1) {
+              console.log(`  ⚡🔒 [VELOCITY] ${symbol} — BEAR obrat upravo detektiran (euforija+nagli pad) → LONG blokiran, lagging signal protiv momentuma`);
+              _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: "VELOCITY_COUNTER", reason: `Velocity BEAR obrat (accel ${velocity.accel}%) → LONG blokiran, protiv momentuma` });
+              continue;
+            }
+            if (signal === "SHORT" && velocity.sig === 1) {
+              console.log(`  ⚡🔒 [VELOCITY] ${symbol} — BULL obrat upravo detektiran (kapitulacija+nagli rast) → SHORT blokiran, lagging signal protiv momentuma`);
+              _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: "VELOCITY_COUNTER", reason: `Velocity BULL obrat (accel ${velocity.accel}%) → SHORT blokiran, protiv momentuma` });
               continue;
             }
           }

@@ -4815,7 +4815,7 @@ function getSafeLeverage(slPct) {
   // Provjera: SL0.7%→50x(liq@1.9%) SL1%→45x(liq@2.2%) SL2%→30x(cap) SL2.5%→27x(liq@3.7%)
 }
 
-async function setupSymbol(symbol, slPct, preferredLeverage = null) {
+async function setupSymbol(symbol, slPct, preferredLeverage = null, side = null) {
   // 1) Isolated margin mode
   const mm = await bitgetPost("/api/v2/mix/account/set-margin-mode", {
     symbol, productType: "USDT-FUTURES", marginCoin: "USDT", marginMode: "isolated",
@@ -4848,7 +4848,12 @@ async function setupSymbol(symbol, slPct, preferredLeverage = null) {
     if (f < targetLev) levFallbacks.push(f);
   }
 
-  let actualLeverage = targetLev;
+  // 08.09.: actualLeverage se PRIJE pratio samo za "long" holdSide bez obzira koji je smjer
+  // stvarnog tradea — na SHORT pozicijama (npr. BTC 30x umjesto pretpostavljenih ~60x) je to
+  // značilo da margin/ROE prikaz koristi krivi (viši) leverage jer "long" strana slučajno
+  // prihvati ciljani leverage dok "short" padne na niži exchange-side cap. Sad se prati
+  // ZASEBNO po holdSide-u i vraća se leverage koji odgovara STVARNOM smjeru ovog tradea.
+  const actualLeverageBySide = { long: targetLev, short: targetLev };
   for (const holdSide of ["long", "short"]) {
     let set = false;
     for (const lev of levFallbacks) {
@@ -4859,7 +4864,7 @@ async function setupSymbol(symbol, slPct, preferredLeverage = null) {
       if (lv.code === "00000") {
         if (lev !== targetLev) {
           console.log(`  ℹ️  ${symbol} ${holdSide}: max leverage je ${lev}x (ne ${targetLev}x) — sizing prilagođen`);
-          if (holdSide === "long") actualLeverage = lev;
+          actualLeverageBySide[holdSide] = lev;
         }
         set = true;
         break;
@@ -4868,7 +4873,8 @@ async function setupSymbol(symbol, slPct, preferredLeverage = null) {
     if (!set) console.log(`  ❌  Nije uspjelo postaviti leverage za ${symbol} ${holdSide}`);
   }
 
-  console.log(`  ⚙️  ${symbol}: isolated + ${actualLeverage}x leverage set`);
+  const actualLeverage = side === "SHORT" ? actualLeverageBySide.short : actualLeverageBySide.long;
+  console.log(`  ⚙️  ${symbol}: isolated + long ${actualLeverageBySide.long}x / short ${actualLeverageBySide.short}x leverage set (koristi se ${actualLeverage}x za ${side ?? "?"})`);
   return actualLeverage;
 }
 
@@ -4906,7 +4912,7 @@ async function closeBitgetPosition(symbol, side, quantity) {
 async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp, slPct, tpPct, preferredLeverage = null) {
   // Postavi isolated margin + tier-based leverage prije svakog naloga
   // preferredLeverage (iz symbol_sltp.leverage) ima prioritet nad getSafeLeverage
-  const actualLeverage = await setupSymbol(symbol, slPct, preferredLeverage);
+  const actualLeverage = await setupSymbol(symbol, slPct, preferredLeverage, side);
   const quantity  = (sizeUSD / price).toFixed(4);
   const holdSide  = side === "LONG" ? "long" : "short";
 

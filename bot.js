@@ -6003,13 +6003,33 @@ export async function run() {
           }
         }
 
+        // Velocity-driven flip override (08.09., na korisnikov zahtjev nakon BTC slučaja gdje
+        // je combo i dalje čitao SHORT(6/8) usred naglog V-recoveryja — flip nije mogao pucati
+        // jer signal nikad nije postao suprotan postojećoj poziciji). Ako glavni combo signal
+        // JOŠ NE protivrječi postojećoj poziciji, ali velocity (brži ROC-akceleracija detektor)
+        // već pokazuje jak suprotan obrat s BAREM nekom podrškom u combou (≥3/8, ne čisto na
+        // velocity samom), forsira se signal na velocity-in smjer da postojeći flip blok ispod
+        // to uhvati. Samo BTC (isti scope kao postojeći flip).
+        let _velocityFlipOverride = false;
+        if (existingPos && symbol === BTC_EXCEPTION && isLive && existingPos.side === signal) {
+          const _velDir = velocity.sig === 1 ? "LONG" : velocity.sig === -1 ? "SHORT" : null;
+          if (_velDir && _velDir !== existingPos.side) {
+            const _velScore = _velDir === "LONG" ? (result.bullScore ?? 0) : (result.bearScore ?? 0);
+            if (_velScore >= 3) {
+              console.log(`  ⚡🔄 [VELOCITY FLIP] ${symbol} — velocity ${velocity.sig>0?"BULL":"BEAR"} obrat (accel ${velocity.accel}%, combo podrška ${_velScore}/8) protivrječi postojećoj ${existingPos.side} poziciji → forsiram flip provjeru`);
+              signal = _velDir;
+              _velocityFlipOverride = true;
+            }
+          }
+        }
+
         // ── Pyramid / Flip logika ─────────────────────────────────────────────
         if (existingPos && existingPos.side !== signal) {
-          // Suprotan signal — flip samo ako je jak (score >= 5)
+          // Suprotan signal — flip samo ako je jak (score >= 5) ILI velocity override
           const _flipScore = signal === "LONG" ? (result.bullScore ?? 0) : (result.bearScore ?? 0);
           const FLIP_MIN_SCORE = 5;
-          if (_flipScore >= FLIP_MIN_SCORE && isLive) {
-            console.log(`  🔄 [FLIP] ${symbol} — jak kontra signal (score=${_flipScore}) → zatvaramo ${existingPos.side}, otvaramo ${signal}`);
+          if ((_flipScore >= FLIP_MIN_SCORE || _velocityFlipOverride) && isLive) {
+            console.log(`  🔄 [FLIP] ${symbol} — ${_velocityFlipOverride ? "velocity obrat" : `jak kontra signal (score=${_flipScore})`} → zatvaramo ${existingPos.side}, otvaramo ${signal}`);
             // Zatvori postojeću poziciju
             const _flipBitPos = await fetchBitgetPositionSize(symbol, existingPos.side).catch(() => null);
             if (_flipBitPos && !_flipBitPos.error) {
@@ -6028,12 +6048,13 @@ export async function run() {
                 const _flipPnl  = existingPos.side === "LONG"
                   ? (_flipExit - existingPos.entryPrice) * parseFloat(_flipQty)
                   : (existingPos.entryPrice - _flipExit) * parseFloat(_flipQty);
-                writeExitCsv(pid, existingPos, _flipExit, `FLIP → ${signal} (score=${_flipScore})`, _flipPnl);
+                const _flipReasonTag = _velocityFlipOverride ? `velocity obrat, combo ${_flipScore}/8` : `score=${_flipScore}`;
+                writeExitCsv(pid, existingPos, _flipExit, `FLIP → ${signal} (${_flipReasonTag})`, _flipPnl);
                 if (existingPos.sigMask != null) recordSignalOutcome(existingPos.sigMask, _flipPnl >= 0);
                 recordSymbolOutcome(symbol, _flipPnl >= 0);
                 const _allPos = loadPositions(pid);
                 savePositions(pid, _allPos.filter(p => !(p.symbol === symbol && p.side === existingPos.side)));
-                await tg(`🔄 <b>FLIP [ULTRA]</b> ${symbol}\nZatvoren ${existingPos.side} → otvaram ${signal}\nScore: ${_flipScore}/6 | P&L: ${_flipPnl >= 0 ? "+" : ""}$${_flipPnl.toFixed(2)}`);
+                await tg(`🔄 <b>FLIP [ULTRA]</b> ${symbol}\nZatvoren ${existingPos.side} → otvaram ${signal}\n${_velocityFlipOverride ? "⚡ Velocity obrat" : "Score"}: ${_flipScore}/8 | P&L: ${_flipPnl >= 0 ? "+" : ""}$${_flipPnl.toFixed(2)}`);
                 // Nastavi s otvaranjem nove pozicije u suprotnom smjeru
               } else {
                 console.log(`  ❌ [FLIP] Close fail: ${_flipCloseRes.code} ${_flipCloseRes.msg} → skip`);

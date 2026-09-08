@@ -94,7 +94,7 @@ const PARTIAL_CLOSE_PCT  = 25;   // % pozicije koji se zatvara na TP
 
 // ─── ULTRA strategija — zaštitni parametri ────────────────────────────────────
 const LONG_ONLY      = false;         // SHORT dozvoljeni kada BTC regime BEAR/NEUTRAL
-const ADX_MIN        = 20;            // ADX prag — bazni (dinamički raste ako WR pada)
+export const ADX_MIN = 20;            // ADX prag — bazni (dinamički raste ako WR pada)
 const SL_COOLDOWN_MS = 4 * 60 * 60 * 1000;  // 4h cooldown po simbolu nakon SL-a
 
 // ─── ADX/MOM "soft zone" — 08.09.2026, na korisnikov zahtjev ─────────────────
@@ -102,9 +102,13 @@ const SL_COOLDOWN_MS = 4 * 60 * 60 * 1000;  // 4h cooldown po simbolu nakon SL-a
 // koji smo dosad pratili, dopusti ulaz ali s POLA rizika (position size ×0.5).
 // Ispod SOFT_FLOOR-a i dalje potpuni block (SWEEP/RANGE ostaju netaknuti —
 // to je zaseban strategija za rangeing tržišta, ne "omekšani" trend gate).
-const ADX_SOFT_BAND   = 5;   // koliko ispod effectiveAdx ulazimo u soft zonu
-const ADX_SOFT_FLOOR  = 12;  // apsolutni pod — ispod ovoga nema ulaza uopće
-const MOM_SOFT_BAND   = 1;   // koliko ispod MOM_MIN (score) dopuštamo soft ulaz
+// Exportano (08.09.) da dashboard.js scanner-preview koristi ISTE brojke —
+// dosad su konstante poput ADX praga bile duplicirane s drugom vrijednošću
+// (22/18 u dashboardu vs 20 u botu) i preview je zavaravao.
+export const ADX_SOFT_BAND  = 5;   // koliko ispod effectiveAdx ulazimo u soft zonu
+export const ADX_SOFT_FLOOR = 12;  // apsolutni pod — ispod ovoga nema ulaza uopće
+export const MOM_SOFT_BAND  = 1;   // koliko ispod MOM_MIN (score) dopuštamo soft ulaz
+export const MOM_ADX_MIN    = 20;  // ADX pod za momentum granu (identično bot.js unutarnjoj const)
 
 // ─── Trailing stop — aktivira se nakon dovoljnog profita ─────────────────────
 // Problem: 1.5% aktivacija + 0.8% gap → exit na samo +0.7% kod prvog odskok (XRP +$0.88)
@@ -3160,8 +3164,7 @@ function analyzeUltra(candles, cfg) {
   const momBull = momBullBase + (momCvdBull && momE145Bull ? 1 : 0) + momPwhMstrBull;
   const momBear = momBearBase + (momCvdBear && momE145Bear ? 1 : 0) + momPwhMstrBear;
 
-  // Za momentum: bez 6SC gate (breakout sam potvrđuje smjer), ADX ≥ 20
-  const MOM_ADX_MIN = 20;
+  // Za momentum: bez 6SC gate (breakout sam potvrđuje smjer), ADX ≥ MOM_ADX_MIN (modul-level export)
   // Ako je _adxSoft već aktivan (glavni ADX gate gore propustio kroz soft zonu),
   // koristi isti omekšani pod i ovdje — inače bi "ADX ≥ 20" tvrdi zahtjev odmah
   // presjekao momentum granu čim je stvarni ADX ispod baze.
@@ -6807,7 +6810,7 @@ export async function run() {
           addPosition(pid, entry);
           writeEntryCsv(pid, entry);
           _newEntriesThisScan++;
-          _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: "ENTERED", reason: `${result.isMomentum?"MOM":"PBK"} ulaz @ ${fmtPrice(price)} SL ${fmtPrice(sl)} TP ${fmtPrice(tp)}`, vwapDist: result.vwap ? ((price-result.vwap)/result.vwap*100).toFixed(2) : null });
+          _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: "ENTERED", reason: `${result.isMomentum?"MOM":"PBK"} ulaz @ ${fmtPrice(price)} SL ${fmtPrice(sl)} TP ${fmtPrice(tp)}${result._halfSize?" [POLA RIZIKA]":""}`, vwapDist: result.vwap ? ((price-result.vwap)/result.vwap*100).toFixed(2) : null });
           // Dinamički leverage: zone-based SL → getSafeLeverage izračunava; tier SL → fiksni
           const _dynLev = slMethod === "tier" ? (symSltp.leverage ?? null) : null;
           const _displayLev = _dynLev ?? getSafeLeverage(slPct);

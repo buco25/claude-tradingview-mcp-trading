@@ -15,7 +15,8 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   generateDailyReport, autoFixCsvFromBitget, SYMBOL_COMBOS, getBtcDailyPivots, getAccountTransfers, calcLiqZones,
   getBtcWeeklyVsKey, getRelStrengthVsBtc, isStockSym, isMetalSym, getBtcChillMode, getBtcDailyVsInvalidation, getBtcWeeklyEmaPhase,
   getBtcWyckoffSignal, getWhaleDivergence, getBullMarketSupportBand,
-  RISK_PCT, RISK_PCT_MIN, RISK_PCT_MAX } from "./bot.js";
+  RISK_PCT, RISK_PCT_MIN, RISK_PCT_MAX,
+  ADX_MIN, ADX_SOFT_BAND, ADX_SOFT_FLOOR, MOM_SOFT_BAND, MOM_ADX_MIN } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -567,6 +568,7 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
   let ultraBull = 0, ultraBear = 0;
   let ultraSigs16 = new Array(11).fill(0);
   let ultraMinSig = 4;  // default
+  let ultraHalfSize = false;  // ADX/MOM soft-zone ulaz (08.09.) — bot bi ovo izvršio na pola rizika
   {
     const _symCombo = SYMBOL_COMBOS[symbol];  // jedan izvor istine — bot.js
     const _comboIdxD = _symCombo?.sigIdx ?? [0,2,3,4,5,6,9,10];
@@ -662,11 +664,16 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
       ultraBull = _activeSigsD.filter(s => s === 1).length;
       ultraBear = _activeSigsD.filter(s => s === -1).length;
 
-      const adxOk = adxV >= 22;
+      // ADX/MOM soft zone (08.09.2026) — identično bot.js analyzeUltra, iste konstante
+      // uvezene iz bot.js (ADX_MIN/ADX_SOFT_BAND/ADX_SOFT_FLOOR/MOM_SOFT_BAND/MOM_ADX_MIN)
+      // umjesto ranije hardkodiranih 22/18 koji nisu odgovarali stvarnom botu.
+      const _adxSoftFloorD = Math.max(ADX_MIN - ADX_SOFT_BAND, ADX_SOFT_FLOOR);
+      const adxOk   = adxV >= ADX_MIN;
+      const adxSoft = !adxOk && adxV >= _adxSoftFloorD;
 
       // Pullback signali — bez RSI gate (uklonjen iz bota)
-      if      (adxOk && ultraBull >= minSig)          ultraSig = "LONG";
-      else if (adxOk && ultraBear >= minSig)          ultraSig = "SHORT";
+      if      ((adxOk || adxSoft) && ultraBull >= minSig)          { ultraSig = "LONG";  ultraHalfSize = adxSoft; }
+      else if ((adxOk || adxSoft) && ultraBear >= minSig)          { ultraSig = "SHORT"; ultraHalfSize = adxSoft; }
       else if (adxOk && ultraBull === minSig - 1)     ultraSig = "SETUP↑";
       else if (adxOk && ultraBear === minSig - 1)     ultraSig = "SETUP↓";
 
@@ -689,9 +696,12 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
         const _momActiveSigsD = _comboIdxD.map(i => momSigsD[i]);
         const momBullD = _momActiveSigsD.filter(s => s === 1).length;
         const momBearD = _momActiveSigsD.filter(s => s === -1).length;
-        const momAdxOk = adxV >= 18;
-        if (momAdxOk && momBullD >= minSig)      { ultraSig = "MOM↑"; ultraBull = momBullD; }
-        else if (momAdxOk && momBearD >= minSig) { ultraSig = "MOM↓"; ultraBear = momBearD; }
+        const _momAdxFloorD = adxSoft ? _adxSoftFloorD : MOM_ADX_MIN;
+        if (_momAdxFloorD <= adxV && momBullD >= minSig)      { ultraSig = "MOM↑"; ultraBull = momBullD; ultraHalfSize = adxSoft; }
+        else if (_momAdxFloorD <= adxV && momBearD >= minSig) { ultraSig = "MOM↓"; ultraBear = momBearD; ultraHalfSize = adxSoft; }
+        // MOM soft zona — score tek 1 ispod praga → pola rizika umjesto blocka
+        else if (_momAdxFloorD <= adxV && momBullD === minSig - MOM_SOFT_BAND) { ultraSig = "MOM↑"; ultraBull = momBullD; ultraHalfSize = true; }
+        else if (_momAdxFloorD <= adxV && momBearD === minSig - MOM_SOFT_BAND) { ultraSig = "MOM↓"; ultraBear = momBearD; ultraHalfSize = true; }
       }
     }
   }
@@ -704,7 +714,7 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
     trend: trendLabel,
     emaRsiSig, megaSig,
     synapse7Sig, synapse7Bull, synapse7Bear, synapse7Subs,
-    ultraSig, ultraBull, ultraBear, ultraSigs16, ultraMinSig,
+    ultraSig, ultraBull, ultraBear, ultraSigs16, ultraMinSig, ultraHalfSize,
     synapseTSig: ultraSig,
     scaleUp, scaleDn,   // direktni 6Sc rezultati za badge display
   };
@@ -1055,23 +1065,36 @@ function buildPortfolioStats(pid) {
 
   // ── WR by entry mode (PBK / MOM) ─────────────────────────────────────────────
   // Traži MOM/PBK u exit Notes-u (novi format) ili u entry Notes-u istog simbola (stari format)
+  // 08.09.: entryMode sad može nositi "-SOFT" sufiks (ADX/MOM soft-zone ulaz, vidi bot.js
+  // analyzeUltra) — regex hvata bazni mod ODVOJENO od sufiksa da PBK/MOM bucketi ostanu
+  // ispravni (stari exact "| MOM |" match bi soft ulaze tiho gurnuo u UNK, isti obrazac
+  // duplikacije/parsing buga kao raniji _parseTradeCsv/buildPortfolioStats dedup slučaj).
   const modeStats = { PBK: { wins: 0, losses: 0 }, MOM: { wins: 0, losses: 0 }, UNK: { wins: 0, losses: 0 } };
+  const softStats = { soft: { wins: 0, losses: 0 }, normal: { wins: 0, losses: 0 } };  // NEW 08.09.: soft-zone vs normal WR
+  const _modeRe = /\|\s*(MOM|PBK)(-SOFT)?\s*\|/;
   // Build lookup: symbol → entryMode iz entry redova (za stari CSV bez entryMode u exit Notes)
   const entryModeBySymbol = {};
   for (const r of entries) {
     const notes = r["Notes"] || "";
-    if (notes.includes("| MOM |")) entryModeBySymbol[r["Symbol"]] = "MOM";
-    else if (notes.includes("| PBK |")) entryModeBySymbol[r["Symbol"]] = "PBK";
+    const mm = notes.match(_modeRe);
+    if (mm) entryModeBySymbol[r["Symbol"]] = mm[1] + (mm[2] ? "-SOFT" : "");
   }
   for (const r of exits) {
     const notes = r["Notes"] || "";
     // Novo: entryMode je u exit Notes-u direktno
-    let m = notes.includes("| MOM |") ? "MOM" : notes.includes("| PBK |") ? "PBK" : null;
+    const mm = notes.match(_modeRe);
+    let raw = mm ? mm[1] + (mm[2] ? "-SOFT" : "") : null;
     // Fallback: lookup iz entry reda za isti simbol (stari CSV)
-    if (!m) m = entryModeBySymbol[r["Symbol"]] || "UNK";
+    if (!raw) raw = entryModeBySymbol[r["Symbol"]] || null;
+    const m      = raw ? raw.split("-")[0] : "UNK";
+    const isSoft = raw ? raw.includes("-SOFT") : false;
     const pnl = parseFloat(r["Net P&L"] || 0);
     if (pnl >= 0) modeStats[m].wins++;
     else          modeStats[m].losses++;
+    if (raw) {
+      if (pnl >= 0) softStats[isSoft ? "soft" : "normal"].wins++;
+      else          softStats[isSoft ? "soft" : "normal"].losses++;
+    }
   }
 
   // ── Profit Factor (sve closed trades) ────────────────────────────────────────
@@ -1100,7 +1123,7 @@ function buildPortfolioStats(pid) {
     pnlDay, pnlWeek, pnlMonth, pnlYear, tradesDay, tradesWeek, tradesMonth, tradesYear,
     phase2Exits, phase2Wins, phase2Losses, phase2Pnl, phase2WR, phase2PF,
     maxDrawdownPct, currentDrawdownPct,
-    modeStats, profitFactor, avgDurationMin };
+    modeStats, softStats, profitFactor, avgDurationMin };
 }
 
 async function fetchLivePrices(symbols) {
@@ -1172,9 +1195,12 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
           <div class="pos-header">
             <span class="symbol">${p.symbol}</span>
             <span class="badge ${isLong ? "badge-long" : "badge-short"}">${p.side}</span>
-            ${p.entryMode === "MOM"
+            ${(p.entryMode || "").startsWith("MOM")
               ? '<span style="background:rgba(251,146,60,0.15);border:1px solid #f97316;border-radius:20px;padding:2px 8px;font-size:10px;color:#f97316;font-weight:700">⚡ MOM</span>'
               : '<span style="background:rgba(96,165,250,0.15);border:1px solid #60a5fa;border-radius:20px;padding:2px 8px;font-size:10px;color:#60a5fa;font-weight:700">↩ PBK</span>'}
+            ${(p.entryMode || "").includes("-SOFT")
+              ? '<span title="ADX ili momentum score je bio tek malo ispod praga na ulazu — otvoreno na pola position size-a" style="background:rgba(217,119,6,0.15);border:1px solid #d97706;border-radius:20px;padding:2px 8px;font-size:10px;color:#d97706;font-weight:700">½ RIZIK</span>'
+              : ''}
             <span class="badge badge-paper">${p.mode}</span>
             ${p.pyramidCount > 1 ? `<span title="Piramidna pozicija — ${p.pyramidCount} spojenih uloga (prosječni entry), max 4" style="background:rgba(245,158,11,0.15);border:1px solid #f59e0b;border-radius:20px;padding:2px 8px;font-size:10px;color:#f59e0b;font-weight:700">🔺 Pyramid ${p.pyramidCount}/4</span>` : ''}
             <span id="lp-${posUid}" style="margin-left:auto;font-size:13px;font-weight:700;color:var(--text-muted)">—</span>
@@ -2000,6 +2026,12 @@ window.toggleScanFilter = function(btn) {
     const momWR  = momT > 0 ? Math.round(p2.modeStats.MOM.wins / momT * 100) : null;
     const pbkCol = pbkWR === null ? "#9ca3af" : pbkWR >= 50 ? "#059669" : pbkWR >= 35 ? "#d97706" : "#dc2626";
     const momCol = momWR === null ? "#9ca3af" : momWR >= 50 ? "#059669" : momWR >= 35 ? "#d97706" : "#dc2626";
+    // ADX/MOM soft-zone WR (08.09.) — provjera radi li omekšani gate ili samo dodaje gubitke
+    const softT   = p2.softStats.soft.wins + p2.softStats.soft.losses;
+    const normT   = p2.softStats.normal.wins + p2.softStats.normal.losses;
+    const softWR  = softT > 0 ? Math.round(p2.softStats.soft.wins / softT * 100) : null;
+    const normWR  = normT > 0 ? Math.round(p2.softStats.normal.wins / normT * 100) : null;
+    const softCol = softWR === null ? "#9ca3af" : softWR >= 50 ? "#059669" : softWR >= 35 ? "#d97706" : "#dc2626";
 
     return `
   <div style="background:#1f2937;border:1px solid #374151;border-radius:12px;padding:16px 20px;margin-bottom:16px">
@@ -2055,6 +2087,12 @@ window.toggleScanFilter = function(btn) {
         <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">Momentum WR</div>
         <div style="font-size:22px;font-weight:800;color:${momCol}">${momWR !== null ? momWR+"%" : "—"}</div>
         <div style="font-size:11px;color:#9ca3af">15m MOM · ${momT} tradova</div>
+      </div>
+
+      <div style="background:#111827;border:1px solid #d9770655;border-radius:8px;padding:12px;text-align:center" title="ADX ili momentum score je bio tek malo ispod praga na ulazu — bot je otvorio na pola position size-a umjesto da blokira (uvedeno 08.09.)">
+        <div style="font-size:10px;color:#d97706;margin-bottom:4px;text-transform:uppercase">½ RIZIK WR</div>
+        <div style="font-size:22px;font-weight:800;color:${softCol}">${softWR !== null ? softWR+"%" : "—"}</div>
+        <div style="font-size:11px;color:#9ca3af">soft-zona · ${softT} tradova ${normWR !== null ? "(normalno " + normWR + "%)" : ""}</div>
       </div>
 
     </div>
@@ -2588,10 +2626,17 @@ function mandatoryBoxes(s) {
   // "info only, više nije obavezan gate" (rsiLongOk/rsiShortOk hardkodirani na true, scaleUp/
   // scaleDn se koriste samo za dijagnostički tekst) — maknuti odavde 26.08. da dashboard ne
   // prikazuje zavaravajući ✓/✗ "BLOKIRAN" status za nešto što stvarno ne blokira ulaz.
-  const adxOk  = adxNum >= 22;
-  const adxCol = adxOk ? '#059669' : '#dc2626';
-  const adxBg  = adxOk ? '#0d3d26' : '#3d0d0d';
-  const adxTip = 'ADX ' + adxNum.toFixed(1) + (adxOk ? ' ≥ 22 ✓ — jak trend' : ' < 22 ✗ — slab trend, nema ulaza');
+  // 08.09.: brojke uskladjene s pravim bot.js pragovima (ADX_MIN=20, ne 22) + treće stanje
+  // "soft zona" (žuto) — bot ovdje ne blokira nego ulazi na pola rizika (vidi analyzeUltra).
+  const _adxSoftFloorD = Math.max(ADX_MIN - ADX_SOFT_BAND, ADX_SOFT_FLOOR);
+  const adxOk   = adxNum >= ADX_MIN;
+  const adxSoft = !adxOk && adxNum >= _adxSoftFloorD;
+  const adxCol  = adxOk ? '#059669' : adxSoft ? '#d97706' : '#dc2626';
+  const adxBg   = adxOk ? '#0d3d26' : adxSoft ? '#3d2c0d' : '#3d0d0d';
+  const adxTip  = 'ADX ' + adxNum.toFixed(1) + (
+    adxOk   ? ' ≥ ' + ADX_MIN + ' ✓ — jak trend' :
+    adxSoft ? ' < ' + ADX_MIN + ' ali ≥ ' + _adxSoftFloorD.toFixed(0) + ' — SOFT ZONA: ulaz dopušten na pola rizika' :
+              ' < ' + _adxSoftFloorD.toFixed(0) + ' (soft pod) ✗ — preslab trend, nema ulaza');
 
   function badge(label, col, bg, tip) {
     return '<span title="' + tip + '" style="display:inline-flex;flex-direction:column;align-items:center;background:' + bg +
@@ -2599,7 +2644,7 @@ function mandatoryBoxes(s) {
       label + '</span>';
   }
 
-  return badge('ADX', adxCol, adxBg, adxTip);
+  return badge(adxSoft ? 'ADX ½' : 'ADX', adxCol, adxBg, adxTip);
 }
 
 function sigBoxes(sigs, symbol) {
@@ -2671,18 +2716,24 @@ function statusBox(s) {
       '</div>';
   }
 
+  // ADX/MOM soft-zone (08.09.) — bot bi ovaj ulaz izvršio na pola position size-a.
+  // Prikazuje se kao žuti tag na svim aktivnim signal-boxovima ispod.
+  const halfTag = s.ultraHalfSize
+    ? '<span title="ADX ili momentum score tek malo ispod praga — bot ulazi na POLA rizika (position size ×0.5)" style="display:inline-block;margin-left:6px;background:rgba(217,119,6,0.15);border:1px solid #d97706;border-radius:20px;padding:1px 6px;font-size:9px;color:#d97706;font-weight:700;vertical-align:middle">½ RIZIK</span>'
+    : '';
+
   // Aktivan signal — bot ulazi odmah na close svjećice
   if (sig === "LONG") {
-    return '<div style="background:rgba(5,150,105,0.1);border:1px solid ' + (s.volLow ? '#f59e0b' : '#059669') + ';border-radius:8px;padding:8px 10px">' +
-      '<div style="font-size:11px;color:#059669;font-weight:700;margin-bottom:4px">' + (s.volLow ? '⚠️ SIGNAL (vol nizak)' : '✅ SIGNAL AKTIVIRAN') + '</div>' +
+    return '<div style="background:rgba(5,150,105,0.1);border:1px solid ' + (s.volLow ? '#f59e0b' : s.ultraHalfSize ? '#d97706' : '#059669') + ';border-radius:8px;padding:8px 10px">' +
+      '<div style="font-size:11px;color:#059669;font-weight:700;margin-bottom:4px">' + (s.volLow ? '⚠️ SIGNAL (vol nizak)' : '✅ SIGNAL AKTIVIRAN') + halfTag + '</div>' +
       '<div style="font-size:13px;font-weight:700;color:#059669">▲ LONG</div>' +
       '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Ulaz odmah @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBull||0) + '/8</b></div>' +
       volWarning +
       '</div>';
   }
   if (sig === "SHORT") {
-    return '<div style="background:rgba(220,38,38,0.1);border:1px solid ' + (s.volLow ? '#f59e0b' : '#dc2626') + ';border-radius:8px;padding:8px 10px">' +
-      '<div style="font-size:11px;color:#dc2626;font-weight:700;margin-bottom:4px">' + (s.volLow ? '⚠️ SIGNAL (vol nizak)' : '✅ SIGNAL AKTIVIRAN') + '</div>' +
+    return '<div style="background:rgba(220,38,38,0.1);border:1px solid ' + (s.volLow ? '#f59e0b' : s.ultraHalfSize ? '#d97706' : '#dc2626') + ';border-radius:8px;padding:8px 10px">' +
+      '<div style="font-size:11px;color:#dc2626;font-weight:700;margin-bottom:4px">' + (s.volLow ? '⚠️ SIGNAL (vol nizak)' : '✅ SIGNAL AKTIVIRAN') + halfTag + '</div>' +
       '<div style="font-size:13px;font-weight:700;color:#dc2626">▼ SHORT</div>' +
       '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Ulaz odmah @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBear||0) + '/8</b></div>' +
       volWarning +
@@ -2691,16 +2742,16 @@ function statusBox(s) {
   if (sig === "SETUP↑") return '<span style="color:#d97706;font-size:12px">◈ SETUP ↑ &nbsp;<span style="color:#94a3b8;font-size:11px">(' + (s.ultraBull||0) + '/5)</span></span>' + (s.volLow ? '<br><span style="color:#f59e0b;font-size:10px">⚠️ VOL ' + s.volRatio + 'x</span>' : '');
   if (sig === "SETUP↓") return '<span style="color:#d97706;font-size:12px">◈ SETUP ↓ &nbsp;<span style="color:#94a3b8;font-size:11px">(' + (s.ultraBear||0) + '/5)</span></span>' + (s.volLow ? '<br><span style="color:#f59e0b;font-size:10px">⚠️ VOL ' + s.volRatio + 'x</span>' : '');
   if (sig === "MOM↑") {
-    return '<div style="background:rgba(59,130,246,0.1);border:1px solid #3b82f6;border-radius:8px;padding:8px 10px">' +
-      '<div style="font-size:11px;color:#3b82f6;font-weight:700;margin-bottom:4px">🚀 MOMENTUM LONG</div>' +
+    return '<div style="background:rgba(59,130,246,0.1);border:1px solid ' + (s.ultraHalfSize ? '#d97706' : '#3b82f6') + ';border-radius:8px;padding:8px 10px">' +
+      '<div style="font-size:11px;color:#3b82f6;font-weight:700;margin-bottom:4px">🚀 MOMENTUM LONG' + halfTag + '</div>' +
       '<div style="font-size:13px;font-weight:700;color:#3b82f6">▲ LONG</div>' +
       '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Breakout ulaz @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBull||0) + '/8</b></div>' +
       volWarning +
       '</div>';
   }
   if (sig === "MOM↓") {
-    return '<div style="background:rgba(139,92,246,0.1);border:1px solid #8b5cf6;border-radius:8px;padding:8px 10px">' +
-      '<div style="font-size:11px;color:#8b5cf6;font-weight:700;margin-bottom:4px">🚀 MOMENTUM SHORT</div>' +
+    return '<div style="background:rgba(139,92,246,0.1);border:1px solid ' + (s.ultraHalfSize ? '#d97706' : '#8b5cf6') + ';border-radius:8px;padding:8px 10px">' +
+      '<div style="font-size:11px;color:#8b5cf6;font-weight:700;margin-bottom:4px">🚀 MOMENTUM SHORT' + halfTag + '</div>' +
       '<div style="font-size:13px;font-weight:700;color:#8b5cf6">▼ SHORT</div>' +
       '<div style="font-size:11px;color:#9ca3af;margin-top:3px">Breakdown ulaz @ <b style="color:#f9fafb">' + fmtLive(s.price) + '</b> · Score: <b>' + (s.ultraBear||0) + '/8</b></div>' +
       volWarning +

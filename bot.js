@@ -6429,9 +6429,15 @@ export async function run() {
         }
 
         // ── Open Interest — potvrda signala ────────────────────────────────────
+        // 08.09.: `oi` mora biti deklariran OVDJE (ne unutar donjeg if-bloka) — bio je
+        // block-scoped pa je squeeze-detection kod niže (LSR sekcija) pucao s "oi is not
+        // defined" ReferenceError-om čim bi retail sentiment bio ekstremno suprotan signalu,
+        // tiho spriječivši inače valjan ulaz (uhvaćeno na COINUSDT SHORT-u koji je prošao
+        // sve gateove pa se srušio ovdje).
         let _oiSizeMult = 1.0;
+        let oi = null;
         if (pDef.strategy === "synapse_t") {
-          const oi = await getOiChange(symbol);
+          oi = await getOiChange(symbol);
           if (oi.falling && signal === "LONG") {
             console.log(`  📉 [OI] ${symbol} — OI pada ${oi.changePct.toFixed(1)}% → slabi reli, size ×0.7`);
             _oiSizeMult = 0.7;

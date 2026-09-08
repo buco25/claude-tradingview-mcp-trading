@@ -2619,6 +2619,11 @@ const SIG_COND_NEUT = [
   'Nema likvidnosnih zona u blizini',                     // 11. LHUNT
 ];
 
+// 08.09.: ADX/MOM soft-zone konstante injektirane iz bot.js (isti obrazac kao "_combos"
+// gore) — ovaj mandatoryBoxes je BROWSER JS (unutar <script> bloka), ne server-side Node,
+// pa ne moze koristiti ES import izravno. Bez ovoga: "ReferenceError: ADX_MIN is not defined".
+const ADX_MIN = ${ADX_MIN}, ADX_SOFT_BAND = ${ADX_SOFT_BAND}, ADX_SOFT_FLOOR = ${ADX_SOFT_FLOOR};
+
 function mandatoryBoxes(s) {
   const adxNum  = parseFloat(s.adx) || 0;
 

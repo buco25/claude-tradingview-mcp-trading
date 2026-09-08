@@ -97,6 +97,15 @@ const LONG_ONLY      = false;         // SHORT dozvoljeni kada BTC regime BEAR/N
 const ADX_MIN        = 20;            // ADX prag — bazni (dinamički raste ako WR pada)
 const SL_COOLDOWN_MS = 4 * 60 * 60 * 1000;  // 4h cooldown po simbolu nakon SL-a
 
+// ─── ADX/MOM "soft zone" — 08.09.2026, na korisnikov zahtjev ─────────────────
+// Umjesto tvrdog blokiranja kad ADX/momentum score padnu tek malo ispod praga
+// koji smo dosad pratili, dopusti ulaz ali s POLA rizika (position size ×0.5).
+// Ispod SOFT_FLOOR-a i dalje potpuni block (SWEEP/RANGE ostaju netaknuti —
+// to je zaseban strategija za rangeing tržišta, ne "omekšani" trend gate).
+const ADX_SOFT_BAND   = 5;   // koliko ispod effectiveAdx ulazimo u soft zonu
+const ADX_SOFT_FLOOR  = 12;  // apsolutni pod — ispod ovoga nema ulaza uopće
+const MOM_SOFT_BAND   = 1;   // koliko ispod MOM_MIN (score) dopuštamo soft ulaz
+
 // ─── Trailing stop — aktivira se nakon dovoljnog profita ─────────────────────
 // Problem: 1.5% aktivacija + 0.8% gap → exit na samo +0.7% kod prvog odskok (XRP +$0.88)
 // Fix: širi gap (1.5%) i kasnija aktivacija (2.5%) — preživljava normalne 1-2% skokove
@@ -2963,6 +2972,8 @@ function analyzeUltra(candles, cfg) {
 
   // 1. ADX ≥ effectiveAdx — trend strategije traže trend. Ako ga NEMA,
   //    market je u zoni/fakeout modu → TraderaEdge router: SWEEP i RANGE strategije
+  const _adxSoftFloor = Math.max(effectiveAdx - ADX_SOFT_BAND, ADX_SOFT_FLOOR);
+  let _adxSoft = false;  // true = ADX ispod praga ali unutar soft zone → half-size umjesto blocka
   if (adx < effectiveAdx) {
 
     // ── STRATEGIJA: LIQUIDITY HUNT (sweep + reclaim HTF zone) ────────────────
@@ -3026,8 +3037,14 @@ function analyzeUltra(candles, cfg) {
       }
     }
 
-    return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
-      reason: `ADX ${adx.toFixed(1)} < ${effectiveAdx} — zona bez ruba/sweepa, nema ulaza` };
+    if (adx < _adxSoftFloor) {
+      return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
+        reason: `ADX ${adx.toFixed(1)} < ${_adxSoftFloor.toFixed(0)} (soft floor) — zona bez ruba/sweepa, nema ulaza` };
+    }
+    // Soft zone: ADX ispod effectiveAdx ali unutar ADX_SOFT_BAND — ne blokiraj,
+    // nastavi na normalnu pullback/momentum logiku, ali označi za half-size dolje.
+    _adxSoft = true;
+    console.log(`  🟡 [ADX-SOFT] ${_sym} — ADX ${adx.toFixed(1)} < ${effectiveAdx} ali ≥ ${_adxSoftFloor.toFixed(0)} → dopušteno, pola rizika`);
   }
 
   // 6-Scale info (nije više obavezan gate, koristi se samo za _strongTrend i reason string)
@@ -3092,8 +3109,8 @@ function analyzeUltra(candles, cfg) {
     }
     const sigMask = sigs.reduce((mask, v, i) => v === 1 ? mask | (1 << i) : mask, 0);
     return { price, signal: "LONG", bullScore, bearScore, sigMask,
-      nearSup, nearRes, vwap: vwapVal,
-      reason: `ULTRA LONG ↑${bullCnt}/8 ADX:${adx.toFixed(0)}✓ RSI:${rsi.toFixed(0)}✓${bonusTag}${_newSigsBull?" "+_newSigsBull:""}` };
+      nearSup, nearRes, vwap: vwapVal, _halfSize: _adxSoft,
+      reason: `ULTRA LONG ↑${bullCnt}/8 ADX:${adx.toFixed(0)}${_adxSoft?"⚠soft":"✓"} RSI:${rsi.toFixed(0)}✓${bonusTag}${_newSigsBull?" "+_newSigsBull:""}${_adxSoft?" [POLA RIZIKA-ADX]":""}` };
   }
   if (!LONG_ONLY && bearScore >= MIN_CONFIRM_SHORT && rsiShortOk) {
     // Zone confluence — trend SHORT samo uz otpor (15m pivot res ili HTF zona ≤1.5% iznad)
@@ -3106,8 +3123,8 @@ function analyzeUltra(candles, cfg) {
       }
     }
     return { price, signal: "SHORT", bullScore, bearScore,
-      nearSup, nearRes, vwap: vwapVal,
-      reason: `ULTRA SHORT ↓${bearCnt}/8 ADX:${adx.toFixed(0)}✓ RSI:${rsi.toFixed(0)}✓${bonusTag}${_newSigsBear?" "+_newSigsBear:""}` };
+      nearSup, nearRes, vwap: vwapVal, _halfSize: _adxSoft,
+      reason: `ULTRA SHORT ↓${bearCnt}/8 ADX:${adx.toFixed(0)}${_adxSoft?"⚠soft":"✓"} RSI:${rsi.toFixed(0)}✓${bonusTag}${_newSigsBear?" "+_newSigsBear:""}${_adxSoft?" [POLA RIZIKA-ADX]":""}` };
   }
   if (LONG_ONLY && bearScore >= MIN_CONFIRM && rsiShortOk) {
     return { price, signal: "NEUTRAL", bullScore, bearScore,
@@ -3145,16 +3162,34 @@ function analyzeUltra(candles, cfg) {
 
   // Za momentum: bez 6SC gate (breakout sam potvrđuje smjer), ADX ≥ 20
   const MOM_ADX_MIN = 20;
+  // Ako je _adxSoft već aktivan (glavni ADX gate gore propustio kroz soft zonu),
+  // koristi isti omekšani pod i ovdje — inače bi "ADX ≥ 20" tvrdi zahtjev odmah
+  // presjekao momentum granu čim je stvarni ADX ispod baze.
+  const _momAdxFloor = _adxSoft ? _adxSoftFloor : MOM_ADX_MIN;
 
-  if (momBull >= MOM_MIN && rsiLongOk && adx >= MOM_ADX_MIN) {
+  if (momBull >= MOM_MIN && rsiLongOk && adx >= _momAdxFloor) {
     return { price, signal: "LONG", bullScore: momBull, bearScore: momBear,
-      nearSup, nearRes, isMomentum: true, vwap: vwapVal,
-      reason: `MOMENTUM LONG ↑${momBullBase}/8 | ADX:${adx.toFixed(0)}✓ RSI:${rsi.toFixed(0)}✓${_strongTrend?" [STRONG]":""}${sigRsiDiv===1?" RDIV✓":""}${sigMktStr===1?" MSTR✓":""}${sigFVG===1?" FVG✓":""}` };
+      nearSup, nearRes, isMomentum: true, vwap: vwapVal, _halfSize: _adxSoft,
+      reason: `MOMENTUM LONG ↑${momBullBase}/8 | ADX:${adx.toFixed(0)}${_adxSoft?"⚠soft":"✓"} RSI:${rsi.toFixed(0)}✓${_strongTrend?" [STRONG]":""}${sigRsiDiv===1?" RDIV✓":""}${sigMktStr===1?" MSTR✓":""}${sigFVG===1?" FVG✓":""}${_adxSoft?" [POLA RIZIKA-ADX]":""}` };
   }
-  if (!LONG_ONLY && momBear >= MOM_MIN && rsiShortOk && adx >= MOM_ADX_MIN) {
+  if (!LONG_ONLY && momBear >= MOM_MIN && rsiShortOk && adx >= _momAdxFloor) {
     return { price, signal: "SHORT", bullScore: momBull, bearScore: momBear,
-      nearSup, nearRes, isMomentum: true, vwap: vwapVal,
-      reason: `MOMENTUM SHORT ↓${momBearBase}/8 | ADX:${adx.toFixed(0)}✓ RSI:${rsi.toFixed(0)}✓${_strongTrendS?" [STRONG]":""}${sigRsiDiv===-1?" RDIV✓":""}${sigMktStr===-1?" MSTR✓":""}${sigFVG===-1?" FVG✓":""}` };
+      nearSup, nearRes, isMomentum: true, vwap: vwapVal, _halfSize: _adxSoft,
+      reason: `MOMENTUM SHORT ↓${momBearBase}/8 | ADX:${adx.toFixed(0)}${_adxSoft?"⚠soft":"✓"} RSI:${rsi.toFixed(0)}✓${_strongTrendS?" [STRONG]":""}${sigRsiDiv===-1?" RDIV✓":""}${sigMktStr===-1?" MSTR✓":""}${sigFVG===-1?" FVG✓":""}${_adxSoft?" [POLA RIZIKA-ADX]":""}` };
+  }
+
+  // ── MOM soft zone (08.09.2026) — score tek 1 ispod MOM_MIN → ne blokiraj,
+  // uđi na pola rizika umjesto potpunog blocka. Kombinira se s ADX soft (max,
+  // ne zbraja se — i dalje samo ×0.5, ne ×0.25, vidi position sizing).
+  if (momBull === MOM_MIN - MOM_SOFT_BAND && rsiLongOk && adx >= _momAdxFloor) {
+    return { price, signal: "LONG", bullScore: momBull, bearScore: momBear,
+      nearSup, nearRes, isMomentum: true, vwap: vwapVal, _halfSize: true,
+      reason: `MOMENTUM LONG (SOFT) ↑${momBullBase}/8, 1 ispod praga ${MOM_MIN}/8 | ADX:${adx.toFixed(0)}${_adxSoft?"⚠soft":"✓"} RSI:${rsi.toFixed(0)}✓ [POLA RIZIKA-MOM]` };
+  }
+  if (!LONG_ONLY && momBear === MOM_MIN - MOM_SOFT_BAND && rsiShortOk && adx >= _momAdxFloor) {
+    return { price, signal: "SHORT", bullScore: momBull, bearScore: momBear,
+      nearSup, nearRes, isMomentum: true, vwap: vwapVal, _halfSize: true,
+      reason: `MOMENTUM SHORT (SOFT) ↓${momBearBase}/8, 1 ispod praga ${MOM_MIN}/8 | ADX:${adx.toFixed(0)}${_adxSoft?"⚠soft":"✓"} RSI:${rsi.toFixed(0)}✓ [POLA RIZIKA-MOM]` };
   }
 
   // Dijagnoza zašto nema signala. Napomena: "/N" ispod prati stvarnu duljinu comba
@@ -6713,8 +6748,13 @@ export async function run() {
         // — inače stack multiplikatora spusti rizik daleko ispod RISK_PCT_MIN
         const _rawMult   = (atrTrend?.sizeMult ?? 1) * (_oiSizeMult ?? 1) * (_vwapSizeMult ?? 1) * (_stableSizeMult ?? 1) * (_macroSizeMult ?? 1);
         const _totalMult = Math.max(_rawMult, 0.5) * (_squeezeMult ?? 1) * (_whaleMult ?? 1);  // squeeze/whale idu iznad floora
-        let tradeSize  = (riskAmount / (slPct / 100)) * _totalMult;
+        // ADX/MOM soft-zone ulaz (08.09.2026) — signal je propušten ispod praga koji smo
+        // dosad tvrdo pratili → pola rizika umjesto punog, primjenjuje se NAKON floora
+        // gore (ne kombinira se s njim, samo halvira konačan iznos).
+        const _softSizeMult = result._halfSize ? 0.5 : 1;
+        let tradeSize  = (riskAmount / (slPct / 100)) * _totalMult * _softSizeMult;
         if (_rawMult < 1) console.log(`  ⚖️  [MULT] ${symbol} — kombinirani mult ×${_rawMult.toFixed(2)}${_rawMult < 0.5 ? " → floor ×0.50" : ""}`);
+        if (result._halfSize) console.log(`  🟡 [SOFT] ${symbol} — ADX/MOM soft-zone ulaz → pozicija ×0.5 (pola rizika)`);
         // Minimum: Bitget minTradeNum + $40 notional floor (margina ≥ ~$1 na 33-52x)
         // — ispod toga fee pojede dobit, a nalozi < min qty padaju s 45110/45111
         const _minQtyNotional = (_minTradeNum[symbol] ?? 0) * price * 1.05;
@@ -6757,7 +6797,7 @@ export async function run() {
         const timestamp = new Date().toISOString();
         const orderId   = `${isLive ? "LIVE" : "PAPER"}-${Date.now()}`;
         const mode      = isLive ? (BITGET_DEMO ? "DEMO" : "LIVE") : "PAPER";
-        const entry = { symbol, signal, price, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode, sigMask: result.sigMask ?? null, entryMode: result.isMomentum ? "MOM" : "PBK", signalStrength, vipSlot: result._vipSlot === true };
+        const entry = { symbol, signal, price, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode, sigMask: result.sigMask ?? null, entryMode: (result.isMomentum ? "MOM" : "PBK") + (result._halfSize ? "-SOFT" : ""), signalStrength, vipSlot: result._vipSlot === true };
 
         const _strengthEmoji = signalStrength === "strong" ? "💪" : "📊";
         const _rrLabel = `RR 1:${(tpPct/slPct).toFixed(1)}`;

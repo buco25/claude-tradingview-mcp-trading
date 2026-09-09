@@ -1399,12 +1399,40 @@ export async function getLongShortRatio(symbol = "BTCUSDT") {
     const url = `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=1h&limit=2`;
     const r = await fetch(url);
     const d = await r.json();
-    if (!Array.isArray(d) || d.length === 0) return null;
+    if (!Array.isArray(d) || d.length === 0) return await getLongShortRatioBybit(symbol);
     const latest = d[d.length - 1];
     const prev   = d.length > 1 ? d[d.length - 2] : null;
     const longRatio  = parseFloat(latest.longAccount) * 100;
     const shortRatio = parseFloat(latest.shortAccount) * 100;
     const prevLong   = prev ? parseFloat(prev.longAccount) * 100 : longRatio;
+    const trend = longRatio > prevLong + 1 ? "RASTE" : longRatio < prevLong - 1 ? "PADA" : "STABILAN";
+    const data = { longRatio: longRatio.toFixed(1), shortRatio: shortRatio.toFixed(1), trend };
+    _lsCache[symbol] = { data, ts: Date.now() };
+    return data;
+  } catch (e) {
+    return await getLongShortRatioBybit(symbol);
+  }
+}
+
+// 09.09.: Binance nema xStock tickere (TSLAUSDT/COINUSDT/SPCXUSDT/...) uopće, pa je
+// squeeze/kontrarian detekcija (retail LSR ekstrem + OI potvrda) bila potpuno slijepa za
+// dionice — te su tri sve odjednom izgubile isti dan bez ikakve retail-sentiment provjere
+// koju kripto dobiva. Bitget-ov vlastiti account-long-short endpoint postoji ali vraća
+// "data is empty" baš za ta tanka imena (radi za BTC/MSTR/XAU). Provjereno da Bybit ima
+// iste xStock perpetuale s realnim volumenom (SPCXUSDT $88M/24h) i radnim account-ratio
+// endpointom — koristimo ga kao fallback samo kad Binance nema podatak.
+async function getLongShortRatioBybit(symbol) {
+  try {
+    const url = `https://api.bybit.com/v5/market/account-ratio?category=linear&symbol=${symbol}&period=1h&limit=2`;
+    const r = await fetch(url);
+    const d = await r.json();
+    const list = d?.result?.list;
+    if (!Array.isArray(list) || list.length === 0) return null;
+    const latest = list[0];   // Bybit vraća silazno (najnoviji prvi) — obrnuto od Binancea
+    const prev   = list.length > 1 ? list[1] : null;
+    const longRatio  = parseFloat(latest.buyRatio) * 100;
+    const shortRatio = parseFloat(latest.sellRatio) * 100;
+    const prevLong   = prev ? parseFloat(prev.buyRatio) * 100 : longRatio;
     const trend = longRatio > prevLong + 1 ? "RASTE" : longRatio < prevLong - 1 ? "PADA" : "STABILAN";
     const data = { longRatio: longRatio.toFixed(1), shortRatio: shortRatio.toFixed(1), trend };
     _lsCache[symbol] = { data, ts: Date.now() };

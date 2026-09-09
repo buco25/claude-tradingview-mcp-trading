@@ -78,6 +78,11 @@ const SYMBOL_SECTORS = {
   "MSTRUSDT":   "STOCK_CRYPTO", "COINUSDT": "STOCK_CRYPTO", "HOODUSDT": "STOCK_CRYPTO",
   "GMEUSDT":    "STOCK_MEME", "AMCUSDT": "STOCK_MEME",
   "SPCXUSDT":   "STOCK_SPACE",
+  // 09.09.: 10 novih dionica, provjereno na Bitgetu (likvidnost) + Bybitu (LSR fallback)
+  "AAPLUSDT":   "STOCK_TECH", "AMZNUSDT": "STOCK_TECH", "GOOGLUSDT": "STOCK_TECH",
+  "METAUSDT":   "STOCK_TECH", "MSFTUSDT": "STOCK_TECH",
+  "AMDUSDT":    "STOCK_CHIP", "AVGOUSDT": "STOCK_CHIP", "ARMUSDT": "STOCK_CHIP",
+  "SPYUSDT":    "STOCK_INDEX", "QQQUSDT": "STOCK_INDEX",
 };
 const MAX_PER_SECTOR = 2;  // max otvorenih pozicija istog sektora
 
@@ -194,6 +199,16 @@ export const SYMBOL_COMBOS = {
   "PLTRUSDT":   { sigIdx: TE_COMBO, minSig: 5 },
   "GMEUSDT":    { sigIdx: TE_COMBO, minSig: 5 },
   "AMCUSDT":    { sigIdx: TE_COMBO, minSig: 5 },
+  "AAPLUSDT":   { sigIdx: TE_COMBO, minSig: 5 },
+  "AMZNUSDT":   { sigIdx: TE_COMBO, minSig: 5 },
+  "GOOGLUSDT":  { sigIdx: TE_COMBO, minSig: 5 },
+  "METAUSDT":   { sigIdx: TE_COMBO, minSig: 5 },
+  "MSFTUSDT":   { sigIdx: TE_COMBO, minSig: 5 },
+  "AMDUSDT":    { sigIdx: TE_COMBO, minSig: 5 },
+  "AVGOUSDT":   { sigIdx: TE_COMBO, minSig: 5 },
+  "ARMUSDT":    { sigIdx: TE_COMBO, minSig: 5 },
+  "SPYUSDT":    { sigIdx: TE_COMBO, minSig: 5 },
+  "QQQUSDT":    { sigIdx: TE_COMBO, minSig: 5 },
 };
 
 // ─── Ekonomski kalendar ───────────────────────────────────────────────────────

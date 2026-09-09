@@ -37,7 +37,17 @@
     "VIRTUALUSDT",
     "PAXGUSDT",
     "XAUUSDT",
-    "XAGUSDT"
+    "XAGUSDT",
+    "AAPLUSDT",
+    "AMZNUSDT",
+    "GOOGLUSDT",
+    "METAUSDT",
+    "MSFTUSDT",
+    "AMDUSDT",
+    "AVGOUSDT",
+    "ARMUSDT",
+    "SPYUSDT",
+    "QQQUSDT"
   ],
   "portfolio_timeframes": {
     "synapse_t": "15m"

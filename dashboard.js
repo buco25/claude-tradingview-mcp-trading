@@ -1542,12 +1542,13 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="stat-label">Win Rate <span style="font-size:10px;color:#9ca3af">(Bitget live)</span></div>
       <div class="stat-value" id="bitget-wr" style="color:#8b5cf6">…</div>
       <div class="stat-sub" id="bitget-wr-sub" style="color:#9ca3af"></div>
+      <div class="stat-sub" id="bitget-wr-class" style="color:#9ca3af"></div>
       <div class="stat-sub">CSV: ${s.winRate !== null ? s.winRate + "%" : "—"} (${s.wins.length}W/${s.losses.length}L)</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Otvoreno</div>
       <div class="stat-value" style="color:#d97706">${positions.length}<span style="font-size:14px;color:#6b7280">/${MAX_OPEN_CRYPTO + MAX_OPEN_STOCKS}</span></div>
-      <div class="stat-sub">max ${MAX_OPEN_CRYPTO} kripto + ${MAX_OPEN_STOCKS} dionice</div>
+      <div class="stat-sub">${positions.filter(p => !isStockSym(p.symbol)).length} kripto + ${positions.filter(p => isStockSym(p.symbol)).length} dionice (max ${MAX_OPEN_CRYPTO}+${MAX_OPEN_STOCKS})</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Strategija</div>
@@ -3009,6 +3010,7 @@ setInterval(loadBitgetBalance, 30000);
 async function loadBitgetWR() {
   const el  = document.getElementById('bitget-wr');
   const sub = document.getElementById('bitget-wr-sub');
+  const cls = document.getElementById('bitget-wr-class');
   if (!el) return;
   try {
     const r = await fetch('/api/bitget-wr');
@@ -3018,6 +3020,12 @@ async function loadBitgetWR() {
       el.textContent = d.wr.toFixed(1) + '%';
       el.style.color = col;
       sub.textContent = d.wins + 'W / ' + d.losses + 'L · net ' + (d.netSum >= 0 ? '+' : '') + '$' + d.netSum;
+      if (cls) {
+        const cw = d.cryptoWr, sw = d.stockWr;
+        const cwTxt = cw && cw.total > 0 ? cw.wr.toFixed(0) + '% (' + cw.wins + 'W/' + cw.losses + 'L)' : '—';
+        const swTxt = sw && sw.total > 0 ? sw.wr.toFixed(0) + '% (' + sw.wins + 'W/' + sw.losses + 'L)' : '—';
+        cls.textContent = 'Kripto ' + cwTxt + ' · Dionice ' + swTxt;
+      }
     } else {
       el.textContent = 'N/A';
       sub.textContent = d.error || 'nema podataka';
@@ -3662,14 +3670,24 @@ const server = http.createServer(async (req, res) => {
       });
       const d = await r.json();
       const list   = d?.data?.list ?? [];
-      const pnls   = list.map(p => parseFloat(p.netProfit)).filter(v => isFinite(v));
+      const rows   = list.map(p => ({ sym: p.symbol, pnl: parseFloat(p.netProfit) })).filter(r => isFinite(r.pnl));
+      const pnls   = rows.map(r => r.pnl);
       const wins   = pnls.filter(v => v >= 0).length;
       const losses = pnls.filter(v => v < 0).length;
       const total  = wins + losses;
       const wr     = total > 0 ? wins / total * 100 : 0;
       const netSum = pnls.reduce((a, b) => a + b, 0);
+      // Razdvoji kripto/metali vs dionice (14.09.: korisnik trazio zaseban WR po klasi)
+      const stockRows  = rows.filter(r => isStockSym(r.sym));
+      const cryptoRows = rows.filter(r => !isStockSym(r.sym));
+      const _classWr = (rs) => {
+        const w = rs.filter(r => r.pnl >= 0).length, l = rs.filter(r => r.pnl < 0).length, t = w + l;
+        return { wins: w, losses: l, total: t, wr: t > 0 ? w / t * 100 : 0 };
+      };
+      const stockWr  = _classWr(stockRows);
+      const cryptoWr = _classWr(cryptoRows);
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: d.code === "00000", error: d.code !== "00000" ? `Bitget ${d.code}: ${d.msg}` : undefined, wins, losses, total, wr, netSum: parseFloat(netSum.toFixed(2)) }));
+      res.end(JSON.stringify({ ok: d.code === "00000", error: d.code !== "00000" ? `Bitget ${d.code}: ${d.msg}` : undefined, wins, losses, total, wr, netSum: parseFloat(netSum.toFixed(2)), cryptoWr, stockWr }));
     } catch (e) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: e.message, wins:0, losses:0, total:0, wr:0 }));

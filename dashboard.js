@@ -16,7 +16,8 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   getBtcWeeklyVsKey, getRelStrengthVsBtc, isStockSym, isMetalSym, getBtcChillMode, getBtcDailyVsInvalidation, getBtcWeeklyEmaPhase,
   getBtcWyckoffSignal, getWhaleDivergence, getBullMarketSupportBand,
   RISK_PCT, RISK_PCT_MIN, RISK_PCT_MAX,
-  ADX_MIN, ADX_SOFT_BAND, ADX_SOFT_FLOOR, MOM_SOFT_BAND, MOM_ADX_MIN } from "./bot.js";
+  ADX_MIN, ADX_SOFT_BAND, ADX_SOFT_FLOOR, MOM_SOFT_BAND, MOM_ADX_MIN,
+  MAX_OPEN_CRYPTO, MAX_OPEN_STOCKS } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -1516,7 +1517,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
       <div class="logo">⚡</div>
       <div>
         <div class="title">ULTRA · Future Bot</div>
-        <div class="subtitle"><span class="live-dot"></span>${ALL_SYMBOLS.length} simbola (kripto + dionice) · rizik ${RISK_PCT_MIN}-${RISK_PCT_MAX}% (baza ${RISK_PCT}%) · combo 5/8 signala · RR 1:2 (JAKO 1:3) · break-even @ +1R · max 6 kripto + 3 dionice</div>
+        <div class="subtitle"><span class="live-dot"></span>${ALL_SYMBOLS.length} simbola (kripto + dionice) · rizik ${RISK_PCT_MIN}-${RISK_PCT_MAX}% (baza ${RISK_PCT}%) · combo 5/8 signala · RR 1:2 (JAKO 1:3) · break-even @ +1R · max ${MAX_OPEN_CRYPTO} kripto + ${MAX_OPEN_STOCKS} dionice</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -1545,8 +1546,8 @@ function renderHtml(allStats, allPositions, hb, rules = {}) {
     </div>
     <div class="stat-card">
       <div class="stat-label">Otvoreno</div>
-      <div class="stat-value" style="color:#d97706">${positions.length}<span style="font-size:14px;color:#6b7280">/9</span></div>
-      <div class="stat-sub">max 6 kripto + 3 dionice</div>
+      <div class="stat-value" style="color:#d97706">${positions.length}<span style="font-size:14px;color:#6b7280">/${MAX_OPEN_CRYPTO + MAX_OPEN_STOCKS}</span></div>
+      <div class="stat-sub">max ${MAX_OPEN_CRYPTO} kripto + ${MAX_OPEN_STOCKS} dionice</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Strategija</div>

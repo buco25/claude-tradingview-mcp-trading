@@ -348,6 +348,7 @@ function getBtcDrawdownPct(price) {
 
 export async function getBtcRegimeExport() { return getBtcRegime(); }
 export async function getBtcRegime1HExport() { return getBtcRegime1H(); }
+export function getBtcDrawdownPctExport(price) { return getBtcDrawdownPct(price); }
 
 // ─── BTC 1H regime — brži od 4H ───────────────────────────────────────────────
 async function getBtcRegime1H() {

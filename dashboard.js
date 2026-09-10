@@ -15,6 +15,7 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   generateDailyReport, autoFixCsvFromBitget, SYMBOL_COMBOS, getBtcDailyPivots, getAccountTransfers, calcLiqZones,
   getBtcWeeklyVsKey, getRelStrengthVsBtc, isStockSym, isMetalSym, getBtcChillMode, getBtcDailyVsInvalidation, getBtcWeeklyEmaPhase,
   getBtcWyckoffSignal, getWhaleDivergence, getBullMarketSupportBand,
+  getBtcRegime1HExport, getBtcDrawdownPctExport,
   RISK_PCT, RISK_PCT_MIN, RISK_PCT_MAX,
   ADX_MIN, ADX_SOFT_BAND, ADX_SOFT_FLOOR, MOM_SOFT_BAND, MOM_ADX_MIN,
   MAX_OPEN_CRYPTO, MAX_OPEN_STOCKS } from "./bot.js";
@@ -1697,6 +1698,11 @@ window.toggleScanFilter = function(btn) {
         if (bm.chill) parts.push('<span style="color:#7dd3fc">😴 CHILL — BTC 24h raspon ' + (bm.rangePct ?? '?') + '% — samo 6/8+ setupi, size ×0.7</span>');
         if (bm.night) parts.push('<span style="color:#c4b5fd">🌙 NOĆNI BLOK — bez novih kripto ulaza do 08:00</span>');
         if (bm.weekend) parts.push('<span style="color:#8b96ab">📅 VIKEND — minSig +2, size ×0.5</span>');
+        if (bm.bounce) {
+          const _rsiTxt = bm.bounceRsi != null ? bm.bounceRsi.toFixed(1) : '?';
+          const _ddTxt = bm.bounceDd != null ? bm.bounceDd.toFixed(1) : '?';
+          parts.push('<span style="color:#fca5a5">🔄 BOUNCE MODE — BTC 1H RSI ' + _rsiTxt + ' / drawdown ' + _ddTxt + '% — svi kripto SHORT ulazi blokirani, traži se LONG odskok</span>');
+        }
         if (parts.length) { bmEl.innerHTML = '🤖 Režim bota: &nbsp;' + parts.join(' &nbsp;·&nbsp; '); bmEl.style.display = 'block'; }
         else { bmEl.innerHTML = '🤖 Režim bota: <span style="color:#34d399">✅ NORMALAN — svi sustavi aktivni</span>'; bmEl.style.display = 'block'; }
       }
@@ -4688,7 +4694,7 @@ const server = http.createServer(async (req, res) => {
         result.wyckoff = await getBtcWyckoffSignal();
       } catch {}
 
-      // Režim bota — CHILL / noćni blok / survival
+      // Režim bota — CHILL / noćni blok / survival / bounce mode
       try {
         const _ch = await getBtcChillMode();
         const _h = new Date().getUTCHours();
@@ -4699,6 +4705,18 @@ const server = http.createServer(async (req, res) => {
           riskPct: RISK_PCT,
           weekend: [0, 6].includes(new Date().getUTCDay()),
         };
+      } catch {}
+
+      // Bounce mode (10.09.: korisnik trazio vidljivost — objasnjava zasto kripto
+      // SHORT ulazi staju dok bot cilja odskok, isti kriterij kao live scan petlja)
+      try {
+        const _r1h = await getBtcRegime1HExport();
+        const _bdd = getBtcDrawdownPctExport(_r1h.currentPrice || 0);
+        const _bRsi = _r1h.btcRsi1h;
+        result.botMode = result.botMode || {};
+        result.botMode.bounce = (_bRsi !== null && _bRsi < 30) || _bdd < -8;
+        result.botMode.bounceRsi = _bRsi;
+        result.botMode.bounceDd = _bdd;
       } catch {}
 
       // Liquidity Hunt zones — Bitget vraća ascending (najstarija prva)

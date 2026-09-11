@@ -3503,6 +3503,8 @@ const TRAIL_TRIGGER    = 2.5;            // % gain koji aktivira trail
 const TRAIL_STEP       = 0.5;            // korak pomaka TP-a (%)
 const TRAIL_GIVEBACK   = 1.0;            // % ispod peaka — prostor za disanje u trendu
                                          // (06.07.: AAVE izbačen na prvi titraj jer je SL stajao na cijeni)
+const ROE_PROTECT_TRIGGER = 20;          // % ROE koji aktivira zaključavanje (11.09., na zahtjev)
+const ROE_PROTECT_LOCK    = 8;           // % ROE koji se zaključava kad se aktivira
 
 function applyTrail(pos, currentPrice) {
   if (!TRAIL_STRATEGIES.includes(pos.strategy)) return false;
@@ -3536,6 +3538,30 @@ function applyTrail(pos, currentPrice) {
       pos.sl = beSl;
       console.log(`  🛡️  [BE] ${pos.symbol} ${pos.side} — +1R (${gainPct.toFixed(2)}% ≥ ${_riskPct}%) → SL na break-even ${fmtPrice(beSl)}`);
       if (gainPct < effectiveTrigger) return true;  // BE primijenjen, trail još nije
+    }
+  }
+
+  // ── ROE zaštita (11.09., na korisnikov zahtjev) ────────────────────────────
+  // BE-stop i trailing gore su price-% bazirani, ali na visokom leverageu (30-50x)
+  // 1% pomaka cijene = 30-50% ROE — korisnik uočio pozicije na +30% ROE koje su
+  // se vratile u gubitak jer NI BE NI trail nisu stigli aktivirati (price-% pomak
+  // je premali za oba praga dok je ROE već velik). Ovo je NEOVISNA zaštita, ne
+  // zamjenjuje gornje — čim ROE dosegne trigger, SL se stegne da zaključa dio
+  // dobitka, isti "improved" obrazac kao BE-stop iznad.
+  const _roeMargin = pos.margin || (pos.totalUSD ? pos.totalUSD / 40 : 0);
+  if (!pos.roeProtectApplied && _roeMargin > 0) {
+    const _roePnl = pos.side === "LONG" ? (currentPrice - entry) * pos.quantity : (entry - currentPrice) * pos.quantity;
+    const _roeNow = _roePnl / _roeMargin * 100;
+    if (_roeNow >= ROE_PROTECT_TRIGGER) {
+      const _lockPnl = ROE_PROTECT_LOCK / 100 * _roeMargin;
+      const roeSl = pos.side === "LONG" ? entry + _lockPnl / pos.quantity : entry - _lockPnl / pos.quantity;
+      const roeImproved = pos.side === "LONG" ? roeSl > pos.sl : roeSl < pos.sl;
+      pos.roeProtectApplied = true;
+      if (roeImproved) {
+        pos.sl = roeSl;
+        console.log(`  🔒 [ROE-PROTECT] ${pos.symbol} ${pos.side} — ROE ${_roeNow.toFixed(1)}% ≥ ${ROE_PROTECT_TRIGGER}% → SL zaključava min ${ROE_PROTECT_LOCK}% ROE @ ${fmtPrice(roeSl)}`);
+        if (gainPct < effectiveTrigger) return true;
+      }
     }
   }
 

@@ -5611,7 +5611,7 @@ export async function syncPositionsFromBitget(pid = "synapse_t") {
 //   Invalidacija: ako se cross okrene prije TP/SL, zatvori odmah (ignoriraj R:R)
 //   Fiksna margina $2/trade, leverage iz postojećeg getSafeLeverage(slPct), max 2 open
 const EMA_RSI_PID        = "ema_rsi";
-const EMA_RSI_SYMBOLS    = ["BTCUSDT"];
+const EMA_RSI_SYMBOLS    = ["BTCUSDT"];  // fallback ako rules.json nedostupan (vidi runEmaRsiStrategy)
 const EMA_RSI_TF         = "15m";
 const EMA_RSI_MAX_POS    = 2;
 const EMA_RSI_MARGIN_USD = 2;
@@ -5714,60 +5714,74 @@ export function analyzeEmaRsiCross(candles) {
 export async function runEmaRsiStrategy() {
   if (PAPER_TRADING) return;
   initCsv(EMA_RSI_PID);
-  for (const symbol of EMA_RSI_SYMBOLS) {
+
+  // ── 1) Upravljanje POSTOJEĆIM pozicijama — svaki poziv (60s), jeftino (max 2) ──
+  for (const pos of loadPositions(EMA_RSI_PID)) {
+    try {
+      const candles = await fetchCandles(pos.symbol, EMA_RSI_TF, 250);
+      const sig = analyzeEmaRsiCross(candles);
+      const prices = await fetchLivePrices([pos.symbol]);
+      const liveP = prices[pos.symbol];
+
+      let exitPrice = null, reason = null;
+      if (liveP != null) {
+        if (pos.side === "LONG") {
+          if (liveP <= pos.sl) { exitPrice = pos.sl; reason = "Soft SL"; }
+          else if (liveP >= pos.tp) { exitPrice = pos.tp; reason = "Soft TP"; }
+        } else {
+          if (liveP >= pos.sl) { exitPrice = pos.sl; reason = "Soft SL"; }
+          else if (liveP <= pos.tp) { exitPrice = pos.tp; reason = "Soft TP"; }
+        }
+      }
+      const invalidated = !reason && ((pos.side === "LONG" && sig.crossDn) || (pos.side === "SHORT" && sig.crossUp));
+      if (invalidated) { exitPrice = liveP ?? pos.entryPrice; reason = "Invalidacija (obrnut EMA cross)"; }
+      if (!reason) continue;
+
+      const pnl = pos.side === "LONG"
+        ? (exitPrice - pos.entryPrice) * pos.quantity
+        : (pos.entryPrice - exitPrice) * pos.quantity;
+      console.log(`  🔄 [EMA-RSI] ${pos.symbol} ${pos.side} — ${reason} @ ${fmtPrice(exitPrice)} → zatvaramo`);
+      try { await closeBitGetOrder(pos); } catch (e) { console.log(`  ⚠️  [EMA-RSI] close fail: ${e.message}`); }
+      savePositions(EMA_RSI_PID, loadPositions(EMA_RSI_PID).filter(p => p.orderId !== pos.orderId));
+      writeExitCsv(EMA_RSI_PID, pos, exitPrice, reason, pnl);
+      await tg(`🔄 <b>EMA/RSI ${reason}</b> ${pos.symbol} ${pos.side}\nZatvoreno @ ${fmtPrice(exitPrice)} | P&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}`);
+    } catch (e) {
+      console.log(`  ❌ [EMA-RSI] ${pos.symbol} monitor: ${e.message}`);
+    }
+  }
+
+  // ── 2) Novi ulazi — samo na zatvaranju 15m svijeće (11.09.: prošireno s BTC-only
+  //    na CIJELU watchlistu, korisnikov zahtjev), skeniranje cijele liste svaku
+  //    minutu bi bilo nepotrebno opterećenje jer se signal mijenja tek na close ──
+  const utcNow = new Date();
+  if (!shouldRunNow(EMA_RSI_TF, utcNow.getUTCHours(), utcNow.getUTCMinutes())) return;
+  if (loadPositions(EMA_RSI_PID).length >= EMA_RSI_MAX_POS) return;
+
+  const rules   = JSON.parse(readFileSync("rules.json", "utf8"));
+  const symbols = rules.watchlist_synapse_t || EMA_RSI_SYMBOLS;
+
+  for (const symbol of symbols) {
+    const openNow = loadPositions(EMA_RSI_PID);
+    if (openNow.length >= EMA_RSI_MAX_POS) break;
+    if (openNow.some(p => p.symbol === symbol)) continue;
     try {
       const candles = await fetchCandles(symbol, EMA_RSI_TF, 250);
       const sig = analyzeEmaRsiCross(candles);
-      const symPositions = loadPositions(EMA_RSI_PID).filter(p => p.symbol === symbol);
+      if (sig.signal === "NEUTRAL") continue;
 
-      // 1) Provjeri SL/TP hit ILI invalidaciju (obrnut cross) na postojećim pozicijama
-      if (symPositions.length > 0) {
-        const prices = await fetchLivePrices([symbol]);
-        const liveP  = prices[symbol];
-        for (const pos of symPositions) {
-          let exitPrice = null, reason = null;
-          if (liveP != null) {
-            if (pos.side === "LONG") {
-              if (liveP <= pos.sl) { exitPrice = pos.sl; reason = "Soft SL"; }
-              else if (liveP >= pos.tp) { exitPrice = pos.tp; reason = "Soft TP"; }
-            } else {
-              if (liveP >= pos.sl) { exitPrice = pos.sl; reason = "Soft SL"; }
-              else if (liveP <= pos.tp) { exitPrice = pos.tp; reason = "Soft TP"; }
-            }
-          }
-          const invalidated = !reason && ((pos.side === "LONG" && sig.crossDn) || (pos.side === "SHORT" && sig.crossUp));
-          if (invalidated) { exitPrice = liveP ?? pos.entryPrice; reason = "Invalidacija (obrnut EMA cross)"; }
-          if (!reason) continue;
-
-          const pnl = pos.side === "LONG"
-            ? (exitPrice - pos.entryPrice) * pos.quantity
-            : (pos.entryPrice - exitPrice) * pos.quantity;
-          console.log(`  🔄 [EMA-RSI] ${symbol} ${pos.side} — ${reason} @ ${fmtPrice(exitPrice)} → zatvaramo`);
-          try { await closeBitGetOrder(pos); } catch (e) { console.log(`  ⚠️  [EMA-RSI] close fail: ${e.message}`); }
-          const remaining = loadPositions(EMA_RSI_PID).filter(p => p.orderId !== pos.orderId);
-          savePositions(EMA_RSI_PID, remaining);
-          writeExitCsv(EMA_RSI_PID, pos, exitPrice, reason, pnl);
-          await tg(`🔄 <b>EMA/RSI ${reason}</b> ${symbol} ${pos.side}\nZatvoreno @ ${fmtPrice(exitPrice)} | P&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}`);
-        }
-      }
-
-      // 2) Novi ulaz — samo ako ima mjesta (max 2 istovremeno, PID-scoped, ne per-symbol)
-      const openNow = loadPositions(EMA_RSI_PID);
-      if (openNow.length < EMA_RSI_MAX_POS && sig.signal !== "NEUTRAL" && !openNow.some(p => p.symbol === symbol)) {
-        const lev = getSafeLeverage(sig.slPct);
-        const notional = EMA_RSI_MARGIN_USD * lev;
-        console.log(`  🎯 [EMA-RSI] ${symbol} ${sig.signal} @ ${fmtPrice(sig.price)} | SL ${fmtPrice(sig.sl)} TP ${fmtPrice(sig.tp)} | margin $${EMA_RSI_MARGIN_USD} × ${lev}x`);
-        const result = await placeBitGetOrder(symbol, sig.signal, notional, sig.price, sig.sl, sig.tp, sig.slPct, sig.tpPct, lev);
-        const entry = {
-          symbol, signal: sig.signal, price: result.fillPrice, sl: result.slFromFill, tp: result.tpFromFill,
-          tradeSize: notional, margin: EMA_RSI_MARGIN_USD, orderId: result.orderId, timestamp: Date.now(),
-          strategy: EMA_RSI_PID, timeframe: EMA_RSI_TF, slPct: sig.slPct, tpPct: sig.tpPct,
-          mode: "LIVE", entryMode: "EMARSI",
-        };
-        addPosition(EMA_RSI_PID, entry);
-        writeEntryCsv(EMA_RSI_PID, entry);
-        await tg(`🎯 <b>EMA/RSI NOVI ULAZ</b> ${symbol} ${sig.signal}\nUlaz: ${fmtPrice(result.fillPrice)} | SL: ${fmtPrice(result.slFromFill)} | TP: ${fmtPrice(result.tpFromFill)}\nMargin: $${EMA_RSI_MARGIN_USD} @ ${lev}x`);
-      }
+      const lev = getSafeLeverage(sig.slPct);
+      const notional = EMA_RSI_MARGIN_USD * lev;
+      console.log(`  🎯 [EMA-RSI] ${symbol} ${sig.signal} @ ${fmtPrice(sig.price)} | SL ${fmtPrice(sig.sl)} TP ${fmtPrice(sig.tp)} | margin $${EMA_RSI_MARGIN_USD} × ${lev}x`);
+      const result = await placeBitGetOrder(symbol, sig.signal, notional, sig.price, sig.sl, sig.tp, sig.slPct, sig.tpPct, lev);
+      const entry = {
+        symbol, signal: sig.signal, price: result.fillPrice, sl: result.slFromFill, tp: result.tpFromFill,
+        tradeSize: notional, margin: EMA_RSI_MARGIN_USD, orderId: result.orderId, timestamp: Date.now(),
+        strategy: EMA_RSI_PID, timeframe: EMA_RSI_TF, slPct: sig.slPct, tpPct: sig.tpPct,
+        mode: "LIVE", entryMode: "EMARSI",
+      };
+      addPosition(EMA_RSI_PID, entry);
+      writeEntryCsv(EMA_RSI_PID, entry);
+      await tg(`🎯 <b>EMA/RSI NOVI ULAZ</b> ${symbol} ${sig.signal}\nUlaz: ${fmtPrice(result.fillPrice)} | SL: ${fmtPrice(result.slFromFill)} | TP: ${fmtPrice(result.tpFromFill)}\nMargin: $${EMA_RSI_MARGIN_USD} @ ${lev}x`);
     } catch (e) {
       console.log(`  ❌ [EMA-RSI] ${symbol}: ${e.message}`);
     }

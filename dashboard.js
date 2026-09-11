@@ -7,6 +7,7 @@ import "dotenv/config";
 import http from "http";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll, softExitMonitor,
+  runEmaRsiStrategy,
   getAllFundingRates, getDailyPnlExport, getSymbolStats, getOIForSymbols,
   getFearGreed, getBtcDominance, getDxyData, getConsecutiveLossCount,
   getSessionInfo, calcAtrTrend, getSp500Data, calcSymbolCorrelation,
@@ -4879,5 +4880,13 @@ server.listen(PORT, async () => {
   setInterval(async () => {
     try { await checkBreakouts(); }
     catch (e) { console.error("Breakout checker greška:", e.message); }
+  }, 60 * 1000);
+
+  // ─── EMA/RSI Cross strategija (11.09., eksperimentalna) — svakih 60s ──────
+  // Potpuno odvojena od ULTRA bota (vidi bot.js komentar kod runEmaRsiStrategy).
+  setTimeout(async () => { try { await runEmaRsiStrategy(); } catch (e) { console.error("EMA/RSI strategija greška:", e.message); } }, 10000);
+  setInterval(async () => {
+    try { await runEmaRsiStrategy(); }
+    catch (e) { console.error("EMA/RSI strategija greška:", e.message); }
   }, 60 * 1000);
 });

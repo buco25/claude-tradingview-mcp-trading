@@ -5600,6 +5600,176 @@ export async function syncPositionsFromBitget(pid = "synapse_t") {
   return { synced, total: bitgetPos.length, message: `Sinhronizirano ${synced} novih pozicija` };
 }
 
+// ═══ EMA/RSI Cross strategija — eksperimentalna, korisnikov zahtjev 11.09.2026 ═══
+// Namjerno POTPUNO odvojena od glavnog synapse_t pipelinea (ne dira buildPortfolios/
+// PORTFOLIO_IDS/run() petlju niti ijedan synapse_t gate) — vlastiti pid "ema_rsi",
+// vlastita jednostavna ulaz/izlaz logika, da se "proba pa vidi" bez rizika interferencije
+// s ULTRA botom. Pravila (korisnikova specifikacija, ne TraderaEdge):
+//   LONG:  EMA10 cross IZNAD EMA20 (15m) I RSI(14) iznad svoje MA(14) na istoj svijeći
+//   SHORT: EMA10 cross ISPOD EMA20 I RSI(14) ispod svoje MA(14)
+//   SL = 1.5x ATR(14) [nije specificirano, razumna zadana vrijednost], TP = SL x 2.5
+//   Invalidacija: ako se cross okrene prije TP/SL, zatvori odmah (ignoriraj R:R)
+//   Fiksna margina $2/trade, leverage iz postojećeg getSafeLeverage(slPct), max 2 open
+const EMA_RSI_PID        = "ema_rsi";
+const EMA_RSI_SYMBOLS    = ["BTCUSDT"];
+const EMA_RSI_TF         = "15m";
+const EMA_RSI_MAX_POS    = 2;
+const EMA_RSI_MARGIN_USD = 2;
+const EMA_RSI_RR         = 2.5;
+const EMA_RSI_ATR_MULT   = 1.5;
+
+function _emaSeriesX(values, period) {
+  const k = 2 / (period + 1);
+  const out = new Array(values.length).fill(null);
+  let prev = null;
+  for (let i = 0; i < values.length; i++) {
+    if (i < period - 1) continue;
+    prev = prev === null
+      ? values.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0) / period
+      : values[i] * k + prev * (1 - k);
+    out[i] = prev;
+  }
+  return out;
+}
+function _rsiSeriesX(closes, period = 14) {
+  const out = new Array(closes.length).fill(null);
+  if (closes.length <= period) return out;
+  let gainSum = 0, lossSum = 0;
+  for (let i = 1; i <= period; i++) {
+    const diff = closes[i] - closes[i - 1];
+    if (diff >= 0) gainSum += diff; else lossSum -= diff;
+  }
+  let avgGain = gainSum / period, avgLoss = lossSum / period;
+  out[period] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+  for (let i = period + 1; i < closes.length; i++) {
+    const diff = closes[i] - closes[i - 1];
+    const gain = diff > 0 ? diff : 0, loss = diff < 0 ? -diff : 0;
+    avgGain = (avgGain * (period - 1) + gain) / period;
+    avgLoss = (avgLoss * (period - 1) + loss) / period;
+    out[i] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+  }
+  return out;
+}
+function _smaSeriesX(values, period) {
+  const out = new Array(values.length).fill(null);
+  for (let i = period - 1; i < values.length; i++) {
+    let sum = 0, ok = true;
+    for (let j = i - period + 1; j <= i; j++) { if (values[j] == null) { ok = false; break; } sum += values[j]; }
+    out[i] = ok ? sum / period : null;
+  }
+  return out;
+}
+function _atrSeriesX(candles, period = 14) {
+  const trs = [null];
+  for (let i = 1; i < candles.length; i++) {
+    const h = candles[i].high, l = candles[i].low, pc = candles[i - 1].close;
+    trs.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+  }
+  const out = new Array(candles.length).fill(null);
+  let prev = null;
+  for (let i = 1; i < candles.length; i++) {
+    if (i < period) continue;
+    prev = prev === null
+      ? trs.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0) / period
+      : (prev * (period - 1) + trs[i]) / period;
+    out[i] = prev;
+  }
+  return out;
+}
+
+export function analyzeEmaRsiCross(candles) {
+  const closes = candles.map(c => c.close);
+  const n = closes.length;
+  if (n < 40) return { signal: "NEUTRAL", crossUp: false, crossDn: false };
+  const ema10 = _emaSeriesX(closes, 10);
+  const ema20 = _emaSeriesX(closes, 20);
+  const rsiArr = _rsiSeriesX(closes, 14);
+  const rsiMa  = _smaSeriesX(rsiArr, 14);
+  const atrArr = _atrSeriesX(candles, 14);
+  const i = n - 1;
+  if (ema10[i] == null || ema20[i] == null || ema10[i - 1] == null || ema20[i - 1] == null
+      || rsiArr[i] == null || rsiMa[i] == null || atrArr[i] == null) {
+    return { signal: "NEUTRAL", crossUp: false, crossDn: false };
+  }
+  const crossUp = ema10[i - 1] <= ema20[i - 1] && ema10[i] > ema20[i];
+  const crossDn = ema10[i - 1] >= ema20[i - 1] && ema10[i] < ema20[i];
+  const rsiAboveMa = rsiArr[i] > rsiMa[i];
+  const price = closes[i];
+  const slDist = atrArr[i] * EMA_RSI_ATR_MULT;
+  const slPct = slDist / price * 100;
+  const tpPct = slPct * EMA_RSI_RR;
+  if (crossUp && rsiAboveMa) {
+    return { signal: "LONG", price, sl: price - slDist, tp: price + slDist * EMA_RSI_RR, slPct, tpPct, crossUp, crossDn };
+  }
+  if (crossDn && !rsiAboveMa) {
+    return { signal: "SHORT", price, sl: price + slDist, tp: price - slDist * EMA_RSI_RR, slPct, tpPct, crossUp, crossDn };
+  }
+  return { signal: "NEUTRAL", crossUp, crossDn };
+}
+
+export async function runEmaRsiStrategy() {
+  if (PAPER_TRADING) return;
+  initCsv(EMA_RSI_PID);
+  for (const symbol of EMA_RSI_SYMBOLS) {
+    try {
+      const candles = await fetchCandles(symbol, EMA_RSI_TF, 250);
+      const sig = analyzeEmaRsiCross(candles);
+      const symPositions = loadPositions(EMA_RSI_PID).filter(p => p.symbol === symbol);
+
+      // 1) Provjeri SL/TP hit ILI invalidaciju (obrnut cross) na postojećim pozicijama
+      if (symPositions.length > 0) {
+        const prices = await fetchLivePrices([symbol]);
+        const liveP  = prices[symbol];
+        for (const pos of symPositions) {
+          let exitPrice = null, reason = null;
+          if (liveP != null) {
+            if (pos.side === "LONG") {
+              if (liveP <= pos.sl) { exitPrice = pos.sl; reason = "Soft SL"; }
+              else if (liveP >= pos.tp) { exitPrice = pos.tp; reason = "Soft TP"; }
+            } else {
+              if (liveP >= pos.sl) { exitPrice = pos.sl; reason = "Soft SL"; }
+              else if (liveP <= pos.tp) { exitPrice = pos.tp; reason = "Soft TP"; }
+            }
+          }
+          const invalidated = !reason && ((pos.side === "LONG" && sig.crossDn) || (pos.side === "SHORT" && sig.crossUp));
+          if (invalidated) { exitPrice = liveP ?? pos.entryPrice; reason = "Invalidacija (obrnut EMA cross)"; }
+          if (!reason) continue;
+
+          const pnl = pos.side === "LONG"
+            ? (exitPrice - pos.entryPrice) * pos.quantity
+            : (pos.entryPrice - exitPrice) * pos.quantity;
+          console.log(`  🔄 [EMA-RSI] ${symbol} ${pos.side} — ${reason} @ ${fmtPrice(exitPrice)} → zatvaramo`);
+          try { await closeBitGetOrder(pos); } catch (e) { console.log(`  ⚠️  [EMA-RSI] close fail: ${e.message}`); }
+          const remaining = loadPositions(EMA_RSI_PID).filter(p => p.orderId !== pos.orderId);
+          savePositions(EMA_RSI_PID, remaining);
+          writeExitCsv(EMA_RSI_PID, pos, exitPrice, reason, pnl);
+          await tg(`🔄 <b>EMA/RSI ${reason}</b> ${symbol} ${pos.side}\nZatvoreno @ ${fmtPrice(exitPrice)} | P&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}`);
+        }
+      }
+
+      // 2) Novi ulaz — samo ako ima mjesta (max 2 istovremeno, PID-scoped, ne per-symbol)
+      const openNow = loadPositions(EMA_RSI_PID);
+      if (openNow.length < EMA_RSI_MAX_POS && sig.signal !== "NEUTRAL" && !openNow.some(p => p.symbol === symbol)) {
+        const lev = getSafeLeverage(sig.slPct);
+        const notional = EMA_RSI_MARGIN_USD * lev;
+        console.log(`  🎯 [EMA-RSI] ${symbol} ${sig.signal} @ ${fmtPrice(sig.price)} | SL ${fmtPrice(sig.sl)} TP ${fmtPrice(sig.tp)} | margin $${EMA_RSI_MARGIN_USD} × ${lev}x`);
+        const result = await placeBitGetOrder(symbol, sig.signal, notional, sig.price, sig.sl, sig.tp, sig.slPct, sig.tpPct, lev);
+        const entry = {
+          symbol, signal: sig.signal, price: result.fillPrice, sl: result.slFromFill, tp: result.tpFromFill,
+          tradeSize: notional, margin: EMA_RSI_MARGIN_USD, orderId: result.orderId, timestamp: Date.now(),
+          strategy: EMA_RSI_PID, timeframe: EMA_RSI_TF, slPct: sig.slPct, tpPct: sig.tpPct,
+          mode: "LIVE", entryMode: "EMARSI",
+        };
+        addPosition(EMA_RSI_PID, entry);
+        writeEntryCsv(EMA_RSI_PID, entry);
+        await tg(`🎯 <b>EMA/RSI NOVI ULAZ</b> ${symbol} ${sig.signal}\nUlaz: ${fmtPrice(result.fillPrice)} | SL: ${fmtPrice(result.slFromFill)} | TP: ${fmtPrice(result.tpFromFill)}\nMargin: $${EMA_RSI_MARGIN_USD} @ ${lev}x`);
+      }
+    } catch (e) {
+      console.log(`  ❌ [EMA-RSI] ${symbol}: ${e.message}`);
+    }
+  }
+}
+
 // ─── Main ───────────────────────────────────────────────────────────────────────
 
 export async function run() {

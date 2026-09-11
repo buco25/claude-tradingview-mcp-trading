@@ -5680,13 +5680,17 @@ function _atrSeriesX(candles, period = 14) {
 export function analyzeEmaRsiCross(candles) {
   const closes = candles.map(c => c.close);
   const n = closes.length;
-  if (n < 40) return { signal: "NEUTRAL", crossUp: false, crossDn: false };
+  if (n < 41) return { signal: "NEUTRAL", crossUp: false, crossDn: false };
   const ema10 = _emaSeriesX(closes, 10);
   const ema20 = _emaSeriesX(closes, 20);
   const rsiArr = _rsiSeriesX(closes, 14);
   const rsiMa  = _smaSeriesX(rsiArr, 14);
   const atrArr = _atrSeriesX(candles, 14);
-  const i = n - 1;
+  // 11.09.: koristi zadnju ZATVORENU svijeću (n-2), ne aktivnu koja se tek
+  // formira (n-1) — ista lekcija kao VOL_EXH bug gore. Bez ovoga bi se cross
+  // mogao "upaliti" na treperavoj, jos-nedovrsenoj svijeci i ugasiti prije
+  // stvarnog zatvaranja — korisnik trazio da se ulazi TEK kad je cross potvrdjen.
+  const i = n - 2;
   if (ema10[i] == null || ema20[i] == null || ema10[i - 1] == null || ema20[i - 1] == null
       || rsiArr[i] == null || rsiMa[i] == null || atrArr[i] == null) {
     return { signal: "NEUTRAL", crossUp: false, crossDn: false };

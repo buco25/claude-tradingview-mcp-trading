@@ -2905,9 +2905,14 @@ function analyzeUltra(candles, cfg) {
   }
 
 
-  // Volume vs average
-  const volAvg20 = vols.slice(-20).reduce((a,b)=>a+b,0) / 20;
-  const volLast  = vols[n-1];
+  // Volume vs average — 11.09.: koristi zadnju ZATVORENU svjeću (n-2), ne
+  // aktivnu koja se još formira (n-1) — ista lekcija kao checkVolumeAnomaly
+  // (bot.js ~1048). Aktivna svjeća ima parcijalni volumen pa je VOL_EXH gate
+  // sustavno podcjenjivao stvarne exhaustion spike-ove (uhvaceno na AMDUSDT
+  // LONG-u koji je usao odmah nakon 11.16x volumen svijece, VOL_EXH ga nije
+  // blokirao jer je gledao sljedecu, tek-otvorenu svijecu s gotovo nula vol).
+  const volAvg20 = vols.slice(-21, -1).reduce((a,b)=>a+b,0) / 20;
+  const volLast  = vols[n-2];
 
   // Recent EMA cross (last 3 bars)
   let hadCrossUp = false, hadCrossDn = false;

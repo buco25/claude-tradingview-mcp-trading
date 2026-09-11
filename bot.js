@@ -6571,6 +6571,18 @@ export async function run() {
         let _squeezeMult = 1.0;
         let _whaleMult = 1.0;
         if (pDef.strategy === "synapse_t") {
+          // Retail LSR se sad dohvaća PRIJE whale provjere (11.09.) — whale bonus
+          // treba znati je li retail VEĆ na istoj strani, ne samo je li top-trader
+          // ratio ekstreman sam po sebi (vidi napomena kod whale bloka niže).
+          const lsr = await getLongShortRatio(symbol);
+          let _lr = null, _bullish = false, _bearish = false, _extreme = false;
+          if (lsr) {
+            _lr       = parseFloat(lsr.longRatio);   // npr. 55.1
+            _extreme  = _lr < 33 || _lr > 72;
+            _bearish  = _lr < 40;
+            _bullish  = _lr > 62;
+          }
+
           // Top-trader position ratio (Binance public, 30-min cache po simbolu)
           try {
             const _ttKey = `_tt_${symbol}`;
@@ -6579,19 +6591,25 @@ export async function run() {
               global[_ttKey] = { ratio: _tt?.[0]?.longShortRatio ? parseFloat(_tt[0].longShortRatio) : null, ts: Date.now() };
             }
             const _ttRatio = global[_ttKey].ratio;
+            // 11.09.: bonus SAMO uz stvarnu divergenciju kitovi-vs-retail (izvorna
+            // TraderaEdge teza gore u komentaru: "top bullish + retail BEARISH =
+            // najjači long setup" — ne "top bullish" samo po sebi). Prije ovog fixa
+            // bonus je palio i kad je retail JEDNAKO pozicioniran kao kitovi (npr.
+            // AVGOUSDT 11.09.: top traderi 81.9% long, retail 81.4% long — nula
+            // divergencije, ali je ipak dobio ×1.2 jer je kod gledao samo kitove).
+            // Ako nema divergencije, cijeli trade je samo prenatrpan u istom smjeru
+            // — to nije "smart money" potvrda, nema razloga za bonus size.
             if (_ttRatio !== null) {
-              if (signal === "LONG"  && _ttRatio >= 1.4) { _whaleMult = 1.2; console.log(`  🐋 [WHALE] ${symbol} — top traderi ${_ttRatio.toFixed(2)} L/S → LONG usklađen s kitovima ×1.2`); }
-              if (signal === "SHORT" && _ttRatio <= 0.7) { _whaleMult = 1.2; console.log(`  🐋 [WHALE] ${symbol} — top traderi ${_ttRatio.toFixed(2)} L/S → SHORT usklađen s kitovima ×1.2`); }
-              if (signal === "LONG"  && _ttRatio <= 0.7) { _whaleMult = 0.7; console.log(`  🐋 [WHALE] ${symbol} — top traderi SHORT (${_ttRatio.toFixed(2)}) a mi LONG → oprez ×0.7`); }
-              if (signal === "SHORT" && _ttRatio >= 1.4) { _whaleMult = 0.7; console.log(`  🐋 [WHALE] ${symbol} — top traderi LONG (${_ttRatio.toFixed(2)}) a mi SHORT → oprez ×0.7`); }
+              if (signal === "LONG"  && _ttRatio >= 1.4 && !_bullish) { _whaleMult = 1.2; console.log(`  🐋 [WHALE] ${symbol} — top traderi ${_ttRatio.toFixed(2)} L/S, retail NIJE isto long (${_lr?.toFixed(1) ?? "?"}%) → prava divergencija, LONG ×1.2`); }
+              else if (signal === "SHORT" && _ttRatio <= 0.7 && !_bearish) { _whaleMult = 1.2; console.log(`  🐋 [WHALE] ${symbol} — top traderi ${_ttRatio.toFixed(2)} L/S, retail NIJE isto short (${_lr?.toFixed(1) ?? "?"}%) → prava divergencija, SHORT ×1.2`); }
+              else if (signal === "LONG"  && _ttRatio >= 1.4 && _bullish) { console.log(`  🐋 [WHALE] ${symbol} — top traderi I retail oboje long (${_ttRatio.toFixed(2)} / ${_lr?.toFixed(1)}%) → nema divergencije, bez bonusa`); }
+              else if (signal === "SHORT" && _ttRatio <= 0.7 && _bearish) { console.log(`  🐋 [WHALE] ${symbol} — top traderi I retail oboje short (${_ttRatio.toFixed(2)} / ${_lr?.toFixed(1)}%) → nema divergencije, bez bonusa`); }
+              else if (signal === "LONG"  && _ttRatio <= 0.7) { _whaleMult = 0.7; console.log(`  🐋 [WHALE] ${symbol} — top traderi SHORT (${_ttRatio.toFixed(2)}) a mi LONG → oprez ×0.7`); }
+              else if (signal === "SHORT" && _ttRatio >= 1.4) { _whaleMult = 0.7; console.log(`  🐋 [WHALE] ${symbol} — top traderi LONG (${_ttRatio.toFixed(2)}) a mi SHORT → oprez ×0.7`); }
             }
           } catch {}
-          const lsr = await getLongShortRatio(symbol);
           if (lsr) {
-            const lr       = parseFloat(lsr.longRatio);   // npr. 55.1
-            const extreme  = lr < 33 || lr > 72;
-            const bearish  = lr < 40;
-            const bullish  = lr > 62;
+            const lr = _lr, extreme = _extreme, bearish = _bearish, bullish = _bullish;
             if (signal === "LONG" && bearish) {
               if (oi.rising && oi.changePct > 8) {
                 _squeezeMult = extreme ? 1.4 : 1.25;

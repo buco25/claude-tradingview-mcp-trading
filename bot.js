@@ -5764,6 +5764,18 @@ export async function runEmaRsiStrategy() {
     const openNow = loadPositions(EMA_RSI_PID);
     if (openNow.length >= EMA_RSI_MAX_POS) break;
     if (openNow.some(p => p.symbol === symbol)) continue;
+    // Dionice: ulaz SAMO dok US tržište radi (13:35–19:30 UTC, pon–pet) — isti
+    // gate kao glavni ULTRA bot (bot.js ~6168). Uhvaćeno uzivo 11.09.: MSFTUSDT
+    // SHORT usao izvan sesije na skoro-nula volumenu (0.2 vs normalnih ~90) —
+    // xStock feed izvan sesije stoji/skoro stoji, cross na toj buci je lazan signal.
+    if (isStockSym(symbol)) {
+      const _nowEr = new Date();
+      const _dowEr = _nowEr.getUTCDay(), _hEr = _nowEr.getUTCHours(), _mEr = _nowEr.getUTCMinutes();
+      const _inSessionEr = _dowEr >= 1 && _dowEr <= 5
+        && (_hEr > 13 || (_hEr === 13 && _mEr >= 35))
+        && (_hEr < 19 || (_hEr === 19 && _mEr <= 30));
+      if (!_inSessionEr) continue;
+    }
     try {
       const candles = await fetchCandles(symbol, EMA_RSI_TF, 250);
       const sig = analyzeEmaRsiCross(candles);

@@ -5952,14 +5952,17 @@ export async function run() {
         // (TraderaEdge pristup: pusti trejd, kontroliraj rizik veličinom)
         let _macroSizeMult = 1.0;
 
-        // ── Noćni blok — analiza 100 tradeova (08.07.): ulazi 20-06 UTC su WR 24%,
+        // ── Noćna zona — analiza 100 tradeova (08.07.): ulazi 20-06 UTC su WR 24%,
         //    -11.6 USDT. Tanka likvidnost + nitko ne gleda. Upravljanje pozicijama
-        //    (SL/TP/trail/partial) radi 24/7 — blokiran je samo NOVI ulaz.
+        //    (SL/TP/trail/partial) radi 24/7. 11.09.: na korisnikov zahtjev, umjesto
+        //    tvrde blokade (continue) sad samo manji ulog — isti obrazac kao VIKEND
+        //    ×0.5 niže. ×0.4 malo strože od vikenda jer je WR čak i gori (24% vs
+        //    tipičan vikend uzorak) — može se lako podesiti ako se pokaže preblago/prestrogo.
         const sess = getSessionInfo();
         const _nightH = new Date().getUTCHours();
         if ((_nightH >= 20 || _nightH < 6) && !isStockSym(symbol)) {
-          _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "NIGHT", reason: `Noćni blok ${_nightH}:00 UTC (WR 24% noću)` });
-          continue;
+          _macroSizeMult *= 0.4;
+          console.log(`  🌙 [NOĆ] ${symbol} — ${_nightH}:00 UTC (WR 24% noću povijesno) → size ×0.4`);
         }
 
         // ── Weekend — TraderaEdge AMA: "weekendom se inače ne trguje" ───────

@@ -1183,8 +1183,8 @@ function renderEmaRsiSection(positions) {
         </div>
         <div class="pos-grid">
           <div><label>Entry</label><span>${fmtP(p.entryPrice)}</span></div>
-          <div><label>SL</label><span class="red">${fmtP(p.sl)}</span></div>
-          <div><label>TP</label><span class="green">${fmtP(p.tp)}</span></div>
+          <div><label>SL</label><span class="red">${fmtP(p.sl)}</span>${p.entryPrice && p.sl ? `<span style="font-size:10px;color:#ff6b6b;margin-left:4px">${(Math.abs(p.entryPrice - p.sl) / p.entryPrice * 100).toFixed(2)}%</span>` : ''}${p.entryPrice && p.sl && p.quantity ? `<div style="font-size:10px;color:#ff6b6b;margin-top:1px" title="Potencijalni gubitak u dolarima ako cijena dotakne SL">-$${(Math.abs(p.entryPrice - p.sl) * p.quantity).toFixed(2)}</div>` : ''}</div>
+          <div><label>TP</label><span class="green">${fmtP(p.tp)}</span>${p.entryPrice && p.tp ? `<span style="font-size:10px;color:#059669;margin-left:4px">${(Math.abs(p.tp - p.entryPrice) / p.entryPrice * 100).toFixed(2)}%</span>` : ''}${p.entryPrice && p.tp && p.quantity ? `<div style="font-size:10px;color:#059669;margin-top:1px" title="Potencijalna dobit u dolarima ako cijena dotakne TP">+$${(Math.abs(p.tp - p.entryPrice) * p.quantity).toFixed(2)}</div>` : ''}</div>
           <div><label>Notional</label><span>$${p.totalUSD.toFixed(2)}</span></div>
           <div><label>Ulog (margin)</label><span style="color:#d97706;font-weight:700">$${margin.toFixed(2)}</span></div>
           <div><label>Otvoreno</label><span>${fmtLocalTs(p.openedAt)}</span></div>
@@ -1197,8 +1197,8 @@ function renderEmaRsiSection(positions) {
           <div style="flex:1;min-width:0">
             <div class="range-bar"><div id="bar-${uid}" class="range-fill"></div></div>
             <div class="range-labels">
-              <small>SL ${fmtP(p.sl)}</small>
-              <small>TP ${fmtP(p.tp)}</small>
+              <small>SL ${fmtP(p.sl)}${p.entryPrice && p.sl ? ' ('+(Math.abs(p.entryPrice - p.sl) / p.entryPrice * 100).toFixed(2)+'%)' : ''}</small>
+              <small>TP ${fmtP(p.tp)}${p.entryPrice && p.tp ? ' ('+(Math.abs(p.tp - p.entryPrice) / p.entryPrice * 100).toFixed(2)+'%)' : ''}</small>
             </div>
           </div>
         </div>

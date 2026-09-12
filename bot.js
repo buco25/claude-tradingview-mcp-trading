@@ -5609,14 +5609,21 @@ export async function syncPositionsFromBitget(pid = "synapse_t") {
 //   SHORT: EMA10 cross ISPOD EMA20 I RSI(14) ispod svoje MA(14)
 //   SL = 1.5x ATR(14) [nije specificirano, razumna zadana vrijednost], TP = SL x 2.5
 //   Invalidacija: ako se cross okrene prije TP/SL, zatvori odmah (ignoriraj R:R)
-//   Fiksna margina $2/trade, leverage iz postojećeg getSafeLeverage(slPct), max 2 open
+//   Risk-based margina (12.09., na zahtjev — prije fiksnih $2 bez obzira na SL
+//   širinu/equity): isti princip kao glavna ULTRA strategija, vidi runEmaRsiStrategy.
+//   Leverage iz postojećeg getSafeLeverage(slPct), max 2 open.
 const EMA_RSI_PID        = "ema_rsi";
 const EMA_RSI_SYMBOLS    = ["BTCUSDT"];  // fallback ako rules.json nedostupan (vidi runEmaRsiStrategy)
 const EMA_RSI_TF         = "1H";
 const EMA_RSI_MAX_POS    = 2;
-const EMA_RSI_MARGIN_USD = 2;
+const EMA_RSI_MIN_NOTIONAL = 40;   // isti pod kao glavni bot (fee/minQty razlog)
 const EMA_RSI_RR         = 2.5;
 const EMA_RSI_ATR_MULT   = 1.5;
+// Trail-extend TP (12.09., na zahtjev "proširi dalje da uzmemo veću dobit"):
+// kad cijena stigne na EMA_RSI_TRAIL_ARM_PCT puta do TP-a, pomakni TP dalje za
+// isti leg iznos i podigni SL na pocetak tog leg-a (zakljucava vecinu dobiti
+// dosad) — trade nastavlja voziti dok se ne dogodi invalidacija ili trailing SL.
+const EMA_RSI_TRAIL_ARM_PCT = 0.8;
 
 function _emaSeriesX(values, period) {
   const k = 2 / (period + 1);
@@ -5723,6 +5730,30 @@ export async function runEmaRsiStrategy() {
       const prices = await fetchLivePrices([pos.symbol]);
       const liveP = prices[pos.symbol];
 
+      // ── Trail-extend TP: cijena blizu TP-a → pomakni dalje, zakljucaj SL ──
+      if (liveP != null && pos.slPct) {
+        const legDist  = pos.entryPrice * (pos.slPct / 100) * EMA_RSI_RR;
+        const armLevel = pos.side === "LONG"
+          ? pos.tp - legDist * (1 - EMA_RSI_TRAIL_ARM_PCT)
+          : pos.tp + legDist * (1 - EMA_RSI_TRAIL_ARM_PCT);
+        const armed = pos.side === "LONG" ? liveP >= armLevel : liveP <= armLevel;
+        if (armed) {
+          const newTp  = pos.side === "LONG" ? pos.tp + legDist : pos.tp - legDist;
+          const lockSl = pos.side === "LONG" ? pos.tp - legDist : pos.tp + legDist;
+          const newSl  = pos.side === "LONG" ? Math.max(pos.sl, lockSl) : Math.min(pos.sl, lockSl);
+          console.log(`  📈 [TRAIL] ${pos.symbol} ${pos.side} — blizu TP-a → produžen ${fmtPrice(pos.tp)} → ${fmtPrice(newTp)}, SL zaključan @ ${fmtPrice(newSl)}`);
+          const all = loadPositions(EMA_RSI_PID);
+          const idx = all.findIndex(p => p.orderId === pos.orderId);
+          if (idx !== -1) {
+            all[idx].tp = newTp;
+            all[idx].sl = newSl;
+            savePositions(EMA_RSI_PID, all);
+            await tg(`📈 <b>EMA/RSI TP PRODUŽEN</b> ${pos.symbol} ${pos.side}\nNovi TP: ${fmtPrice(newTp)} | SL zaključan: ${fmtPrice(newSl)}`);
+          }
+          continue;
+        }
+      }
+
       let exitPrice = null, reason = null;
       if (liveP != null) {
         if (pos.side === "LONG") {
@@ -5782,18 +5813,30 @@ export async function runEmaRsiStrategy() {
       if (sig.signal === "NEUTRAL") continue;
 
       const lev = getSafeLeverage(sig.slPct);
-      const notional = EMA_RSI_MARGIN_USD * lev;
-      console.log(`  🎯 [EMA-RSI] ${symbol} ${sig.signal} @ ${fmtPrice(sig.price)} | SL ${fmtPrice(sig.sl)} TP ${fmtPrice(sig.tp)} | margin $${EMA_RSI_MARGIN_USD} × ${lev}x`);
+
+      // Risk-based sizing (isto nacelo kao glavna ULTRA strategija): riziknemo
+      // RISK_PCT% od stvarnog Bitget equity-ja po tradeu, notional = riskAmount /
+      // slPct tako da dolar-gubitak na SL bude konstantan bez obzira na ATR sirinu.
+      const _liveEq    = await fetchBitgetEquity();
+      const equity     = _liveEq ?? getPortfolioEquity(EMA_RSI_PID, START_CAPITAL);
+      const riskAmount = equity * (RISK_PCT / 100);
+      let notional = riskAmount / (sig.slPct / 100);
+      const _minQtyNotional = (_minTradeNum[symbol] ?? 0) * sig.price * 1.05;
+      const _minNotional = Math.max(EMA_RSI_MIN_NOTIONAL, _minQtyNotional);
+      if (notional < _minNotional) notional = _minNotional;
+      const margin = notional / lev;
+
+      console.log(`  🎯 [EMA-RSI] ${symbol} ${sig.signal} @ ${fmtPrice(sig.price)} | SL ${fmtPrice(sig.sl)} TP ${fmtPrice(sig.tp)} | rizik $${riskAmount.toFixed(2)} (${RISK_PCT}% od $${equity.toFixed(2)}) → margin $${margin.toFixed(2)} × ${lev}x`);
       const result = await placeBitGetOrder(symbol, sig.signal, notional, sig.price, sig.sl, sig.tp, sig.slPct, sig.tpPct, lev);
       const entry = {
         symbol, signal: sig.signal, price: result.fillPrice, sl: result.slFromFill, tp: result.tpFromFill,
-        tradeSize: notional, margin: EMA_RSI_MARGIN_USD, orderId: result.orderId, timestamp: Date.now(),
+        tradeSize: notional, margin, orderId: result.orderId, timestamp: Date.now(),
         strategy: EMA_RSI_PID, timeframe: EMA_RSI_TF, slPct: sig.slPct, tpPct: sig.tpPct,
         mode: "LIVE", entryMode: "EMARSI",
       };
       addPosition(EMA_RSI_PID, entry);
       writeEntryCsv(EMA_RSI_PID, entry);
-      await tg(`🎯 <b>EMA/RSI NOVI ULAZ</b> ${symbol} ${sig.signal}\nUlaz: ${fmtPrice(result.fillPrice)} | SL: ${fmtPrice(result.slFromFill)} | TP: ${fmtPrice(result.tpFromFill)}\nMargin: $${EMA_RSI_MARGIN_USD} @ ${lev}x`);
+      await tg(`🎯 <b>EMA/RSI NOVI ULAZ</b> ${symbol} ${sig.signal}\nUlaz: ${fmtPrice(result.fillPrice)} | SL: ${fmtPrice(result.slFromFill)} | TP: ${fmtPrice(result.tpFromFill)}\nMargin: $${margin.toFixed(2)} @ ${lev}x`);
     } catch (e) {
       console.log(`  ❌ [EMA-RSI] ${symbol}: ${e.message}`);
     }

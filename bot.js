@@ -5624,6 +5624,7 @@ const EMA_RSI_ATR_MULT   = 1.5;
 // isti leg iznos i podigni SL na pocetak tog leg-a (zakljucava vecinu dobiti
 // dosad) — trade nastavlja voziti dok se ne dogodi invalidacija ili trailing SL.
 const EMA_RSI_TRAIL_ARM_PCT = 0.8;
+const EMA_RSI_MAX_CHASE_PCT = 0.75;  // 12.09., na zahtjev: ne ulazi ako je cijena >0.75% od tocke crossa
 
 function _emaSeriesX(values, period) {
   const k = 2 / (period + 1);
@@ -5709,10 +5710,18 @@ export function analyzeEmaRsiCross(candles) {
   const slDist = atrArr[i] * EMA_RSI_ATR_MULT;
   const slPct = slDist / price * 100;
   const tpPct = slPct * EMA_RSI_RR;
+  // Chase-filter (12.09., na zahtjev): ako je cijena vec pobjegla EMA_RSI_MAX_CHASE_PCT
+  // dalje od tocke crossa (prosjek EMA10/EMA20 na svijeci crossa), ne ulazimo — to je
+  // vec zakasnjeli/prenategnuti ulaz na pokretu koji je vec u tijeku, ne svjez signal.
+  const crossPrice = (ema10[i] + ema20[i]) / 2;
+  const chaseDistPct = Math.abs(price - crossPrice) / crossPrice * 100;
+  const tooFarFromCross = chaseDistPct > EMA_RSI_MAX_CHASE_PCT;
   if (crossUp && rsiAboveMa) {
+    if (tooFarFromCross) return { signal: "NEUTRAL", crossUp, crossDn };
     return { signal: "LONG", price, sl: price - slDist, tp: price + slDist * EMA_RSI_RR, slPct, tpPct, crossUp, crossDn };
   }
   if (crossDn && !rsiAboveMa) {
+    if (tooFarFromCross) return { signal: "NEUTRAL", crossUp, crossDn };
     return { signal: "SHORT", price, sl: price + slDist, tp: price - slDist * EMA_RSI_RR, slPct, tpPct, crossUp, crossDn };
   }
   return { signal: "NEUTRAL", crossUp, crossDn };

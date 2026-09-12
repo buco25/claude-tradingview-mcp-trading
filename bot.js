@@ -5625,6 +5625,7 @@ const EMA_RSI_ATR_MULT   = 1.5;
 // dosad) — trade nastavlja voziti dok se ne dogodi invalidacija ili trailing SL.
 const EMA_RSI_TRAIL_ARM_PCT = 0.8;
 const EMA_RSI_MAX_CHASE_PCT = 0.75;  // 12.09., na zahtjev: ne ulazi ako je cijena >0.75% od tocke crossa
+const EMA_RSI_MIN_VOL_RATIO = 0.8;   // 12.09., na zahtjev: volumen mora biti >=80% prosjeka zadnjih 20 svijeca
 
 function _emaSeriesX(values, period) {
   const k = 2 / (period + 1);
@@ -5716,12 +5717,19 @@ export function analyzeEmaRsiCross(candles) {
   const crossPrice = (ema10[i] + ema20[i]) / 2;
   const chaseDistPct = Math.abs(price - crossPrice) / crossPrice * 100;
   const tooFarFromCross = chaseDistPct > EMA_RSI_MAX_CHASE_PCT;
+  // Volume filter (12.09., na zahtjev): cross na tankom/ispod-prosjecnom volumenu
+  // ima vecu sansu da je lazan/whipsash — trazimo da zadnja zatvorena svijeca ima
+  // barem EMA_RSI_MIN_VOL_RATIO prosjeka zadnjih 20 svijeca (ne treba biti eksploziv).
+  const vols = candles.map(c => c.volume);
+  const volAvg20 = vols.slice(i - 20, i).reduce((a, b) => a + b, 0) / 20;
+  const volLast = vols[i];
+  const volTooThin = volAvg20 > 0 && volLast < volAvg20 * EMA_RSI_MIN_VOL_RATIO;
   if (crossUp && rsiAboveMa) {
-    if (tooFarFromCross) return { signal: "NEUTRAL", crossUp, crossDn };
+    if (tooFarFromCross || volTooThin) return { signal: "NEUTRAL", crossUp, crossDn };
     return { signal: "LONG", price, sl: price - slDist, tp: price + slDist * EMA_RSI_RR, slPct, tpPct, crossUp, crossDn };
   }
   if (crossDn && !rsiAboveMa) {
-    if (tooFarFromCross) return { signal: "NEUTRAL", crossUp, crossDn };
+    if (tooFarFromCross || volTooThin) return { signal: "NEUTRAL", crossUp, crossDn };
     return { signal: "SHORT", price, sl: price + slDist, tp: price - slDist * EMA_RSI_RR, slPct, tpPct, crossUp, crossDn };
   }
   return { signal: "NEUTRAL", crossUp, crossDn };

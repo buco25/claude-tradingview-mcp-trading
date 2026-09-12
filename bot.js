@@ -39,9 +39,9 @@ const STRONG_SIGNAL_SCORE = 9;    // nekorišten za TP (zadržan za eventualne f
 const STRONG_TP_MULT      = 3.0;  // jako tržište → TP = SL × 3 (1:3 R:R)
 const NORMAL_TP_MULT      = 2.0;  // konsolidacija / neutralno → TP = SL × 2.0 (1:2 R:R min, TraderaEdge standard)
 const MAX_TRADES_PER_DAY = 100;
-export const MAX_OPEN_CRYPTO = 7;  // max otvorenih kripto pozicija (10.09.: 6->7, watchlist narasla na 45)
-export const MAX_OPEN_STOCKS = 5;  // max otvorenih pozicija na dionicama (10.09.: 3->5, +10 novih dionica)
-const MAX_OPEN_PER_PORTFOLIO = MAX_OPEN_CRYPTO + MAX_OPEN_STOCKS;  // ukupni cap = 12
+export const MAX_OPEN_CRYPTO = 5;  // max otvorenih kripto pozicija (12.09.: 7->5, na zahtjev)
+export const MAX_OPEN_STOCKS = 3;  // max otvorenih pozicija na dionicama (12.09.: 5->3, na zahtjev)
+const MAX_OPEN_PER_PORTFOLIO = MAX_OPEN_CRYPTO + MAX_OPEN_STOCKS;  // ukupni cap = 8
 export const isStockSym = (s) => (SYMBOL_SECTORS[s] || "").startsWith("STOCK_");
 // Metali (PAXG/XAU/XAG, 26.08.) — zlato ne prati BTC kao altcoini, izuzeti iz
 // BTC-korelacijskih gateova (weekly key-level SHORT, BTC dEMA10 LONG, REL-STR vs BTC).
@@ -5615,7 +5615,7 @@ export async function syncPositionsFromBitget(pid = "synapse_t") {
 const EMA_RSI_PID        = "ema_rsi";
 const EMA_RSI_SYMBOLS    = ["BTCUSDT"];  // fallback ako rules.json nedostupan (vidi runEmaRsiStrategy)
 const EMA_RSI_TF         = "1H";
-const EMA_RSI_MAX_POS    = 2;
+const EMA_RSI_MAX_POS    = 5;   // 12.09.: 2->5, na zahtjev
 const EMA_RSI_MIN_NOTIONAL = 40;   // isti pod kao glavni bot (fee/minQty razlog)
 const EMA_RSI_RR         = 2.5;
 const EMA_RSI_ATR_MULT   = 1.5;

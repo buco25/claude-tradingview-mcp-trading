@@ -5612,7 +5612,7 @@ export async function syncPositionsFromBitget(pid = "synapse_t") {
 //   Fiksna margina $2/trade, leverage iz postojećeg getSafeLeverage(slPct), max 2 open
 const EMA_RSI_PID        = "ema_rsi";
 const EMA_RSI_SYMBOLS    = ["BTCUSDT"];  // fallback ako rules.json nedostupan (vidi runEmaRsiStrategy)
-const EMA_RSI_TF         = "15m";
+const EMA_RSI_TF         = "1H";
 const EMA_RSI_MAX_POS    = 2;
 const EMA_RSI_MARGIN_USD = 2;
 const EMA_RSI_RR         = 2.5;

@@ -5624,6 +5624,7 @@ const EMA_RSI_ATR_MULT   = 1.5;
 // isti leg iznos i podigni SL na pocetak tog leg-a (zakljucava vecinu dobiti
 // dosad) — trade nastavlja voziti dok se ne dogodi invalidacija ili trailing SL.
 const EMA_RSI_TRAIL_ARM_PCT = 0.8;
+const EMA_RSI_TRAIL_GIVEBACK_PCT = 0.3;  // 13.09., popravljeno: SL blizu arm tocke (ne na proslu prekretnicu), giveback = 30% leg-a
 const EMA_RSI_MAX_CHASE_PCT = 0.75;  // 12.09., na zahtjev: ne ulazi ako je cijena >0.75% od tocke crossa
 const EMA_RSI_MIN_VOL_RATIO = 0.8;   // 12.09., na zahtjev: volumen mora biti >=80% prosjeka zadnjih 20 svijeca
 
@@ -5755,8 +5756,14 @@ export async function runEmaRsiStrategy() {
           : pos.tp + legDist * (1 - EMA_RSI_TRAIL_ARM_PCT);
         const armed = pos.side === "LONG" ? liveP >= armLevel : liveP <= armLevel;
         if (armed) {
+          // 13.09., popravljeno (korisnik primijetio): SL se VIŠE NE zaključava na
+          // prošlu prekretnicu (za prvo produženje to je bio ravno breakeven — dalo
+          // bi natrag CIJELI dosadašnji dobitak prije zatvaranja). Umjesto toga SL
+          // ostaje blizu tocke gdje je produženje okinulo (armLevel, blizu trenutne
+          // cijene/TP-a), uz mali giveback od EMA_RSI_TRAIL_GIVEBACK_PCT tog leg-a.
+          const giveback = legDist * EMA_RSI_TRAIL_GIVEBACK_PCT;
           const newTp  = pos.side === "LONG" ? pos.tp + legDist : pos.tp - legDist;
-          const lockSl = pos.side === "LONG" ? pos.tp - legDist : pos.tp + legDist;
+          const lockSl = pos.side === "LONG" ? armLevel - giveback : armLevel + giveback;
           const newSl  = pos.side === "LONG" ? Math.max(pos.sl, lockSl) : Math.min(pos.sl, lockSl);
           console.log(`  📈 [TRAIL] ${pos.symbol} ${pos.side} — blizu TP-a → produžen ${fmtPrice(pos.tp)} → ${fmtPrice(newTp)}, SL zaključan @ ${fmtPrice(newSl)}`);
           const all = loadPositions(EMA_RSI_PID);

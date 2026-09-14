@@ -5616,6 +5616,7 @@ const EMA_RSI_PID        = "ema_rsi";
 const EMA_RSI_SYMBOLS    = ["BTCUSDT"];  // fallback ako rules.json nedostupan (vidi runEmaRsiStrategy)
 const EMA_RSI_TF         = "1H";
 const EMA_RSI_MAX_POS    = 2;   // 12.09.: 5->2, na zahtjev (nakon losije live serije)
+const EMA_RSI_PAUSED     = true; // 14.09., na zahtjev — pauzirano nakon losije live serije (WR 10%)
 const EMA_RSI_MIN_NOTIONAL = 40;   // isti pod kao glavni bot (fee/minQty razlog)
 const EMA_RSI_RR         = 2.5;
 const EMA_RSI_ATR_MULT   = 1.5;
@@ -5805,7 +5806,12 @@ export async function runEmaRsiStrategy() {
     }
   }
 
-  // ── 2) Novi ulazi — samo na zatvaranju 15m svijeće (11.09.: prošireno s BTC-only
+  // ── 2) Novi ulazi — PAUZIRANO (14.09., na zahtjev nakon losije live serije).
+  //    Postojece pozicije se i dalje prate gore (SL/TP/trail/invalidacija) da ne
+  //    ostanu bez zastite, samo se ne otvaraju NOVE. Vrati na false za nastavak.
+  if (EMA_RSI_PAUSED) return;
+
+  // ── Novi ulazi — samo na zatvaranju 15m svijeće (11.09.: prošireno s BTC-only
   //    na CIJELU watchlistu, korisnikov zahtjev), skeniranje cijele liste svaku
   //    minutu bi bilo nepotrebno opterećenje jer se signal mijenja tek na close ──
   const utcNow = new Date();

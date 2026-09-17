@@ -5666,10 +5666,38 @@ const ULTRA4H_MIN_SIG      = 5;    // isti default prag kao SYMBOL_COMBOS fallba
 const ULTRA4H_RR           = 2.5;
 const ULTRA4H_ATR_MULT     = 1.5;
 const ULTRA4H_MIN_NOTIONAL = 40;
+// RSI ekstrem filter (17.09., na zahtjev — ZEC usao LONG na RSI 82 nakon +11% dana).
+// Napomena: 15m bot VIŠE nema stvarni RSI gate (rsiLongOk/rsiShortOk su hardkodirani
+// na true, "info only" — vidi analyzeUltra), samo zone-confluence provjeru kod PBK
+// ulaza (MOMENTUM grana je nema). Pragovi ispod su ISTI oni koji su nekad bili pravi
+// gate na 15m (jos vidljivi u "whyNot" reason stringu), sad prvi put stvarno primijenjeni.
+const ULTRA4H_RSI_LONG_MAX  = 72;  // ne ulazi LONG ako je RSI(14) iznad ovoga
+const ULTRA4H_RSI_SHORT_MIN = 30;  // ne ulazi SHORT ako je RSI(14) ispod ovoga
+
+function _lastRsi14(closes) {
+  const period = 14;
+  if (closes.length <= period) return 50;
+  let gainSum = 0, lossSum = 0;
+  for (let i = 1; i <= period; i++) {
+    const diff = closes[i] - closes[i - 1];
+    if (diff >= 0) gainSum += diff; else lossSum -= diff;
+  }
+  let avgGain = gainSum / period, avgLoss = lossSum / period;
+  for (let i = period + 1; i < closes.length; i++) {
+    const diff = closes[i] - closes[i - 1];
+    const gain = diff > 0 ? diff : 0, loss = diff < 0 ? -diff : 0;
+    avgGain = (avgGain * (period - 1) + gain) / period;
+    avgLoss = (avgLoss * (period - 1) + loss) / period;
+  }
+  return avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+}
 
 export function analyzeUltra4h(candles, symbol) {
   const result = analyzeUltra(candles, { minSig: ULTRA4H_MIN_SIG, _dynAdx: ADX_MIN, symbol });
   if (result.signal === "NEUTRAL" || result.price == null) return { signal: "NEUTRAL" };
+  const rsi = _lastRsi14(candles.map(c => c.close));
+  if (result.signal === "LONG"  && rsi > ULTRA4H_RSI_LONG_MAX)  return { signal: "NEUTRAL" };
+  if (result.signal === "SHORT" && rsi < ULTRA4H_RSI_SHORT_MIN) return { signal: "NEUTRAL" };
   const atrArr = _atrSeriesX(candles, 14);
   const atr = atrArr[atrArr.length - 1];
   if (atr == null) return { signal: "NEUTRAL" };

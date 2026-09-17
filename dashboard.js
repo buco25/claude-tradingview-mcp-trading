@@ -7,7 +7,7 @@ import "dotenv/config";
 import http from "http";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll, softExitMonitor,
-  runEmaRsiStrategy, runUltra4hStrategy,
+  runUltra4hStrategy,
   getAllFundingRates, getDailyPnlExport, getSymbolStats, getOIForSymbols,
   getFearGreed, getBtcDominance, getDxyData, getConsecutiveLossCount,
   getSessionInfo, calcAtrTrend, getSp500Data, calcSymbolCorrelation,
@@ -1164,79 +1164,7 @@ function pnlHtml(pnl) {
 // glavni renderHtml pretpostavlja jedan portfolio (PORTFOLIO_DEFS[0]). Ista
 // live-price polling logika kao glavne pos-card kartice, drugi ID prefiks
 // ("erpos-") da se ne sudari s ULTRA pozicijama.
-function renderEmaRsiSection(positions) {
-  if (!positions.length) {
-    return `<div class="section-label" style="color:#a78bfa">📐 EMA/RSI (eksperimentalno) — nema otvorenih pozicija</div>`;
-  }
-  const cards = positions.map((p, idx) => {
-    const uid = `er-${p.symbol}-${idx}`;
-    const isLong = p.side === "LONG";
-    const margin = p.margin ?? p.totalUSD / 20;
-    return `
-      <div class="pos-card ${isLong ? "pos-long" : "pos-short"}" id="erpos-${uid}">
-        <div class="pos-header">
-          <span class="symbol">${p.symbol}</span>
-          <span class="badge ${isLong ? "badge-long" : "badge-short"}">${p.side}</span>
-          <span style="background:rgba(167,139,250,0.15);border:1px solid #a78bfa;border-radius:20px;padding:2px 8px;font-size:10px;color:#a78bfa;font-weight:700">📐 EMA/RSI</span>
-          <span class="badge badge-paper">${p.mode}</span>
-          <span id="lp-${uid}" style="margin-left:auto;font-size:13px;font-weight:700;color:var(--text-muted)">—</span>
-        </div>
-        <div class="pos-grid">
-          <div><label>Entry</label><span>${fmtP(p.entryPrice)}</span></div>
-          <div><label>SL</label><span class="red">${fmtP(p.sl)}</span>${p.entryPrice && p.sl ? `<span style="font-size:10px;color:#ff6b6b;margin-left:4px">${(Math.abs(p.entryPrice - p.sl) / p.entryPrice * 100).toFixed(2)}%</span>` : ''}${p.entryPrice && p.sl && p.quantity ? `<div style="font-size:10px;color:#ff6b6b;margin-top:1px" title="Potencijalni gubitak u dolarima ako cijena dotakne SL">-$${(Math.abs(p.entryPrice - p.sl) * p.quantity).toFixed(2)}</div>` : ''}</div>
-          <div><label>TP</label><span class="green">${fmtP(p.tp)}</span>${p.entryPrice && p.tp ? `<span style="font-size:10px;color:#059669;margin-left:4px">${(Math.abs(p.tp - p.entryPrice) / p.entryPrice * 100).toFixed(2)}%</span>` : ''}${p.entryPrice && p.tp && p.quantity ? `<div style="font-size:10px;color:#059669;margin-top:1px" title="Potencijalna dobit u dolarima ako cijena dotakne TP">+$${(Math.abs(p.tp - p.entryPrice) * p.quantity).toFixed(2)}</div>` : ''}</div>
-          <div><label>Notional</label><span>$${p.totalUSD.toFixed(2)}</span></div>
-          <div><label>Ulog (margin)</label><span style="color:#d97706;font-weight:700">$${margin.toFixed(2)}</span></div>
-          <div><label>Otvoreno</label><span>${fmtLocalTs(p.openedAt)}</span></div>
-        </div>
-        <div class="pos-pnl-row">
-          <div style="display:flex;flex-direction:column;gap:2px">
-            <div id="pnl-${uid}" style="font-size:14px;font-weight:700;color:#9ca3af">—</div>
-            <div id="roe-${uid}" style="font-size:18px;font-weight:800;color:#9ca3af;letter-spacing:-0.5px">ROE —</div>
-          </div>
-          <div style="flex:1;min-width:0">
-            <div class="range-bar"><div id="bar-${uid}" class="range-fill"></div></div>
-            <div class="range-labels">
-              <small>SL ${fmtP(p.sl)}${p.entryPrice && p.sl ? ' ('+(Math.abs(p.entryPrice - p.sl) / p.entryPrice * 100).toFixed(2)+'%)' : ''}</small>
-              <small>TP ${fmtP(p.tp)}${p.entryPrice && p.tp ? ' ('+(Math.abs(p.tp - p.entryPrice) / p.entryPrice * 100).toFixed(2)+'%)' : ''}</small>
-            </div>
-          </div>
-        </div>
-        <script>
-        (function(){
-          const uid="${uid}", sym="${p.symbol}", side="${p.side}";
-          const entry=${p.entryPrice}, qty=${p.quantity}, notional=${p.totalUSD};
-          const margin=${margin.toFixed(4)};
-          const sl=${p.sl}, tp=${p.tp};
-          function fmtLive(v){if(v>=1000)return "$"+v.toFixed(2);if(v>=1)return "$"+v.toFixed(4);if(v>=0.001)return "$"+v.toFixed(6);return "$"+v.toFixed(10);}
-          function update(price){
-            document.getElementById("lp-"+uid).textContent=fmtLive(price);
-            const pnl=side==="LONG"?(price-entry)*qty:(entry-price)*qty;
-            const pct=(pnl/notional*100).toFixed(2);
-            const roe=margin>0?(pnl/margin*100).toFixed(2):null;
-            const el=document.getElementById("pnl-"+uid);
-            el.textContent=(pnl>=0?"+":"")+"$"+pnl.toFixed(4)+" ("+pct+"%)";
-            el.style.color=pnl>=0?"#059669":"#dc2626";
-            const roeEl=document.getElementById("roe-"+uid);
-            if(roeEl&&roe!==null){roeEl.textContent="ROE "+(pnl>=0?"+":"")+roe+"%";roeEl.style.color=pnl>=0?"#059669":"#dc2626";}
-            const range=Math.abs(tp-sl);
-            const pos2=side==="LONG"?(price-sl)/range:(sl-price)/range;
-            const pct2=Math.max(0,Math.min(100,pos2*100));
-            const bar=document.getElementById("bar-"+uid);
-            bar.style.width=pct2+"%";bar.style.background=pnl>=0?"#059669":"#dc2626";
-          }
-          async function poll(){try{const r=await fetch("/api/live?sym="+sym);const d=await r.json();if(d.price)update(d.price);}catch{}}
-          poll(); setInterval(poll,15000);
-        })();
-        </script>
-      </div>`;
-  }).join("");
-  return `
-    <div class="section-label" style="color:#a78bfa">📐 EMA/RSI (eksperimentalno) — Otvorene pozicije (${positions.length}/2)</div>
-    <div class="pos-grid-wrap">${cards}</div>`;
-}
-
-// ULTRA-4H (17.09., treća strategija) — ista kartica kao EMA/RSI, drugi badge/boja/id prefiks
+// ULTRA-4H (17.09., treća strategija) — pos-card u istom stilu kao ostale strategije
 function renderUltra4hSection(positions) {
   if (!positions.length) {
     return `<div class="section-label" style="color:#22d3ee">🚀 ULTRA-4H (eksperimentalno) — nema otvorenih pozicija</div>`;
@@ -1309,7 +1237,7 @@ function renderUltra4hSection(positions) {
     <div class="pos-grid-wrap">${cards}</div>`;
 }
 
-function renderHtml(allStats, allPositions, hb, rules = {}, emaRsiPositions = [], ultra4hPositions = []) {
+function renderHtml(allStats, allPositions, hb, rules = {}, ultra4hPositions = []) {
   const tfMap = rules?.portfolio_timeframes || {};
   const hbAgeSec = hb ? Math.floor((Date.now() - new Date(hb.ts).getTime()) / 1000) : null;
   const hbOk     = hbAgeSec !== null && hbAgeSec < 600;
@@ -2039,9 +1967,6 @@ window.toggleScanFilter = function(btn) {
 
   <!-- Open positions — na vrhu za brzi pregled -->
   ${positionsSections}
-
-  <!-- EMA/RSI eksperimentalna strategija — zasebna kartica, odvojena od ULTRA -->
-  ${renderEmaRsiSection(emaRsiPositions)}
 
   <!-- ULTRA-4H eksperimentalna strategija (17.09., treća) — zasebna kartica -->
   ${renderUltra4hSection(ultra4hPositions)}
@@ -4998,9 +4923,8 @@ const server = http.createServer(async (req, res) => {
   const hbFile       = `${DATA_DIR}/heartbeat.json`;
   const hb           = existsSync(hbFile) ? JSON.parse(readFileSync(hbFile, "utf8")) : null;
   const dashRules    = loadRules();
-  const emaRsiPositions = loadPositions("ema_rsi");
   const ultra4hPositions = loadPositions("ultra_4h");
-  const html         = renderHtml(allStats, allPositions, hb, dashRules, emaRsiPositions, ultra4hPositions);
+  const html         = renderHtml(allStats, allPositions, hb, dashRules, ultra4hPositions);
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html);
 });
@@ -5039,13 +4963,8 @@ server.listen(PORT, async () => {
     catch (e) { console.error("Breakout checker greška:", e.message); }
   }, 60 * 1000);
 
-  // ─── EMA/RSI Cross strategija (11.09., eksperimentalna) — svakih 60s ──────
-  // Potpuno odvojena od ULTRA bota (vidi bot.js komentar kod runEmaRsiStrategy).
-  setTimeout(async () => { try { await runEmaRsiStrategy(); } catch (e) { console.error("EMA/RSI strategija greška:", e.message); } }, 10000);
-  setInterval(async () => {
-    try { await runEmaRsiStrategy(); }
-    catch (e) { console.error("EMA/RSI strategija greška:", e.message); }
-  }, 60 * 1000);
+  // EMA/RSI strategija trajno uklonjena 17.09.2026 (na zahtjev, WR 10%) — vidi
+  // komentar kod EMA_RSI_PID u bot.js.
 
   // ─── ULTRA-4H strategija (17.09., treća) — svakih 60s ─────────────────────
   // Potpuno odvojena, vidi bot.js komentar kod runUltra4hStrategy.

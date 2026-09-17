@@ -39,9 +39,9 @@ const STRONG_SIGNAL_SCORE = 9;    // nekorišten za TP (zadržan za eventualne f
 const STRONG_TP_MULT      = 3.0;  // jako tržište → TP = SL × 3 (1:3 R:R)
 const NORMAL_TP_MULT      = 2.0;  // konsolidacija / neutralno → TP = SL × 2.0 (1:2 R:R min, TraderaEdge standard)
 const MAX_TRADES_PER_DAY = 100;
-export const MAX_OPEN_CRYPTO = 5;  // max otvorenih kripto pozicija (12.09.: 7->5, na zahtjev)
-export const MAX_OPEN_STOCKS = 3;  // max otvorenih pozicija na dionicama (12.09.: 5->3, na zahtjev)
-const MAX_OPEN_PER_PORTFOLIO = MAX_OPEN_CRYPTO + MAX_OPEN_STOCKS;  // ukupni cap = 8
+export const MAX_OPEN_CRYPTO = 8;  // max otvorenih kripto pozicija (17.09.: 5->8, na zahtjev)
+export const MAX_OPEN_STOCKS = 7;  // max otvorenih pozicija na dionicama (17.09.: 3->7, na zahtjev)
+const MAX_OPEN_PER_PORTFOLIO = MAX_OPEN_CRYPTO + MAX_OPEN_STOCKS;  // ukupni cap = 15
 export const isStockSym = (s) => (SYMBOL_SECTORS[s] || "").startsWith("STOCK_");
 // Metali (PAXG/XAU/XAG, 26.08.) — zlato ne prati BTC kao altcoini, izuzeti iz
 // BTC-korelacijskih gateova (weekly key-level SHORT, BTC dEMA10 LONG, REL-STR vs BTC).
@@ -275,8 +275,9 @@ function getDynamicAdx(pid) {
   } catch { return ADX_MIN; }
 }
 
-// ─── 2. SYMBOL BLACKLIST — 3 uzastopna SL → 24h ban ─────────────────────────
-const BLACKLIST_LOSSES   = 3;    // uzastopnih SL → blacklist
+// ─── 2. SYMBOL BLACKLIST — 2 uzastopna SL → 24h ban (17.09.: 3->2, na zahtjev;
+//    BTC izuzet od ovoga, vidi recordSymbolSl) ────────────────────────────────
+const BLACKLIST_LOSSES   = 2;    // uzastopnih SL → blacklist
 const BLACKLIST_HOURS    = 24;   // sati bana
 const getBlacklistFile   = () => `${DATA_DIR}/symbol_blacklist.json`;
 
@@ -304,6 +305,7 @@ function isBlacklisted(symbol) {
 }
 
 async function recordSymbolSl(pid, symbol) {
+  if (symbol === "BTCUSDT") return;  // 17.09.: BTC je poseban, ne blacklista se
   const f = csvFilePath(pid);
   if (!existsSync(f)) return;
   try {
@@ -7144,7 +7146,10 @@ export async function run() {
         if      (_isStrong && _entryScore >= _comboMinSig + 2) _dynRiskPct = RISK_PCT_MAX;
         else if (_entryScore <= _comboMinSig)                  _dynRiskPct = RISK_PCT_MIN;
         else                                                   _dynRiskPct = RISK_PCT;
-        const _symRiskPct = rules.symbol_sltp?.[symbol]?.riskPct ?? _dynRiskPct;
+        let _symRiskPct = rules.symbol_sltp?.[symbol]?.riskPct ?? _dynRiskPct;
+        // BTC je poseban (17.09., na zahtjev): +1 postotni poen rizika iznad
+        // ostalih, bez obzira na RISK_PCT_MIN/MAX strop koji vrijedi za ostale.
+        if (symbol === "BTCUSDT") _symRiskPct += 1;
         const riskAmount = equity * (_symRiskPct / 100);
         console.log(`  🎚️  [RISK] ${symbol} — score ${_entryScore}/${SYMBOL_COMBOS[symbol]?.sigIdx?.length ?? 8}, ${_isStrong ? "JAKO" : "normalno"} → rizik $${riskAmount.toFixed(2)} (${_symRiskPct}% od $${equity.toFixed(2)} [${_equitySrc}])`);
         // Ukupni size mult (macro + stable + vwap + oi) ne smije pasti ispod 0.5

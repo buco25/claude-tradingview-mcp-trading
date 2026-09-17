@@ -4706,8 +4706,17 @@ export async function checkBeStopAll() {
 // ─── Soft Exit Monitor — pozivati svakih 15s iz dashboard.js ─────────────────
 // Prati live cijenu za sve otvorene pozicije i zatvara tržišnim nalogom
 // kad cijena dostigne soft SL ili soft TP. Nema Bitget SL/TP ordere.
+let _softExitMonitorRunning = false;
 export async function softExitMonitor() {
   if (PAPER_TRADING) return;
+  // 17.09., otkriveno uzivo (COINUSDT triplo zabiljezen exit): softExitMonitor se
+  // zove svakih 5s, ali jedan prolaz (fetch + close + retry s 1-2s pauzama) moze
+  // trajati duze od 5s - bez ove brave, sljedeci setInterval tick bi pokrenuo NOVI
+  // prolaz DOK je prethodni jos u tijeku, oba bi procitala ISTU (jos neazuriranu)
+  // listu pozicija i oba pokusala zatvoriti istu poziciju → duplicirani CSV izlazi.
+  if (_softExitMonitorRunning) return;
+  _softExitMonitorRunning = true;
+  try {
   for (const pid of PORTFOLIO_IDS) {
     try {
       const pDef = buildPortfolios(JSON.parse(readFileSync("rules.json", "utf8")))[pid];
@@ -4903,6 +4912,9 @@ export async function softExitMonitor() {
     } catch (e) {
       console.log(`  ⚠️  [softExitMonitor] ${pid} greška: ${e.message}`);
     }
+  }
+  } finally {
+    _softExitMonitorRunning = false;
   }
 }
 
@@ -5825,6 +5837,10 @@ export async function runEmaRsiStrategy() {
     const openNow = loadPositions(EMA_RSI_PID);
     if (openNow.length >= EMA_RSI_MAX_POS) break;
     if (openNow.some(p => p.symbol === symbol)) continue;
+    // Cross-strategy kolizija (14.09., otkriveno uzivo — BTC gubitak): vidi identican
+    // komentar u glavnom botu (~6168). EMA/RSI i synapse_t dijele isti Bitget racun -
+    // Bitget merga isti simbol u JEDNU poziciju, a flash-close bi zatvorio oboje.
+    if (loadPositions("synapse_t").some(p => p.symbol === symbol)) continue;
     // Dionice: ulaz SAMO dok US tržište radi (13:35–19:30 UTC, pon–pet) — isti
     // gate kao glavni ULTRA bot (bot.js ~6168). Uhvaćeno uzivo 11.09.: MSFTUSDT
     // SHORT usao izvan sesije na skoro-nula volumenu (0.2 vs normalnih ~90) —
@@ -6167,6 +6183,18 @@ export async function run() {
 
     for (const symbol of pDef.symbols) {
       // Bitget provjera otvorene pozicije — odgođena do nakon signal computation (vidi ispod)
+
+      // ── Cross-strategy kolizija (14.09., otkriveno uzivo — BTC gubitak): EMA/RSI i
+      // synapse_t dijele ISTI stvarni Bitget racun. Bitget nema koncept "nas internih
+      // strategija" - ako oba interno otvore isti simbol, Bitget ih MERGA u JEDNU
+      // poziciju (blended entry/qty), a closeBitGetOrder koristi "close-positions"
+      // (flash-close CIJELE pozicije) - zatvaranje jedne strategije bi zatvorilo i
+      // drugu, na sasvim drugoj cijeni/velicini nego sto je bilo tko od njih ocekivao.
+      // Zato: nikad ne ulazimo u simbol koji EMA/RSI vec drzi, bez obzira na smjer.
+      if (loadPositions(EMA_RSI_PID).some(p => p.symbol === symbol)) {
+        console.log(`  🔒 [${pDef.name}] ${symbol} — EMA/RSI strategija već drži ovaj simbol (dijeljeni Bitget račun) → skip`);
+        continue;
+      }
 
       // ── Pyramid (DCA) logika: dopuštamo max MAX_PYRAMID adicija u ISTOM smjeru ──
       const existingPosList = openPositions.filter(p => p.symbol === symbol);

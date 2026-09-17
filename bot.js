@@ -5898,6 +5898,142 @@ export async function runEmaRsiStrategy() {
   }
 }
 
+// ═══ ULTRA-4H strategija — treca, korisnikov zahtjev 17.09.2026 ═══════════════
+// Potpuno odvojena od synapse_t (15m) i ema_rsi (1H) — vlastiti pid "ultra_4h".
+// Ideja: TraderaEdge sam trguje na 4H/weekly (vidi rules.json btc_target_note),
+// puno sporije od naseg 15m bota. Umjesto da se cijeli 15m bot preradi (svi
+// pragovi/gate-ovi kalibrirani su za 15m ritam), testiramo ISTU jezgru signala
+// (postojeci TE_COMBO analyzeUltra, 8 signala) na 4H svijecama u izolaciji.
+// Namjerno BEZ dodatnih bonus signala (whale/squeeze/wyckoff/bmsb) koji trebaju
+// puno vanjskih fetcheva — cfg im dostavlja samo minSig+ADX, ostatak gracefully
+// no-op-a (vidi analyzeUltra, svaki bonus je cfg.xxx ?? default). Cist test:
+// radi li JEZGRA signala bolje na sporijem TF-u, neovisno o svim finim tweakovima.
+// SL = 1.5x ATR(14), TP = SL x 2.5 (ista formula kao ema_rsi), risk-based sizing
+// isto nacelo kao ostale dvije strategije. Max 3 open (oprezan pocetak).
+const ULTRA4H_PID          = "ultra_4h";
+const ULTRA4H_TF           = "4H";
+const ULTRA4H_MAX_POS      = 3;
+const ULTRA4H_MIN_SIG      = 5;    // isti default prag kao SYMBOL_COMBOS fallback
+const ULTRA4H_RR           = 2.5;
+const ULTRA4H_ATR_MULT     = 1.5;
+const ULTRA4H_MIN_NOTIONAL = 40;
+
+export function analyzeUltra4h(candles, symbol) {
+  const result = analyzeUltra(candles, { minSig: ULTRA4H_MIN_SIG, _dynAdx: ADX_MIN, symbol });
+  if (result.signal === "NEUTRAL" || result.price == null) return { signal: "NEUTRAL" };
+  const atrArr = _atrSeriesX(candles, 14);
+  const atr = atrArr[atrArr.length - 1];
+  if (atr == null) return { signal: "NEUTRAL" };
+  const price   = result.price;
+  const slDist  = atr * ULTRA4H_ATR_MULT;
+  const slPct   = slDist / price * 100;
+  const tpPct   = slPct * ULTRA4H_RR;
+  if (result.signal === "LONG") {
+    return { signal: "LONG", price, sl: price - slDist, tp: price + slDist * ULTRA4H_RR, slPct, tpPct, bullScore: result.bullScore, bearScore: result.bearScore };
+  }
+  return { signal: "SHORT", price, sl: price + slDist, tp: price - slDist * ULTRA4H_RR, slPct, tpPct, bullScore: result.bullScore, bearScore: result.bearScore };
+}
+
+export async function runUltra4hStrategy() {
+  if (PAPER_TRADING) return;
+  initCsv(ULTRA4H_PID);
+
+  // ── 1) Upravljanje POSTOJEĆIM pozicijama ──────────────────────────────────
+  for (const pos of loadPositions(ULTRA4H_PID)) {
+    try {
+      const candles = await fetchCandles(pos.symbol, ULTRA4H_TF, 250);
+      const sig     = analyzeUltra4h(candles, pos.symbol);
+      const prices  = await fetchLivePrices([pos.symbol]);
+      const liveP   = prices[pos.symbol];
+
+      let exitPrice = null, reason = null;
+      if (liveP != null) {
+        if (pos.side === "LONG") {
+          if (liveP <= pos.sl) { exitPrice = pos.sl; reason = "Soft SL"; }
+          else if (liveP >= pos.tp) { exitPrice = pos.tp; reason = "Soft TP"; }
+        } else {
+          if (liveP >= pos.sl) { exitPrice = pos.sl; reason = "Soft SL"; }
+          else if (liveP <= pos.tp) { exitPrice = pos.tp; reason = "Soft TP"; }
+        }
+      }
+      // Invalidacija — analogno EMA/RSI cross-invalidaciji: TE_COMBO nema "cross"
+      // kao takav, pa se kao ekvivalent koristi obrnut signal koji ponovno dosegne
+      // minSig prag (thesis se stvarno okrenula, ne samo oslabila).
+      const invalidated = !reason && ((pos.side === "LONG" && sig.signal === "SHORT") || (pos.side === "SHORT" && sig.signal === "LONG"));
+      if (invalidated) { exitPrice = liveP ?? pos.entryPrice; reason = "Invalidacija (signal obrnut)"; }
+      if (!reason) continue;
+
+      const pnl = pos.side === "LONG"
+        ? (exitPrice - pos.entryPrice) * pos.quantity
+        : (pos.entryPrice - exitPrice) * pos.quantity;
+      console.log(`  🔄 [ULTRA-4H] ${pos.symbol} ${pos.side} — ${reason} @ ${fmtPrice(exitPrice)} → zatvaramo`);
+      try { await closeBitGetOrder(pos); } catch (e) { console.log(`  ⚠️  [ULTRA-4H] close fail: ${e.message}`); }
+      savePositions(ULTRA4H_PID, loadPositions(ULTRA4H_PID).filter(p => p.orderId !== pos.orderId));
+      writeExitCsv(ULTRA4H_PID, pos, exitPrice, reason, pnl);
+      await tg(`🔄 <b>ULTRA-4H ${reason}</b> ${pos.symbol} ${pos.side}\nZatvoreno @ ${fmtPrice(exitPrice)} | P&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}`);
+    } catch (e) {
+      console.log(`  ❌ [ULTRA-4H] ${pos.symbol} monitor: ${e.message}`);
+    }
+  }
+
+  // ── 2) Novi ulazi — samo na zatvaranju 4H svijeće ─────────────────────────
+  const utcNow = new Date();
+  if (!shouldRunNow(ULTRA4H_TF, utcNow.getUTCHours(), utcNow.getUTCMinutes())) return;
+  if (loadPositions(ULTRA4H_PID).length >= ULTRA4H_MAX_POS) return;
+
+  const rules   = JSON.parse(readFileSync("rules.json", "utf8"));
+  const symbols = rules.watchlist_synapse_t || [];
+
+  for (const symbol of symbols) {
+    const openNow = loadPositions(ULTRA4H_PID);
+    if (openNow.length >= ULTRA4H_MAX_POS) break;
+    if (openNow.some(p => p.symbol === symbol)) continue;
+    // Cross-strategy kolizija (vidi identican komentar kod EMA/RSI i glavnog bota) —
+    // ne ulazi u simbol koji vec drzi BILO KOJA od druge dvije strategije, isti
+    // Bitget racun bi ih spojio u jednu poziciju.
+    if (loadPositions("synapse_t").some(p => p.symbol === symbol)) continue;
+    if (loadPositions(EMA_RSI_PID).some(p => p.symbol === symbol)) continue;
+    if (isStockSym(symbol)) {
+      const _nowU = new Date();
+      const _dowU = _nowU.getUTCDay(), _hU = _nowU.getUTCHours(), _mU = _nowU.getUTCMinutes();
+      const _inSessionU = _dowU >= 1 && _dowU <= 5
+        && (_hU > 13 || (_hU === 13 && _mU >= 35))
+        && (_hU < 19 || (_hU === 19 && _mU <= 30));
+      if (!_inSessionU) continue;
+    }
+    try {
+      const candles = await fetchCandles(symbol, ULTRA4H_TF, 250);
+      const sig = analyzeUltra4h(candles, symbol);
+      if (sig.signal === "NEUTRAL") continue;
+
+      const lev = getSafeLeverage(sig.slPct);
+      const _liveEq    = await fetchBitgetEquity();
+      const equity     = _liveEq ?? getPortfolioEquity(ULTRA4H_PID, START_CAPITAL);
+      const riskAmount = equity * (RISK_PCT / 100);
+      let notional = riskAmount / (sig.slPct / 100);
+      const _minQtyNotional = (_minTradeNum[symbol] ?? 0) * sig.price * 1.05;
+      const _minNotional = Math.max(ULTRA4H_MIN_NOTIONAL, _minQtyNotional);
+      if (notional < _minNotional) notional = _minNotional;
+      const margin = notional / lev;
+      const score = sig.signal === "LONG" ? sig.bullScore : sig.bearScore;
+
+      console.log(`  🎯 [ULTRA-4H] ${symbol} ${sig.signal} @ ${fmtPrice(sig.price)} | SL ${fmtPrice(sig.sl)} TP ${fmtPrice(sig.tp)} | score ${score}/8 | rizik $${riskAmount.toFixed(2)} (${RISK_PCT}% od $${equity.toFixed(2)}) → margin $${margin.toFixed(2)} × ${lev}x`);
+      const result = await placeBitGetOrder(symbol, sig.signal, notional, sig.price, sig.sl, sig.tp, sig.slPct, sig.tpPct, lev);
+      const entry = {
+        symbol, signal: sig.signal, price: result.fillPrice, sl: result.slFromFill, tp: result.tpFromFill,
+        tradeSize: notional, margin, orderId: result.orderId, timestamp: Date.now(),
+        strategy: ULTRA4H_PID, timeframe: ULTRA4H_TF, slPct: sig.slPct, tpPct: sig.tpPct,
+        mode: "LIVE", entryMode: "ULTRA4H",
+      };
+      addPosition(ULTRA4H_PID, entry);
+      writeEntryCsv(ULTRA4H_PID, entry);
+      await tg(`🎯 <b>ULTRA-4H NOVI ULAZ</b> ${symbol} ${sig.signal}\nUlaz: ${fmtPrice(result.fillPrice)} | SL: ${fmtPrice(result.slFromFill)} | TP: ${fmtPrice(result.tpFromFill)}\nScore: ${score}/8 | Margin: $${margin.toFixed(2)} @ ${lev}x`);
+    } catch (e) {
+      console.log(`  ❌ [ULTRA-4H] ${symbol}: ${e.message}`);
+    }
+  }
+}
+
 // ─── Main ───────────────────────────────────────────────────────────────────────
 
 export async function run() {

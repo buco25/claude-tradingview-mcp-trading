@@ -5731,7 +5731,8 @@ export async function runUltra4hStrategy() {
   if (loadPositions(ULTRA4H_PID).length >= ULTRA4H_MAX_POS) return;
 
   const rules   = JSON.parse(readFileSync("rules.json", "utf8"));
-  const symbols = rules.watchlist_synapse_t || [];
+  // 17.09., na zahtjev: testiramo SAMO na kripti (izbaceni dionice i metali)
+  const symbols = (rules.watchlist_synapse_t || []).filter(s => !isStockSym(s) && !isMetalSym(s));
 
   for (const symbol of symbols) {
     const openNow = loadPositions(ULTRA4H_PID);

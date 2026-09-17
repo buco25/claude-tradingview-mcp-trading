@@ -32,6 +32,13 @@ export const RISK_PCT_MAX  = 2.0;    // jak setup (score ≥ comboMinSig+2)
 const SL_PCT        = 2.0;    // fallback SL % (Tier 1) — override per-simbol u symbol_sltp
 const TP_PCT        = 3.0;    // fallback TP % (Tier 1, 1.5×SL) — override per-simbol u symbol_sltp
 
+// ─── Bonus signali — pragovi olabavljeni 17.09. na zahtjev (rijetko su se aktivirali) ──
+const WHALE_BONUS_TT_LONG  = 1.25;  // top-trader L/S prag za WHALE long bonus (bilo 1.4)
+const WHALE_BONUS_TT_SHORT = 0.8;   // top-trader L/S prag za WHALE short bonus (bilo 0.7)
+const SQUEEZE_OI_MIN_PCT   = 5;     // min OI rast% za SQUEEZE bonus (bilo 8)
+const JAKO_RSI4H_LONG_MAX  = 75;    // BTC 4H RSI strop za JAKO LONG (bilo 70)
+const JAKO_RSI4H_SHORT_MIN = 25;    // BTC 4H RSI pod za JAKO SHORT (bilo 30)
+
 // ─── Dinamički TP — tržišni uvjeti (BTC Regime) ───────────────────────────────
 // JAKO: BTC Regime BULL + signal LONG, ili BEAR + signal SHORT → TP = SL × 3 (1:3 R:R)
 // NORMALNO: BTC Regime NEUTRAL, ili regime ne podudara signal → TP = SL × 1.5 (1:1.5 R:R)
@@ -6909,10 +6916,13 @@ export async function run() {
             // Ako nema divergencije, cijeli trade je samo prenatrpan u istom smjeru
             // — to nije "smart money" potvrda, nema razloga za bonus size.
             if (_ttRatio !== null) {
-              if (signal === "LONG"  && _ttRatio >= 1.4 && !_bullish) { _whaleMult = 1.2; console.log(`  🐋 [WHALE] ${symbol} — top traderi ${_ttRatio.toFixed(2)} L/S, retail NIJE isto long (${_lr?.toFixed(1) ?? "?"}%) → prava divergencija, LONG ×1.2`); }
-              else if (signal === "SHORT" && _ttRatio <= 0.7 && !_bearish) { _whaleMult = 1.2; console.log(`  🐋 [WHALE] ${symbol} — top traderi ${_ttRatio.toFixed(2)} L/S, retail NIJE isto short (${_lr?.toFixed(1) ?? "?"}%) → prava divergencija, SHORT ×1.2`); }
-              else if (signal === "LONG"  && _ttRatio >= 1.4 && _bullish) { console.log(`  🐋 [WHALE] ${symbol} — top traderi I retail oboje long (${_ttRatio.toFixed(2)} / ${_lr?.toFixed(1)}%) → nema divergencije, bez bonusa`); }
-              else if (signal === "SHORT" && _ttRatio <= 0.7 && _bearish) { console.log(`  🐋 [WHALE] ${symbol} — top traderi I retail oboje short (${_ttRatio.toFixed(2)} / ${_lr?.toFixed(1)}%) → nema divergencije, bez bonusa`); }
+              // 17.09., na zahtjev: bonus-prag olabavljen 1.4/0.7 -> 1.25/0.8 (WHALE_BONUS_TT_*)
+              // da se bonus češće aktivira — caution grane (oprez ×0.7) ostaju na strožem
+              // 1.4/0.7 jer tamo veća sigurnost prije upozorenja ima smisla zadržati.
+              if (signal === "LONG"  && _ttRatio >= WHALE_BONUS_TT_LONG && !_bullish) { _whaleMult = 1.2; console.log(`  🐋 [WHALE] ${symbol} — top traderi ${_ttRatio.toFixed(2)} L/S, retail NIJE isto long (${_lr?.toFixed(1) ?? "?"}%) → prava divergencija, LONG ×1.2`); }
+              else if (signal === "SHORT" && _ttRatio <= WHALE_BONUS_TT_SHORT && !_bearish) { _whaleMult = 1.2; console.log(`  🐋 [WHALE] ${symbol} — top traderi ${_ttRatio.toFixed(2)} L/S, retail NIJE isto short (${_lr?.toFixed(1) ?? "?"}%) → prava divergencija, SHORT ×1.2`); }
+              else if (signal === "LONG"  && _ttRatio >= WHALE_BONUS_TT_LONG && _bullish) { console.log(`  🐋 [WHALE] ${symbol} — top traderi I retail oboje long (${_ttRatio.toFixed(2)} / ${_lr?.toFixed(1)}%) → nema divergencije, bez bonusa`); }
+              else if (signal === "SHORT" && _ttRatio <= WHALE_BONUS_TT_SHORT && _bearish) { console.log(`  🐋 [WHALE] ${symbol} — top traderi I retail oboje short (${_ttRatio.toFixed(2)} / ${_lr?.toFixed(1)}%) → nema divergencije, bez bonusa`); }
               else if (signal === "LONG"  && _ttRatio <= 0.7) { _whaleMult = 0.7; console.log(`  🐋 [WHALE] ${symbol} — top traderi SHORT (${_ttRatio.toFixed(2)}) a mi LONG → oprez ×0.7`); }
               else if (signal === "SHORT" && _ttRatio >= 1.4) { _whaleMult = 0.7; console.log(`  🐋 [WHALE] ${symbol} — top traderi LONG (${_ttRatio.toFixed(2)}) a mi SHORT → oprez ×0.7`); }
             }
@@ -6920,14 +6930,14 @@ export async function run() {
           if (lsr) {
             const lr = _lr, extreme = _extreme, bearish = _bearish, bullish = _bullish;
             if (signal === "LONG" && bearish) {
-              if (oi.rising && oi.changePct > 8) {
+              if (oi.rising && oi.changePct > SQUEEZE_OI_MIN_PCT) {
                 _squeezeMult = extreme ? 1.4 : 1.25;
                 console.log(`  🔥 [SQUEEZE] ${symbol} — retail ${lr.toFixed(1)}% long + OI+${oi.changePct.toFixed(1)}% → short squeeze setup ×${_squeezeMult}`);
               } else {
                 console.log(`  📊 [LSR] ${symbol} — retail bearish (${lr.toFixed(1)}% long) → kontrarian long bias`);
               }
             } else if (signal === "SHORT" && bullish) {
-              if (oi.rising && oi.changePct > 8) {
+              if (oi.rising && oi.changePct > SQUEEZE_OI_MIN_PCT) {
                 _squeezeMult = extreme ? 1.4 : 1.25;
                 console.log(`  🔥 [SQUEEZE] ${symbol} — retail ${lr.toFixed(1)}% long + OI+${oi.changePct.toFixed(1)}% → long squeeze setup ×${_squeezeMult}`);
               } else {
@@ -7099,7 +7109,7 @@ export async function run() {
         // 4H RSI ekstrem isključuje JAKO — overbought/oversold bull nije "jako", nego KASNO
         // tržište (post-mortem 05.07.: RSI 71.6 + JAKO → TP ×3 na vrhu poteza)
         const _rsi4h = _regimeCache?.btcRsi4h ?? 50;
-        const _rsiOkForStrong = signal === "LONG" ? _rsi4h < 70 : _rsi4h > 30;
+        const _rsiOkForStrong = signal === "LONG" ? _rsi4h < JAKO_RSI4H_LONG_MAX : _rsi4h > JAKO_RSI4H_SHORT_MIN;
         // Tjedni EMA makro-faza mora biti usklađena (27.07.): "vaznije biti na pravoj
         // strani dugorocnog trenda" — JAKO LONG samo u tjednoj BULL fazi, SHORT u BEAR fazi
         const _weeklyPhase = pDef.params._weeklyBullPhase;

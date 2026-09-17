@@ -5692,8 +5692,10 @@ function _lastRsi14(closes) {
   return avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
 }
 
-export function analyzeUltra4h(candles, symbol) {
-  const result = analyzeUltra(candles, { minSig: ULTRA4H_MIN_SIG, _dynAdx: ADX_MIN, symbol });
+// Zajednicki zavrsni korak za oba puta ispod: RSI ekstrem filter + ATR SL/TP.
+// Uzima "sirovi" analyzeUltra/analyzeUltraPullback rezultat (signal/bullScore/bearScore)
+// i candles (za RSI/ATR), vraca isti oblik kao prije ({signal, price, sl, tp, slPct, tpPct,...}).
+function _finalizeUltra4hSignal(result, candles) {
   if (result.signal === "NEUTRAL" || result.price == null) return { signal: "NEUTRAL" };
   const rsi = _lastRsi14(candles.map(c => c.close));
   if (result.signal === "LONG"  && rsi > ULTRA4H_RSI_LONG_MAX)  return { signal: "NEUTRAL" };
@@ -5709,6 +5711,50 @@ export function analyzeUltra4h(candles, symbol) {
     return { signal: "LONG", price, sl: price - slDist, tp: price + slDist * ULTRA4H_RR, slPct, tpPct, bullScore: result.bullScore, bearScore: result.bearScore };
   }
   return { signal: "SHORT", price, sl: price + slDist, tp: price - slDist * ULTRA4H_RR, slPct, tpPct, bullScore: result.bullScore, bearScore: result.bearScore };
+}
+
+// Laka verzija (bez weekly/daily/whale/bmsb fetcheva) — koristi se za praćenje
+// POSTOJEĆIH pozicija (invalidacija), zove se svakih 60s pa ne smije biti teška.
+export function analyzeUltra4h(candles, symbol) {
+  const result = analyzeUltra(candles, { minSig: ULTRA4H_MIN_SIG, _dynAdx: ADX_MIN, symbol });
+  return _finalizeUltra4hSignal(result, candles);
+}
+
+// Puna verzija — 17.09., na zahtjev "sve signale kao na 15m". Koristi
+// analyzeUltraPullback (isti wrapper koji koristi glavni bot) umjesto sirovog
+// analyzeUltra — to sam po sebi dodaje weekly PWH/PWL, daily EMA10/20, mjesecni/
+// godisnji open/high/low confluence (LHUNT/DEMA/PWHL signali postaju stvarno
+// aktivni, ne samo no-op default). cfg nosi ostale bonuse (whale/bmsb/wyckoff/
+// chill) koje poziva runUltra4hStrategy jednom po scan ciklusu (ne po simbolu).
+// Zove se SAMO na ulaznom skeniranju (jednom na 4h svijecu), ne na monitoringu.
+export async function analyzeUltra4hFull(candles, symbol, cfg) {
+  const result = await analyzeUltraPullback(symbol, candles, { ...cfg, minSig: ULTRA4H_MIN_SIG, _dynAdx: cfg._dynAdx ?? ADX_MIN });
+  return _finalizeUltra4hSignal(result, candles);
+}
+
+// Gradi cfg s bonus signalima (whale/bmsb/wyckoff/chill/invalidacija/weekly faza) —
+// isti podaci koje glavni 15m bot koristi, ovdje dohvaceni JEDNOM po scan ciklusu
+// (ne po simbolu) jer ULTRA-4H skenira samo jednom na 4h, pa ekstra API pozivi nisu
+// problem ucestalosti kao sto bi bili na 15m kadenci.
+export async function _buildUltra4hCfg(cryptoSymbols) {
+  const cfg = { _dynAdx: getDynamicAdx(ULTRA4H_PID) };
+  try { const c = await getBtcChillMode(); cfg._chillMode = c.chill; } catch {}
+  try { const iv = await getBtcDailyVsInvalidation(); cfg._invalBoost = iv.belowInval === true; } catch {}
+  try { const we = await getBtcWeeklyEmaPhase(); cfg._weeklyBullPhase = we.bullPhase; } catch {}
+  try {
+    const wy = await getBtcWyckoffSignal();
+    cfg._wyckoffBullish = wy.bullish; cfg._wyckoffBearish = wy.bearish;
+    cfg._wyckoffSosPending = wy.sosPending; cfg._wyckoffSowPending = wy.sowPending;
+  } catch {}
+  try {
+    const whaleFull = await getWhaleDivergenceMap(cryptoSymbols);
+    cfg._whaleBiasMap = Object.fromEntries(Object.entries(whaleFull).map(([s, v]) => [s, v.bias]));
+  } catch {}
+  try {
+    const bmsbFull = await getBullMarketSupportBandMap(cryptoSymbols);
+    cfg._bmsbBiasMap = Object.fromEntries(Object.entries(bmsbFull).map(([s, v]) => [s, v.bias]));
+  } catch {}
+  return cfg;
 }
 
 export async function runUltra4hStrategy() {
@@ -5761,6 +5807,8 @@ export async function runUltra4hStrategy() {
   const rules   = JSON.parse(readFileSync("rules.json", "utf8"));
   // 17.09., na zahtjev: testiramo SAMO na kripti (izbaceni dionice i metali)
   const symbols = (rules.watchlist_synapse_t || []).filter(s => !isStockSym(s) && !isMetalSym(s));
+  // Bonus signali (whale/bmsb/wyckoff/chill/...) — jednom po scan ciklusu, ne po simbolu
+  const _u4hCfg = await _buildUltra4hCfg(symbols);
 
   for (const symbol of symbols) {
     const openNow = loadPositions(ULTRA4H_PID);
@@ -5781,7 +5829,7 @@ export async function runUltra4hStrategy() {
     }
     try {
       const candles = await fetchCandles(symbol, ULTRA4H_TF, 250);
-      const sig = analyzeUltra4h(candles, symbol);
+      const sig = await analyzeUltra4hFull(candles, symbol, _u4hCfg);
       if (sig.signal === "NEUTRAL") continue;
 
       const lev = getSafeLeverage(sig.slPct);

@@ -3281,7 +3281,7 @@ function analyzeUltra(candles, cfg) {
 
 // check5mSRTest — uklonjeno 06.06.2026 (bio samo logging, nije blokirao trade)
 
-async function analyzeUltraPullback(symbol, candles, cfg) {
+export async function analyzeUltraPullback(symbol, candles, cfg) {
   const last  = candles[candles.length - 1];
   const price = last.close;
 

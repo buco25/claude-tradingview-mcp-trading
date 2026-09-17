@@ -7,7 +7,7 @@ import "dotenv/config";
 import http from "http";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll, softExitMonitor,
-  runUltra4hStrategy,
+  runUltra4hStrategy, analyzeUltraPullback,
   getAllFundingRates, getDailyPnlExport, getSymbolStats, getOIForSymbols,
   getFearGreed, getBtcDominance, getDxyData, getConsecutiveLossCount,
   getSessionInfo, calcAtrTrend, getSp500Data, calcSymbolCorrelation,
@@ -894,6 +894,62 @@ async function runScan(rules) {
   _scanCacheTs = Date.now();
   _scanRunning = false;
   return _scanCache;
+}
+
+// ─── 1H vs 4H signal usporedba (17.09., na zahtjev) ──────────────────────────
+// Koristi PRAVU bot.js logiku (analyzeUltraPullback) na obje TF za isti simbol,
+// umjesto duplicirane runScan/scanSymbol implementacije iznad — laksi cfg (bez
+// whale/bmsb bonusa) jer je ovo samo vizualna usporedba, ne stvarna trading odluka.
+let _tfCompareCache   = null;
+let _tfCompareCacheTs = 0;
+let _tfCompareRunning = false;
+const TF_COMPARE_TTL  = 5 * 60 * 1000;  // 5 min — 4H se ionako sporo mijenja
+
+async function fetchCandlesLocal(symbol, granularity, limit) {
+  const url = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=${granularity}&limit=${limit}`;
+  const res = await fetch(url);
+  const json = await res.json();
+  if (json.code !== "00000" || !json.data?.length) return null;
+  return json.data.map(k => ({
+    time: parseInt(k[0]), open: parseFloat(k[1]), high: parseFloat(k[2]),
+    low: parseFloat(k[3]), close: parseFloat(k[4]), volume: parseFloat(k[5] || 0),
+  }));
+}
+
+async function runTfCompare() {
+  if (_tfCompareRunning) return _tfCompareCache;
+  _tfCompareRunning = true;
+  const cryptoSymbols = ALL_SYMBOLS.filter(s => !isStockSym(s) && !isMetalSym(s));
+  const results = [];
+  const BATCH = 5;
+  for (let i = 0; i < cryptoSymbols.length; i += BATCH) {
+    const batch = cryptoSymbols.slice(i, i + BATCH);
+    await Promise.all(batch.map(async sym => {
+      try {
+        const [c1h, c4h] = await Promise.all([
+          fetchCandlesLocal(sym, "1H", 250),
+          fetchCandlesLocal(sym, "4H", 250),
+        ]);
+        if (!c1h || !c4h) { results.push({ symbol: sym, error: "no data" }); return; }
+        const [r1h, r4h] = await Promise.all([
+          analyzeUltraPullback(sym, c1h, {}),
+          analyzeUltraPullback(sym, c4h, {}),
+        ]);
+        results.push({
+          symbol: sym,
+          tf1h: { signal: r1h.signal, bullScore: r1h.bullScore ?? 0, bearScore: r1h.bearScore ?? 0 },
+          tf4h: { signal: r4h.signal, bullScore: r4h.bullScore ?? 0, bearScore: r4h.bearScore ?? 0 },
+        });
+      } catch (e) {
+        results.push({ symbol: sym, error: e.message });
+      }
+    }));
+    if (i + BATCH < cryptoSymbols.length) await new Promise(r => setTimeout(r, 200));
+  }
+  _tfCompareCache   = { ts: new Date().toISOString(), results };
+  _tfCompareCacheTs = Date.now();
+  _tfCompareRunning = false;
+  return _tfCompareCache;
 }
 
 // ─── Auth ──────────────────────────────────────────────────────────────────────
@@ -1970,6 +2026,73 @@ window.toggleScanFilter = function(btn) {
 
   <!-- ULTRA-4H eksperimentalna strategija (17.09., treća) — zasebna kartica -->
   ${renderUltra4hSection(ultra4hPositions)}
+
+  <!-- 1H vs 4H signal usporedba (17.09., na zahtjev) -->
+  <div class="scan-card">
+    <div class="scan-header">
+      <div>
+        <div class="chart-title" style="margin-bottom:2px">📐 1H vs 4H — usporedba signala (samo kripto)</div>
+        <div style="font-size:12px;color:var(--text-muted)">Ista TE_COMBO jezgra, iste svijeće u dva TF-a — pokazuje slaže li se 1H (glavni bot) s 4H (ULTRA-4H)</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span id="tfcmp-ts" style="font-size:12px;color:var(--text-muted)">—</span>
+        <button class="scan-btn" id="tfcmp-btn" onclick="doTfCompare()">🔄 Usporedi</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="scan-table" id="tfcmp-table">
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th style="color:#d97706;text-align:center">1H signal</th>
+            <th style="color:#22d3ee;text-align:center">4H signal</th>
+            <th style="text-align:center">Slaganje</th>
+          </tr>
+        </thead>
+        <tbody id="tfcmp-tbody">
+          <tr><td colspan="4" style="text-align:center;padding:24px;color:var(--text-muted)">Klikni "Usporedi" za prikaz</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <script>
+    async function doTfCompare() {
+      const btn = document.getElementById('tfcmp-btn');
+      const tbody = document.getElementById('tfcmp-tbody');
+      btn.disabled = true; btn.textContent = '⏳ Skeniram...';
+      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:24px;color:var(--text-muted)">Dohvaćam 1H i 4H svijeće za sve kripto simbole...</td></tr>';
+      try {
+        const r = await fetch('/api/tf-compare');
+        const d = await r.json();
+        document.getElementById('tfcmp-ts').textContent = new Date(d.ts).toLocaleTimeString('hr-HR');
+        const sigColor = s => s === 'LONG' ? '#10b981' : s === 'SHORT' ? '#ef4444' : '#6b7280';
+        const sigLabel = (s, r) => {
+          if (s === 'NEUTRAL') return '<span style="color:#6b7280">· NEUTRAL</span>';
+          const score = s === 'LONG' ? r.bullScore : r.bearScore;
+          return '<span style="color:' + sigColor(s) + ';font-weight:700">' + (s === 'LONG' ? '▲' : '▼') + ' ' + s + '</span> <span style="font-size:10px;color:#6b7280">' + score + '/8</span>';
+        };
+        const rows = (d.results || []).filter(x => !x.error);
+        rows.sort((a, b) => {
+          const active = x => x.tf1h.signal !== 'NEUTRAL' || x.tf4h.signal !== 'NEUTRAL';
+          return (active(b) ? 1 : 0) - (active(a) ? 1 : 0);
+        });
+        tbody.innerHTML = rows.map(function(x) {
+          const agree = x.tf1h.signal === x.tf4h.signal;
+          const bothActive = x.tf1h.signal !== 'NEUTRAL' && x.tf4h.signal !== 'NEUTRAL';
+          const agreeCell = bothActive
+            ? (agree ? '<span style="color:#10b981">✓ slažu se</span>' : '<span style="color:#f59e0b">✗ razilaze</span>')
+            : '<span style="color:#374151">—</span>';
+          return '<tr><td style="font-weight:700">' + x.symbol.replace('USDT','') + '</td>'
+            + '<td style="text-align:center">' + sigLabel(x.tf1h.signal, x.tf1h) + '</td>'
+            + '<td style="text-align:center">' + sigLabel(x.tf4h.signal, x.tf4h) + '</td>'
+            + '<td style="text-align:center">' + agreeCell + '</td></tr>';
+        }).join('') || '<tr><td colspan="4" style="text-align:center;padding:24px;color:var(--text-muted)">Nema podataka</td></tr>';
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:24px;color:#ef4444">Greška: ' + e.message + '</td></tr>';
+      }
+      btn.disabled = false; btn.textContent = '🔄 Usporedi';
+    }
+  </script>
 
   <div class="scan-card">
     <div class="scan-header">
@@ -3941,6 +4064,24 @@ const server = http.createServer(async (req, res) => {
     try {
       const rules = loadRules();
       const data  = await runScan(rules);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(data || { ts: new Date().toISOString(), results: [] }));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: e.message }));
+    }
+    return;
+  }
+
+  // 1H vs 4H signal usporedba — GET /api/tf-compare
+  if (url.pathname === "/api/tf-compare") {
+    if (_tfCompareCache && (Date.now() - _tfCompareCacheTs) < TF_COMPARE_TTL) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(_tfCompareCache));
+      return;
+    }
+    try {
+      const data = await runTfCompare();
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(data || { ts: new Date().toISOString(), results: [] }));
     } catch (e) {

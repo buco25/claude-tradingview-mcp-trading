@@ -6255,15 +6255,18 @@ export async function run() {
 
         // ── Noćna zona — analiza 100 tradeova (08.07.): ulazi 20-06 UTC su WR 24%,
         //    -11.6 USDT. Tanka likvidnost + nitko ne gleda. Upravljanje pozicijama
-        //    (SL/TP/trail/partial) radi 24/7. 11.09.: na korisnikov zahtjev, umjesto
-        //    tvrde blokade (continue) sad samo manji ulog — isti obrazac kao VIKEND
-        //    ×0.5 niže. ×0.4 malo strože od vikenda jer je WR čak i gori (24% vs
-        //    tipičan vikend uzorak) — može se lako podesiti ako se pokaže preblago/prestrogo.
+        //    (SL/TP/trail/partial) radi 24/7. 11.09.: na korisnikov zahtjev, tvrda
+        //    blokada je omeksana na manji ulog (×0.4) umjesto potpunog gasenja.
+        //    17.09.: VRACENO NAZAD — provjereno uzivo, ta promjena je od 11.09. do
+        //    17.09. dodala 12 novih tradova koji prije ne bi ni postojali, WR 41.7%
+        //    ali NETO -$9.19 (DOGE -2.52, ETH -2.22, LINK -2.41, PAXG/XAU -2.07/-2.08
+        //    itd.) — potvrdjuje da je originalni hard-block bio ispravan, ne pregrub.
         const sess = getSessionInfo();
         const _nightH = new Date().getUTCHours();
         if ((_nightH >= 20 || _nightH < 6) && !isStockSym(symbol)) {
-          _macroSizeMult *= 0.4;
-          console.log(`  🌙 [NOĆ] ${symbol} — ${_nightH}:00 UTC (WR 24% noću povijesno) → size ×0.4`);
+          console.log(`  🌙 [NOĆ] ${symbol} — ${_nightH}:00 UTC (WR 24% noću povijesno) → blokiran ulaz`);
+          _scanLogEntries.push({ symbol, signal: "NEUTRAL", blocker: "NIGHT_BLOCK", reason: `Nocna zona ${_nightH}:00 UTC — blokirano` });
+          continue;
         }
 
         // ── Weekend — TraderaEdge AMA: "weekendom se inače ne trguje" ───────

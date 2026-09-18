@@ -1293,7 +1293,83 @@ function renderUltra4hSection(positions) {
     <div class="pos-grid-wrap">${cards}</div>`;
 }
 
-function renderHtml(allStats, allPositions, hb, rules = {}, ultra4hPositions = []) {
+// ULTRA-4H performanse (18.09., na zahtjev "pratimo kao i na ostalim strategijama") —
+// equity/PnL/WR + win-loss po simbolu + zadnjih 20 tradova, iz VLASTITOG CSV-a
+// (trades_ultra_4h.csv preko buildPortfolioStats) — ne globalnog Bitget accounta,
+// jer taj miksa sve strategije zajedno (isti simbol+smjer nije nuzno ista strategija).
+function renderUltra4hStatsSection(stats) {
+  if (!stats) return "";
+  const eqCol  = stats.equity >= START_CAPITAL ? "#059669" : "#dc2626";
+  const pnlCol = stats.totalPnl >= 0 ? "#059669" : "#dc2626";
+  const pcts   = ((stats.equity - START_CAPITAL) / START_CAPITAL * 100);
+  const pctStr = (pcts >= 0 ? "+" : "") + pcts.toFixed(2) + "%";
+
+  if (stats.recentExits.length === 0) {
+    return `
+      <div class="section-label" style="color:#22d3ee">🚀 ULTRA-4H — nema zatvorenih tradova</div>`;
+  }
+
+  const symRows = stats.symbolStatsArr.map(sym => {
+    const wr = sym.total > 0 ? (sym.wins / sym.total * 100).toFixed(0) : 0;
+    const wrCol = wr >= 50 ? "#059669" : "#dc2626";
+    const pnlColSym = sym.pnl >= 0 ? "#059669" : "#dc2626";
+    return `<tr>
+      <td style="font-weight:700;color:#f9fafb">${sym.sym.replace("USDT","")}</td>
+      <td style="color:#059669;font-weight:700">${sym.wins}W</td>
+      <td style="color:#dc2626;font-weight:700">${sym.losses}L</td>
+      <td style="color:${wrCol};font-weight:700">${wr}%</td>
+      <td style="color:${pnlColSym};font-weight:600">${sym.pnl >= 0 ? "+" : ""}$${sym.pnl.toFixed(2)}</td>
+    </tr>`;
+  }).join("");
+
+  const tradeRows = stats.recentExits.map(r => {
+    const pnl = parseFloat(r["Net P&L"] || 0);
+    const win = pnl >= 0;
+    return `<tr class="${win ? "win-row" : "loss-row"}">
+      <td>${r["Date"]} ${r["Time (UTC)"]}</td>
+      <td style="font-weight:700">${r["Symbol"]}</td>
+      <td><span class="badge ${r["Side"].includes("LONG") ? "badge-long" : "badge-short"}" style="font-size:9px">${r["Side"].replace("CLOSE_","")}</span></td>
+      <td style="color:${win ? "#059669" : "#dc2626"};font-weight:600">${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}</td>
+    </tr>`;
+  }).join("");
+
+  return `
+    <div class="section-label" style="color:#22d3ee">🚀 ULTRA-4H — Performanse</div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;font-size:13px">
+      <div>Equity: <span style="color:${eqCol};font-weight:700">$${stats.equity.toFixed(2)} (${pctStr})</span></div>
+      <div>Total P&amp;L: <span style="color:${pnlCol};font-weight:700">${stats.totalPnl >= 0 ? "+" : ""}$${stats.totalPnl.toFixed(2)}</span></div>
+      <div>Win Rate: <span style="font-weight:700">${stats.winRate ?? "—"}%</span></div>
+      <div>Tradova: <span style="font-weight:700">${stats.recentExits.length < 20 ? stats.recentExits.length : "20+"}</span></div>
+    </div>
+    <div id="collhdr-u4hwl" onclick="colToggle('u4hwl')"
+      style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;padding:8px 0;margin-bottom:4px">
+      <span class="section-label" style="color:#22d3ee;margin:0">📊 Win/Loss po coinu (${stats.symbolStatsArr.length})</span>
+      <span id="collcaret-u4hwl" style="color:#9ca3af;font-size:11px">▶</span>
+    </div>
+    <div id="collbody-u4hwl" style="display:none">
+      <div class="table-wrap">
+        <table class="trade-table">
+          <thead><tr><th>Coin</th><th>W</th><th>L</th><th>WR</th><th>P&amp;L</th></tr></thead>
+          <tbody>${symRows}</tbody>
+        </table>
+      </div>
+    </div>
+    <div id="collhdr-u4htrades" onclick="colToggle('u4htrades')"
+      style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;padding:8px 0;margin-top:10px;margin-bottom:4px">
+      <span class="section-label" style="color:#22d3ee;margin:0">🚀 ULTRA-4H — Zadnjih ${stats.recentExits.length} tradova</span>
+      <span id="collcaret-u4htrades" style="color:#9ca3af;font-size:11px">▶</span>
+    </div>
+    <div id="collbody-u4htrades" style="display:none">
+      <div class="table-wrap">
+        <table class="trade-table">
+          <thead><tr><th>Zatvoreno</th><th>Symbol</th><th>Side</th><th>Net P&amp;L</th></tr></thead>
+          <tbody>${tradeRows}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function renderHtml(allStats, allPositions, hb, rules = {}, ultra4hPositions = [], ultra4hStats = null) {
   const tfMap = rules?.portfolio_timeframes || {};
   const hbAgeSec = hb ? Math.floor((Date.now() - new Date(hb.ts).getTime()) / 1000) : null;
   const hbOk     = hbAgeSec !== null && hbAgeSec < 600;
@@ -2026,6 +2102,7 @@ window.toggleScanFilter = function(btn) {
 
   <!-- ULTRA-4H eksperimentalna strategija (17.09., treća) — zasebna kartica -->
   ${renderUltra4hSection(ultra4hPositions)}
+  ${renderUltra4hStatsSection(ultra4hStats)}
 
   <!-- 1H vs 4H signal usporedba (17.09., na zahtjev) -->
   <div class="scan-card">
@@ -5065,7 +5142,8 @@ const server = http.createServer(async (req, res) => {
   const hb           = existsSync(hbFile) ? JSON.parse(readFileSync(hbFile, "utf8")) : null;
   const dashRules    = loadRules();
   const ultra4hPositions = loadPositions("ultra_4h");
-  const html         = renderHtml(allStats, allPositions, hb, dashRules, ultra4hPositions);
+  const ultra4hStats = buildPortfolioStats("ultra_4h");
+  const html         = renderHtml(allStats, allPositions, hb, dashRules, ultra4hPositions, ultra4hStats);
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html);
 });

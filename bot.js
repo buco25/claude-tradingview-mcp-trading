@@ -6161,9 +6161,15 @@ export async function run() {
       // poziciju (blended entry/qty), a closeBitGetOrder koristi "close-positions"
       // (flash-close CIJELE pozicije) - zatvaranje jedne strategije bi zatvorilo i
       // drugu, na sasvim drugoj cijeni/velicini nego sto je bilo tko od njih ocekivao.
-      // Zato: nikad ne ulazimo u simbol koji EMA/RSI vec drzi, bez obzira na smjer.
+      // Zato: nikad ne ulazimo u simbol koji EMA/RSI ili ULTRA-4H vec drze, bez obzira na smjer.
+      // 18.09., otkriveno uzivo (BTC opet spojen) — ULTRA-4H je provjeravao synapse_t,
+      // ali ovaj smjer (synapse_t provjerava ULTRA-4H) je nedostajao. Ista greska, drugi smjer.
       if (loadPositions(EMA_RSI_PID).some(p => p.symbol === symbol)) {
         console.log(`  🔒 [${pDef.name}] ${symbol} — EMA/RSI strategija već drži ovaj simbol (dijeljeni Bitget račun) → skip`);
+        continue;
+      }
+      if (loadPositions(ULTRA4H_PID).some(p => p.symbol === symbol)) {
+        console.log(`  🔒 [${pDef.name}] ${symbol} — ULTRA-4H strategija već drži ovaj simbol (dijeljeni Bitget račun) → skip`);
         continue;
       }
 

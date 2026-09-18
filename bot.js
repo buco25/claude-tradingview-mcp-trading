@@ -46,9 +46,9 @@ const STRONG_SIGNAL_SCORE = 9;    // nekorišten za TP (zadržan za eventualne f
 const STRONG_TP_MULT      = 3.0;  // jako tržište → TP = SL × 3 (1:3 R:R)
 const NORMAL_TP_MULT      = 2.0;  // konsolidacija / neutralno → TP = SL × 2.0 (1:2 R:R min, TraderaEdge standard)
 const MAX_TRADES_PER_DAY = 100;
-export const MAX_OPEN_CRYPTO = 8;  // max otvorenih kripto pozicija (17.09.: 5->8, na zahtjev)
-export const MAX_OPEN_STOCKS = 7;  // max otvorenih pozicija na dionicama (17.09.: 3->7, na zahtjev)
-const MAX_OPEN_PER_PORTFOLIO = MAX_OPEN_CRYPTO + MAX_OPEN_STOCKS;  // ukupni cap = 15
+export const MAX_OPEN_CRYPTO = 9;  // max otvorenih kripto pozicija (18.09.: 8->9, na zahtjev — dijeli se sa ULTRA-4H)
+export const MAX_OPEN_STOCKS = 6;  // max otvorenih pozicija na dionicama (18.09.: 7->6, na zahtjev)
+const MAX_OPEN_PER_PORTFOLIO = MAX_OPEN_CRYPTO + MAX_OPEN_STOCKS;  // ukupni cap = 15 — ZAJEDNIČKI za synapse_t + ultra_4h (18.09.)
 export const isStockSym = (s) => (SYMBOL_SECTORS[s] || "").startsWith("STOCK_");
 // Metali (PAXG/XAU/XAG, 26.08.) — zlato ne prati BTC kao altcoini, izuzeti iz
 // BTC-korelacijskih gateova (weekly key-level SHORT, BTC dEMA10 LONG, REL-STR vs BTC).
@@ -5673,7 +5673,8 @@ function _atrSeriesX(candles, period = 14) {
 // isto nacelo kao ostale dvije strategije. Max 3 open (oprezan pocetak).
 const ULTRA4H_PID          = "ultra_4h";
 const ULTRA4H_TF           = "4H";
-const ULTRA4H_MAX_POS      = 3;
+// ULTRA4H_MAX_POS uklonjen (18.09., na zahtjev) — ULTRA-4H sad dijeli ZAJEDNIČKI
+// limit sa synapse_t (MAX_OPEN_PER_PORTFOLIO=15 / MAX_OPEN_CRYPTO=9), vidi runUltra4hStrategy.
 const ULTRA4H_MIN_SIG      = 5;    // isti default prag kao SYMBOL_COMBOS fallback
 const ULTRA4H_RR           = 2.5;
 const ULTRA4H_ATR_MULT     = 1.5;
@@ -5814,7 +5815,16 @@ export async function runUltra4hStrategy() {
   // ── 2) Novi ulazi — samo na zatvaranju 4H svijeće ─────────────────────────
   const utcNow = new Date();
   if (!shouldRunNow(ULTRA4H_TF, utcNow.getUTCHours(), utcNow.getUTCMinutes())) return;
-  if (loadPositions(ULTRA4H_PID).length >= ULTRA4H_MAX_POS) return;
+
+  // 18.09., na zahtjev: ZAJEDNIČKI limit sa synapse_t — 15 ukupno / 9 kripto
+  // preko OBJE strategije (ULTRA-4H trguje samo kriptom), ne odvojeni cap od 3.
+  {
+    const _synPos0     = loadPositions("synapse_t");
+    const _u4hPos0     = loadPositions(ULTRA4H_PID);
+    if (_synPos0.length + _u4hPos0.length >= MAX_OPEN_PER_PORTFOLIO) return;
+    const _cryptoOpen0 = _synPos0.filter(p => !isStockSym(p.symbol)).length + _u4hPos0.length;
+    if (_cryptoOpen0 >= MAX_OPEN_CRYPTO) return;
+  }
 
   const rules   = JSON.parse(readFileSync("rules.json", "utf8"));
   // 17.09., na zahtjev: testiramo SAMO na kripti (izbaceni dionice i metali)
@@ -5823,8 +5833,11 @@ export async function runUltra4hStrategy() {
   const _u4hCfg = await _buildUltra4hCfg(symbols);
 
   for (const symbol of symbols) {
-    const openNow = loadPositions(ULTRA4H_PID);
-    if (openNow.length >= ULTRA4H_MAX_POS) break;
+    const openNow    = loadPositions(ULTRA4H_PID);
+    const synOpenNow = loadPositions("synapse_t");
+    if (openNow.length + synOpenNow.length >= MAX_OPEN_PER_PORTFOLIO) break;
+    const cryptoOpenNow = synOpenNow.filter(p => !isStockSym(p.symbol)).length + openNow.length;
+    if (cryptoOpenNow >= MAX_OPEN_CRYPTO) break;
     if (openNow.some(p => p.symbol === symbol)) continue;
     if (isStockSym(symbol)) {
       const _nowU = new Date();
@@ -6195,19 +6208,24 @@ export async function run() {
       }
 
       // Provjeri limit otvorenih pozicija (ukupni + po klasi: kripto/dionice)
+      // 18.09.: ZAJEDNIČKI cap sa ULTRA-4H (na zahtjev) — 15 ukupno / 9 kripto preko
+      // OBJE strategije, ne odvojeno (dijele isti Bitget račun, nema smisla gledati
+      // odvojene limite).
       const _openNow    = loadPositions(pid);
-      const currentOpen = _openNow.length;
+      const _openNowU4h = loadPositions(ULTRA4H_PID);
+      const currentOpen = _openNow.length + _openNowU4h.length;
       const _reEntry = _winReEntry.get(symbol);
       const _reEntryActive = _reEntry && (Date.now() - _reEntry.ts) < REENTRY_WINDOW_MS;
       if (!_reEntryActive && _reEntry) _winReEntry.delete(symbol);
       const _maxOpen = _reEntryActive ? MAX_OPEN_PER_PORTFOLIO + 1 : MAX_OPEN_PER_PORTFOLIO;
       if (currentOpen >= _maxOpen && symbol !== BTC_EXCEPTION) {
-        console.log(`  🔒 [${pDef.name}] Max ${MAX_OPEN_PER_PORTFOLIO}${_reEntryActive?" (re-entry +1)":""} dostignut — preskačem ${symbol}`);
-        _scanLogEntries.push({ symbol, signal: "SKIP", blocker: `MAX_POS(${currentOpen}/${_maxOpen})`, reason: "Max otvorenih pozicija dostignut" });
+        console.log(`  🔒 [${pDef.name}] Max ${MAX_OPEN_PER_PORTFOLIO}${_reEntryActive?" (re-entry +1)":""} dostignut (${currentOpen}, uklj. ULTRA-4H) — preskačem ${symbol}`);
+        _scanLogEntries.push({ symbol, signal: "SKIP", blocker: `MAX_POS(${currentOpen}/${_maxOpen})`, reason: "Max otvorenih pozicija dostignut (zajednički sa ULTRA-4H)" });
         continue;
       }
       const _symIsStock = isStockSym(symbol);
-      const _classOpen  = _openNow.filter(p => isStockSym(p.symbol) === _symIsStock).length;
+      // ULTRA-4H trguje samo kriptom → sve njene pozicije ulaze u kripto klasu
+      const _classOpen  = _openNow.filter(p => isStockSym(p.symbol) === _symIsStock).length + (_symIsStock ? 0 : _openNowU4h.length);
       const _classMax   = _symIsStock ? MAX_OPEN_STOCKS : MAX_OPEN_CRYPTO;
       if (_classOpen >= _classMax && symbol !== BTC_EXCEPTION && !openSymbols.includes(symbol)) {
         console.log(`  🔒 [${pDef.name}] Max ${_classMax} ${_symIsStock ? "dionica" : "kripto"} dostignut (${_classOpen}) — preskačem ${symbol}`);

@@ -1217,6 +1217,9 @@ function renderUltra4hSection(positions) {
           <span class="symbol">${p.symbol}</span>
           <span class="badge ${isLong ? "badge-long" : "badge-short"}">${p.side}</span>
           <span style="background:rgba(34,211,238,0.15);border:1px solid #22d3ee;border-radius:20px;padding:2px 8px;font-size:10px;color:#22d3ee;font-weight:700">🚀 ULTRA-4H</span>
+          ${(p.entryMode || "").startsWith("MOM")
+            ? '<span style="background:rgba(251,146,60,0.15);border:1px solid #f97316;border-radius:20px;padding:2px 8px;font-size:10px;color:#f97316;font-weight:700">⚡ MOM</span>'
+            : '<span style="background:rgba(96,165,250,0.15);border:1px solid #60a5fa;border-radius:20px;padding:2px 8px;font-size:10px;color:#60a5fa;font-weight:700">↩ PBK</span>'}
           <span class="badge badge-paper">${p.mode}</span>
           <span id="lp-${uid}" style="margin-left:auto;font-size:13px;font-weight:700;color:var(--text-muted)">—</span>
         </div>
@@ -1226,6 +1229,7 @@ function renderUltra4hSection(positions) {
           <div><label>TP</label><span class="green">${fmtP(p.tp)}</span>${p.entryPrice && p.tp ? `<span style="font-size:10px;color:#059669;margin-left:4px">${(Math.abs(p.tp - p.entryPrice) / p.entryPrice * 100).toFixed(2)}%</span>` : ''}${p.entryPrice && p.tp && p.quantity ? `<div style="font-size:10px;color:#059669;margin-top:1px" title="Potencijalna dobit u dolarima ako cijena dotakne TP">+$${(Math.abs(p.tp - p.entryPrice) * p.quantity).toFixed(2)}</div>` : ''}</div>
           <div><label>Notional</label><span>$${p.totalUSD.toFixed(2)}</span></div>
           <div><label>Ulog (margin)</label><span style="color:#d97706;font-weight:700">$${margin.toFixed(2)}</span></div>
+          <div><label>Qty</label><span>${p.quantity.toFixed(4)}</span></div>
           <div><label>Otvoreno</label><span>${fmtLocalTs(p.openedAt)}</span></div>
         </div>
         <div class="pos-pnl-row">
@@ -1240,6 +1244,9 @@ function renderUltra4hSection(positions) {
               <small>TP ${fmtP(p.tp)}${p.entryPrice && p.tp ? ' ('+(Math.abs(p.tp - p.entryPrice) / p.entryPrice * 100).toFixed(2)+'%)' : ''}</small>
             </div>
           </div>
+        </div>
+        <div style="margin-top:10px;display:flex;justify-content:flex-end">
+          <button onclick="closePosition('ultra_4h','${p.symbol}',this)" style="background:#ef4444;color:#fff;border:none;border-radius:6px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.02em">✕ Zatvori</button>
         </div>
         <script>
         (function(){
@@ -1271,7 +1278,7 @@ function renderUltra4hSection(positions) {
       </div>`;
   }).join("");
   return `
-    <div class="section-label" style="color:#22d3ee">🚀 ULTRA-4H (eksperimentalno) — Otvorene pozicije (${positions.length}/3)</div>
+    <div class="section-label" style="color:#22d3ee">🚀 ULTRA-4H (eksperimentalno) — Otvorene pozicije (${positions.length}) <span style="font-weight:400;color:#94a3b8;font-size:11px">— dio zajedničkog limita 15 (9 kripto) sa ULTRA</span></div>
     <div class="pos-grid-wrap">${cards}</div>`;
 }
 
@@ -1663,9 +1670,9 @@ function renderHtml(allStats, allPositions, hb, rules = {}, ultra4hPositions = [
       <div class="stat-sub">CSV: ${s.winRate !== null ? s.winRate + "%" : "—"} (${s.wins.length}W/${s.losses.length}L)</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Otvoreno</div>
-      <div class="stat-value" style="color:#d97706">${positions.length}<span style="font-size:14px;color:#6b7280">/${MAX_OPEN_CRYPTO + MAX_OPEN_STOCKS}</span></div>
-      <div class="stat-sub">${positions.filter(p => !isStockSym(p.symbol)).length} kripto + ${positions.filter(p => isStockSym(p.symbol)).length} dionice (max ${MAX_OPEN_CRYPTO}+${MAX_OPEN_STOCKS})</div>
+      <div class="stat-label">Otvoreno <span style="font-size:10px;color:#9ca3af">(+ULTRA-4H)</span></div>
+      <div class="stat-value" style="color:#d97706">${positions.length + ultra4hPositions.length}<span style="font-size:14px;color:#6b7280">/${MAX_OPEN_CRYPTO + MAX_OPEN_STOCKS}</span></div>
+      <div class="stat-sub">${positions.filter(p => !isStockSym(p.symbol)).length + ultra4hPositions.length} kripto + ${positions.filter(p => isStockSym(p.symbol)).length} dionice (max ${MAX_OPEN_CRYPTO}+${MAX_OPEN_STOCKS})</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Strategija</div>

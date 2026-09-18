@@ -5132,20 +5132,21 @@ async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp, slPct, tpP
 export async function closeBitGetOrder(pos) {
   const holdSide = pos.side === "LONG" ? "long" : "short";
 
-  // Pokušaj 1: close-positions endpoint (isti kao "Flash close" u UI, ne treba size)
-  const r1 = await bitgetPost("/api/v2/mix/order/close-positions", {
-    symbol:      pos.symbol,
-    productType: "USDT-FUTURES",
-    holdSide,
-  });
-  console.log(`  📨 BitGet close-positions: code=${r1?.code} msg=${r1?.msg}`);
-  if (r1?.code === "00000") return r1.data;
-
-  // Pokušaj 2: fallback — place-order s pravom veličinom s Bitgeta
+  // 18.09., popravljeno (korisnik primijetio): prijasnja verzija je PRVO pokusavala
+  // "close-positions" (Bitget "Flash Close") koji zatvara CIJELU poziciju na tom
+  // simbolu+smjeru, bez obzira koliko je nasa lokalno tracked kolicina. Ako dvije nase
+  // strategije (npr. synapse_t + ultra_4h) slucajno drze isti simbol (Bitget ih spaja u
+  // JEDNU poziciju), zatvaranje jedne bi zatvorilo i drugu. Sada PRVO pokusavamo sized
+  // reduce-only close (samo NASA kolicina), a flash-close-sve koristimo TEK kao zadnji
+  // pokusaj i SAMO ako je nasa kolicina ~cijela stvarna pozicija (sigurno da nema tudeg
+  // dijela unutra) — inace radije glasno failamo nego da tiho pojedemo tudju poziciju.
   const bitPosData = await fetchBitgetPositionSize(pos.symbol, pos.side);
-  const quantity   = (bitPosData && !bitPosData.error)
-    ? bitPosData.available.toFixed(4)
-    : (pos.quantity ?? (pos.totalUSD / pos.entryPrice)).toFixed(4);
+  const bitgetTotal = (bitPosData && !bitPosData.error) ? bitPosData.total : null;
+  const ownQty = pos.quantity ?? (pos.totalUSD / pos.entryPrice);
+  // Nikad ne zatvaraj vise nego sto stvarno postoji na Bitgetu, niti vise nego sto je NASE.
+  const closeQty = bitgetTotal != null ? Math.min(ownQty, bitgetTotal) : ownQty;
+  const isFullPosition = bitgetTotal == null || Math.abs(bitgetTotal - ownQty) / bitgetTotal < 0.02;
+
   const closeSide = pos.side === "LONG" ? "buy" : "sell";  // Bitget v2 hedge: close nosi side ISTOG smjera kao pozicija
   const path = "/api/v2/mix/order/place-order";
   const orderBody = {
@@ -5155,7 +5156,7 @@ export async function closeBitGetOrder(pos) {
     marginCoin:  "USDT",
     side:        closeSide,
     orderType:   "market",
-    size:        quantity,
+    size:        closeQty.toFixed(4),
     reduceOnly:  "YES",
   };
   const timestamp = Date.now().toString();
@@ -5170,9 +5171,20 @@ export async function closeBitGetOrder(pos) {
   if (BITGET_DEMO) headers["x-simulated-trading"] = "1";
   const res  = await fetch(`${BITGET.baseUrl}${path}`, { method: "POST", headers, body });
   const data = await res.json();
-  console.log(`  📨 BitGet place-order fallback: code=${data.code} msg=${data.msg}`);
-  if (data.code !== "00000") throw new Error(`BitGet close: ${data.msg}`);
-  return data.data;
+  console.log(`  📨 BitGet sized close (qty ${closeQty.toFixed(4)}): code=${data.code} msg=${data.msg}`);
+  if (data.code === "00000") return data.data;
+
+  // Fallback: sized close nije uspio (npr. ispod min qty). Flash-close-sve SAMO ako
+  // smo sigurni da je nasa kolicina ~cijela pozicija (nema tudjeg dijela za pojesti).
+  if (!isFullPosition) {
+    throw new Error(`Sized close (${closeQty.toFixed(4)}) failed: ${data.msg} — NE koristim flash-close jer nasa kolicina (${ownQty.toFixed(4)}) nije cijela pozicija (${bitgetTotal?.toFixed(4)}), moglo bi zatvoriti tudju poziciju`);
+  }
+  const r1 = await bitgetPost("/api/v2/mix/order/close-positions", {
+    symbol: pos.symbol, productType: "USDT-FUTURES", holdSide,
+  });
+  console.log(`  📨 BitGet close-positions (fallback, cijela pozicija je nasa): code=${r1?.code} msg=${r1?.msg}`);
+  if (r1?.code === "00000") return r1.data;
+  throw new Error(`BitGet close: ${data.msg}`);
 }
 
 // Zatvori višak pozicija — ostavlja prvih `target` pozicija, zatvara ostale market orderom

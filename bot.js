@@ -46,8 +46,8 @@ const STRONG_SIGNAL_SCORE = 9;    // nekorišten za TP (zadržan za eventualne f
 const STRONG_TP_MULT      = 3.0;  // jako tržište → TP = SL × 3 (1:3 R:R)
 const NORMAL_TP_MULT      = 2.0;  // konsolidacija / neutralno → TP = SL × 2.0 (1:2 R:R min, TraderaEdge standard)
 const MAX_TRADES_PER_DAY = 100;
-export const MAX_OPEN_CRYPTO = 9;  // max otvorenih kripto pozicija (18.09.: 8->9, na zahtjev — dijeli se sa ULTRA-4H)
-export const MAX_OPEN_STOCKS = 6;  // max otvorenih pozicija na dionicama (18.09.: 7->6, na zahtjev)
+export const MAX_OPEN_CRYPTO = 10; // max otvorenih kripto pozicija (18.09.: 9->10, na zahtjev — dijeli se sa ULTRA-4H, koja trguje samo kriptom)
+export const MAX_OPEN_STOCKS = 5;  // max otvorenih pozicija na dionicama (18.09.: 6->5, na zahtjev)
 const MAX_OPEN_PER_PORTFOLIO = MAX_OPEN_CRYPTO + MAX_OPEN_STOCKS;  // ukupni cap = 15 — ZAJEDNIČKI za synapse_t + ultra_4h (18.09.)
 export const isStockSym = (s) => (SYMBOL_SECTORS[s] || "").startsWith("STOCK_");
 // Metali (PAXG/XAU/XAG, 26.08.) — zlato ne prati BTC kao altcoini, izuzeti iz

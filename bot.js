@@ -5720,9 +5720,9 @@ function _finalizeUltra4hSignal(result, candles) {
   const slPct   = slDist / price * 100;
   const tpPct   = slPct * ULTRA4H_RR;
   if (result.signal === "LONG") {
-    return { signal: "LONG", price, sl: price - slDist, tp: price + slDist * ULTRA4H_RR, slPct, tpPct, bullScore: result.bullScore, bearScore: result.bearScore };
+    return { signal: "LONG", price, sl: price - slDist, tp: price + slDist * ULTRA4H_RR, slPct, tpPct, bullScore: result.bullScore, bearScore: result.bearScore, isMomentum: result.isMomentum === true };
   }
-  return { signal: "SHORT", price, sl: price + slDist, tp: price - slDist * ULTRA4H_RR, slPct, tpPct, bullScore: result.bullScore, bearScore: result.bearScore };
+  return { signal: "SHORT", price, sl: price + slDist, tp: price - slDist * ULTRA4H_RR, slPct, tpPct, bullScore: result.bullScore, bearScore: result.bearScore, isMomentum: result.isMomentum === true };
 }
 
 // Laka verzija (bez weekly/daily/whale/bmsb fetcheva) — koristi se za praćenje
@@ -5826,11 +5826,6 @@ export async function runUltra4hStrategy() {
     const openNow = loadPositions(ULTRA4H_PID);
     if (openNow.length >= ULTRA4H_MAX_POS) break;
     if (openNow.some(p => p.symbol === symbol)) continue;
-    // Cross-strategy kolizija (vidi identican komentar kod EMA/RSI i glavnog bota) —
-    // ne ulazi u simbol koji vec drzi BILO KOJA od druge dvije strategije, isti
-    // Bitget racun bi ih spojio u jednu poziciju.
-    if (loadPositions("synapse_t").some(p => p.symbol === symbol)) continue;
-    if (loadPositions(EMA_RSI_PID).some(p => p.symbol === symbol)) continue;
     if (isStockSym(symbol)) {
       const _nowU = new Date();
       const _dowU = _nowU.getUTCDay(), _hU = _nowU.getUTCHours(), _mU = _nowU.getUTCMinutes();
@@ -5843,6 +5838,17 @@ export async function runUltra4hStrategy() {
       const candles = await fetchCandles(symbol, ULTRA4H_TF, 250);
       const sig = await analyzeUltra4hFull(candles, symbol, _u4hCfg);
       if (sig.signal === "NEUTRAL") continue;
+
+      // Cross-strategy kolizija (18.09., olabavljeno na zahtjev nakon closeBitGetOrder
+      // fixa — Bitget merge vise nije opasan jer close sad zatvara SAMO nasu kolicinu).
+      // Dopusteno: isti simbol, ISTI smjer (dodaje se na Bitgetov merge, obje strane
+      // i dalje prate SVOJ udio odvojeno). Blokirano: isti simbol, SUPROTAN smjer
+      // (hedge na dijeljenom racunu je besmislen — jedna bi strana placala spread).
+      const _otherPos = [...loadPositions("synapse_t"), ...loadPositions(EMA_RSI_PID)].find(p => p.symbol === symbol);
+      if (_otherPos && _otherPos.side !== sig.signal) {
+        console.log(`  🔒 [ULTRA-4H] ${symbol} — ${_otherPos.portfolio || "druga strategija"} drži ${_otherPos.side}, mi ${sig.signal} → suprotan smjer, skip`);
+        continue;
+      }
 
       const lev = getSafeLeverage(sig.slPct);
       const _liveEq    = await fetchBitgetEquity();
@@ -5861,7 +5867,7 @@ export async function runUltra4hStrategy() {
         symbol, signal: sig.signal, price: result.fillPrice, sl: result.slFromFill, tp: result.tpFromFill,
         tradeSize: notional, margin, orderId: result.orderId, timestamp: Date.now(),
         strategy: ULTRA4H_PID, timeframe: ULTRA4H_TF, slPct: sig.slPct, tpPct: sig.tpPct,
-        mode: "LIVE", entryMode: "ULTRA4H",
+        mode: "LIVE", entryMode: sig.isMomentum ? "MOM" : "PBK",
       };
       addPosition(ULTRA4H_PID, entry);
       writeEntryCsv(ULTRA4H_PID, entry);
@@ -6167,24 +6173,6 @@ export async function run() {
     for (const symbol of pDef.symbols) {
       // Bitget provjera otvorene pozicije — odgođena do nakon signal computation (vidi ispod)
 
-      // ── Cross-strategy kolizija (14.09., otkriveno uzivo — BTC gubitak): EMA/RSI i
-      // synapse_t dijele ISTI stvarni Bitget racun. Bitget nema koncept "nas internih
-      // strategija" - ako oba interno otvore isti simbol, Bitget ih MERGA u JEDNU
-      // poziciju (blended entry/qty), a closeBitGetOrder koristi "close-positions"
-      // (flash-close CIJELE pozicije) - zatvaranje jedne strategije bi zatvorilo i
-      // drugu, na sasvim drugoj cijeni/velicini nego sto je bilo tko od njih ocekivao.
-      // Zato: nikad ne ulazimo u simbol koji EMA/RSI ili ULTRA-4H vec drze, bez obzira na smjer.
-      // 18.09., otkriveno uzivo (BTC opet spojen) — ULTRA-4H je provjeravao synapse_t,
-      // ali ovaj smjer (synapse_t provjerava ULTRA-4H) je nedostajao. Ista greska, drugi smjer.
-      if (loadPositions(EMA_RSI_PID).some(p => p.symbol === symbol)) {
-        console.log(`  🔒 [${pDef.name}] ${symbol} — EMA/RSI strategija već drži ovaj simbol (dijeljeni Bitget račun) → skip`);
-        continue;
-      }
-      if (loadPositions(ULTRA4H_PID).some(p => p.symbol === symbol)) {
-        console.log(`  🔒 [${pDef.name}] ${symbol} — ULTRA-4H strategija već drži ovaj simbol (dijeljeni Bitget račun) → skip`);
-        continue;
-      }
-
       // ── Pyramid (DCA) logika: dopuštamo max MAX_PYRAMID adicija u ISTOM smjeru ──
       const existingPosList = openPositions.filter(p => p.symbol === symbol);
       const existingPos     = existingPosList[0];  // prva/primarna pozicija
@@ -6354,6 +6342,18 @@ export async function run() {
             blocker: "SIGNAL", reason,
           });
           continue;
+        }
+
+        // ── Cross-strategy kolizija (18.09., olabavljeno na zahtjev nakon closeBitGetOrder
+        // fixa — Bitget merge vise nije opasan jer close sad zatvara SAMO nasu kolicinu).
+        // Isti obrazac kao Bitget-smjer-svjesna provjera ispod: dopusti isti smjer,
+        // blokiraj suprotan (EMA_RSI_PID trajno prazan, ULTRA4H_PID stvarna druga strategija).
+        {
+          const _otherPos = [...loadPositions(EMA_RSI_PID), ...loadPositions(ULTRA4H_PID)].find(p => p.symbol === symbol);
+          if (_otherPos && _otherPos.side !== signal) {
+            console.log(`  🔒 [${pDef.name}] ${symbol} — ${_otherPos.portfolio || "druga strategija"} drži ${_otherPos.side}, mi ${signal} → suprotan smjer, skip`);
+            continue;
+          }
         }
 
         // ── Bitget provjera otvorene pozicije (smjer-svjesna) ────────────────────

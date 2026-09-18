@@ -786,6 +786,15 @@ async function runScan(rules) {
         // Bull Market Support Band (20W SMA + 21W EMA) dip-buy/rejection — svi kripto (29.08.)
         s.bmsb = (!isStockSym(sym) && !isMetalSym(sym))
           ? await getBullMarketSupportBand(sym).catch(() => null) : null;
+        // 4H signal (18.09., na zahtjev "stavi na skener dal se ceka ulaz na 1h ili 4h") —
+        // ista prava logika (analyzeUltraPullback) kao ULTRA-4H strategija, samo za prikaz.
+        try {
+          const c4h = await fetchCandlesLocal(sym, "4H", 250);
+          if (c4h) {
+            const r4h = await analyzeUltraPullback(sym, c4h, {});
+            s.sig4h = { signal: r4h.signal, bullScore: r4h.bullScore ?? 0, bearScore: r4h.bearScore ?? 0 };
+          }
+        } catch { /* ignoriraj — 4H stupac ostaje prazan za ovaj simbol */ }
         const pending = pendingList.find(p => p.symbol === sym) || null;
         const symSltp = rules.symbol_sltp?.[sym] || {};
         const slPct   = symSltp.slPct ?? 1.5;
@@ -896,15 +905,9 @@ async function runScan(rules) {
   return _scanCache;
 }
 
-// ─── 1H vs 4H signal usporedba (17.09., na zahtjev) ──────────────────────────
-// Koristi PRAVU bot.js logiku (analyzeUltraPullback) na obje TF za isti simbol,
-// umjesto duplicirane runScan/scanSymbol implementacije iznad — laksi cfg (bez
-// whale/bmsb bonusa) jer je ovo samo vizualna usporedba, ne stvarna trading odluka.
-let _tfCompareCache   = null;
-let _tfCompareCacheTs = 0;
-let _tfCompareRunning = false;
-const TF_COMPARE_TTL  = 5 * 60 * 1000;  // 5 min — 4H se ionako sporo mijenja
-
+// 18.09.: 4H signal je sad ugradjen direktno u glavni Scanner (runScan iznad,
+// vidi s.sig4h) — zasebna "1H vs 4H usporedba" kartica/endpoint je uklonjena
+// (na zahtjev "stavi sve pod jedan"). fetchCandlesLocal ostaje, koristi ga runScan.
 async function fetchCandlesLocal(symbol, granularity, limit) {
   const url = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=${granularity}&limit=${limit}`;
   const res = await fetch(url);
@@ -914,42 +917,6 @@ async function fetchCandlesLocal(symbol, granularity, limit) {
     time: parseInt(k[0]), open: parseFloat(k[1]), high: parseFloat(k[2]),
     low: parseFloat(k[3]), close: parseFloat(k[4]), volume: parseFloat(k[5] || 0),
   }));
-}
-
-async function runTfCompare() {
-  if (_tfCompareRunning) return _tfCompareCache;
-  _tfCompareRunning = true;
-  const cryptoSymbols = ALL_SYMBOLS.filter(s => !isStockSym(s) && !isMetalSym(s));
-  const results = [];
-  const BATCH = 5;
-  for (let i = 0; i < cryptoSymbols.length; i += BATCH) {
-    const batch = cryptoSymbols.slice(i, i + BATCH);
-    await Promise.all(batch.map(async sym => {
-      try {
-        const [c1h, c4h] = await Promise.all([
-          fetchCandlesLocal(sym, "1H", 250),
-          fetchCandlesLocal(sym, "4H", 250),
-        ]);
-        if (!c1h || !c4h) { results.push({ symbol: sym, error: "no data" }); return; }
-        const [r1h, r4h] = await Promise.all([
-          analyzeUltraPullback(sym, c1h, {}),
-          analyzeUltraPullback(sym, c4h, {}),
-        ]);
-        results.push({
-          symbol: sym,
-          tf1h: { signal: r1h.signal, bullScore: r1h.bullScore ?? 0, bearScore: r1h.bearScore ?? 0 },
-          tf4h: { signal: r4h.signal, bullScore: r4h.bullScore ?? 0, bearScore: r4h.bearScore ?? 0 },
-        });
-      } catch (e) {
-        results.push({ symbol: sym, error: e.message });
-      }
-    }));
-    if (i + BATCH < cryptoSymbols.length) await new Promise(r => setTimeout(r, 200));
-  }
-  _tfCompareCache   = { ts: new Date().toISOString(), results };
-  _tfCompareCacheTs = Date.now();
-  _tfCompareRunning = false;
-  return _tfCompareCache;
 }
 
 // ─── Auth ──────────────────────────────────────────────────────────────────────
@@ -1034,11 +1001,16 @@ function dedupeExitRows(exits) {
   return out;
 }
 
+// pid moze biti string (jedan portfolio) ili niz stringova (18.09., na zahtjev
+// "stavi sve pod jedan" — kombinira synapse_t + ultra_4h u JEDAN prikaz umjesto
+// dvije odvojene, zbunjujuce equity brojke). def/startCap se uzima od PRVOG
+// pida u nizu, ostatak samo doprinosi redovima (rows).
 function buildPortfolioStats(pid) {
-  const def   = PORTFOLIO_DEFS.find(d => d.id === pid) || {};
+  const pids  = Array.isArray(pid) ? pid : [pid];
+  const def   = PORTFOLIO_DEFS.find(d => d.id === pids[0]) || {};
   const startCap = def.startCapital ?? START_CAPITAL;
 
-  const rows  = parseCsvFile(pid);
+  const rows  = pids.flatMap(p => parseCsvFile(p));
   const exits = dedupeExitRows(rows.filter(r => r["Side"] === "CLOSE_LONG" || r["Side"] === "CLOSE_SHORT"));
   const entries= rows.filter(r => r["Side"] === "LONG" || r["Side"] === "SHORT");
 
@@ -1156,6 +1128,16 @@ function buildPortfolioStats(pid) {
     }
   }
 
+  // ── WR by TF (1H glavni bot / 4H ULTRA-4H) — 18.09., na zahtjev ──────────────
+  // Portfolio kolona u CSV-u vec kaze odakle red dolazi (synapse_t vs ultra_4h).
+  const tfStats = { "1H": { wins: 0, losses: 0, pnl: 0 }, "4H": { wins: 0, losses: 0, pnl: 0 } };
+  for (const r of exits) {
+    const tf  = r["Portfolio"] === "ultra_4h" ? "4H" : "1H";
+    const pnl = parseFloat(r["Net P&L"] || 0);
+    if (pnl >= 0) tfStats[tf].wins++; else tfStats[tf].losses++;
+    tfStats[tf].pnl += pnl;
+  }
+
   // ── Profit Factor (sve closed trades) ────────────────────────────────────────
   const grossWins   = wins.reduce((s, r) => s + parseFloat(r["Net P&L"] || 0), 0);
   const grossLosses = Math.abs(losses.reduce((s, r) => s + parseFloat(r["Net P&L"] || 0), 0));
@@ -1182,7 +1164,7 @@ function buildPortfolioStats(pid) {
     pnlDay, pnlWeek, pnlMonth, pnlYear, tradesDay, tradesWeek, tradesMonth, tradesYear,
     phase2Exits, phase2Wins, phase2Losses, phase2Pnl, phase2WR, phase2PF,
     maxDrawdownPct, currentDrawdownPct,
-    modeStats, softStats, profitFactor, avgDurationMin };
+    modeStats, softStats, profitFactor, avgDurationMin, tfStats };
 }
 
 async function fetchLivePrices(symbols) {
@@ -1293,83 +1275,7 @@ function renderUltra4hSection(positions) {
     <div class="pos-grid-wrap">${cards}</div>`;
 }
 
-// ULTRA-4H performanse (18.09., na zahtjev "pratimo kao i na ostalim strategijama") —
-// equity/PnL/WR + win-loss po simbolu + zadnjih 20 tradova, iz VLASTITOG CSV-a
-// (trades_ultra_4h.csv preko buildPortfolioStats) — ne globalnog Bitget accounta,
-// jer taj miksa sve strategije zajedno (isti simbol+smjer nije nuzno ista strategija).
-function renderUltra4hStatsSection(stats) {
-  if (!stats) return "";
-  const eqCol  = stats.equity >= START_CAPITAL ? "#059669" : "#dc2626";
-  const pnlCol = stats.totalPnl >= 0 ? "#059669" : "#dc2626";
-  const pcts   = ((stats.equity - START_CAPITAL) / START_CAPITAL * 100);
-  const pctStr = (pcts >= 0 ? "+" : "") + pcts.toFixed(2) + "%";
-
-  if (stats.recentExits.length === 0) {
-    return `
-      <div class="section-label" style="color:#22d3ee">🚀 ULTRA-4H — nema zatvorenih tradova</div>`;
-  }
-
-  const symRows = stats.symbolStatsArr.map(sym => {
-    const wr = sym.total > 0 ? (sym.wins / sym.total * 100).toFixed(0) : 0;
-    const wrCol = wr >= 50 ? "#059669" : "#dc2626";
-    const pnlColSym = sym.pnl >= 0 ? "#059669" : "#dc2626";
-    return `<tr>
-      <td style="font-weight:700;color:#f9fafb">${sym.sym.replace("USDT","")}</td>
-      <td style="color:#059669;font-weight:700">${sym.wins}W</td>
-      <td style="color:#dc2626;font-weight:700">${sym.losses}L</td>
-      <td style="color:${wrCol};font-weight:700">${wr}%</td>
-      <td style="color:${pnlColSym};font-weight:600">${sym.pnl >= 0 ? "+" : ""}$${sym.pnl.toFixed(2)}</td>
-    </tr>`;
-  }).join("");
-
-  const tradeRows = stats.recentExits.map(r => {
-    const pnl = parseFloat(r["Net P&L"] || 0);
-    const win = pnl >= 0;
-    return `<tr class="${win ? "win-row" : "loss-row"}">
-      <td>${r["Date"]} ${r["Time (UTC)"]}</td>
-      <td style="font-weight:700">${r["Symbol"]}</td>
-      <td><span class="badge ${r["Side"].includes("LONG") ? "badge-long" : "badge-short"}" style="font-size:9px">${r["Side"].replace("CLOSE_","")}</span></td>
-      <td style="color:${win ? "#059669" : "#dc2626"};font-weight:600">${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}</td>
-    </tr>`;
-  }).join("");
-
-  return `
-    <div class="section-label" style="color:#22d3ee">🚀 ULTRA-4H — Performanse</div>
-    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;font-size:13px">
-      <div>Equity: <span style="color:${eqCol};font-weight:700">$${stats.equity.toFixed(2)} (${pctStr})</span></div>
-      <div>Total P&amp;L: <span style="color:${pnlCol};font-weight:700">${stats.totalPnl >= 0 ? "+" : ""}$${stats.totalPnl.toFixed(2)}</span></div>
-      <div>Win Rate: <span style="font-weight:700">${stats.winRate ?? "—"}%</span></div>
-      <div>Tradova: <span style="font-weight:700">${stats.recentExits.length < 20 ? stats.recentExits.length : "20+"}</span></div>
-    </div>
-    <div id="collhdr-u4hwl" onclick="colToggle('u4hwl')"
-      style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;padding:8px 0;margin-bottom:4px">
-      <span class="section-label" style="color:#22d3ee;margin:0">📊 Win/Loss po coinu (${stats.symbolStatsArr.length})</span>
-      <span id="collcaret-u4hwl" style="color:#9ca3af;font-size:11px">▶</span>
-    </div>
-    <div id="collbody-u4hwl" style="display:none">
-      <div class="table-wrap">
-        <table class="trade-table">
-          <thead><tr><th>Coin</th><th>W</th><th>L</th><th>WR</th><th>P&amp;L</th></tr></thead>
-          <tbody>${symRows}</tbody>
-        </table>
-      </div>
-    </div>
-    <div id="collhdr-u4htrades" onclick="colToggle('u4htrades')"
-      style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;padding:8px 0;margin-top:10px;margin-bottom:4px">
-      <span class="section-label" style="color:#22d3ee;margin:0">🚀 ULTRA-4H — Zadnjih ${stats.recentExits.length} tradova</span>
-      <span id="collcaret-u4htrades" style="color:#9ca3af;font-size:11px">▶</span>
-    </div>
-    <div id="collbody-u4htrades" style="display:none">
-      <div class="table-wrap">
-        <table class="trade-table">
-          <thead><tr><th>Zatvoreno</th><th>Symbol</th><th>Side</th><th>Net P&amp;L</th></tr></thead>
-          <tbody>${tradeRows}</tbody>
-        </table>
-      </div>
-    </div>`;
-}
-
-function renderHtml(allStats, allPositions, hb, rules = {}, ultra4hPositions = [], ultra4hStats = null) {
+function renderHtml(allStats, allPositions, hb, rules = {}, ultra4hPositions = []) {
   const tfMap = rules?.portfolio_timeframes || {};
   const hbAgeSec = hb ? Math.floor((Date.now() - new Date(hb.ts).getTime()) / 1000) : null;
   const hbOk     = hbAgeSec !== null && hbAgeSec < 600;
@@ -2100,77 +2006,13 @@ window.toggleScanFilter = function(btn) {
   <!-- Open positions — na vrhu za brzi pregled -->
   ${positionsSections}
 
-  <!-- ULTRA-4H eksperimentalna strategija (17.09., treća) — zasebna kartica -->
+  <!-- ULTRA-4H eksperimentalna strategija (17.09., treća) — zasebna kartica
+       otvorenih pozicija. Statistika (equity/PnL/WR) je 18.09. spojena u
+       glavni ULTRA prikaz gore (vidi buildPortfolioStats poziv), ne ovdje. -->
   ${renderUltra4hSection(ultra4hPositions)}
-  ${renderUltra4hStatsSection(ultra4hStats)}
 
-  <!-- 1H vs 4H signal usporedba (17.09., na zahtjev) -->
-  <div class="scan-card">
-    <div class="scan-header">
-      <div>
-        <div class="chart-title" style="margin-bottom:2px">📐 1H vs 4H — usporedba signala (samo kripto)</div>
-        <div style="font-size:12px;color:var(--text-muted)">Ista TE_COMBO jezgra, iste svijeće u dva TF-a — pokazuje slaže li se 1H (glavni bot) s 4H (ULTRA-4H)</div>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <span id="tfcmp-ts" style="font-size:12px;color:var(--text-muted)">—</span>
-        <button class="scan-btn" id="tfcmp-btn" onclick="doTfCompare()">🔄 Usporedi</button>
-      </div>
-    </div>
-    <div class="table-wrap">
-      <table class="scan-table" id="tfcmp-table">
-        <thead>
-          <tr>
-            <th>Symbol</th>
-            <th style="color:#d97706;text-align:center">1H signal</th>
-            <th style="color:#22d3ee;text-align:center">4H signal</th>
-            <th style="text-align:center">Slaganje</th>
-          </tr>
-        </thead>
-        <tbody id="tfcmp-tbody">
-          <tr><td colspan="4" style="text-align:center;padding:24px;color:var(--text-muted)">Klikni "Usporedi" za prikaz</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-  <script>
-    async function doTfCompare() {
-      const btn = document.getElementById('tfcmp-btn');
-      const tbody = document.getElementById('tfcmp-tbody');
-      btn.disabled = true; btn.textContent = '⏳ Skeniram...';
-      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:24px;color:var(--text-muted)">Dohvaćam 1H i 4H svijeće za sve kripto simbole...</td></tr>';
-      try {
-        const r = await fetch('/api/tf-compare');
-        const d = await r.json();
-        document.getElementById('tfcmp-ts').textContent = new Date(d.ts).toLocaleTimeString('hr-HR');
-        const sigColor = s => s === 'LONG' ? '#10b981' : s === 'SHORT' ? '#ef4444' : '#6b7280';
-        const sigLabel = (s, r) => {
-          if (s === 'NEUTRAL') return '<span style="color:#6b7280">· NEUTRAL</span>';
-          const score = s === 'LONG' ? r.bullScore : r.bearScore;
-          return '<span style="color:' + sigColor(s) + ';font-weight:700">' + (s === 'LONG' ? '▲' : '▼') + ' ' + s + '</span> <span style="font-size:10px;color:#6b7280">' + score + '/8</span>';
-        };
-        const rows = (d.results || []).filter(x => !x.error);
-        rows.sort((a, b) => {
-          const active = x => x.tf1h.signal !== 'NEUTRAL' || x.tf4h.signal !== 'NEUTRAL';
-          return (active(b) ? 1 : 0) - (active(a) ? 1 : 0);
-        });
-        tbody.innerHTML = rows.map(function(x) {
-          const agree = x.tf1h.signal === x.tf4h.signal;
-          const bothActive = x.tf1h.signal !== 'NEUTRAL' && x.tf4h.signal !== 'NEUTRAL';
-          const agreeCell = bothActive
-            ? (agree ? '<span style="color:#10b981">✓ slažu se</span>' : '<span style="color:#f59e0b">✗ razilaze</span>')
-            : '<span style="color:#374151">—</span>';
-          return '<tr><td style="font-weight:700">' + x.symbol.replace('USDT','') + '</td>'
-            + '<td style="text-align:center">' + sigLabel(x.tf1h.signal, x.tf1h) + '</td>'
-            + '<td style="text-align:center">' + sigLabel(x.tf4h.signal, x.tf4h) + '</td>'
-            + '<td style="text-align:center">' + agreeCell + '</td></tr>';
-        }).join('') || '<tr><td colspan="4" style="text-align:center;padding:24px;color:var(--text-muted)">Nema podataka</td></tr>';
-      } catch (e) {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:24px;color:#ef4444">Greška: ' + e.message + '</td></tr>';
-      }
-      btn.disabled = false; btn.textContent = '🔄 Usporedi';
-    }
-  </script>
-
+  <!-- 18.09.: zasebna "1H vs 4H usporedba" kartica uklonjena — 4H stupac je sad
+       ugradjen direktno u glavni Scanner ispod (na zahtjev "stavi sve pod jedan"). -->
   <div class="scan-card">
     <div class="scan-header">
       <div>
@@ -2198,13 +2040,14 @@ window.toggleScanFilter = function(btn) {
             <th>Symbol</th>
             <th>Cijena</th>
             <th style="color:#d97706;text-align:center">1H</th>
+            <th style="color:#22d3ee;text-align:center">4H <span style="font-weight:400;font-size:10px;color:#94a3b8">ULTRA-4H</span></th>
             <th style="color:#db2777;text-align:center">Signali <span style="font-weight:400;font-size:10px;color:#94a3b8">ADX + 8 combo</span></th>
             <th style="color:#db2777;text-align:center;width:60px">↑↓</th>
             <th style="min-width:160px">Status</th>
           </tr>
         </thead>
         <tbody id="scan-tbody">
-          <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted)">Klikni "Skeniraj" za prikaz ULTRA signala</td></tr>
+          <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted)">Klikni "Skeniraj" za prikaz ULTRA signala</td></tr>
         </tbody>
       </table>
     </div>
@@ -2383,6 +2226,27 @@ window.toggleScanFilter = function(btn) {
         <div style="font-size:22px;font-weight:800;color:${softCol}">${softWR !== null ? softWR+"%" : "—"}</div>
         <div style="font-size:11px;color:#9ca3af">soft-zona · ${softT} tradova ${normWR !== null ? "(normalno " + normWR + "%)" : ""}</div>
       </div>
+
+      ${(() => {
+        const t1 = p2.tfStats["1H"], t4 = p2.tfStats["4H"];
+        const t1T = t1.wins + t1.losses, t4T = t4.wins + t4.losses;
+        const t1WR = t1T > 0 ? Math.round(t1.wins / t1T * 100) : null;
+        const t4WR = t4T > 0 ? Math.round(t4.wins / t4T * 100) : null;
+        const t1Col = t1WR === null ? "#9ca3af" : t1WR >= 50 ? "#059669" : t1WR >= 35 ? "#d97706" : "#dc2626";
+        const t4Col = t4WR === null ? "#9ca3af" : t4WR >= 50 ? "#059669" : t4WR >= 35 ? "#d97706" : "#dc2626";
+        return `
+      <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px;text-align:center" title="Glavni bot, TE_COMBO na 1H svijecama">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">1H WR</div>
+        <div style="font-size:22px;font-weight:800;color:${t1Col}">${t1WR !== null ? t1WR+"%" : "—"}</div>
+        <div style="font-size:11px;color:#9ca3af">${t1T} tradova · ${t1.pnl >= 0 ? "+" : ""}$${t1.pnl.toFixed(2)}</div>
+      </div>
+
+      <div style="background:#111827;border:1px solid #22d3ee55;border-radius:8px;padding:12px;text-align:center" title="ULTRA-4H, ista TE_COMBO jezgra na 4H svijecama">
+        <div style="font-size:10px;color:#22d3ee;margin-bottom:4px;text-transform:uppercase">4H WR</div>
+        <div style="font-size:22px;font-weight:800;color:${t4Col}">${t4WR !== null ? t4WR+"%" : "—"}</div>
+        <div style="font-size:11px;color:#9ca3af">${t4T} tradova · ${t4.pnl >= 0 ? "+" : ""}$${t4.pnl.toFixed(2)}</div>
+      </div>`;
+      })()}
 
     </div>
   </div>`;
@@ -3167,7 +3031,7 @@ async function doScan() {
     // 14.08.: dionice odvojene od kripta u tablici — dva bloka, svaki sortiran
     // istim rank pravilom, s naslovnim retkom izmedju.
     function rowHtml(s, i) {
-      if (s.error) return '<tr><td colspan="7" style="color:#dc2626;padding:6px 10px">' + s.symbol + ': ' + s.error + '</td></tr>';
+      if (s.error) return '<tr><td colspan="8" style="color:#dc2626;padding:6px 10px">' + s.symbol + ': ' + s.error + '</td></tr>';
 
       const rsiNum = parseFloat(s.rsi);
       const rsiCol = isNaN(rsiNum) ? "#94a3b8" : rsiNum > 70 ? "#dc2626" : rsiNum < 30 ? "#059669" : rsiNum > 60 ? "#ea580c" : rsiNum < 40 ? "#0284c7" : "#475569";
@@ -3186,6 +3050,13 @@ async function doScan() {
       const t1h = s.trend1h || 'UNKNOWN';
       const t1hCol  = t1h === 'BULL' ? '#10b981' : t1h === 'BEAR' ? '#ef4444' : '#6b7280';
       const t1hIcon = t1h === 'BULL' ? '▲' : t1h === 'BEAR' ? '▼' : '·';
+
+      // 4H signal (18.09., na zahtjev) — ista prava TE_COMBO logika kao ULTRA-4H
+      const sig4h      = s.sig4h || { signal: 'NEUTRAL', bullScore: 0, bearScore: 0 };
+      const sig4hCol   = sig4h.signal === 'LONG' ? '#10b981' : sig4h.signal === 'SHORT' ? '#ef4444' : '#6b7280';
+      const sig4hIcon  = sig4h.signal === 'LONG' ? '▲' : sig4h.signal === 'SHORT' ? '▼' : '·';
+      const sig4hScore = sig4h.signal === 'LONG' ? sig4h.bullScore : sig4h.signal === 'SHORT' ? sig4h.bearScore : Math.max(sig4h.bullScore, sig4h.bearScore);
+      const sig4hTitle = sig4h.signal === 'NEUTRAL' ? '4H: čeka se (nema aktivnog signala)' : '4H: ' + sig4h.signal + ' ' + sig4hScore + '/8 — ULTRA-4H strategija bi ovdje ušla';
 
       const volR = s.volRatio ?? null;
       const volThr = s.volExhThreshold ?? 1.5;
@@ -3227,6 +3098,7 @@ async function doScan() {
           '<div style="font-size:9px;color:' + slTpCol + ';font-weight:500;margin-top:1px">' + slTp + '</div>' + rsiAdxInfo + '</td>' +
         '<td style="font-weight:600;white-space:nowrap;font-size:12px;padding:6px 8px">' + fmtLive(s.price) + entryInfo + '</td>' +
         '<td style="text-align:center;font-weight:800;color:' + t1hCol + ';font-size:13px;padding:6px 4px" title="1H EMA20: ' + t1h + '">' + t1hIcon + '</td>' +
+        '<td style="text-align:center;font-weight:800;color:' + sig4hCol + ';font-size:13px;padding:6px 4px" title="' + sig4hTitle + '">' + sig4hIcon + (sig4h.signal !== 'NEUTRAL' ? ' <span style="font-size:9px;font-weight:400;color:#94a3b8">' + sig4hScore + '/8</span>' : '') + '</td>' +
         '<td style="padding:4px 4px">' + mandatoryBoxes(s) + sigBoxes(s.ultraSigs16, s.symbol) + '</td>' +
         '<td style="padding:4px 6px;text-align:center">' + scoreBox(s.ultraBull||0, s.ultraBear||0, s.ultraSig, s.ultraMinSig) + '</td>' +
         '<td style="padding:4px 6px">' + statusBox(s) + '</td>' +
@@ -3234,7 +3106,7 @@ async function doScan() {
     }
 
     function sectionHeader(label, count) {
-      return '<tr><td colspan="7" style="padding:10px 8px 5px;color:#60a5fa;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;border-top:2px solid #374151;background:rgba(96,165,250,0.05)">' + label + ' (' + count + ')</td></tr>';
+      return '<tr><td colspan="8" style="padding:10px 8px 5px;color:#60a5fa;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;border-top:2px solid #374151;background:rgba(96,165,250,0.05)">' + label + ' (' + count + ')</td></tr>';
     }
     const cryptoResults = results.filter(function(s){ return !s.isStock; });
     const stockResults  = results.filter(function(s){ return s.isStock; });
@@ -3261,7 +3133,7 @@ async function doScan() {
     }
 
   } catch(e) {
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#dc2626;padding:24px">Greška: ' + e.message + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#dc2626;padding:24px">Greška: ' + e.message + '</td></tr>';
   }
 
   btn.disabled = false;
@@ -4150,27 +4022,9 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // 1H vs 4H signal usporedba — GET /api/tf-compare
-  if (url.pathname === "/api/tf-compare") {
-    if (_tfCompareCache && (Date.now() - _tfCompareCacheTs) < TF_COMPARE_TTL) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(_tfCompareCache));
-      return;
-    }
-    try {
-      const data = await runTfCompare();
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(data || { ts: new Date().toISOString(), results: [] }));
-    } catch (e) {
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: e.message }));
-    }
-    return;
-  }
-
   // Portfolio stats API
   if (url.pathname === "/api/portfolios") {
-    const stats = PORTFOLIO_DEFS.map(d => buildPortfolioStats(d.id));
+    const stats = PORTFOLIO_DEFS.map(d => buildPortfolioStats(d.id === "synapse_t" ? ["synapse_t", "ultra_4h"] : d.id));
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(stats));
     return;
@@ -5135,15 +4989,16 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Dashboard HTML
-  const allStats     = PORTFOLIO_DEFS.map(d => buildPortfolioStats(d.id));
+  // Dashboard HTML — 18.09.: glavni "ULTRA" stats sad kombinira synapse_t (1H) +
+  // ultra_4h (4H) u JEDAN equity/PnL prikaz (na zahtjev, prijasnja odvojena
+  // "ULTRA-4H — Performanse" kartica sa svojim laznim $1000 equity je zbunjivala).
+  const allStats     = PORTFOLIO_DEFS.map(d => buildPortfolioStats(d.id === "synapse_t" ? ["synapse_t", "ultra_4h"] : d.id));
   const allPositions = PORTFOLIO_DEFS.map(d => loadPositions(d.id));
   const hbFile       = `${DATA_DIR}/heartbeat.json`;
   const hb           = existsSync(hbFile) ? JSON.parse(readFileSync(hbFile, "utf8")) : null;
   const dashRules    = loadRules();
   const ultra4hPositions = loadPositions("ultra_4h");
-  const ultra4hStats = buildPortfolioStats("ultra_4h");
-  const html         = renderHtml(allStats, allPositions, hb, dashRules, ultra4hPositions, ultra4hStats);
+  const html         = renderHtml(allStats, allPositions, hb, dashRules, ultra4hPositions);
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html);
 });

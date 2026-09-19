@@ -5886,6 +5886,36 @@ export async function runUltra4hStrategy() {
         if (sig.signal === "SHORT" && velocity.sig === 1) continue;
       }
 
+      // 1H trend filter — isto kao synapse_t (calcTrend1H uvijek gleda 1H candlese,
+      // neovisno o pozivateljevom TF-u, pa je izravno primjenjivo i ovdje).
+      const trend1h4 = await calcTrend1H(symbol);
+      if (sig.signal === "LONG" && trend1h4.trend === "BEAR") continue;
+      if (sig.signal === "SHORT" && trend1h4.trend === "BULL") continue;
+
+      // Day range filter — LONG samo u donjem dijelu dana (≤80% hard / ≤65% bez penala),
+      // SHORT samo u gornjem (≥20% hard / ≥35% bez penala). Isti obrazac kao synapse_t.
+      let _dayRangeSizeMult4 = 1.0;
+      {
+        const _dayHL4 = await fetchDayHL(symbol).catch(() => null);
+        if (_dayHL4 && _dayHL4.high > _dayHL4.low) {
+          const _hlRange4  = _dayHL4.high - _dayHL4.low;
+          const _liveMap4  = await fetchLivePrices([symbol]).catch(() => ({}));
+          const _liveP4    = _liveMap4[symbol] ?? null;
+          if (_liveP4) {
+            const _posInRange4 = (_liveP4 - _dayHL4.low) / _hlRange4 * 100;
+            if (sig.signal === "LONG" && _posInRange4 > 80) continue;
+            if (sig.signal === "SHORT" && _posInRange4 < 20) continue;
+            if (sig.signal === "LONG" && _posInRange4 > 65) {
+              _dayRangeSizeMult4 = 0.6;
+              console.log(`  📊 [ULTRA-4H][DAY RANGE] ${symbol} — cijena na ${_posInRange4.toFixed(0)}% dana → LONG size ×0.6`);
+            } else if (sig.signal === "SHORT" && _posInRange4 < 35) {
+              _dayRangeSizeMult4 = 0.6;
+              console.log(`  📊 [ULTRA-4H][DAY RANGE] ${symbol} — cijena na ${_posInRange4.toFixed(0)}% dana → SHORT size ×0.6`);
+            }
+          }
+        }
+      }
+
       // Liquidation Risk — visok rizik blokira LONG (kaskadni padovi mogući)
       if (sig.signal === "LONG" && _liqScore4 !== null && _liqScore4 > 75) continue;
 
@@ -5907,7 +5937,7 @@ export async function runUltra4hStrategy() {
       let notional = riskAmount / (sig.slPct / 100);
 
       // Makro size multiplikatori — isto kao synapse_t, umjesto blokade smanjujemo poziciju
-      let _macroSizeMult4 = 1.0;
+      let _macroSizeMult4 = _dayRangeSizeMult4;
       if (_dow4 === 0 || _dow4 === 6) { _macroSizeMult4 *= 0.5; console.log(`  📅 [ULTRA-4H][WEEKEND] ${symbol} — size ×0.5`); }
       if (_u4hCfg._chillMode) { _macroSizeMult4 *= 0.7; console.log(`  😴 [ULTRA-4H][CHILL] ${symbol} — size ×0.7`); }
       if (atrTrend.trend === "EXPANDING") { _macroSizeMult4 *= atrTrend.sizeMult; console.log(`  📊 [ULTRA-4H][ATR] ${symbol} — volatilnost raste (${atrTrend.ratio}x) → size ×${atrTrend.sizeMult}`); }

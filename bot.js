@@ -5836,8 +5836,11 @@ export async function runUltra4hStrategy() {
   // 19.09., na zahtjev "sve na 4h isto kao 1h" — isti makro gate-ovi/multiplikatori
   // kao synapse_t, dohvaceni JEDNOM po scan ciklusu (60s), ne po simbolu (isti
   // obrazac kao _buildUltra4hCfg iznad).
-  let _btcRegime1h4 = "UNKNOWN";
-  try { _btcRegime1h4 = (await getBtcRegime1H()).regime; } catch {}
+  // 19.09., ispravljeno na zahtjev: ULTRA-4H gleda 4H BTC regime (getBtcRegime,
+  // stvarno 4H candlese), NE 1H regime — svrha je da 4H strategija reagira na
+  // 4H signale, ne da posuđuje bržu 1H sliku od glavnog bota.
+  let _btcRegime4 = "UNKNOWN";
+  try { _btcRegime4 = await getBtcRegime(); } catch {}
   let _sp500Regime4 = "NEUTRAL";
   try { _sp500Regime4 = (await getSp500Data()).regime; } catch {}
   let _fearGreed4 = null;
@@ -5876,9 +5879,9 @@ export async function runUltra4hStrategy() {
       const sig = await analyzeUltra4hFull(candles, symbol, _u4hCfg);
       if (sig.signal === "NEUTRAL") continue;
 
-      // BTC 1H regime alignment — isto kao synapse_t (LONG treba ne-BEAR, SHORT ne-BULL)
-      if (sig.signal === "LONG" && _btcRegime1h4 === "BEAR") continue;
-      if (sig.signal === "SHORT" && _btcRegime1h4 === "BULL") continue;
+      // BTC 4H regime alignment (LONG treba ne-BEAR, SHORT ne-BULL) — 4H regime, ne 1H
+      if (sig.signal === "LONG" && _btcRegime4 === "BEAR") continue;
+      if (sig.signal === "SHORT" && _btcRegime4 === "BULL") continue;
 
       // Velocity kontra-signal gate — lagging signal protiv već obrnutog momentuma
       if (velocity.sig !== 0) {
@@ -5886,11 +5889,15 @@ export async function runUltra4hStrategy() {
         if (sig.signal === "SHORT" && velocity.sig === 1) continue;
       }
 
-      // 1H trend filter — isto kao synapse_t (calcTrend1H uvijek gleda 1H candlese,
-      // neovisno o pozivateljevom TF-u, pa je izravno primjenjivo i ovdje).
-      const trend1h4 = await calcTrend1H(symbol);
-      if (sig.signal === "LONG" && trend1h4.trend === "BEAR") continue;
-      if (sig.signal === "SHORT" && trend1h4.trend === "BULL") continue;
+      // 4H trend filter — isti koncept kao synapse_t-ov "1H trend filter" (calcTrend1H:
+      // close vs EMA20), ali računat na VLASTITOM 4H TF-u (već dohvaćeni candles), ne na
+      // 1H — 19.09., ispravljeno na zahtjev: 4H strategija mora gledati 4H signale, ne
+      // posuđivati 1H sliku od glavnog bota.
+      const _closes4h = candles.map(c => c.close);
+      const _ema20_4h = calcEMA(_closes4h, 20);
+      const _trend4h  = _ema20_4h ? (_closes4h[_closes4h.length - 1] > _ema20_4h ? "BULL" : "BEAR") : "UNKNOWN";
+      if (sig.signal === "LONG" && _trend4h === "BEAR") continue;
+      if (sig.signal === "SHORT" && _trend4h === "BULL") continue;
 
       // Day range filter — LONG samo u donjem dijelu dana (≤80% hard / ≤65% bez penala),
       // SHORT samo u gornjem (≥20% hard / ≥35% bez penala). Isti obrazac kao synapse_t.

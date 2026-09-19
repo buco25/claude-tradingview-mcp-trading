@@ -2289,6 +2289,11 @@ window.toggleScanFilter = function(btn) {
     const adxLbl  = dynAdxVal === 30 ? "normalno" : dynAdxVal === 35 ? "WR loš" : "WR kritičan";
     const wrCol   = recentWr === null ? "#94a3b8" : recentWr >= 40 ? "#059669" : recentWr >= 30 ? "#d97706" : "#dc2626";
 
+    // Noćna zona — 20-06 UTC hard block za kripto/metale (19.09.: sad vrijedi i za
+    // ULTRA-4H, ne samo glavni bot). Čisto UTC-satni izračun, sinkrono, bez fetcha.
+    const _nightH = new Date().getUTCHours();
+    const _nightActive = _nightH >= 20 || _nightH < 6;
+
     return `
   <div style="background:#1f2937;border:1px solid #374151;border-radius:12px;padding:16px 20px;margin-bottom:20px">
     <div style="font-size:11px;color:#9ca3af;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">⚙️ Adaptivni Status</div>
@@ -2314,7 +2319,14 @@ window.toggleScanFilter = function(btn) {
               </div>`;
             }).join("")
         }
-        <div style="font-size:10px;color:#9ca3af;margin-top:6px">Trigger: 3 uzastopna SL → 24h ban</div>
+        <div style="font-size:10px;color:#9ca3af;margin-top:6px">Trigger: 2 uzastopna SL → 24h ban</div>
+      </div>
+
+      <!-- Noćna zona -->
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">🌙 Noćna Zona (kripto)</div>
+        <div style="font-size:18px;font-weight:800;color:${_nightActive ? "#dc2626" : "#059669"}">${_nightActive ? "🔴 Aktivna" : "🟢 Neaktivna"}</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px">${_nightActive ? "Ulazi blokirani (20-06 UTC)" : "Ulazi dozvoljeni · blok 20-06 UTC"}</div>
       </div>
 
     </div>
@@ -2341,6 +2353,30 @@ window.toggleScanFilter = function(btn) {
         <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">📊 BTC Regime (1H)</div>
         <div style="font-size:22px;font-weight:800" id="mi-regime-val">…</div>
         <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="mi-regime-sub">BULL=LONG ok · BEAR=LONG blokiran</div>
+      </div>
+
+      <!-- BTC Regime 4H (19.09., dodano — koristi ga ULTRA-4H za alignment) -->
+      <div style="background:#2d3748;border:1px solid #22d3ee55;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#22d3ee;margin-bottom:6px;text-transform:uppercase">📊 BTC Regime (4H) <span style="color:#94a3b8;font-weight:400">ULTRA-4H</span></div>
+        <div style="font-size:22px;font-weight:800" id="mi-regime4h-val">…</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="mi-regime4h-sub">BULL=LONG ok · BEAR=LONG blokiran</div>
+      </div>
+
+      <!-- ATR Trend / Volatilnost -->
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">📈 ATR Trend (volatilnost)</div>
+        <div style="font-size:18px;font-weight:800" id="atr-trend-val">…</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="atr-trend-sub">učitavam…</div>
+      </div>
+
+      <!-- Liquidation Risk -->
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">💥 Liquidation Risk</div>
+        <div style="font-size:16px;font-weight:800" id="liq-val">…</div>
+        <div style="background:#374151;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">
+          <div id="liq-bar" style="height:100%;border-radius:4px;background:#059669;transition:width .5s,background .5s;width:0%"></div>
+        </div>
+        <div style="font-size:11px;color:#9ca3af" id="liq-sub">učitavam…</div>
       </div>
 
       <!-- Active Gates -->
@@ -3235,7 +3271,22 @@ async function loadMarketContext() {
       document.getElementById('readiness-card').style.borderColor = col;
     }
 
-    // ── BTC Regime — loadBtcRegime() handles this via /api/regime ────────
+    // ── BTC Regime (1H) — loadBtcRegime() handles this via /api/regime ────
+    // ── BTC Regime (4H) — 19.09., dodano: d.regime iz ovog istog /api/market-context
+    // fetcha je već 4H-računat na serveru (vidi handler), samo mu je trebao UI ────
+    if (d.regime) {
+      const r4 = d.regime;
+      const col4 = r4 === "BULL" ? "#059669" : r4 === "BEAR" ? "#dc2626" : "#d97706";
+      const icon4 = r4 === "BULL" ? "📈" : r4 === "BEAR" ? "📉" : "➡️";
+      const el4 = document.getElementById('mi-regime4h-val');
+      if (el4) {
+        el4.textContent = icon4 + ' ' + r4;
+        el4.style.color = col4;
+        document.getElementById('mi-regime4h-sub').textContent =
+          r4 === "BULL" ? "LONG ulazi aktivni" : r4 === "BEAR" ? "LONG suspendiran" : "Čekamo trend";
+        document.getElementById('mi-regime4h-sub').style.color = col4;
+      }
+    }
 
     // ── Active Gates ──────────────────────────────────────────────────────
     if (d.readiness?.gates) {
@@ -4334,7 +4385,7 @@ const server = http.createServer(async (req, res) => {
       const liqNum  = liq?.score ?? 0;
       const cbCount = consecLosses ?? 0;
       const gates = [
-        { name: "BTC Regime",   ok: regime === "BULL" || regime === "NEUTRAL", weight: 20 },
+        { name: "BTC Regime 4H", ok: regime === "BULL" || regime === "NEUTRAL", weight: 20 },
         { name: "F&G",          ok: fgNum > 20 && fgNum < 80,                  weight: 15 },
         { name: "DXY",          ok: dxyNum <= 0.3,                             weight: 10 },
         { name: "Liq Risk",     ok: liqNum <= 75,                              weight: 15 },

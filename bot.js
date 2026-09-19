@@ -3507,7 +3507,7 @@ function addPosition(pid, entry) {
 //   newTpPct = origTpPct   + (steps+1) × TRAIL_STEP        (3.5, 4.0, 4.5, ...)
 
 const _softFailAlertTs = new Map();  // symbol:side → ts zadnjeg SOFT FAIL alerta (anti-spam)
-const TRAIL_STRATEGIES = ["synapse_t"];  // koje strategije koriste trail
+const TRAIL_STRATEGIES = ["synapse_t", "ultra_4h"];  // koje strategije koriste trail (19.09.: dodan ultra_4h, vidi softExitMonitor)
 const TRAIL_TRIGGER    = 2.5;            // % gain koji aktivira trail
 const TRAIL_STEP       = 0.5;            // korak pomaka TP-a (%)
 const TRAIL_GIVEBACK   = 1.0;            // % ispod peaka — prostor za disanje u trendu
@@ -4726,10 +4726,15 @@ export async function softExitMonitor() {
   if (_softExitMonitorRunning) return;
   _softExitMonitorRunning = true;
   try {
-  for (const pid of PORTFOLIO_IDS) {
+  // 19.09.: ULTRA-4H dodan u isti monitor (na zahtjev — trail TP nikad nije radio
+  // na 4H jer je runUltra4hStrategy imao samo prost SL/TP-hit check, bez applyTrail/
+  // emergency-close koje ovaj monitor već radi za synapse_t). ULTRA-4H nema pDef u
+  // rules.json (nije "pravi" portfolio iz buildPortfolios), pa se pDef.live gate
+  // preskače baš za nju.
+  for (const pid of [...PORTFOLIO_IDS, ULTRA4H_PID]) {
     try {
       const pDef = buildPortfolios(JSON.parse(readFileSync("rules.json", "utf8")))[pid];
-      if (!pDef?.live) continue;
+      if (pid !== ULTRA4H_PID && !pDef?.live) continue;
 
       const positions = loadPositions(pid);
       if (!positions.length) continue;
@@ -5775,29 +5780,25 @@ export async function runUltra4hStrategy() {
   initCsv(ULTRA4H_PID);
 
   // ── 1) Upravljanje POSTOJEĆIM pozicijama ──────────────────────────────────
+  // 19.09.: Soft SL/TP-hit i trailing sad radi softExitMonitor (isti kod kao
+  // synapse_t, uklj. applyTrail — vidi TRAIL_STRATEGIES) jer se zove svakih 5s,
+  // puno responzivnije od ovog 60s ciklusa. Ovdje ostaje SAMO invalidacija
+  // (obrnut signal) — treba ponovnu analizu candlesa koju softExitMonitor ne radi.
   for (const pos of loadPositions(ULTRA4H_PID)) {
     try {
       const candles = await fetchCandles(pos.symbol, ULTRA4H_TF, 250);
       const sig     = analyzeUltra4h(candles, pos.symbol);
-      const prices  = await fetchLivePrices([pos.symbol]);
-      const liveP   = prices[pos.symbol];
 
-      let exitPrice = null, reason = null;
-      if (liveP != null) {
-        if (pos.side === "LONG") {
-          if (liveP <= pos.sl) { exitPrice = pos.sl; reason = "Soft SL"; }
-          else if (liveP >= pos.tp) { exitPrice = pos.tp; reason = "Soft TP"; }
-        } else {
-          if (liveP >= pos.sl) { exitPrice = pos.sl; reason = "Soft SL"; }
-          else if (liveP <= pos.tp) { exitPrice = pos.tp; reason = "Soft TP"; }
-        }
-      }
       // Invalidacija — analogno EMA/RSI cross-invalidaciji: TE_COMBO nema "cross"
       // kao takav, pa se kao ekvivalent koristi obrnut signal koji ponovno dosegne
       // minSig prag (thesis se stvarno okrenula, ne samo oslabila).
-      const invalidated = !reason && ((pos.side === "LONG" && sig.signal === "SHORT") || (pos.side === "SHORT" && sig.signal === "LONG"));
-      if (invalidated) { exitPrice = liveP ?? pos.entryPrice; reason = "Invalidacija (signal obrnut)"; }
-      if (!reason) continue;
+      const invalidated = (pos.side === "LONG" && sig.signal === "SHORT") || (pos.side === "SHORT" && sig.signal === "LONG");
+      if (!invalidated) continue;
+
+      const prices    = await fetchLivePrices([pos.symbol]);
+      const liveP     = prices[pos.symbol];
+      const exitPrice = liveP ?? pos.entryPrice;
+      const reason    = "Invalidacija (signal obrnut)";
 
       const pnl = pos.side === "LONG"
         ? (exitPrice - pos.entryPrice) * pos.quantity

@@ -4602,25 +4602,27 @@ async function moveSLtoBreakEven(pos) {
   if (pos.beMoved) return false;
   if (PAPER_TRADING) return false;
 
-  const { symbol, side, entryPrice } = pos;
+  const { symbol, side, entryPrice, portfolio: pid } = pos;
   // Novi SL: entry + buffer (LONG: dobitak pri povratku, SHORT: minimalni gubitak)
   const newSlPrice = entryPrice * (1 + BE_BUFFER_PCT / 100);
+
+  // Ažuriraj pos.sl u JSON-u — koristi pos.portfolio direktno (19.09. fix: stari kod
+  // je petljao SAMO kroz PORTFOLIO_IDS pa bi za ultra_4h/druge pid-ove tiho vratio
+  // true BEZ da išta spremi — lažni "uspjeh" koji je već slao TG poruku o zaštiti
+  // profita koja se nikad nije stvarno dogodila).
+  const allPos = loadPositions(pid);
+  const idx = allPos.findIndex(p => p.symbol === symbol && p.side === side);
+  if (idx < 0) {
+    console.log(`  ⚠️  [BE-STOP] ${symbol} ${side} — pozicija nije pronađena u ${pid}, preskačem`);
+    return false;
+  }
+  allPos[idx].sl      = newSlPrice;
+  allPos[idx].beMoved = true;
+  savePositions(pid, allPos);
 
   // Soft SL — samo ažuriraj lokalno, nema Bitget nalog
   console.log(`  🔒 [BE-STOP] ${symbol} ${side} — soft SL pomaknut na ${fmtPrice(newSlPrice, symbol)} (+${BE_BUFFER_PCT}% od entry ${fmtPrice(entryPrice)})`);
   await tg(`🔒 <b>BE-STOP [ULTRA]</b> ${symbol} ${side}\nSoft SL pomaknut na entry+${BE_BUFFER_PCT}%: ${fmtPrice(newSlPrice, symbol)}\nProfit zagarantiran pri povratku na entry.`);
-
-  // Ažuriraj pos.sl u JSON-u
-  for (const pid of PORTFOLIO_IDS) {
-    const allPos = loadPositions(pid);
-    const idx = allPos.findIndex(p => p.symbol === symbol && p.side === side);
-    if (idx >= 0) {
-      allPos[idx].sl     = newSlPrice;
-      allPos[idx].beMoved = true;
-      savePositions(pid, allPos);
-      return true;
-    }
-  }
   return true;
 }
 
@@ -4674,10 +4676,13 @@ async function partialClosePosition(pos, closePct = PARTIAL_CLOSE_PCT) {
 // Ne čeka 5-min run() ciklus — reagira unutar 30 sekundi.
 export async function checkBeStopAll() {
   if (PAPER_TRADING) return;
-  for (const pid of PORTFOLIO_IDS) {
+  // 19.09.: ULTRA-4H dodan (na zahtjev — isti 70%-TP-progress BE-stop kao synapse_t).
+  // Nema pDef u rules.json, pa se pDef.live gate preskače baš za nju (isti obrazac
+  // kao softExitMonitor).
+  for (const pid of [...PORTFOLIO_IDS, ULTRA4H_PID]) {
     try {
       const pDef = buildPortfolios(JSON.parse(readFileSync("rules.json", "utf8")))[pid];
-      if (!pDef?.live) continue;
+      if (pid !== ULTRA4H_PID && !pDef?.live) continue;
 
       const positions = loadPositions(pid);
       const unprotected = positions.filter(p => !p.beMoved);
@@ -4698,12 +4703,7 @@ export async function checkBeStopAll() {
 
         if (tpProgress >= BE_TRIGGER_PCT) {
           console.log(`  🎯 [BE-STOP 30s] ${pos.symbol} ${pos.side} — ${tpProgress.toFixed(0)}% TP dostignut → pomičem SL na BE`);
-          const moved = await moveSLtoBreakEven(pos);
-          if (moved) {
-            const allPos = loadPositions(pid);
-            const idx    = allPos.findIndex(p => p.symbol === pos.symbol && p.side === pos.side);
-            if (idx >= 0) { allPos[idx].beMoved = true; savePositions(pid, allPos); }
-          }
+          await moveSLtoBreakEven(pos);  // sam sprema beMoved+sl u ISPRAVAN pos.portfolio
         }
       }
     } catch(e) {
@@ -5833,6 +5833,23 @@ export async function runUltra4hStrategy() {
   // Bonus signali (whale/bmsb/wyckoff/chill/...) — jednom po scan ciklusu, ne po simbolu
   const _u4hCfg = await _buildUltra4hCfg(symbols);
 
+  // 19.09., na zahtjev "sve na 4h isto kao 1h" — isti makro gate-ovi/multiplikatori
+  // kao synapse_t, dohvaceni JEDNOM po scan ciklusu (60s), ne po simbolu (isti
+  // obrazac kao _buildUltra4hCfg iznad).
+  let _btcRegime1h4 = "UNKNOWN";
+  try { _btcRegime1h4 = (await getBtcRegime1H()).regime; } catch {}
+  let _sp500Regime4 = "NEUTRAL";
+  try { _sp500Regime4 = (await getSp500Data()).regime; } catch {}
+  let _fearGreed4 = null;
+  try { _fearGreed4 = (await getFearGreed())?.value ?? null; } catch {}
+  let _dxyChange4 = null;
+  try { _dxyChange4 = (await getDxyData())?.change4h ?? null; } catch {}
+  let _liqScore4 = null;
+  try { _liqScore4 = (await getLiquidationRisk(symbols))?.overall ?? null; } catch {}
+  const _nightH4 = new Date().getUTCHours();
+  const _dow4    = new Date().getUTCDay();
+  let _newEntriesThisU4hScan = 0;
+
   for (const symbol of symbols) {
     const openNow    = loadPositions(ULTRA4H_PID);
     const synOpenNow = loadPositions("synapse_t");
@@ -5840,18 +5857,37 @@ export async function runUltra4hStrategy() {
     const cryptoOpenNow = synOpenNow.filter(p => !isStockSym(p.symbol)).length + openNow.length;
     if (cryptoOpenNow >= MAX_OPEN_CRYPTO) break;
     if (openNow.some(p => p.symbol === symbol)) continue;
-    if (isStockSym(symbol)) {
-      const _nowU = new Date();
-      const _dowU = _nowU.getUTCDay(), _hU = _nowU.getUTCHours(), _mU = _nowU.getUTCMinutes();
-      const _inSessionU = _dowU >= 1 && _dowU <= 5
-        && (_hU > 13 || (_hU === 13 && _mU >= 35))
-        && (_hU < 19 || (_hU === 19 && _mU <= 30));
-      if (!_inSessionU) continue;
-    }
+
+    // ── Isti gate-ovi kao synapse_t (19.09., na zahtjev) ─────────────────────
+    if (isBlacklisted(symbol)) continue;
+    // Noćna zona 20-06 UTC — hard block, dokazano -$9.19 kad je omeksano (vidi
+    // synapse_t komentar). Svi ULTRA-4H simboli su kripto, pa vrijedi za sve.
+    if (_nightH4 >= 20 || _nightH4 < 6) continue;
+    if (_newEntriesThisU4hScan >= MAX_NEW_ENTRIES_PER_SCAN) continue;
+
     try {
       const candles = await fetchCandles(symbol, ULTRA4H_TF, 250);
+
+      const volAnomaly = checkVolumeAnomaly(candles);
+      if (!volAnomaly.ok) continue;
+      const velocity  = checkVelocity(candles);
+      const atrTrend  = calcAtrTrend(candles);
+
       const sig = await analyzeUltra4hFull(candles, symbol, _u4hCfg);
       if (sig.signal === "NEUTRAL") continue;
+
+      // BTC 1H regime alignment — isto kao synapse_t (LONG treba ne-BEAR, SHORT ne-BULL)
+      if (sig.signal === "LONG" && _btcRegime1h4 === "BEAR") continue;
+      if (sig.signal === "SHORT" && _btcRegime1h4 === "BULL") continue;
+
+      // Velocity kontra-signal gate — lagging signal protiv već obrnutog momentuma
+      if (velocity.sig !== 0) {
+        if (sig.signal === "LONG" && velocity.sig === -1) continue;
+        if (sig.signal === "SHORT" && velocity.sig === 1) continue;
+      }
+
+      // Liquidation Risk — visok rizik blokira LONG (kaskadni padovi mogući)
+      if (sig.signal === "LONG" && _liqScore4 !== null && _liqScore4 > 75) continue;
 
       // Cross-strategy kolizija (18.09., olabavljeno na zahtjev nakon closeBitGetOrder
       // fixa — Bitget merge vise nije opasan jer close sad zatvara SAMO nasu kolicinu).
@@ -5869,6 +5905,18 @@ export async function runUltra4hStrategy() {
       const equity     = _liveEq ?? getPortfolioEquity(ULTRA4H_PID, START_CAPITAL);
       const riskAmount = equity * (RISK_PCT / 100);
       let notional = riskAmount / (sig.slPct / 100);
+
+      // Makro size multiplikatori — isto kao synapse_t, umjesto blokade smanjujemo poziciju
+      let _macroSizeMult4 = 1.0;
+      if (_dow4 === 0 || _dow4 === 6) { _macroSizeMult4 *= 0.5; console.log(`  📅 [ULTRA-4H][WEEKEND] ${symbol} — size ×0.5`); }
+      if (_u4hCfg._chillMode) { _macroSizeMult4 *= 0.7; console.log(`  😴 [ULTRA-4H][CHILL] ${symbol} — size ×0.7`); }
+      if (atrTrend.trend === "EXPANDING") { _macroSizeMult4 *= atrTrend.sizeMult; console.log(`  📊 [ULTRA-4H][ATR] ${symbol} — volatilnost raste (${atrTrend.ratio}x) → size ×${atrTrend.sizeMult}`); }
+      if (sig.signal === "LONG" && _sp500Regime4 === "RISK_OFF") { _macroSizeMult4 *= 0.6; console.log(`  🚨 [ULTRA-4H][SP500] ${symbol} — RISK_OFF → LONG size ×0.6`); }
+      if (sig.signal === "SHORT" && _fearGreed4 !== null && _fearGreed4 <= 15) { _macroSizeMult4 *= 0.5; console.log(`  😱 [ULTRA-4H][F&G] ${symbol} — Extreme Fear → SHORT size ×0.5`); }
+      if (sig.signal === "LONG" && _fearGreed4 !== null && _fearGreed4 >= 85) { _macroSizeMult4 *= 0.5; console.log(`  🤑 [ULTRA-4H][F&G] ${symbol} — Extreme Greed → LONG size ×0.5`); }
+      if (sig.signal === "LONG" && _dxyChange4 !== null && _dxyChange4 > 0.3) { _macroSizeMult4 *= 0.7; console.log(`  💵 [ULTRA-4H][DXY] ${symbol} — jaki dolar → LONG size ×0.7`); }
+      notional *= _macroSizeMult4;
+
       const _minQtyNotional = (_minTradeNum[symbol] ?? 0) * sig.price * 1.05;
       const _minNotional = Math.max(ULTRA4H_MIN_NOTIONAL, _minQtyNotional);
       if (notional < _minNotional) notional = _minNotional;
@@ -5877,6 +5925,7 @@ export async function runUltra4hStrategy() {
 
       console.log(`  🎯 [ULTRA-4H] ${symbol} ${sig.signal} @ ${fmtPrice(sig.price)} | SL ${fmtPrice(sig.sl)} TP ${fmtPrice(sig.tp)} | score ${score}/8 | rizik $${riskAmount.toFixed(2)} (${RISK_PCT}% od $${equity.toFixed(2)}) → margin $${margin.toFixed(2)} × ${lev}x`);
       const result = await placeBitGetOrder(symbol, sig.signal, notional, sig.price, sig.sl, sig.tp, sig.slPct, sig.tpPct, lev);
+      _newEntriesThisU4hScan++;
       const entry = {
         symbol, signal: sig.signal, price: result.fillPrice, sl: result.slFromFill, tp: result.tpFromFill,
         tradeSize: notional, margin, orderId: result.orderId, timestamp: Date.now(),

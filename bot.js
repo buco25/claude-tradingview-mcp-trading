@@ -49,6 +49,11 @@ const MAX_TRADES_PER_DAY = 100;
 export const MAX_OPEN_CRYPTO = 10; // max otvorenih kripto pozicija (18.09.: 9->10, na zahtjev — dijeli se sa ULTRA-4H, koja trguje samo kriptom)
 export const MAX_OPEN_STOCKS = 5;  // max otvorenih pozicija na dionicama (18.09.: 6->5, na zahtjev)
 const MAX_OPEN_PER_PORTFOLIO = MAX_OPEN_CRYPTO + MAX_OPEN_STOCKS;  // ukupni cap = 15 — ZAJEDNIČKI za synapse_t + ultra_4h (18.09.)
+const WEEKEND_MAX_OPEN = 5;  // 19.09., na zahtjev: preko vikenda (UTC subota/nedjelja) ukupni cap se stegne na 5, bez BTC bonus-slot iznimke
+function getMaxOpenPositions() {
+  const dow = new Date().getUTCDay();
+  return (dow === 0 || dow === 6) ? WEEKEND_MAX_OPEN : MAX_OPEN_PER_PORTFOLIO;
+}
 export const isStockSym = (s) => (SYMBOL_SECTORS[s] || "").startsWith("STOCK_");
 // Metali (PAXG/XAU/XAG, 26.08.) — zlato ne prati BTC kao altcoini, izuzeti iz
 // BTC-korelacijskih gateova (weekly key-level SHORT, BTC dEMA10 LONG, REL-STR vs BTC).
@@ -5822,7 +5827,7 @@ export async function runUltra4hStrategy() {
   {
     const _synPos0     = loadPositions("synapse_t");
     const _u4hPos0     = loadPositions(ULTRA4H_PID);
-    if (_synPos0.length + _u4hPos0.length >= MAX_OPEN_PER_PORTFOLIO) return;
+    if (_synPos0.length + _u4hPos0.length >= getMaxOpenPositions()) return;
     const _cryptoOpen0 = _synPos0.filter(p => !isStockSym(p.symbol)).length + _u4hPos0.length;
     if (_cryptoOpen0 >= MAX_OPEN_CRYPTO) return;
   }
@@ -5856,7 +5861,7 @@ export async function runUltra4hStrategy() {
   for (const symbol of symbols) {
     const openNow    = loadPositions(ULTRA4H_PID);
     const synOpenNow = loadPositions("synapse_t");
-    if (openNow.length + synOpenNow.length >= MAX_OPEN_PER_PORTFOLIO) break;
+    if (openNow.length + synOpenNow.length >= getMaxOpenPositions()) break;
     const cryptoOpenNow = synOpenNow.filter(p => !isStockSym(p.symbol)).length + openNow.length;
     if (cryptoOpenNow >= MAX_OPEN_CRYPTO) break;
     if (openNow.some(p => p.symbol === symbol)) continue;
@@ -6041,14 +6046,17 @@ export async function run() {
     const openSymbols   = openPositions.map(p => p.symbol);
     const BTC_EXCEPTION = "BTCUSDT";  // BTC uvijek može otvoriti kao bonus slot (4. trade)
 
-    if (openPositions.length >= MAX_OPEN_PER_PORTFOLIO) {
-      // Ako su svi slotovi puni, skeniramo samo BTC (specijalni slot)
+    const _maxOpenNow = getMaxOpenPositions();
+    const _weekendCapActive = _maxOpenNow === WEEKEND_MAX_OPEN;
+    if (openPositions.length >= _maxOpenNow) {
+      // Ako su svi slotovi puni, skeniramo samo BTC (specijalni slot) — OSIM preko
+      // vikenda kad je cap stegnut na 5, tad nema iznimke (na zahtjev).
       const btcAlreadyOpen = openSymbols.includes(BTC_EXCEPTION);
-      if (btcAlreadyOpen || !pDef.symbols.includes(BTC_EXCEPTION)) {
-        console.log(`  🔒 [${pDef.name}] Max ${MAX_OPEN_PER_PORTFOLIO} otvorenih pozicija dostignut (${openPositions.length}) — preskačem skeniranje`);
+      if (_weekendCapActive || btcAlreadyOpen || !pDef.symbols.includes(BTC_EXCEPTION)) {
+        console.log(`  🔒 [${pDef.name}] Max ${_maxOpenNow}${_weekendCapActive ? " (vikend)" : ""} otvorenih pozicija dostignut (${openPositions.length}) — preskačem skeniranje`);
         continue;
       }
-      console.log(`  🔒 [${pDef.name}] Max ${MAX_OPEN_PER_PORTFOLIO} dostignut — skeniranje samo BTC (specijalni slot)`);
+      console.log(`  🔒 [${pDef.name}] Max ${_maxOpenNow} dostignut — skeniranje samo BTC (specijalni slot)`);
     }
 
     // ── Daily P&L Budget gate — 3% od stvarnog equityja ──────────────────
@@ -6304,9 +6312,11 @@ export async function run() {
       const _reEntry = _winReEntry.get(symbol);
       const _reEntryActive = _reEntry && (Date.now() - _reEntry.ts) < REENTRY_WINDOW_MS;
       if (!_reEntryActive && _reEntry) _winReEntry.delete(symbol);
-      const _maxOpen = _reEntryActive ? MAX_OPEN_PER_PORTFOLIO + 1 : MAX_OPEN_PER_PORTFOLIO;
-      if (currentOpen >= _maxOpen && symbol !== BTC_EXCEPTION) {
-        console.log(`  🔒 [${pDef.name}] Max ${MAX_OPEN_PER_PORTFOLIO}${_reEntryActive?" (re-entry +1)":""} dostignut (${currentOpen}, uklj. ULTRA-4H) — preskačem ${symbol}`);
+      const _maxOpenBase = getMaxOpenPositions();
+      const _isWeekendCap = _maxOpenBase === WEEKEND_MAX_OPEN;
+      const _maxOpen = _reEntryActive ? _maxOpenBase + 1 : _maxOpenBase;
+      if (currentOpen >= _maxOpen && (symbol !== BTC_EXCEPTION || _isWeekendCap)) {
+        console.log(`  🔒 [${pDef.name}] Max ${_maxOpenBase}${_isWeekendCap ? " (vikend)" : ""}${_reEntryActive?" (re-entry +1)":""} dostignut (${currentOpen}, uklj. ULTRA-4H) — preskačem ${symbol}`);
         _scanLogEntries.push({ symbol, signal: "SKIP", blocker: `MAX_POS(${currentOpen}/${_maxOpen})`, reason: "Max otvorenih pozicija dostignut (zajednički sa ULTRA-4H)" });
         continue;
       }

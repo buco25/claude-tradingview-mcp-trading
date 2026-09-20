@@ -7414,8 +7414,6 @@ export async function checkBreakouts() {
 // Sprema se u DATA_DIR/daily_reports/YYYY-MM-DD.md i latest.md
 // Šalje se na Telegram kao jutarnji brief.
 
-const REPORT_SYMBOLS = ["BTCUSDT","ETHUSDT","SOLUSDT","TAOUSDT","AAVEUSDT"];
-
 // 15.08.: _parseTradeCsv je brojao svaki CSV RED kao poseban trade — ali partial-TP
 // (npr. "84% zatvoreno" pa ostatak kasnije) je JEDAN trade zapisan u DVA reda, i
 // Bitget sync bug zna upisati isti izlaz duplo. Zato je dnevni izvještaj prikazivao
@@ -7423,8 +7421,7 @@ const REPORT_SYMBOLS = ["BTCUSDT","ETHUSDT","SOLUSDT","TAOUSDT","AAVEUSDT"];
 // pravi dobitak na dva manja (Avg Win $0.67 umjesto stvarnih $1.18). Sad grupira po
 // Order ID: isti qty = duplicate sync red (uzmi zadnji), različit qty = prava
 // odvojena noga partial closea (zbroji obje) — ista logika kao position-sizing fix.
-function _parseTradeCsv(days = 7) {
-  const pid = "synapse_t";
+function _parseTradeCsv(days = 7, pid = "synapse_t") {
   const f   = csvFilePath(pid);
   if (!existsSync(f)) return null;
   const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
@@ -7503,62 +7500,6 @@ function _parseTradeCsv(days = 7) {
   return { total, wins, longs, shorts, wr, avgWin, avgLoss, rr, topSlSyms, topSlHours };
 }
 
-function _analyzeMMPhase(sym, candles) {
-  if (!candles || candles.length < 22)
-    return { sym, phase:"N/A", volRatio:"—", threshold:"—", rsi:50, dir:"—", trend:"—", price:0 };
-
-  const closes = candles.map(c => c.close);
-  const vols   = candles.map(c => c.volume);
-  const n      = candles.length;
-
-  // Vol ratio: zadnja svjeća vs avg20 prethodnih
-  const avg20   = vols.slice(-21, -1).reduce((a,b)=>a+b,0) / 20;
-  const lastVol = vols[n-1];
-  const volRatio = avg20 > 0 ? lastVol / avg20 : 1;
-
-  const threshold = VOL_EXH_TIERS[sym] ?? VOL_EXH_DEFAULT;
-
-  // MM faza
-  let phase;
-  if      (volRatio < 0.5)         phase = "AKUMULACIJA";
-  else if (volRatio < 1.2)         phase = "NEUTRALNO";
-  else if (volRatio < threshold)   phase = "MARKUP";
-  else if (volRatio < 3.5)         phase = "DISTRIBUCIJA";
-  else                             phase = "CRASH/PANIC";
-
-  // RSI (Wilder, 14)
-  const rsiArr = _rsiSeries(closes, 14);
-  const rsi    = Math.round(rsiArr[n-1] ?? 50);
-
-  // ADX approximation — avg directional movement zadnjih 14 barova
-  let dmPlus = 0, dmMinus = 0, tr14 = 0;
-  for (let i = Math.max(1, n-14); i < n; i++) {
-    const high = candles[i].high, low = candles[i].low;
-    const phigh = candles[i-1].high, plow = candles[i-1].low, pclose = candles[i-1].close;
-    const dm_p = high - phigh > plow - low ? Math.max(high - phigh, 0) : 0;
-    const dm_m = plow - low > high - phigh ? Math.max(plow - low, 0) : 0;
-    const trueRange = Math.max(high - low, Math.abs(high - pclose), Math.abs(low - pclose));
-    dmPlus += dm_p; dmMinus += dm_m; tr14 += trueRange;
-  }
-  const di_p = tr14 > 0 ? (dmPlus  / tr14) * 100 : 0;
-  const di_m = tr14 > 0 ? (dmMinus / tr14) * 100 : 0;
-  const adxApprox = (di_p + di_m) > 0 ? Math.round(Math.abs(di_p - di_m) / (di_p + di_m) * 100) : 0;
-
-  const lastC  = candles[n-1];
-  const dir    = lastC.close > lastC.open ? "BULL" : "BEAR";
-  const ema50v = closes.slice(-50).reduce((a,b)=>a+b,0) / Math.min(50, n);
-  const trend  = lastC.close > ema50v ? "↑" : "↓";
-
-  return {
-    sym, phase,
-    volRatio: volRatio.toFixed(2),
-    threshold,
-    rsi, adx: adxApprox,
-    dir, trend,
-    price: lastC.close,
-  };
-}
-
 // ─── Dnevni Outlook — sintetizira sve makro-signale u jedan bias (14.08.) ────
 // Isti pristup kao ručna analiza u chatu: broji koliko od 4 direkcijska signala
 // (1H regime, tjedna EMA faza, ključna razina, dnevna invalidacija) je bull/bear,
@@ -7600,40 +7541,39 @@ function _buildDailyOutlook({ regime1h, weeklyEma, weeklyVsKey, dailyVsInvalidat
   return { bias, biasEmoji, bull, bear, notes, lsWarn, nearZone };
 }
 
-function _buildReport(dateStr, stats, symReports, fg, news, pivots, outlook) {
-  const phaseEmoji = {
-    "AKUMULACIJA": "🔵", "NEUTRALNO": "⬜", "MARKUP": "🟡",
-    "DISTRIBUCIJA": "🔴", "CRASH/PANIC": "💥", "N/A": "❓",
-  };
+// 20.09., osvježeno na zahtjev — maknuta zastarjela "MM Faze" sekcija (grubi
+// volumen-ratio heuristik na 5 fiksnih simbola iz 07.08., davno prestigla ga
+// prava Scanner tablica na dashboardu). Dodano: ULTRA-4H performanse (do sad
+// potpuno izostavljene iz brifinga iako je treća live strategija), trenutna
+// popunjenost pozicija (koliko od zajedničkog limita 15/10/5 je iskorišteno),
+// blacklist status, i BTC 4H regime uz postojeći 1H (ULTRA-4H koristi 4H za
+// svoj regime-alignment gate).
+function _buildStrategyVerdict(stats) {
+  const wrNum = parseFloat(stats?.wr);
+  const rrNum = parseFloat(stats?.rr);
+  if (!stats || stats.total < 3) return { verdict: "HOLD", reason: "premalo podataka za procjenu" };
+  if (wrNum >= 45 && rrNum >= 1.0) return { verdict: "HOLD", reason: `WR ${stats.wr}% + R:R ${stats.rr} — strategija radi` };
+  if (wrNum < 35) return { verdict: "ADJUST", reason: `WR ${stats.wr}% prenisko — razmatraj filtere` };
+  if (rrNum < 0.7) return { verdict: "ADJUST", reason: `R:R ${stats.rr} prenizak — gubitak veći od dobitka` };
+  return { verdict: "HOLD", reason: `WR ${stats.wr}% prihvatljivo, pratimo` };
+}
 
-  // Grupiraj po fazi
-  const byPhase = {};
-  for (const r of symReports) {
-    if (r.error) continue;
-    (byPhase[r.phase] = byPhase[r.phase] || []).push(r);
-  }
-  const accum  = byPhase["AKUMULACIJA"] || [];
-  const markup = byPhase["MARKUP"]      || [];
-  const distrib = (byPhase["DISTRIBUCIJA"] || []).concat(byPhase["CRASH/PANIC"] || []);
+function _fmtPerf(label, stats) {
+  if (!stats || stats.total === 0) return `📈 <b>${label}:</b> nema zatvorenih tradova u zadnjih 7 dana\n`;
+  let s = `📈 <b>${label} (7 dana)</b>\n`;
+  s += `Tradovi: ${stats.total} (L:${stats.longs}/S:${stats.shorts}) | WR: <b>${stats.wr}%</b> | R:R: <b>${stats.rr}</b>\n`;
+  s += `Avg Win: +$${stats.avgWin} | Avg Loss: -$${stats.avgLoss}\n`;
+  if (stats.topSlSyms.length) s += `⚠️ Top SL: ${stats.topSlSyms.map(([sym,n])=>`${sym.replace("USDT","")}(${n})`).join(", ")}\n`;
+  return s;
+}
 
-  // Strategy verdict
-  const wrNum  = parseFloat(stats?.wr);
-  const rrNum  = parseFloat(stats?.rr);
-  let verdict, verdictReason;
-  if (!stats || stats.total < 3) {
-    verdict = "HOLD"; verdictReason = "premalo podataka za procjenu";
-  } else if (wrNum >= 45 && rrNum >= 1.0) {
-    verdict = "HOLD"; verdictReason = `WR ${stats.wr}% + R:R ${stats.rr} — strategija radi`;
-  } else if (wrNum < 35) {
-    verdict = "ADJUST"; verdictReason = `WR ${stats.wr}% prenisko — razmatraj filtere`;
-  } else if (rrNum < 0.7) {
-    verdict = "ADJUST"; verdictReason = `R:R ${stats.rr} prenizak — gubitak veći od dobitka`;
-  } else {
-    verdict = "HOLD"; verdictReason = `WR ${stats.wr}% prihvatljivo, pratimo`;
-  }
+function _buildReport(dateStr, stats, statsU4h, fg, news, pivots, outlook, posInfo, blActive, regime1h, regime4h, isWeekend) {
+  const { verdict, reason: verdictReason } = _buildStrategyVerdict(stats);
 
   // ── Telegram message (max ~2000 char) ──────────────────────────────────────
   let tgMsg = `📊 <b>ULTRA Jutarnji Brief — ${dateStr}</b>\n\n`;
+
+  if (isWeekend) tgMsg += `🌙 <b>Vikend — max ${WEEKEND_MAX_OPEN} otvorenih pozicija ukupno (umjesto 15)</b>\n\n`;
 
   // Dnevni Outlook — sintetizirani bias iz 1H regime + tjedna faza + ključna razina
   // + invalidacija + L/S ratio (14.08., _buildDailyOutlook). Deterministički.
@@ -7645,6 +7585,8 @@ function _buildReport(dateStr, stats, symReports, fg, news, pivots, outlook) {
     tgMsg += "\n";
   }
 
+  tgMsg += `📊 <b>BTC Regime:</b> 1H ${regime1h} · 4H ${regime4h}\n\n`;
+
   const fgEmoji = !fg || fg.value == null ? "❓" : fg.value >= 75 ? "🤑" : fg.value >= 55 ? "😊" : fg.value >= 45 ? "😐" : fg.value >= 25 ? "😨" : "😱";
   tgMsg += `${fgEmoji} <b>Fear &amp; Greed:</b> ${fg && fg.value != null ? `${fg.value}/100 — ${fg.label}` : "N/A"}\n\n`;
 
@@ -7655,42 +7597,25 @@ function _buildReport(dateStr, stats, symReports, fg, news, pivots, outlook) {
     tgMsg += `S1 $${Math.round(pivots.s1).toLocaleString()} · S2 $${Math.round(pivots.s2).toLocaleString()} · S3 $${Math.round(pivots.s3).toLocaleString()}\n\n`;
   }
 
-  if (stats && stats.total > 0) {
-    tgMsg += `📈 <b>Performance (7 dana)</b>\n`;
-    tgMsg += `Tradovi: ${stats.total} (L:${stats.longs}/S:${stats.shorts}) | WR: <b>${stats.wr}%</b> | R:R: <b>${stats.rr}</b>\n`;
-    tgMsg += `Avg Win: +$${stats.avgWin} | Avg Loss: -$${stats.avgLoss}\n`;
-    if (stats.topSlSyms.length)
-      tgMsg += `⚠️ Top SL: ${stats.topSlSyms.map(([s,n])=>`${s.replace("USDT","")}(${n})`).join(", ")}\n`;
-    if (stats.topSlHours.length)
-      tgMsg += `🕐 MM sweep: ${stats.topSlHours.join(", ")}\n`;
-    tgMsg += "\n";
-  } else {
-    tgMsg += `📈 <b>Performance:</b> nema zatvorenih tradova u zadnjih 7 dana\n\n`;
-  }
+  tgMsg += _fmtPerf("ULTRA", stats) + "\n";
+  tgMsg += _fmtPerf("ULTRA-4H", statsU4h) + "\n";
 
-  tgMsg += `🎯 <b>MM Faze (1H trenutno)</b>\n`;
-  for (const [phase, syms] of Object.entries(byPhase)) {
-    if (!syms.length) continue;
-    tgMsg += `${phaseEmoji[phase]||"⬜"} <b>${phase}</b>: ${syms.map(r=>r.sym.replace("USDT","")).join(", ")}\n`;
-  }
-  tgMsg += "\n";
+  tgMsg += `🎯 <b>Otvoreno sada:</b> ${posInfo.total}/${posInfo.max} ukupno (${posInfo.crypto} kripto / ${posInfo.stocks} dionice)\n\n`;
 
-  if (accum.length)
-    tgMsg += `🟢 Prati za ulaz: ${accum.map(r=>`${r.sym.replace("USDT","")}(RSI:${r.rsi} ${r.trend})`).join(", ")}\n`;
-  if (markup.length)
-    tgMsg += `🟡 Bot aktivan: ${markup.map(r=>r.sym.replace("USDT","")).join(", ")}\n`;
-  if (distrib.length)
-    tgMsg += `🔴 Izbjegavaj: ${distrib.map(r=>`${r.sym.replace("USDT","")}(${r.volRatio}×)`).join(", ")}\n`;
+  tgMsg += blActive.length
+    ? `🚫 <b>Blacklist:</b> ${blActive.map(([sym,v])=>`${sym.replace("USDT","")} (još ${((v.until-Date.now())/3600000).toFixed(1)}h)`).join(", ")}\n\n`
+    : `🚫 <b>Blacklist:</b> svi simboli aktivni\n\n`;
 
-  tgMsg += `\n⚖️ Strategija: <b>${verdict}</b> — ${verdictReason}`;
+  tgMsg += `⚖️ Strategija: <b>${verdict}</b> — ${verdictReason}`;
 
   if (news && news.length > 0) {
     tgMsg += `\n\n📰 <b>Top vijesti</b>\n` + news.map((n, i) => `${i + 1}. <a href="${n.url}">${n.title}</a>`).join("\n");
   }
 
   // ── Markdown report ────────────────────────────────────────────────────────
-  let md = `# ULTRA Daily MM/Algo Report — ${dateStr}\n`;
+  let md = `# ULTRA Daily Report — ${dateStr}\n`;
   md += `**Generirano:** ${new Date().toISOString()} UTC\n\n`;
+  if (isWeekend) md += `> 🌙 Vikend — max ${WEEKEND_MAX_OPEN} otvorenih pozicija ukupno (umjesto 15)\n\n`;
   if (outlook) {
     md += `## ${outlook.biasEmoji} Dnevni Outlook: ${outlook.bias} (${outlook.bull}↑/${outlook.bear}↓ signala)\n\n`;
     if (outlook.notes.length) md += outlook.notes.map(n => `- ${n}`).join("\n") + "\n";
@@ -7698,6 +7623,7 @@ function _buildReport(dateStr, stats, symReports, fg, news, pivots, outlook) {
     if (outlook.nearZone) md += `- Najbliži pivot: ${outlook.nearZone}\n`;
     md += "\n";
   }
+  md += `**BTC Regime:** 1H ${regime1h} · 4H ${regime4h}\n\n`;
   md += `**Fear & Greed:** ${fg && fg.value != null ? `${fg.value}/100 (${fg.label})` : "N/A"}\n\n`;
   if (pivots && pivots.p !== null) {
     md += `## 📐 BTC Dnevni Pivot Points (Classic, iz jučerašnjeg H/L/C)\n\n`;
@@ -7711,48 +7637,40 @@ function _buildReport(dateStr, stats, symReports, fg, news, pivots, outlook) {
     md += news.map((n, i) => `${i + 1}. [${n.title}](${n.url})`).join("\n") + "\n\n";
   }
 
-  // Performance
-  md += `## 📈 Performance (zadnjih 7 dana)\n\n`;
-  if (stats && stats.total > 0) {
-    md += `| Metrika | Vrijednost |\n|---|---|\n`;
-    md += `| Ukupno tradova | ${stats.total} |\n`;
-    md += `| LONG / SHORT | ${stats.longs} / ${stats.shorts} |\n`;
-    md += `| **Win Rate** | **${stats.wr}%** |\n`;
-    md += `| **R:R** | **${stats.rr}** |\n`;
-    md += `| Avg Win | +$${stats.avgWin} |\n`;
-    md += `| Avg Loss | -$${stats.avgLoss} |\n\n`;
-    if (stats.topSlSyms.length) {
-      md += `### Top SL simboli\n`;
-      md += stats.topSlSyms.map(([s,n])=>`- ${s}: ${n} SL hit`).join("\n") + "\n\n";
+  for (const [label, s] of [["ULTRA", stats], ["ULTRA-4H", statsU4h]]) {
+    md += `## 📈 ${label} — Performance (zadnjih 7 dana)\n\n`;
+    if (s && s.total > 0) {
+      md += `| Metrika | Vrijednost |\n|---|---|\n`;
+      md += `| Ukupno tradova | ${s.total} |\n`;
+      md += `| LONG / SHORT | ${s.longs} / ${s.shorts} |\n`;
+      md += `| **Win Rate** | **${s.wr}%** |\n`;
+      md += `| **R:R** | **${s.rr}** |\n`;
+      md += `| Avg Win | +$${s.avgWin} |\n`;
+      md += `| Avg Loss | -$${s.avgLoss} |\n\n`;
+      if (s.topSlSyms.length) {
+        md += `### Top SL simboli\n`;
+        md += s.topSlSyms.map(([sym,n])=>`- ${sym}: ${n} SL hit`).join("\n") + "\n\n";
+      }
+      if (s.topSlHours.length) {
+        md += `### MM Sweep sati (UTC)\n`;
+        md += s.topSlHours.map(h=>`- ${h}`).join("\n") + "\n\n";
+      }
+    } else {
+      md += `_Nema zatvorenih tradova u zadnjih 7 dana._\n\n`;
     }
-    if (stats.topSlHours.length) {
-      md += `### MM Sweep sati (UTC)\n`;
-      md += stats.topSlHours.map(h=>`- ${h}`).join("\n") + "\n\n";
-    }
-  } else {
-    md += `_Nema zatvorenih tradova u zadnjih 7 dana._\n\n`;
   }
 
-  // Symbol MM table
-  md += `## 📊 MM Faze svih simbola\n\n`;
-  md += `| Simbol | Faza | Vol/Avg20 | Threshold | RSI | ADX | Smjer | vs EMA50 |\n`;
-  md += `|--------|------|-----------|-----------|-----|-----|-------|----------|\n`;
-  for (const r of symReports) {
-    if (r.error) { md += `| ${r.sym} | ❌ ERROR | — | — | — | — | — | — |\n`; continue; }
-    const e = phaseEmoji[r.phase] || "⬜";
-    md += `| ${r.sym} | ${e} ${r.phase} | ${r.volRatio}× | ${r.threshold}× | ${r.rsi} | ${r.adx} | ${r.dir} | ${r.trend} |\n`;
-  }
-  md += "\n";
+  md += `## 🎯 Otvorene pozicije\n\n`;
+  md += `Ukupno: ${posInfo.total}/${posInfo.max} · Kripto: ${posInfo.crypto}/${posInfo.cryptoMax} · Dionice: ${posInfo.stocks}/${posInfo.stocksMax}\n\n`;
 
-  // Preporuke
-  md += `## 🎯 Preporuke\n\n`;
-  if (accum.length)  md += `**🟢 Prati za ulaz (akumulacija):** ${accum.map(r=>r.sym).join(", ")}\n\n`;
-  if (markup.length) md += `**🟡 Markup faza (bot radi):** ${markup.map(r=>r.sym).join(", ")}\n\n`;
-  if (distrib.length) md += `**🔴 Izbjegavaj (distribucija/panic):** ${distrib.map(r=>r.sym).join(", ")}\n\n`;
+  md += `## 🚫 Blacklist\n\n`;
+  md += blActive.length
+    ? blActive.map(([sym,v])=>`- ${sym}: još ${((v.until-Date.now())/3600000).toFixed(1)}h (${v.reason})`).join("\n") + "\n\n"
+    : `_Svi simboli aktivni._\n\n`;
 
   md += `## ⚖️ Zaključak\n\n`;
   md += `**Strategija: ${verdict}** — ${verdictReason}\n\n`;
-  md += `---\n*Generirano automatski od ULTRA Bot v3 | ${dateStr} | 8 signala min 6/8 + BTC EMA50 4H filter*\n`;
+  md += `---\n*Generirano automatski od ULTRA Bot v3 | ${dateStr}*\n`;
 
   return { md, tg: tgMsg };
 }
@@ -7843,19 +7761,9 @@ export async function generateDailyReport() {
   const dateStr = now.toISOString().slice(0, 10);
   console.log(`📋 [Daily Report] Generiranje za ${dateStr}...`);
 
-  // 1. Trade analiza
-  const stats = _parseTradeCsv(7);
-
-  // 2. MM skeniranje svih simbola (paralelno za brzinu)
-  const symReports = await Promise.all(REPORT_SYMBOLS.map(async sym => {
-    try {
-      const candles = await fetchCandles(sym, "1H", 60);
-      return _analyzeMMPhase(sym, candles);
-    } catch (e) {
-      console.log(`  ⚠️ [Daily Report] ${sym}: ${e.message}`);
-      return { sym, error: e.message };
-    }
-  }));
+  // 1. Trade analiza — obje strategije (20.09., dodano ULTRA-4H)
+  const stats    = _parseTradeCsv(7, "synapse_t");
+  const statsU4h = _parseTradeCsv(7, ULTRA4H_PID);
 
   // 2b. Fear&Greed + crypto vijesti (07.08., iz portable/morning-report.mjs)
   const [fg, news] = await Promise.all([
@@ -7876,8 +7784,26 @@ export async function generateDailyReport() {
   ]);
   const outlook = _buildDailyOutlook({ regime1h, weeklyEma, weeklyVsKey, dailyVsInvalidation, lsr, pivots, price: regime1h?.currentPrice });
 
+  // 2e. BTC 4H regime (koristi ga ULTRA-4H za regime-alignment gate) — 20.09., dodano
+  const regime4h = await getBtcRegime().catch(() => "UNKNOWN");
+
+  // 2f. Otvorene pozicije — kombinirano preko obje strategije, isti brojevi kao
+  // dashboard/gate-ovi (getMaxOpenPositions vraća 5 preko vikenda). 20.09., dodano.
+  const isWeekend  = [0, 6].includes(now.getUTCDay());
+  const _openSyn   = loadPositions("synapse_t");
+  const _openU4h   = loadPositions(ULTRA4H_PID);
+  const posInfo = {
+    total: _openSyn.length + _openU4h.length, max: getMaxOpenPositions(),
+    crypto: _openSyn.filter(p => !isStockSym(p.symbol)).length + _openU4h.length, cryptoMax: MAX_OPEN_CRYPTO,
+    stocks: _openSyn.filter(p => isStockSym(p.symbol)).length, stocksMax: MAX_OPEN_STOCKS,
+  };
+
+  // 2g. Blacklist status — 20.09., dodano
+  const bl = loadBlacklist();
+  const blActive = Object.entries(bl).filter(([, v]) => Date.now() < v.until);
+
   // 3. Build report
-  const report = _buildReport(dateStr, stats, symReports, fg, news, pivots, outlook);
+  const report = _buildReport(dateStr, stats, statsU4h, fg, news, pivots, outlook, posInfo, blActive, regime1h?.regime ?? "UNKNOWN", regime4h, isWeekend);
 
   // 4. Spremi u fajl
   try {

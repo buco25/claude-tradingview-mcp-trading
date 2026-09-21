@@ -3318,16 +3318,20 @@ async function loadMarketContext() {
     document.getElementById('cb-bar').style.background = cbColor;
     document.getElementById('cb-sub').textContent = cbPct >= 85 ? '🚨 OPASNO! Blizu pauze' : cbCount === 0 ? 'Sve OK' : 'Još ' + (cbMax - cbCount) + ' do pauze';
 
-    // Daily P&L Budget
+    // Daily P&L Budget — bar prati SAMO gubitak (limit se odnosi na dnevni gubitak,
+    // ne na dobit) — 21.09. fix: Math.abs(dp) je prije napuhavao bar na 100% crveno
+    // i u profitnim danima (npr. +$34 na limitu od $20 = 170% → clamp 100%).
     const dp = d.dailyPnl || 0;
     const dlim = d.dailyLimit || 20;
-    const dpPct = Math.min(Math.abs(dp) / dlim * 100, 100);
-    const dpColor = dpPct >= 80 ? '#dc2626' : dpPct >= 60 ? '#d97706' : '#059669';
+    const dpPct = dp < 0 ? Math.min(Math.abs(dp) / dlim * 100, 100) : 0;
+    const dpColor = dp >= 0 ? '#059669' : dpPct >= 80 ? '#dc2626' : dpPct >= 60 ? '#d97706' : '#059669';
     document.getElementById('daily-pnl-val').textContent = (dp >= 0 ? '+' : '') + '$' + dp.toFixed(2);
     document.getElementById('daily-pnl-val').style.color = dp < 0 ? '#dc2626' : '#059669';
     document.getElementById('daily-pnl-bar').style.width = dpPct + '%';
     document.getElementById('daily-pnl-bar').style.background = dpColor;
-    document.getElementById('daily-pnl-sub').textContent = 'Iskorišteno: ' + dpPct.toFixed(0) + '% limita ($' + dlim.toFixed(0) + ' = 3% equityja)';
+    document.getElementById('daily-pnl-sub').textContent = dp >= 0
+      ? 'U plusu — limit gubitka ($' + dlim.toFixed(0) + ' = 3% equityja) se ne troši'
+      : 'Iskorišteno: ' + dpPct.toFixed(0) + '% limita ($' + dlim.toFixed(0) + ' = 3% equityja)';
 
     // Funding Rates + trend
     if (d.fr && Object.keys(d.fr).length > 0) {
@@ -3822,10 +3826,13 @@ const server = http.createServer(async (req, res) => {
         if (price > e55) up++;
         regime = up >= 3 ? "BULL" : up <= 1 ? "BEAR" : "NEUTRAL";
       }
-      res.writeHead(200, { "Content-Type": "application/json" });
+      // 21.09. fix: bez Cache-Control browser (ili proxy usput) zna zadržati stari
+      // JSON odgovor satima unatoč automatskom page-refreshu — korisnik prijavio
+      // "BTC Regime" zaglavljen na UNKNOWN cijeli dan iako je server već vraćao BULL.
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       res.end(JSON.stringify({ regime, raw: rD.code }));
     } catch(e) {
-      res.writeHead(200, { "Content-Type": "application/json" });
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       res.end(JSON.stringify({ regime: "ERROR", error: e.message }));
     }
     return;
@@ -4397,7 +4404,9 @@ const server = http.createServer(async (req, res) => {
       const readinessScore = gates.reduce((sum, g) => sum + (g.ok ? g.weight : 0), 0);
       const readiness = { score: readinessScore, gates };
 
-      res.writeHead(200, { "Content-Type": "application/json" });
+      // 21.09. fix: isti Cache-Control fix kao /api/regime — sprječava zaglavljeni
+      // stari JSON u browseru (uzrok prijavljenog "BTC Regime (4H)" stuck na UNKNOWN).
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       res.end(JSON.stringify({ fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, dailyLimit, cbLosses: 7, session, atrTrend, sp500, corr, pc, liq, econ, regime, ls, stableInflow, perpBasis, altSeason, readiness }));
     } catch(e) {
       res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
@@ -4975,7 +4984,10 @@ const server = http.createServer(async (req, res) => {
         if (Object.keys(lhz).length > 0) result.lhz = lhz;
       } catch {}
 
-      res.writeHead(200, { "Content-Type": "application/json" });
+      // 21.09. fix: isti Cache-Control fix kao /api/regime i /api/market-context —
+      // sprječava zaglavljene stare vrijednosti (npr. "Režim EMA50" karticu koja je
+      // ostajala na "—" jer se result.regime u browseru nikad nije osvježio).
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       res.end(JSON.stringify(result));
     } catch(e) {
       res.writeHead(500);

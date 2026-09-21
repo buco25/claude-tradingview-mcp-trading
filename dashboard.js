@@ -1711,11 +1711,6 @@ function renderHtml(allStats, allPositions, hb, rules = {}, ultra4hPositions = [
         <div style="font-size:10px;color:#9ca3af;margin-top:2px" id="btc-score-sub">bull / bear signala</div>
       </div>
       <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px;text-align:center">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">Režim EMA50</div>
-        <div style="font-size:22px;font-weight:800" id="btc-regime-val">—</div>
-        <div style="font-size:10px;color:#9ca3af;margin-top:2px" id="btc-regime-sub">BTC 4H trend</div>
-      </div>
-      <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px;text-align:center">
         <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">Pyramid Slot</div>
         <div style="font-size:22px;font-weight:800" id="btc-pyramid-val">—</div>
         <div style="font-size:10px;color:#9ca3af;margin-top:2px" id="btc-pyramid-sub">dodatni ulaz</div>
@@ -1790,15 +1785,6 @@ window.toggleScanFilter = function(btn) {
         const sigText = sc.signal ? (sc.signal === 'LONG' ? '🟢 LONG' : '🔴 SHORT') : '⚪ nema';
         document.getElementById('btc-score-sub').textContent =
           sigText + (sc.flipReady ? ' · 🔄 Flip ready' : '') + (sc.ts ? ' · ' + sc.ts.slice(11,16) : '');
-      }
-
-      // Regime
-      const rg = d.regime;
-      const rgEl = document.getElementById('btc-regime-val');
-      if (rg) {
-        rgEl.textContent = rg === 'BULL' ? '🐂 BULL' : rg === 'BEAR' ? '🐻 BEAR' : '⚖️ NEUTRAL';
-        rgEl.style.color = rg === 'BULL' ? '#059669' : rg === 'BEAR' ? '#dc2626' : '#9ca3af';
-        document.getElementById('btc-regime-sub').textContent = 'EMA50 4H · cijena ' + (rg === 'BULL' ? 'iznad' : rg === 'BEAR' ? 'ispod' : 'na') + ' EMA';
       }
 
       // Pyramid
@@ -2321,13 +2307,6 @@ window.toggleScanFilter = function(btn) {
   <div style="background:#1f2937;border:1px solid #374151;border-radius:12px;padding:16px 20px;margin-bottom:20px">
     <div style="font-size:11px;color:#9ca3af;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">⚙️ Adaptivni Status</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
-
-      <!-- Market Regime -->
-      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px" id="regime-card">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">🌍 BTC 1H Regime</div>
-        <div style="font-size:22px;font-weight:800;color:#9ca3af" id="regime-val">…</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:2px" id="regime-sub">učitavam…</div>
-      </div>
 
       <!-- Blacklist -->
       <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
@@ -3019,11 +2998,6 @@ function applyRegime(regime) {
   var col  = regime === "BULL" ? "#059669" : regime === "BEAR" ? "#dc2626" : "#d97706";
   var icon = regime === "BULL" ? "📈" : regime === "BEAR" ? "📉" : "➡️";
   var sub  = regime === "BULL" ? "LONG ulazi aktivni" : regime === "BEAR" ? "LONG suspendiran" : "Čekamo trend";
-  // Adaptivni Status section
-  var el1 = document.getElementById("regime-val");
-  var sb1 = document.getElementById("regime-sub");
-  if (el1) { el1.textContent = icon + " " + regime; el1.style.color = col; }
-  if (sb1) { sb1.textContent = sub; sb1.style.color = col; }
   // Market Intelligence section
   var el2 = document.getElementById("mi-regime-val");
   var sb2 = document.getElementById("mi-regime-sub");
@@ -4913,18 +4887,9 @@ const server = http.createServer(async (req, res) => {
         }
       } catch {}
 
-      // BTC Regime: price vs EMA50 from 4H candles
-      try {
-        const r4 = await fetch("https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=4H&limit=60").then(r=>r.json());
-        if (r4.code === "00000" && r4.data?.length >= 55) {
-          const closes = r4.data.map(c => parseFloat(c[4]));  // ascending
-          const k = 2 / 51;
-          let ema = closes[0];
-          for (let i = 1; i < closes.length; i++) ema = closes[i] * k + ema * (1 - k);
-          const price = closes[closes.length - 1];
-          result.regime = price > ema * 1.002 ? "BULL" : price < ema * 0.998 ? "BEAR" : "NEUTRAL";
-        }
-      } catch {}
+      // BTC Regime (EMA50 4H varijanta) uklonjen 21.09. — bio treći duplikat regime
+      // prikaza (uz 1H i 4H kartice u Market Intelligence), kartica mu je bila
+      // zaglavljena na "—" jer joj JS nije bio zaštićen null-provjerom.
 
       // Pyramid: count BTC positions in open_positions file
       try {

@@ -223,6 +223,13 @@ export const SYMBOL_COMBOS = {
   "QQQUSDT":    { sigIdx: TE_COMBO, minSig: 5 },
 };
 
+// 21.09. dodano (audit nalaz #16, latentan bug) — jedinstveni fallback za simbol koji
+// nema SYMBOL_COMBOS unos. analyzeUltra je interno padao na [0,1,2,3,4,5,6,7]/minSig=8,
+// dok je dashboard.js scanner padao na TE_COMBO/minSig=4 — trenutno mrtvo jer svih 45
+// watchlist simbola ima unos, ali bi se tiho razišlo čim se doda novi simbol bez njega.
+export const DEFAULT_COMBO   = TE_COMBO;
+export const DEFAULT_MIN_SIG = 5;
+
 // ─── Ekonomski kalendar ───────────────────────────────────────────────────────
 const ECON_BLOCK_MIN = 15;  // blokiraj ±15min oko HIGH impact USD eventa
 
@@ -253,17 +260,18 @@ function saveSlCooldown() {
 }
 
 // ─── 1. DINAMIČKI ADX — raste kad je WR loš ──────────────────────────────────
-// Čita zadnjih 10 trejdova iz CSV-a i računa trenutni WR.
+// 21.09. fix (audit nalaz #9/#15): komentar je govorio "zadnjih 10 trejdova" i "22+5/22+3",
+// ali kod stvarno gleda SVE današnje izlaze (ne zadnjih 10) i baza je ADX_MIN=20, ne 22 —
+// DYN_ADX_LOOKBACK je bio deklariran a nikad korišten, uklonjen.
 // WR < 35% → ADX +3 (23) | WR < 25% → ADX +5 (25) + pauza 2h | baza ADX_MIN=20
-const DYN_ADX_LOOKBACK  = 10;   // zadnjih N trejdova za WR procjenu
-const DYN_ADX_BOOST_1   =  3;   // +3 kad WR < 35%  → ADX 25
-const DYN_ADX_BOOST_2   =  5;   // +5 kad WR < 25%  → ADX 27
+const DYN_ADX_BOOST_1   =  3;   // +3 kad WR < 35%  → ADX 23
+const DYN_ADX_BOOST_2   =  5;   // +5 kad WR < 25%  → ADX 25
 const DYN_PAUSE_WR      = 20;   // ispod ovog WR% → 2h pauza
 const DYN_PAUSE_MS      = 2 * 60 * 60 * 1000;
 
 let _dynPauseUntil = 0;  // in-memory pauza (reset na restart)
 
-function getDynamicAdx(pid) {
+export function getDynamicAdx(pid) {
   const f = csvFilePath(pid);
   if (!existsSync(f)) return ADX_MIN;
   try {
@@ -281,9 +289,9 @@ function getDynamicAdx(pid) {
         console.log(`  ⚠️  [DYN] WR=${wr.toFixed(0)}% (danas: ${exits.length} trejdova) — 2h pauza aktivirana`);
       }
     }
-    if (wr < 25) return ADX_MIN + DYN_ADX_BOOST_2;  // ADX 27 (22+5)
-    if (wr < 35) return ADX_MIN + DYN_ADX_BOOST_1;  // ADX 25 (22+3)
-    return ADX_MIN;                                   // ADX 22 (normalno)
+    if (wr < 25) return ADX_MIN + DYN_ADX_BOOST_2;  // ADX 25 (20+5)
+    if (wr < 35) return ADX_MIN + DYN_ADX_BOOST_1;  // ADX 23 (20+3)
+    return ADX_MIN;                                   // ADX 20 (normalno)
   } catch { return ADX_MIN; }
 }
 
@@ -322,8 +330,10 @@ async function recordSymbolSl(pid, symbol) {
   if (!existsSync(f)) return;
   try {
     const lines = readFileSync(f, "utf8").trim().split("\n");
+    // 21.09. fix (audit nalaz #3): bio col[2] (Exchange, uvijek "BitGet") umjesto col[3]
+    // (Symbol) — blacklist NIKAD nije okidao jer je filter uvijek vraćao prazan niz.
     const symExits = lines.slice(1)
-      .filter(l => (l.includes("CLOSE_LONG") || l.includes("CLOSE_SHORT")) && l.split(",")[2] === symbol)
+      .filter(l => (l.includes("CLOSE_LONG") || l.includes("CLOSE_SHORT")) && l.split(",")[3] === symbol)
       .slice(-BLACKLIST_LOSSES);
     if (symExits.length < BLACKLIST_LOSSES) return;
     const allLoss = symExits.every(l => parseFloat(l.split(",")[9] || 0) < 0);
@@ -2553,7 +2563,7 @@ function analyzeSynapseT(candles, cfg) {
 // SL 1% / TP 2%
 
 function analyzeUltra(candles, cfg) {
-  const { minSig = 8, _dynAdx, symbol: _sym, _pwh = null, _pwl = null } = cfg;
+  const { minSig = DEFAULT_MIN_SIG, _dynAdx, symbol: _sym, _pwh = null, _pwl = null } = cfg;
   const effectiveAdx = _dynAdx ?? ADX_MIN;  // koristi dinamički ADX ako dostupan
   const closes = candles.map(c => c.close);
   const vols   = candles.map(c => c.volume || 0);
@@ -3017,18 +3027,19 @@ function analyzeUltra(candles, cfg) {
 
   // Per-simbol combo filter — koristi samo signale iz SYMBOL_COMBOS
   const _combo    = SYMBOL_COMBOS[_sym];
-  const _comboIdx = _combo?.sigIdx ?? [0,1,2,3,4,5,6,7];
+  const _comboIdx = _combo?.sigIdx ?? DEFAULT_COMBO;
   const _activeSigs = _comboIdx.map(i => sigs[i]);
   const bullCnt = _activeSigs.filter(s => s === 1).length;
   const bearCnt = _activeSigs.filter(s => s === -1).length;
 
-  // ── Težinski bonus: CVD + E145 su "premium" signali (samo ako su u combu) ────
-  const cvdBull  = sigs[1] === 1  && _comboIdx.includes(1);
-  const e145Bull = sigs[3] === 1  && _comboIdx.includes(3);
-  const cvdBear  = sigs[1] === -1 && _comboIdx.includes(1);
-  const e145Bear = sigs[3] === -1 && _comboIdx.includes(3);
-  const _premiumBonusBull = (cvdBull && e145Bull) ? 1 : 0;
-  const _premiumBonusBear = (cvdBear && e145Bear) ? 1 : 0;
+  // 21.09. uklonjeno (audit nalaz #6): "CVD+E145 premium bonus" je zahtijevao
+  // _comboIdx.includes(1), ali CVD (indeks 1) nije dio TE_COMBO=[0,2,3,4,5,6,9,10]
+  // koji koristi SVAKI simbol — bonus je bio trajno mrtav kod (uvijek 0), a tag
+  // "CVD+E145" u reason stringu nedostižan. Čisto uklanjanje, nema promjene ponašanja
+  // (bilo je uvijek 0). Aktiviranje bonusa bi bila stvarna promjena scoringa i ide
+  // kroz normalan proces (tjedni audit), ne kroz ovaj bug-fix.
+  const _premiumBonusBull = 0;
+  const _premiumBonusBear = 0;
   // Bonus 2: PWHL + MSTR u istom smjeru (samo ako oba u combu)
   const _pwhInCombo  = _comboIdx.includes(4);
   const _mstrInCombo = _comboIdx.includes(6);
@@ -3078,7 +3089,10 @@ function analyzeUltra(candles, cfg) {
   // ("market je neizvjestan") iz različitog izvora, ne nezavisni rizik koji se doslovno
   // zbraja — uzima se MAX aktivnog razloga za oprez, ne zbroj. Wyckoff +2 ostaje netaknut
   // kad je jedini aktivan (kalibriran na stvarni incident), samo se ne gomila s ostalima.
-  const _comboBase = _combo?.minSig ?? minSig;
+  // 21.09. fix (audit nalaz #5): _combo?.minSig je bio UVIJEK definiran (svaki simbol ima
+  // SYMBOL_COMBOS unos), pa cfg-prosljeđeni "minSig" (npr. bounce mode override na 3) nikad
+  // nije stizao do izraza — dodan eksplicitni _minSigOverride koji ima prednost nad oboje.
+  const _comboBase = cfg._minSigOverride ?? _combo?.minSig ?? minSig;
   const MIN_CONFIRM      = _comboBase + Math.max(_weekendBoost, _chillBoost);
   const MIN_CONFIRM_LONG  = _comboBase + Math.max(_weekendBoost, _chillBoost, _invalBoost, _wyckoffLongBoost);
   const MIN_CONFIRM_SHORT = _comboBase + Math.max(_weekendBoost, _chillBoost, _wyckoffShortBoost);
@@ -3187,7 +3201,9 @@ function analyzeUltra(candles, cfg) {
   const VOL_EXH_THRESHOLD = VOL_EXH_TIERS[_sym] ?? VOL_EXH_DEFAULT;
   const volRatioNow = volAvg20 > 0 ? volLast / volAvg20 : 1;
   const volExhOk = volRatioNow < VOL_EXH_THRESHOLD;
-  const _isMaxScore = bullCnt === 7 || bearCnt === 7;
+  // 21.09. fix (audit nalaz #4): bio === 7, pa savršen 8/8 score NIJE bio obuhvaćen
+  // (8 !== 7) i blokirao bi ga VOL_EXH gate dok je slabiji 7/8 prolazio — >= 7 hvata oboje.
+  const _isMaxScore = bullCnt >= 7 || bearCnt >= 7;
   if (!volExhOk && !_isMaxScore) {
     return { price, signal: "NEUTRAL", bullScore: bullCnt, bearScore: bearCnt,
       reason: `VOL_EXH: ${volRatioNow.toFixed(2)}x avg ≥ ${VOL_EXH_THRESHOLD}× (${_sym||"def"}) — high-vol svjeća, čekamo pullback` };
@@ -3262,6 +3278,11 @@ function analyzeUltra(candles, cfg) {
   // Isti 13 signala ali 6 reversanih vraćamo u originalnu (trend-following) logiku.
   // Viši prag (MOM_MIN) jer su momentum ulazi rizičniji od pullback ulaza.
   const MOM_MIN = _combo?.minSig ?? 5;  // = combo minSig (4/5 za optimizirane simbole)
+  // 21.09. fix (audit nalaz #2): momSigs je imao samo 8 elemenata (indeksi 0-7), ali
+  // TE_COMBO = [0,2,3,4,5,6,9,10] koji koristi SVAKI simbol referencira i indekse 9/10 —
+  // momSigs[9]/[10] su bili undefined, pa je momentum grana tiho ocjenjivala na 6 signala
+  // umjesto 8 (DEMA i LHUNT slotovi nikad nisu brojani). Prošireno na isti raspored kao
+  // pullback "sigs" niz (indeksi 8-11 su identične varijable, ne treba ih preračunavati).
   const momSigs = [
     price > ema50  ?  1 : -1,                          //  1. E50   MOM: >EMA50 = trend gore = +1
     cvdSum > 0 ?  1 : -1,                              //  2. CVD   MOM: kupni vol = potvrda pumpa = +1
@@ -3271,20 +3292,22 @@ function analyzeUltra(candles, cfg) {
     sigRsiDiv,                                          //  6. RDIV  RSI div: isti
     sigMktStr,                                          //  7. MSTR  Market Structure: isti
     sigFVG,                                             //  8. FVG   Fair Value Gap: isti
+    sigOB,                                              //  9. OB    Order Block: isti
+    sigDailyEMA,                                        // 10. DEMA  Daily EMA10/20 retest: isti
+    sigMOPEN,                                           // 11. LHUNT Liquidity Hunt: isti
+    sigMacdDiv,                                         // 12. MDIV  MACD div (bonus-only): isti
   ];
   const _momActiveSigs = _comboIdx.map(i => momSigs[i]);
   const momBullBase = _momActiveSigs.filter(s => s === 1).length;
   const momBearBase = _momActiveSigs.filter(s => s === -1).length;
-  // Bonus 1: CVD + E145 za momentum (samo ako u combu)
-  const momCvdBull  = momSigs[1] === 1  && _comboIdx.includes(1);
-  const momE145Bull = momSigs[3] === 1  && _comboIdx.includes(3);
-  const momCvdBear  = momSigs[1] === -1 && _comboIdx.includes(1);
-  const momE145Bear = momSigs[3] === -1 && _comboIdx.includes(3);
-  // Bonus 2: PWHL + MSTR za momentum (samo ako oba u combu)
+  // 21.09. uklonjeno (audit nalaz #6, isti obrazac kao pullback grana) — CVD+E145
+  // momentum bonus je zahtijevao _comboIdx.includes(1), a CVD nije u TE_COMBO za
+  // nijedan simbol, pa je bio trajno mrtav (uvijek 0). Čisto uklanjanje.
+  // Bonus: PWHL + MSTR za momentum (samo ako oba u combu)
   const momPwhMstrBull = (_pwhInCombo && _mstrInCombo && momSigs[4] === 1  && momSigs[6] === 1)  ? 1 : 0;
   const momPwhMstrBear = (_pwhInCombo && _mstrInCombo && momSigs[4] === -1 && momSigs[6] === -1) ? 1 : 0;
-  const momBull = momBullBase + (momCvdBull && momE145Bull ? 1 : 0) + momPwhMstrBull;
-  const momBear = momBearBase + (momCvdBear && momE145Bear ? 1 : 0) + momPwhMstrBear;
+  const momBull = momBullBase + momPwhMstrBull;
+  const momBear = momBearBase + momPwhMstrBear;
 
   // Za momentum: bez 6SC gate (breakout sam potvrđuje smjer), ADX ≥ MOM_ADX_MIN (modul-level export)
   // Ako je _adxSoft već aktivan (glavni ADX gate gore propustio kroz soft zonu),
@@ -3464,7 +3487,7 @@ export async function analyzeUltraPullback(symbol, candles, cfg) {
 // SHORT signal → čeka rast +1% → tek onda ulaz
 
 const PULLBACK_PCT  = 1.0;   // % pullback koji čekamo
-const PULLBACK_TTL  = 4 * 60 * 60 * 1000;  // 4h — cancel ako ne dođe
+export const PULLBACK_TTL  = 4 * 60 * 60 * 1000;  // 4h — cancel ako ne dođe
 
 function pendingFile(pid) { return `${DATA_DIR}/pending_${pid}.json`; }
 
@@ -5580,7 +5603,8 @@ function checkDailyLimit(pid) {
 }
 
 // ─── Circuit Breaker ────────────────────────────────────────────────────────────
-// Ako portfolio ima 5 uzastopnih gubitaka → pauza 8 sati.
+// Ako portfolio ima 7 uzastopnih gubitaka → pauza 8 sati (21.09. fix nalaz #15 — komentar
+// je pisao staru vrijednost 5, CB_LOSSES je odavno 7).
 // Stanje se čuva na disku (preživi restart).
 
 const CB_LOSSES   = 7;                     // uzastopnih gubitaka → circuit breaker
@@ -5665,9 +5689,11 @@ async function checkAndRemoveSymbol(pid, symbol) {
   try {
     const lines = readFileSync(f, "utf8").trim().split("\n");
     // Filtriraj samo exitove tog simbola
+    // 21.09. fix (audit nalaz #3): bio col[2] (Exchange, uvijek "BitGet") umjesto col[3]
+    // (Symbol) — auto-suspend NIKAD nije okidao jer je filter uvijek vraćao prazan niz.
     const symExits = lines.slice(1)
       .filter(l => l.includes("CLOSE_LONG") || l.includes("CLOSE_SHORT"))
-      .filter(l => l.split(",")[2] === symbol);  // col 2 = symbol
+      .filter(l => l.split(",")[3] === symbol);  // col 3 = Symbol
 
     if (symExits.length < SYM_CONSEC_LOSSES) return;
 
@@ -6469,7 +6495,10 @@ export async function run() {
         //    17.09. dodala 12 novih tradova koji prije ne bi ni postojali, WR 41.7%
         //    ali NETO -$9.19 (DOGE -2.52, ETH -2.22, LINK -2.41, PAXG/XAU -2.07/-2.08
         //    itd.) — potvrdjuje da je originalni hard-block bio ispravan, ne pregrub.
-        const sess = getSessionInfo();
+        // 21.09. uklonjeno (audit nalaz #13): "const sess = getSessionInfo()" je bio
+        // izračunat a nikad korišten — 01:00-05:00 UTC "dead zone" koju getSessionInfo
+        // prijavljuje nije nigdje gate-ala ulaze (samo odvojeni 20-06 UTC night block
+        // ispod stvarno blokira). Čisto uklanjanje mrtvog koda, nema promjene ponašanja.
         const _nightH = new Date().getUTCHours();
         if ((_nightH >= 20 || _nightH < 6) && !isStockSym(symbol)) {
           console.log(`  🌙 [NOĆ] ${symbol} — ${_nightH}:00 UTC (WR 24% noću povijesno) → blokiran ulaz`);
@@ -6538,8 +6567,11 @@ export async function run() {
         }
 
         // Bounce mode: smanji minSig na 3 (tržište oversold, manji prag za LONG)
+        // 21.09. fix (audit nalaz #5): "minSig" u cfg-u je bio no-op (vidi _comboBase
+        // komentar) — sad koristi _minSigOverride koji analyzeUltra stvarno provjerava prije
+        // per-simbol SYMBOL_COMBOS vrijednosti.
         const _bounceParams = _bounceMode
-          ? { ...pDef.params, minSig: Math.min(pDef.params?.minSig ?? 4, 3) }
+          ? { ...pDef.params, _minSigOverride: 3 }
           : pDef.params;
 
         let result;
@@ -6633,10 +6665,10 @@ export async function run() {
             if (_liqStatus.danger === "CAUTION") {
               const _scoreNow = Math.max(result.bullScore ?? 0, result.bearScore ?? 0);
               if (_scoreNow < 6) {
-                console.log(`  ${_icon} [LIQ] ${symbol} — CAUTION (${_liqStatus.minDist.toFixed(1)}%), score ${_scoreNow}/7 < 6 → preskačem`);
+                console.log(`  ${_icon} [LIQ] ${symbol} — CAUTION (${_liqStatus.minDist.toFixed(1)}%), score ${_scoreNow}/8 < 6 → preskačem`);
                 continue;
               }
-              console.log(`  ${_icon} [LIQ] ${symbol} — CAUTION ali score ${_scoreNow}/7 ≥ 6 → dopuštam`);
+              console.log(`  ${_icon} [LIQ] ${symbol} — CAUTION ali score ${_scoreNow}/8 ≥ 6 → dopuštam`);
             }
           } else {
             console.log(`  🟢 [LIQ] ${symbol} — CLEAR (${_liqStatus.minDist.toFixed(1)}% do liq)`);
@@ -6651,7 +6683,7 @@ export async function run() {
         // velocity samom), forsira se signal na velocity-in smjer da postojeći flip blok ispod
         // to uhvati. Samo BTC (isti scope kao postojeći flip).
         let _velocityFlipOverride = false;
-        if (existingPos && symbol === BTC_EXCEPTION && isLive && existingPos.side === signal) {
+        if (existingPos && symbol === BTC_EXCEPTION && _isLive && existingPos.side === signal) {
           const _velDir = velocity.sig === 1 ? "LONG" : velocity.sig === -1 ? "SHORT" : null;
           if (_velDir && _velDir !== existingPos.side) {
             const _velScore = _velDir === "LONG" ? (result.bullScore ?? 0) : (result.bearScore ?? 0);
@@ -6668,7 +6700,7 @@ export async function run() {
           // Suprotan signal — flip samo ako je jak (score >= 5) ILI velocity override
           const _flipScore = signal === "LONG" ? (result.bullScore ?? 0) : (result.bearScore ?? 0);
           const FLIP_MIN_SCORE = 5;
-          if ((_flipScore >= FLIP_MIN_SCORE || _velocityFlipOverride) && isLive) {
+          if ((_flipScore >= FLIP_MIN_SCORE || _velocityFlipOverride) && _isLive) {
             console.log(`  🔄 [FLIP] ${symbol} — ${_velocityFlipOverride ? "velocity obrat" : `jak kontra signal (score=${_flipScore})`} → zatvaramo ${existingPos.side}, otvaramo ${signal}`);
             // Zatvori postojeću poziciju
             const _flipBitPos = await fetchBitgetPositionSize(symbol, existingPos.side).catch(() => null);
@@ -6767,7 +6799,7 @@ export async function run() {
               const _pullbackScore = result.bullScore ?? 0;
               const _pullbackMin = 5;
               if (_pullbackScore >= _pullbackMin) {
-                console.log(`  🔄 [PULLBACK] ${symbol} — 4H BULL + 1H pullback, score ${_pullbackScore}/6 ≥ ${_pullbackMin} → LONG dopušten`);
+                console.log(`  🔄 [PULLBACK] ${symbol} — 4H BULL + 1H pullback, score ${_pullbackScore}/8 ≥ ${_pullbackMin} → LONG dopušten`);
               } else {
                 console.log(`  🌧️  [REGIME] ${symbol} — 4H BULL + 1H BEAR pullback, score ${_pullbackScore} < ${_pullbackMin} → LONG blokiran`);
                 _scanLogEntries.push({ symbol, signal, score: _pullbackScore, blocker: `PULLBACK_SCORE(${_pullbackScore}<${_pullbackMin})`, reason: `4H BULL + 1H BEAR, slab signal` });
@@ -6936,7 +6968,9 @@ export async function run() {
             }
           }
 
-          // Day range filter — LONG samo u donjem dijelu dana (≤45%), SHORT samo u gornjem (≥55%)
+          // Day range filter — LONG blokiran >80% dana (hard), size ×0.6 iznad 65%; SHORT
+          // blokiran <20% dana (hard), size ×0.6 ispod 35% (21.09. fix nalaz #15 — komentar
+          // je pisao stari 45/55% prag, stvarni kod ispod je već odavno 80/20 + 65/35).
           // Analiza 36 trejdova pokazala da SOL/ETH/TAO LONG ulaze blizu vrha dana → odmah SL
           {
             const _dayHL = await fetchDayHL(symbol).catch(() => null);
@@ -7399,14 +7433,18 @@ export async function run() {
           continue;
         }
 
-        const isLive    = pDef.live === true && !PAPER_TRADING;
+        // 21.09. fix (audit nalaz #1): "isLive" je ovdje bio redeklariran s const, ali se
+        // koristio i RANIJE u istom bloku (linije s _velocityFlipOverride/FLIP provjerom) —
+        // TDZ ReferenceError na svakom FLIP pokušaju, tiho progutan vanjskim try/catch, pa
+        // pozicije NIKAD nisu stvarno flipane. Sad se koristi već postojeći _isLive (identična
+        // formula, izračunat ranije u istom scopeu za cijeli portfolio) posvuda umjesto novog.
         const _isPyramid = existingPos && existingPos.side === signal;
 
         console.log(`🎯 [${pDef.name}] ${_isPyramid?"🔺 PYRAMID":"NEW"} ${signal} ${symbol} @ ${fmtPrice(price)} | SL ${fmtPrice(sl)} | TP ${fmtPrice(tp)} | $${tradeSize.toFixed(0)}`);
 
         // ── PYRAMID: merged avg entry, single SL/TP na BitGetu ──────────────────
         if (_isPyramid) {
-          const pyramidResult = await addToPyramid(pid, existingPos, signal, tradeSize, slPct, tpPct, isLive, symSltp);
+          const pyramidResult = await addToPyramid(pid, existingPos, signal, tradeSize, slPct, tpPct, _isLive, symSltp);
           if (pyramidResult) {
             _newEntriesThisScan++;
             // CSV zapis pyramid adicije (za povijest)
@@ -7415,8 +7453,8 @@ export async function run() {
               price: fmtPrice(pyramidResult.avgEntry), sl: fmtPrice(pyramidResult.newSl), tp: fmtPrice(pyramidResult.newTp),
               quantity: pyramidResult.totalQty.toFixed(4), totalUSD: (existingPos.totalUSD + tradeSize).toFixed(2),
               notes: `PYRAMID +${(existingPos.pyramidCount || 1) + 1} | avg entry ${fmtPrice(pyramidResult.avgEntry)} | SL ${slPct.toFixed(1)}% TP ${tpPct.toFixed(1)}%`,
-              orderId: `${isLive?"LIVE":"PAPER"}-PYR-${Date.now()}`,
-              mode: isLive ? (BITGET_DEMO ? "DEMO" : "LIVE") : "PAPER",
+              orderId: `${_isLive?"LIVE":"PAPER"}-PYR-${Date.now()}`,
+              mode: _isLive ? (BITGET_DEMO ? "DEMO" : "LIVE") : "PAPER",
             });
           }
           continue;  // Ne prolazimo kroz normalni entry flow
@@ -7424,15 +7462,15 @@ export async function run() {
 
         // ── NOVI ulaz (nije pyramid) ─────────────────────────────────────────────
         const timestamp = new Date().toISOString();
-        const orderId   = `${isLive ? "LIVE" : "PAPER"}-${Date.now()}`;
-        const mode      = isLive ? (BITGET_DEMO ? "DEMO" : "LIVE") : "PAPER";
+        const orderId   = `${_isLive ? "LIVE" : "PAPER"}-${Date.now()}`;
+        const mode      = _isLive ? (BITGET_DEMO ? "DEMO" : "LIVE") : "PAPER";
         const entry = { symbol, signal, price, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode, sigMask: result.sigMask ?? null, entryMode: (result.isMomentum ? "MOM" : "PBK") + (result._halfSize ? "-SOFT" : ""), signalStrength, vipSlot: result._vipSlot === true, btcRegime1h: _btcRegime1h, btcRegime4h: _btcRegime };
 
         const _strengthEmoji = signalStrength === "strong" ? "💪" : "📊";
         const _rrLabel = `RR 1:${(tpPct/slPct).toFixed(1)}`;
         const _vipTag = entry.vipSlot ? " ⭐VIP" : "";
 
-        if (!isLive) {
+        if (!_isLive) {
           addPosition(pid, entry);
           writeEntryCsv(pid, entry);
           _newEntriesThisScan++;

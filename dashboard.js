@@ -16,7 +16,8 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   generateDailyReport, autoFixCsvFromBitget, SYMBOL_COMBOS, getBtcDailyPivots, getAccountTransfers, calcLiqZones,
   getBtcWeeklyVsKey, getRelStrengthVsBtc, isStockSym, isMetalSym, getBtcChillMode, getBtcDailyVsInvalidation, getBtcWeeklyEmaPhase,
   getBtcWyckoffSignal, getWhaleDivergence, getBullMarketSupportBand,
-  getBtcRegime1HExport, getBtcDrawdownPctExport, recordOiSnapshot, getOiChangeMap,
+  getBtcRegime1HExport, getBtcRegimeExport, getBtcDrawdownPctExport, recordOiSnapshot, getOiChangeMap, getDynamicAdx, PULLBACK_TTL,
+  DEFAULT_COMBO, DEFAULT_MIN_SIG,
   RISK_PCT, RISK_PCT_MIN, RISK_PCT_MAX,
   ADX_MIN, ADX_SOFT_BAND, ADX_SOFT_FLOOR, MOM_SOFT_BAND, MOM_ADX_MIN,
   MAX_OPEN_CRYPTO, MAX_OPEN_STOCKS } from "./bot.js";
@@ -520,7 +521,7 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
 
   // ── ULTRA v3 — 8 signala + 3 gateva (identično bot.js analyzeUltra) ──
   // Signali: E50↑, CVD↑, MACD, E145, PWHL, RDIV, MSTR, FVG
-  // Gatevi (obvezni, ne broje se u score): ADX≥22, VOL_EXH
+  // Gatevi (obvezni, ne broje se u score): ADX≥20, VOL_EXH (21.09. fix nalaz #15 — ADX_MIN je 20, ne 22)
 
   // PWHL signal (Previous Weekly High/Low)
   let sigPWHLD = 0;
@@ -574,8 +575,10 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
   let ultraHalfSize = false;  // ADX/MOM soft-zone ulaz (08.09.) — bot bi ovo izvršio na pola rizika
   {
     const _symCombo = SYMBOL_COMBOS[symbol];  // jedan izvor istine — bot.js
-    const _comboIdxD = _symCombo?.sigIdx ?? [0,2,3,4,5,6,9,10];
-    const { minSig = 4 } = _symCombo ?? {};
+    // 21.09. fix (audit nalaz #16): fallback ovdje i u bot.js analyzeUltra su se razišli
+    // (dashboard TE_COMBO/minSig=4 vs bot.js [0..7]/minSig=8) — sad dijele iste konstante.
+    const _comboIdxD = _symCombo?.sigIdx ?? DEFAULT_COMBO;
+    const { minSig = DEFAULT_MIN_SIG } = _symCombo ?? {};
     ultraMinSig = minSig;
     if (n >= 200 && ema9 && ema21) {
       const rsiV  = rsi ?? 50;
@@ -741,9 +744,11 @@ async function runScan(rules) {
   try {
     if (existsSync(pendingFile)) {
       pendingList = JSON.parse(readFileSync(pendingFile, "utf8"));
-      // Makni istekle (TTL 4h)
+      // 21.09. fix (audit nalaz #14): komentar je govorio "TTL 4h" ali kod je filtrirao na
+      // 15 min (dok bot.js PULLBACK_TTL stvarno je 4h) — scanner je skrivao pending ulaze
+      // koje bot i dalje smatra živima. Sad koristi stvarnu konstantu iz bot.js.
       const now = Date.now();
-      pendingList = pendingList.filter(p => now - p.ts < 15 * 60 * 1000);  // 1 svjećica (15m)
+      pendingList = pendingList.filter(p => now - p.ts < PULLBACK_TTL);
     }
   } catch { /* ignoriraj */ }
 
@@ -833,50 +838,12 @@ async function runScan(rules) {
           }
         } catch { /* ignoriraj */ }
 
-        // ── MM/Algo filter detekcija (preview — identična logika bot.js) ──────
-        const mmFilters = [];
-        const nC = candles.length;
-        const curPrice = candles[nC - 1].close;
-        if (nC >= 5) {
-          // Filter 1: Manipulation Candle (wick >60% ranga, body <25%)
-          const lc = candles[nC - 2];
-          const lcRange = lc.high - lc.low;
-          if (lcRange > 0) {
-            const lcBody   = Math.abs(lc.close - lc.open);
-            const upperWck = lc.high - Math.max(lc.close, lc.open);
-            const lowerWck = Math.min(lc.close, lc.open) - lc.low;
-            const isManip  = lcBody < lcRange * 0.25;
-            if (isManip && upperWck > lcRange * 0.60) mmFilters.push({ code: 'MANIP↑', label: '🪝 MANIP↑', tip: 'Gornja wick manipulacija — LONG blokiran' });
-            if (isManip && lowerWck > lcRange * 0.60) mmFilters.push({ code: 'MANIP↓', label: '🪝 MANIP↓', tip: 'Donja wick manipulacija — SHORT blokiran' });
-          }
-          // Filter 2: Round Number Proximity (±0.25%)
-          const RN_PROX = 0.0025;
-          const mag = Math.pow(10, Math.floor(Math.log10(curPrice)));
-          for (const mult of [1, 2, 5, 10]) {
-            const rnStep = mag * mult / 10;
-            const nearest = Math.round(curPrice / rnStep) * rnStep;
-            if (nearest > 0 && Math.abs(curPrice - nearest) / curPrice < RN_PROX) {
-              mmFilters.push({ code: 'RNDUP', label: '🎯 RNDUP', tip: `Blizu round numbera ${nearest.toFixed(nearest >= 100 ? 0 : nearest >= 1 ? 2 : 4)} — blokiran` });
-              break;
-            }
-          }
-          // Filter 3: Volume Divergence — identično bot.js (nizak vol + smjer cijene)
-          if (nC >= 12) {
-            const recentVols = candles.slice(-12, -2).map(c => c.volume);
-            const avgVol10 = recentVols.reduce((a, b) => a + b, 0) / recentVols.length;
-            const lastVol  = candles[nC - 2].volume;
-            const volDecline = avgVol10 > 0 && lastVol < avgVol10 * 0.6;
-            if (volDecline) {
-              const p3 = candles.slice(-4, -1).map(c => c.close);
-              const priceRise3 = p3[2] > p3[0];
-              const priceFall3 = p3[2] < p3[0];
-              if (priceRise3)  mmFilters.push({ code: 'VOLDIV↑', label: '📉 VOLDIV↑', tip: 'Lažni pump — cijena raste + slab vol → LONG blokiran' });
-              if (priceFall3)  mmFilters.push({ code: 'VOLDIV↓', label: '📉 VOLDIV↓', tip: 'Lažni dump — cijena pada + slab vol → SHORT blokiran' });
-            }
-          }
-        }
-
-        results.push({ symbol: sym, ...s, pending, slPct, tpPct, trend1h, volRatio: parseFloat(volRatio.toFixed(2)), volLow, volHigh, volExhThreshold, mmFilters });
+        // 21.09. uklonjeno (audit nalaz #11) — mmFilters (MANIP/RNDUP/VOLDIV) je bio
+        // izračunat za SVAKI simbol svaki scan, ali "identična logika bot.js" tvrdnja
+        // nije bila točna (bot.js nema wick-manipulation/round-number/volume-divergence
+        // gate — MM Blackout je uklonjen 25.05.), a jedini klijentski potrošač
+        // (mm-filters-grid) ne postoji u HTML-u pa se rezultat nikad nije prikazao.
+        results.push({ symbol: sym, ...s, pending, slPct, tpPct, trend1h, volRatio: parseFloat(volRatio.toFixed(2)), volLow, volHigh, volExhThreshold });
       } catch (e) {
         results.push({ symbol: sym, error: e.message });
       }
@@ -2043,6 +2010,10 @@ window.toggleScanFilter = function(btn) {
       </div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <span id="scan-ts" style="font-size:12px;color:var(--text-muted)">—</span>
+        <!-- Market Breadth — 21.09. dodano (audit nalaz #12): podatak se već računao iz
+             scan rezultata ali nije imao HTML karticu (bio mrtav kod). -->
+        <span id="breadth-val" style="font-size:12px;font-weight:700">—</span>
+        <span id="breadth-sub" style="font-size:11px;color:var(--text-muted)"></span>
         <button class="scan-btn" id="scan-btn" onclick="doScan()">🔄 Skeniraj</button>
         <button class="scan-btn" style="border-color:#f85149;color:#f85149" onclick="resetAll()">🗑️ Reset SVE</button>
         <button class="scan-btn" style="border-color:#db2777;color:#db2777" onclick="resetOne('synapse_t')">🎯 Reset ULTRA</button>
@@ -2275,10 +2246,13 @@ window.toggleScanFilter = function(btn) {
     const bl = existsSync(blPath) ? (() => { try { return JSON.parse(readFileSync(blPath,"utf8")); } catch { return {}; } })() : {};
     const blActive = Object.entries(bl).filter(([,v]) => Date.now() < v.until);
 
-    // Učitaj recent WR (zadnjih 10 trejdova DANAS) za dinamički ADX
-    // VAŽNO: samo današnji trejdovi — usklađeno s bot.js getDynamicAdx()
+    // Dinamički ADX — 21.09. fix (audit nalaz #9): ovo je bila zasebna reimplementacija
+    // koja je hardkodirala 30/35/40 dok bot.js getDynamicAdx() stvarno vraća 20/23/25
+    // (ADX_MIN=20) — kartica je pokazivala prag koji bot nikad ne koristi. Sad poziva
+    // pravu funkciju direktno; WR/N se i dalje računaju ovdje samo za prikaz konteksta.
     const csvPath = `${DATA_DIR}/trades_synapse_t.csv`;
-    let dynAdxVal = 30, recentWr = null, recentN = 0;
+    const dynAdxVal = getDynamicAdx("synapse_t");
+    let recentWr = null, recentN = 0;
     if (existsSync(csvPath)) {
       try {
         const today = new Date().toISOString().slice(0, 10);  // YYYY-MM-DD
@@ -2289,13 +2263,11 @@ window.toggleScanFilter = function(btn) {
           const wins = exits.filter(l => parseFloat(l.split(",")[9]||0) > 0).length;
           recentWr = Math.round(wins/exits.length*100);
           recentN  = exits.length;
-          if (recentWr < 25) dynAdxVal = 40;
-          else if (recentWr < 35) dynAdxVal = 35;
         }
       } catch {}
     }
-    const adxCol  = dynAdxVal === 30 ? "#059669" : dynAdxVal === 35 ? "#d97706" : "#dc2626";
-    const adxLbl  = dynAdxVal === 30 ? "normalno" : dynAdxVal === 35 ? "WR loš" : "WR kritičan";
+    const adxCol  = dynAdxVal <= ADX_MIN ? "#059669" : dynAdxVal < ADX_MIN + 5 ? "#d97706" : "#dc2626";
+    const adxLbl  = dynAdxVal <= ADX_MIN ? "normalno" : dynAdxVal < ADX_MIN + 5 ? "WR loš" : "WR kritičan";
     const wrCol   = recentWr === null ? "#94a3b8" : recentWr >= 40 ? "#059669" : recentWr >= 30 ? "#d97706" : "#dc2626";
 
     // Noćna zona — 20-06 UTC hard block za kripto/metale (19.09.: sad vrijedi i za
@@ -2457,7 +2429,7 @@ window.toggleScanFilter = function(btn) {
       <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
         <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">🕐 Trading Sesija</div>
         <div style="font-size:16px;font-weight:800" id="session-val">…</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="session-sub">01-06 UTC = dead zone blokiran</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="session-sub">01-05 UTC = dead zone blokiran</div>
       </div>
 
 
@@ -2881,7 +2853,9 @@ function mandatoryBoxes(s) {
 function sigBoxes(sigs, symbol) {
   if (!sigs || sigs.length === 0) return '<span style="color:#444">—</span>';
   const _combos = ${JSON.stringify(Object.fromEntries(Object.entries(SYMBOL_COMBOS).map(([k,v]) => [k, v.sigIdx])))};  // injektirano iz bot.js
-  const activeIdx = _combos[symbol] ?? [0,2,3,4,5,6,9,10];
+  // 21.09. fix (audit nalaz #16): fallback usklađen s bot.js DEFAULT_COMBO umjesto
+  // odvojeno hardkodiranog niza koji se mogao razići.
+  const activeIdx = _combos[symbol] ?? ${JSON.stringify(DEFAULT_COMBO)};
   return activeIdx.map(i => {
     const v    = sigs[i] ?? 0;
     const bg   = v === 1 ? '#0d3d26' : v === -1 ? '#3d0d0d' : '#1c2128';
@@ -3183,24 +3157,6 @@ async function doScan() {
       (cryptoResults.length ? sectionHeader('🪙 Kripto', cryptoResults.length) + cryptoResults.map(rowHtml).join('') : '') +
       (stockResults.length  ? sectionHeader('📈 Dionice', stockResults.length) + stockResults.map(rowHtml).join('')  : '');
 
-    // ── Ažuriraj MM Filteri karticu ─────────────────────────────────────────
-    const mmGrid = document.getElementById('mm-filters-grid');
-    if (mmGrid) {
-      const mmSymbols = results.filter(s => s.mmFilters && s.mmFilters.length > 0);
-      if (mmSymbols.length === 0) {
-        mmGrid.innerHTML = '<span style="color:#059669;font-size:12px">✓ Nema aktivnih MM blokatora na watchlisti</span>';
-      } else {
-        mmGrid.innerHTML = mmSymbols.map(s => {
-          const sym = s.symbol.replace('USDT','');
-          const badges = s.mmFilters.map(f =>
-            '<span title="' + f.tip + '" style="background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.4);border-radius:3px;padding:1px 5px;font-size:10px;color:#fca5a5;font-weight:600">' + f.label + '</span>'
-          ).join(' ');
-          return '<div style="background:#374151;border-radius:6px;padding:6px 10px;font-size:11px">' +
-            '<span style="color:#f9fafb;font-weight:700;margin-right:6px">' + sym + '</span>' + badges + '</div>';
-        }).join('');
-      }
-    }
-
   } catch(e) {
     tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#dc2626;padding:24px">Greška: ' + e.message + '</td></tr>';
   }
@@ -3438,7 +3394,7 @@ async function loadMarketContext() {
         sessEl.textContent = sessIcon + ' ' + s.session + ' sesija';
         sessEl.style.color = sessColor;
         document.getElementById('session-sub').textContent =
-          s.dead ? '01-06 UTC blokiran — nizak volumen' :
+          s.dead ? '01-05 UTC blokiran — nizak volumen' :
           s.quality === 'PRIME' ? '13-21 UTC — NY, vrhunska likvidnost' :
           s.quality === 'GOOD'  ? '08-16 UTC — London, dobra likvidnost' :
           'Srednja likvidnost';
@@ -3498,49 +3454,10 @@ async function loadMarketContext() {
         : 'Prati se ' + cf.tracked + ' simbola (treba 24h povijesti)';
     }
 
-    // Ekonomski kalendar
-    if (d.econ) {
-      const econ = d.econ;
-      const status = econ.status || {};
-      const events = econ.events || [];
-      const econEl = document.getElementById('econ-val');
-      const econSub = document.getElementById('econ-sub');
-      const econList = document.getElementById('econ-list');
-      if (econEl) {
-        if (status.blocked) {
-          econEl.textContent = "BLOKIRANO — " + status.event;
-          econEl.style.color = "#ef4444";
-          if (econSub) econSub.textContent = "Trading pauziran +-15min oko HIGH impact eventa";
-        } else if (status.next) {
-          const inMin = Math.round((new Date(status.next.date).getTime() - Date.now()) / 60000);
-          econEl.textContent = inMin > 0 ? ("Sljedeci: " + status.next.title + " za " + inMin + "min") : "Slobodno";
-          econEl.style.color = inMin > 0 && inMin <= 30 ? "#fbbf24" : "#10b981";
-          if (econSub) econSub.textContent = inMin > 0 && inMin <= 30 ? "Upozorenje: HIGH impact event blizu" : "Nema HIGH impact eventa u narednih 30min";
-        } else {
-          econEl.textContent = "Slobodno";
-          econEl.style.color = "#10b981";
-          if (econSub) econSub.textContent = events.length + " HIGH impact USD eventa ovaj tjedan";
-        }
-      }
-      if (econList && events.length) {
-        const now2 = Date.now();
-        econList.innerHTML = events.slice(0, 8).map(function(ev) {
-          const evTime = new Date(ev.date).getTime();
-          const diff   = evTime - now2;
-          const past   = diff < 0;
-          const diffMin = Math.floor(Math.abs(diff) / 60000);
-          const diffH   = Math.floor(diffMin / 60);
-          const label   = past ? (diffMin < 60 ? diffMin + "min nazad" : diffH + "h nazad")
-                                : (diffMin < 60 ? "za " + diffMin + "min" : "za " + diffH + "h");
-          const near = !past && diff < 30 * 60000;
-          const bg   = past ? "#374151" : near ? "rgba(251,191,36,0.15)" : "rgba(96,165,250,0.1)";
-          const brd  = past ? "#4b5563" : near ? "#fbbf24" : "#60a5fa";
-          const col  = past ? "#6b7280" : near ? "#fbbf24" : "#f9fafb";
-          return '<div style="background:' + bg + ';border:1px solid ' + brd + ';border-radius:6px;padding:5px 10px;font-size:11px;color:' + col + ';white-space:nowrap">' +
-                 '<b>' + ev.title + '</b> <span style="opacity:.7">' + label + '</span></div>';
-        }).join('');
-      }
-    }
+    // 21.09. uklonjeno (audit nalaz #12) — econEl/econSub/econList su ciljali id-eve
+    // koji ne postoje u HTML-u (nikad se nisu prikazivali); stvarni "Sljedeći Econ
+    // Event" prikaz radi preko odvojenog _econEventsForCountdown/countdown-val
+    // mehanizma niže u ovoj datoteci, koji već ispravno radi.
 
   } catch(e) { console.error('market-context error:', e); }
 }
@@ -3861,29 +3778,16 @@ const server = http.createServer(async (req, res) => {
   // BTC Regime — bez auth, za debug
   if (url.pathname === "/api/regime") {
     try {
-      const rUrl = "https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1H&limit=60";
-      const rD   = await fetch(rUrl).then(r => r.json());
-      let regime = "UNKNOWN";
-      if (rD.code === "00000" && rD.data?.length >= 20) {
-        const closes = rD.data.map(k => parseFloat(k[4]));
-        const price  = closes[closes.length - 1];
-        let e55 = closes.slice(0, Math.min(55, closes.length)).reduce((a,b)=>a+b,0) / Math.min(55, closes.length);
-        const m = 2/56;
-        for (let i = 55; i < closes.length; i++) e55 = closes[i]*m + e55*(1-m);
-        const e9  = closes.slice(-9).reduce((a,b)=>a+b,0)/9;
-        const e21 = closes.slice(-21).reduce((a,b)=>a+b,0)/21;
-        let up = 0;
-        if (e9 > e21) up++;
-        if (price > e9) up++;
-        if (price > e21) up++;
-        if (price > e55) up++;
-        regime = up >= 3 ? "BULL" : up <= 1 ? "BEAR" : "NEUTRAL";
-      }
+      // 21.09. fix (audit nalaz #8): ovo je bila druga nezavisna reimplementacija
+      // (SMA9/21 + EMA55) uz bot.js-ov getBtcRegime1H() (EMA20/50, drugačiji uvjet) —
+      // mogle su se ne slagati. Sad koristi ISTU funkciju koju stvarno koristi
+      // entry-gating kod (getBtcRegime1HExport).
+      const r1h = await getBtcRegime1HExport();
       // 21.09. fix: bez Cache-Control browser (ili proxy usput) zna zadržati stari
       // JSON odgovor satima unatoč automatskom page-refreshu — korisnik prijavio
       // "BTC Regime" zaglavljen na UNKNOWN cijeli dan iako je server već vraćao BULL.
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-      res.end(JSON.stringify({ regime, raw: rD.code }));
+      res.end(JSON.stringify({ regime: r1h.regime || "UNKNOWN", raw: "00000" }));
     } catch(e) {
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       res.end(JSON.stringify({ regime: "ERROR", error: e.message }));
@@ -4387,33 +4291,13 @@ const server = http.createServer(async (req, res) => {
         getAltcoinSeason(),
       ]);
 
-      // BTC Regime — direktni fetch (4H candles)
+      // BTC Regime (4H) — 21.09. fix (audit nalaz #8): ovo je bila TREĆA nezavisna
+      // reimplementacija (6-scale sa SMA parovima) uz bot.js-ov getBtcRegime() (6-scale
+      // s EMA parovima) i /api/regime (SMA9/21) — mogle su se ne slagati, dashboard bi
+      // pokazao BULL dok gate koji stvarno blokira ulaze kaže NEUTRAL/BEAR. Sad koristi
+      // ISTU funkciju koju stvarno koristi entry-gating kod.
       let regime = "UNKNOWN";
-      try {
-        const rUrl = "https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=4H&limit=60";
-        const rD   = await fetch(rUrl).then(r => r.json());
-        if (rD.code === "00000" && rD.data?.length >= 56) {
-          const closes = rD.data.map(k => parseFloat(k[4]));
-          const highs  = rD.data.map(k => parseFloat(k[2]));
-          const lows   = rD.data.map(k => parseFloat(k[3]));
-          // EMA55
-          let e55 = closes.slice(0, 55).reduce((a,b) => a+b,0) / 55;
-          const m = 2/56;
-          for (let i = 55; i < closes.length; i++) e55 = closes[i]*m + e55*(1-m);
-          const price = closes[closes.length-1];
-          // 6-Scale: 6 parova EMA
-          const pairs = [[9,21],[21,55],[55,200]].filter(([f,s]) => closes.length > s);
-          let upPairs = 0;
-          for (const [fast,slow] of [[9,21],[21,55]]) {
-            const eFast = closes.slice(-fast).reduce((a,b)=>a+b,0)/fast;
-            const eSlow = closes.slice(-slow).reduce((a,b)=>a+b,0)/slow;
-            if (eFast > eSlow) upPairs++;
-            if (price > eFast) upPairs++;
-            if (price > eSlow) upPairs++;
-          }
-          regime = (upPairs >= 4 && price > e55) ? "BULL" : (upPairs <= 2 && price < e55) ? "BEAR" : "NEUTRAL";
-        }
-      } catch(e) { /* ostaje UNKNOWN */ }
+      try { regime = await getBtcRegimeExport(); } catch(e) { /* ostaje UNKNOWN */ }
       const econ = { events: econRaw, status: isEconBlocked(econRaw) };
 
       // Session info — sinhrono, ne zahtijeva fetch
@@ -4457,9 +4341,13 @@ const server = http.createServer(async (req, res) => {
 
       // ── Trade Readiness Score (0–100%) ─────────────────────────────────────
       // Svaki uvjet donosi bodove; agregat = readiness
-      const fgNum   = typeof fg === "number" ? fg : 50;
+      // 21.09. fix (audit nalaz #7): fg je uvijek {value,label} objekt, nikad broj — fgNum je
+      // bio trajno 50 (uvijek "ok"). liq.score ne postoji (getLiquidationRisk vraća .overall) —
+      // liqNum je bio trajno 0 (uvijek "ok"). session.active ne postoji (getSessionInfo vraća
+      // .dead) — Sesija gate je bio trajno "ok". Sva tri su umjetno napuhavala readiness za 40/100.
+      const fgNum   = typeof fg?.value === "number" ? fg.value : 50;
       const dxyNum  = dxy?.change4h ?? 0;
-      const liqNum  = liq?.score ?? 0;
+      const liqNum  = liq?.overall ?? 0;
       const cbCount = consecLosses ?? 0;
       const gates = [
         { name: "BTC Regime 4H", ok: regime === "BULL" || regime === "NEUTRAL", weight: 20 },
@@ -4468,7 +4356,7 @@ const server = http.createServer(async (req, res) => {
         { name: "Liq Risk",     ok: liqNum <= 75,                              weight: 15 },
         { name: "Circuit Bkr",  ok: cbCount < 7,                               weight: 15 },
         { name: "SP500",        ok: (sp500?.change4h ?? 0) > -1,               weight: 10 },
-        { name: "Sesija",       ok: session?.active !== false,                 weight: 10 },
+        { name: "Sesija",       ok: session?.dead !== true,                    weight: 10 },
         { name: "Econ Event",   ok: !econ?.status?.blocked,                   weight: 5  },
       ];
       const readinessScore = gates.reduce((sum, g) => sum + (g.ok ? g.weight : 0), 0);

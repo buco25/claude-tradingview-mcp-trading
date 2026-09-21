@@ -2432,6 +2432,27 @@ window.toggleScanFilter = function(btn) {
       </div>
 
 
+      <!-- Altcoin Season — 21.09., dodano (podatak već stizao, nije bio prikazan) -->
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">🔄 Altcoin Season</div>
+        <div style="font-size:16px;font-weight:800" id="altseason-val">…</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="altseason-sub">učitavam…</div>
+      </div>
+
+      <!-- Stablecoin Flow — 21.09., dodano -->
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">💵 Stablecoin Flow</div>
+        <div style="font-size:16px;font-weight:800" id="stable-val">…</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="stable-sub">učitavam…</div>
+      </div>
+
+      <!-- BTC Perp Basis — 21.09., dodano -->
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">⚖️ BTC Perp Basis</div>
+        <div style="font-size:16px;font-weight:800" id="basis-val">…</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="basis-sub">učitavam…</div>
+      </div>
+
       <!-- Session Filter -->
       <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px">
         <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">🕐 Trading Sesija</div>
@@ -3372,6 +3393,34 @@ async function loadMarketContext() {
       document.getElementById('fg-val').style.color = fgColor;
       document.getElementById('fg-label').textContent = d.fg.label || '';
       document.getElementById('fg-label').style.color = fgColor;
+    }
+
+    // Altcoin Season — 21.09., dodano
+    if (d.altSeason) {
+      const as = d.altSeason;
+      const asCol = as.season === 'ALT SEASON' ? '#059669' : as.season === 'ALT FAVORED' ? '#22c55e' : as.season === 'BTC FAVORED' ? '#d97706' : '#dc2626';
+      document.getElementById('altseason-val').textContent = as.season + ' (' + as.score + '/100)';
+      document.getElementById('altseason-val').style.color = asCol;
+      document.getElementById('altseason-sub').textContent = 'BTC dominacija ' + as.btcDom + '%';
+    }
+
+    // Stablecoin Flow — 21.09., dodano
+    if (d.stableInflow) {
+      const st = d.stableInflow;
+      const stCol = st.direction === 'INFLOW' ? '#059669' : st.direction === 'OUTFLOW' ? '#dc2626' : '#9ca3af';
+      const stIcon = st.direction === 'INFLOW' ? '📈' : st.direction === 'OUTFLOW' ? '📉' : '➡️';
+      document.getElementById('stable-val').textContent = stIcon + ' ' + st.direction;
+      document.getElementById('stable-val').style.color = stCol;
+      document.getElementById('stable-sub').textContent = '$' + st.totalB + 'B ukupno · ' + (st.changePct>0?'+':'') + st.changePct + '% (7d)';
+    }
+
+    // BTC Perp Basis — 21.09., dodano
+    if (d.perpBasis) {
+      const pb = d.perpBasis;
+      const pbCol = pb.sentiment === 'CONTANGO' ? '#059669' : pb.sentiment === 'BACKWARDATION' ? '#dc2626' : '#9ca3af';
+      document.getElementById('basis-val').textContent = pb.sentiment + ' ' + (pb.basis>0?'+':'') + pb.basis + '%';
+      document.getElementById('basis-val').style.color = pbCol;
+      document.getElementById('basis-sub').textContent = 'Spot $' + Number(pb.spot).toLocaleString() + ' vs Fut $' + Number(pb.futures).toLocaleString();
     }
 
     // BTC Dominance i DXY — kartice uklonjene iz UI-a (dom-val/dxy-val/dxy-sub ne

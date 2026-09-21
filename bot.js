@@ -7496,6 +7496,21 @@ export async function run() {
     }
   }
 
+  // Tjedni Signal/Gate Audit — nedjelja 08:00 UTC (10:00 HR), jednom tjedno (guard fajl)
+  // 21.09., na zahtjev: automatski self-audit signala/gate-ova, vidi generateSignalGateAudit.
+  {
+    const _ns = new Date();
+    if (_ns.getUTCDay() === 0 && _ns.getUTCHours() === 8) {
+      const _sf = `${DATA_DIR}/signal_audit_last.txt`;
+      const _today = _ns.toISOString().slice(0, 10);
+      let _last = null;
+      try { _last = readFileSync(_sf, "utf8").trim(); } catch {}
+      if (_last !== _today) {
+        try { writeFileSync(_sf, _today); await generateSignalGateAudit(); } catch (_) {}
+      }
+    }
+  }
+
   // Dnevni izvještaj — 07:00 UTC (09:00 HR), svaki dan (guard fajl) (07.08.)
   {
     const _nd = new Date();
@@ -7789,6 +7804,187 @@ function _buildReport(dateStr, stats, statsU4h, fg, news, pivots, outlook, posIn
   md += `---\n*Generirano automatski od ULTRA Bot v3 | ${dateStr}*\n`;
 
   return { md, tg: tgMsg };
+}
+
+// ─── Tjedni Signal/Gate Audit — nedjeljom na Telegram ────────────────────────
+// 21.09., na zahtjev: automatizirana verzija ručnog audita koji sam radio kroz
+// ovaj chat (night-zona se pokazala štetnom, whale/squeeze bonusi nikad nisu
+// okinuli, itd.) — koristi nove strukturirane CSV stupce (SigMask/EntryMode/
+// BTCRegime1H/4H/Night/Weekend, dodano isti dan) + scan_log.csv (gate aktivnost,
+// čuva zadnjih 7 dana). NE mijenja ništa u kodu — samo predlaže, korisnik odlučuje.
+const AUDIT_MIN_SAMPLE = 15;  // min. tradova po kategoriji prije bilo kakvog zaključka
+
+function _parseTradesWithContext(pid, days = 7) {
+  const f = csvFilePath(pid);
+  if (!existsSync(f)) return [];
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  const lines = readFileSync(f, "utf8").trim().split("\n");
+
+  function parseCsvLine(line) {
+    const out = []; let cur = "", inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') { inQ = !inQ; continue; }
+      if (c === "," && !inQ) { out.push(cur); cur = ""; continue; }
+      cur += c;
+    }
+    out.push(cur);
+    return out;
+  }
+
+  const byOrder = new Map();
+  for (let i = 1; i < lines.length; i++) {
+    const cols = parseCsvLine(lines[i]);
+    if (cols.length < 13) continue;
+    const orderId = cols[12]?.trim();
+    if (!orderId) continue;
+    if (!byOrder.has(orderId)) byOrder.set(orderId, []);
+    byOrder.get(orderId).push(cols);
+  }
+
+  const trades = [];
+  for (const [, rows] of byOrder) {
+    const opens  = rows.filter(c => c[4] === "LONG" || c[4] === "SHORT");
+    const closes = rows.filter(c => c[4]?.startsWith("CLOSE"));
+    if (!opens.length || !closes.length) continue;
+
+    closes.sort((a, b) => `${a[0]}T${a[1]}`.localeCompare(`${b[0]}T${b[1]}`));
+    const lastClose = closes[closes.length - 1];
+    const closeTs = new Date(`${lastClose[0]}T${lastClose[1]}Z`).getTime();
+    if (isNaN(closeTs) || closeTs < cutoff) continue;
+
+    // isti dedup obrazac kao _parseTradeCsv — isti qty = duplikat, različit qty = partial leg
+    const legsByQty = new Map();
+    for (const c of closes) {
+      const q = (parseFloat(c[5]) || 0).toFixed(6);
+      if (!legsByQty.has(q)) legsByQty.set(q, []);
+      legsByQty.get(q).push(c);
+    }
+    const legs = [...legsByQty.values()].map(rs => rs[rs.length - 1]);
+    const netPnl = legs.reduce((s, c) => s + (parseFloat(c[9]) || 0), 0);
+    const open = opens[0];
+    trades.push({
+      pid, symbol: open[3]?.trim(), side: open[4]?.trim(), netPnl,
+      entryMode: (open[17] || "PBK").split("-")[0],
+      btcRegime1h: open[18] || "UNKNOWN", btcRegime4h: open[19] || "UNKNOWN",
+      night: open[20] === "true", weekend: open[21] === "true",
+    });
+  }
+  return trades;
+}
+
+function _wrBucket(trades, keyFn) {
+  const buckets = {};
+  for (const t of trades) {
+    const k = keyFn(t);
+    if (k == null) continue;
+    if (!buckets[k]) buckets[k] = { wins: 0, losses: 0, pnl: 0 };
+    if (t.netPnl >= 0) buckets[k].wins++; else buckets[k].losses++;
+    buckets[k].pnl += t.netPnl;
+  }
+  return buckets;
+}
+
+function _fmtBucketLine(label, buckets) {
+  const parts = [];
+  for (const [k, v] of Object.entries(buckets)) {
+    const n = v.wins + v.losses;
+    if (n < AUDIT_MIN_SAMPLE) { parts.push(`${k}: n=${n} (premalo)`); continue; }
+    const wr = (v.wins / n * 100).toFixed(0);
+    parts.push(`${k}: WR ${wr}% (n=${n}, ${v.pnl>=0?"+":""}$${v.pnl.toFixed(2)})`);
+  }
+  return parts.length ? `${label}: ` + parts.join(" | ") : null;
+}
+
+export async function generateSignalGateAudit() {
+  try {
+    console.log(`🔍 [Signal Audit] Generiranje tjednog audita...`);
+    const trades = [
+      ..._parseTradesWithContext("synapse_t", 7),
+      ..._parseTradesWithContext(ULTRA4H_PID, 7),
+    ];
+
+    let msg = `🔍 <b>ULTRA Tjedni Signal/Gate Audit</b> — ${new Date().toISOString().slice(0,10)}\n\n`;
+    msg += `Analizirano ${trades.length} zatvorenih tradova (zadnjih 7 dana, obje strategije)\n\n`;
+
+    if (trades.length === 0) {
+      msg += "Nema zatvorenih tradova ovaj tjedan — nema što analizirati.";
+    } else {
+      const byMode = _wrBucket(trades, t => t.entryMode);
+      const modeLine = _fmtBucketLine("📊 Entry Mode (MOM vs PBK)", byMode);
+      if (modeLine) msg += modeLine + "\n";
+
+      // Regime alignment — svaka strategija se poravnava s VLASTITIM regime-om koji
+      // stvarno gate-a njene ulaze (synapse_t=1H, ultra_4h=4H — vidi bot.js komentar
+      // kod BTC regime alignment gate-a).
+      const byAlign = _wrBucket(trades, t => {
+        const regime = t.pid === "ultra_4h" ? t.btcRegime4h : t.btcRegime1h;
+        if (regime === "UNKNOWN") return null;
+        const aligned = (t.side === "LONG" && regime !== "BEAR") || (t.side === "SHORT" && regime !== "BULL");
+        return aligned ? "S regimeom" : "Protiv regimea";
+      });
+      const alignLine = _fmtBucketLine("🎯 BTC Regime Alignment", byAlign);
+      if (alignLine) msg += alignLine + "\n";
+
+      const byNight = _wrBucket(trades, t => t.night ? "Noć (20-06 UTC)" : "Dan");
+      const nightLine = _fmtBucketLine("🌙 Noć vs Dan", byNight);
+      if (nightLine) msg += nightLine + "\n";
+
+      const byWeekend = _wrBucket(trades, t => t.weekend ? "Vikend" : "Radni dan");
+      const weekendLine = _fmtBucketLine("📅 Vikend vs Radni dan", byWeekend);
+      if (weekendLine) msg += weekendLine + "\n";
+
+      // Top gubitnici po simbolu (apsolutni $ gubitak, ne samo broj SL-ova)
+      const bySymbol = _wrBucket(trades, t => t.symbol);
+      const topLosers = Object.entries(bySymbol)
+        .filter(([, v]) => v.pnl < 0 && (v.wins + v.losses) >= 3)
+        .sort((a, b) => a[1].pnl - b[1].pnl).slice(0, 3);
+      if (topLosers.length) {
+        msg += `📉 Najviše gubi: ` + topLosers.map(([s, v]) => `${s.replace("USDT","")} ($${v.pnl.toFixed(2)}, ${v.wins}/${v.wins+v.losses})`).join(", ") + "\n";
+      }
+    }
+
+    // Gate aktivnost iz scan_log.csv (čuva zadnjih 7 dana, automatski se čisti)
+    msg += "\n🚦 <b>Gate aktivnost (7 dana)</b>\n";
+    try {
+      if (existsSync(SCAN_LOG_FILE)) {
+        const slLines = readFileSync(SCAN_LOG_FILE, "utf8").trim().split("\n");
+        const counts = {};
+        for (let i = 1; i < slLines.length; i++) {
+          const blocker = slLines[i].split(",")[7]?.trim();
+          if (!blocker) continue;
+          counts[blocker] = (counts[blocker] || 0) + 1;
+        }
+        const entered = counts["ENTERED"] || 0;
+        const totalScans = slLines.length - 1;
+        msg += `Ukupno scan-odluka: ${totalScans} | Stvarnih ulaza: ${entered}\n`;
+        const sorted = Object.entries(counts).filter(([b]) => b !== "ENTERED" && b !== "—").sort((a,b) => b[1]-a[1]);
+        const lowActivity = sorted.filter(([, n]) => n > 0 && n < 5);
+        if (lowActivity.length) {
+          msg += `⚠️ Gate-ovi s vrlo niskom aktivnošću ovaj tjedan (provjeri okidaju li ispravno): ` +
+            lowActivity.map(([b,n]) => `${b}(${n}×)`).join(", ") + "\n";
+        }
+        const topBlockers = sorted.slice(0, 5);
+        if (topBlockers.length) msg += `Top blokeri: ` + topBlockers.map(([b,n]) => `${b}(${n}×)`).join(", ") + "\n";
+      } else {
+        msg += "scan_log.csv još ne postoji.\n";
+      }
+    } catch (e) { msg += `(scan_log greška: ${e.message})\n`; }
+
+    msg += `\nℹ️ Automatska analiza — ništa nije mijenjano u kodu. Javi ako želiš da nešto od ovoga primijenim.`;
+
+    try {
+      const reportDir = `${DATA_DIR}/daily_reports`;
+      if (!existsSync(reportDir)) mkdirSync(reportDir, { recursive: true });
+      writeFileSync(`${reportDir}/signal_audit_latest.txt`, msg.replace(/<\/?b>/g, ""), "utf8");
+    } catch {}
+
+    try { await tg(msg); } catch (e) { console.log(`  ⚠️ [Signal Audit] Telegram greška: ${e.message}`); }
+    return msg;
+  } catch (e) {
+    console.log(`  ⚠️ [Signal Audit] greška: ${e.message}`);
+    return null;
+  }
 }
 
 // ─── Tjedna analiza (TraderaEdge framework) — ponedjeljkom na Telegram ────────

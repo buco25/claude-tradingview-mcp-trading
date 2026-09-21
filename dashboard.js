@@ -1735,7 +1735,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}, ultra4hPositions = [
         <div style="font-size:10px;color:#9ca3af;margin-top:2px" id="btc-wema-sub">W-EMA10 vs W-EMA21</div>
       </div>
       <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px;text-align:center">
-        <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">Wyckoff (90d TR)</div>
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">Wyckoff (60d TR)</div>
         <div style="font-size:22px;font-weight:800" id="btc-wyckoff-val">—</div>
         <div style="font-size:10px;color:#9ca3af;margin-top:2px" id="btc-wyckoff-sub">Spring/SOS/LPS bonus</div>
       </div>

@@ -16,7 +16,7 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   generateDailyReport, autoFixCsvFromBitget, SYMBOL_COMBOS, getBtcDailyPivots, getAccountTransfers, calcLiqZones,
   getBtcWeeklyVsKey, getRelStrengthVsBtc, isStockSym, isMetalSym, getBtcChillMode, getBtcDailyVsInvalidation, getBtcWeeklyEmaPhase,
   getBtcWyckoffSignal, getWhaleDivergence, getBullMarketSupportBand,
-  getBtcRegime1HExport, getBtcDrawdownPctExport,
+  getBtcRegime1HExport, getBtcDrawdownPctExport, recordOiSnapshot, getOiChangeMap,
   RISK_PCT, RISK_PCT_MIN, RISK_PCT_MAX,
   ADX_MIN, ADX_SOFT_BAND, ADX_SOFT_FLOOR, MOM_SOFT_BAND, MOM_ADX_MIN,
   MAX_OPEN_CRYPTO, MAX_OPEN_STOCKS } from "./bot.js";
@@ -747,6 +747,10 @@ async function runScan(rules) {
     }
   } catch { /* ignoriraj */ }
 
+  // Capital Flow (OI 24h % promjena) — 21.09., na zahtjev. Sinkroni lokalni file
+  // read, jednom po scan ciklusu (isti obrazac kao _buildUltra4hCfg).
+  const _oiFlowMap = getOiChangeMap(ALL_SYMBOLS.filter(s => !isStockSym(s) && !isMetalSym(s)));
+
   const results = [];
   const BATCH = 5;
   for (let i = 0; i < ALL_SYMBOLS.length; i += BATCH) {
@@ -786,6 +790,8 @@ async function runScan(rules) {
         // Bull Market Support Band (20W SMA + 21W EMA) dip-buy/rejection — svi kripto (29.08.)
         s.bmsb = (!isStockSym(sym) && !isMetalSym(sym))
           ? await getBullMarketSupportBand(sym).catch(() => null) : null;
+        // Capital Flow (OI 24h %) — 21.09., na zahtjev
+        s.oiFlow = _oiFlowMap[sym] || null;
         // 4H signal (18.09., na zahtjev "stavi na skener dal se ceka ulaz na 1h ili 4h") —
         // ista prava logika (analyzeUltraPullback) kao ULTRA-4H strategija, samo za prikaz.
         try {
@@ -2396,6 +2402,13 @@ window.toggleScanFilter = function(btn) {
         <div style="font-size:11px;color:#9ca3af" id="liq-sub">učitavam…</div>
       </div>
 
+      <!-- Capital Flow (OI 24h %) — 21.09., na zahtjev -->
+      <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px;grid-column:span 2">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;text-transform:uppercase">💰 Capital Flow (OI 24h)</div>
+        <div style="font-size:16px;font-weight:800" id="oi-trend-val">…</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px" id="oi-trend-sub">učitavam…</div>
+      </div>
+
       <!-- Active Gates -->
       <div style="background:#2d3748;border:1px solid #374151;border-radius:8px;padding:12px;grid-column:span 2">
         <div style="font-size:10px;color:#9ca3af;margin-bottom:8px;text-transform:uppercase">🚦 Aktivni Gateovi</div>
@@ -3155,6 +3168,7 @@ async function doScan() {
           (s.relStr ? ' <span title="Relativna snaga vs BTC (7d ratio vs EMA20): ' + s.relStr + ' — LONG samo STRONG, SHORT samo WEAK" style="font-size:10px">' + (s.relStr === 'STRONG' ? '💪' : '🐌') + '</span>' : '') +
           (s.whale && s.whale.bias !== 'NEUTRAL' ? ' <span title="Whale (top-trader) vs globalni L/S ratio: top ' + s.whale.topLongPct + '% long, globalno ' + s.whale.globalLongPct + '% (' + (s.whale.divergence>0?'+':'') + s.whale.divergence + 'pp odmak) — bonus ' + (s.whale.bias === 'BULLISH' ? 'bullScore' : 'bearScore') + '" style="font-size:10px">🐋' + (s.whale.bias === 'BULLISH' ? '▲' : '▼') + '</span>' : '') +
           (s.bmsb && s.bmsb.bias !== 'NEUTRAL' ? ' <span title="Bull Market Support Band (20W SMA + 21W EMA): traka ' + s.bmsb.bandLow.toFixed(4) + '-' + s.bmsb.bandHigh.toFixed(4) + ', cijena ' + s.bmsb.price.toFixed(4) + ' — ' + (s.bmsb.bias === 'BULLISH' ? 'dip-buy zona, bonus bullScore' : 'rejection zona, bonus bearScore') + '" style="font-size:10px">📊' + (s.bmsb.bias === 'BULLISH' ? '▲' : '▼') + '</span>' : '') +
+          (s.oiFlow && Math.abs(s.oiFlow.pct) >= 8 ? ' <span title="Capital Flow — Open Interest promjena zadnjih ' + s.oiFlow.ageH.toFixed(0) + 'h: ' + (s.oiFlow.pct>0?'+':'') + s.oiFlow.pct + '% — ' + (s.oiFlow.pct > 0 ? 'kapital ulazi (novi longovi/shortovi)' : 'kapital izlazi (zatvaranje pozicija)') + '" style="font-size:10px;color:' + (s.oiFlow.pct > 0 ? '#059669' : '#dc2626') + '">💰' + (s.oiFlow.pct>0?'+':'') + s.oiFlow.pct + '%</span>' : '') +
           '<div style="font-size:9px;color:' + slTpCol + ';font-weight:500;margin-top:1px">' + slTp + '</div>' + rsiAdxInfo + '</td>' +
         '<td style="font-weight:600;white-space:nowrap;font-size:12px;padding:6px 8px">' + fmtLive(s.price) + entryInfo + '</td>' +
         '<td style="text-align:center;font-weight:800;color:' + t1hCol + ';font-size:13px;padding:6px 4px" title="1H EMA20: ' + t1h + '">' + t1hIcon + '</td>' +
@@ -3446,20 +3460,19 @@ async function loadMarketContext() {
           liq.risk === 'MEDIUM' ? 'Srednji rizik — prati funding rate' :
           'Nizak rizik — balansiran leverage u tržištu';
       }
-      // OI trend iz liq podataka
-      const oiEl = document.getElementById('oi-trend-val');
-      if (oiEl && d.liq.oiTrend) {
-        const rising  = d.liq.oiTrend.filter(x => x.trend === 'RASTE').length;
-        const falling = d.liq.oiTrend.filter(x => x.trend === 'PADA').length;
-        const oiCol   = rising > falling ? '#059669' : falling > rising ? '#dc2626' : '#9ca3af';
-        oiEl.textContent = 'OI: ▲' + rising + ' raste · ▼' + falling + ' pada';
-        oiEl.style.color = oiCol;
-      } else if (oiEl) {
-        // Fallback: iz liq score procijeni
-        const oiMsg = liq.overall > 60 ? '📈 OI visok — overlevered' : liq.overall < 30 ? '📉 OI nizak — malo leveragea' : '➡️ OI neutralan';
-        oiEl.textContent = oiMsg;
-        oiEl.style.color = liqColor;
-      }
+    }
+
+    // Capital Flow — 21.09., na zahtjev: koliko coinova pokazuje kapital ulaz/izlaz
+    // (OI 24h % promjena ≥8pp). d.capitalFlow dolazi iz getOiChangeMap na serveru.
+    const oiEl = document.getElementById('oi-trend-val');
+    if (oiEl && d.capitalFlow) {
+      const cf = d.capitalFlow;
+      const oiCol = cf.inflow > cf.outflow ? '#059669' : cf.outflow > cf.inflow ? '#dc2626' : '#9ca3af';
+      oiEl.textContent = '▲' + cf.inflow + ' ulaz · ▼' + cf.outflow + ' izlaz';
+      oiEl.style.color = oiCol;
+      document.getElementById('oi-trend-sub').textContent = cf.top
+        ? 'Najviše kapitala: ' + cf.top.map(t => t.sym.replace('USDT','') + ' ' + (t.pct>0?'+':'') + t.pct + '%').join(', ')
+        : 'Prati se ' + cf.tracked + ' simbola (treba 24h povijesti)';
     }
 
     // Ekonomski kalendar
@@ -4394,6 +4407,20 @@ const server = http.createServer(async (req, res) => {
         }
       } catch { /* ignoriraj */ }
 
+      // Capital Flow — 21.09., na zahtjev: sažetak koliko kripto simbola pokazuje
+      // OI-baziran kapital ulaz/izlaz (getOiChangeMap, sinkroni lokalni file read)
+      let capitalFlow = null;
+      try {
+        const _cryptoSyms = symbols.filter(s => !isStockSym(s) && !isMetalSym(s));
+        const _flowMap = getOiChangeMap(_cryptoSyms);
+        const entries = Object.entries(_flowMap);
+        const inflow  = entries.filter(([,v]) => v.pct >= 8).length;
+        const outflow = entries.filter(([,v]) => v.pct <= -8).length;
+        const top = entries.sort((a,b) => Math.abs(b[1].pct) - Math.abs(a[1].pct)).slice(0,3)
+          .map(([sym,v]) => ({ sym, pct: v.pct }));
+        capitalFlow = { inflow, outflow, top: top.length ? top : null, tracked: entries.length };
+      } catch { /* ignoriraj */ }
+
       // Dinamički daily limit: 3% od Bitget equityja (min $20)
       let dailyLimit = 20;
       try {
@@ -4424,7 +4451,7 @@ const server = http.createServer(async (req, res) => {
       // 21.09. fix: isti Cache-Control fix kao /api/regime — sprječava zaglavljeni
       // stari JSON u browseru (uzrok prijavljenog "BTC Regime (4H)" stuck na UNKNOWN).
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-      res.end(JSON.stringify({ fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, dailyLimit, cbLosses: 7, session, atrTrend, sp500, corr, pc, liq, econ, regime, ls, stableInflow, perpBasis, altSeason, readiness }));
+      res.end(JSON.stringify({ fg, dom, dxy, fr, dailyPnl, consecLosses, symStats, dailyLimit, cbLosses: 7, session, atrTrend, sp500, corr, pc, liq, econ, regime, ls, stableInflow, perpBasis, altSeason, readiness, capitalFlow }));
     } catch(e) {
       res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
     }
@@ -5140,4 +5167,16 @@ server.listen(PORT, async () => {
     try { await runUltra4hStrategy(); }
     catch (e) { console.error("ULTRA-4H strategija greška:", e.message); }
   }, 60 * 1000);
+
+  // ─── Capital Flow — OI snapshot svaki sat (21.09., na zahtjev) ────────────
+  // Gradi 24h povijest Open Interesta po simbolu za "kapital ulazi/izlazi"
+  // signal na Scanneru (vidi getOiChangeMap u bot.js).
+  async function recordOiNow() {
+    try {
+      const cryptoSyms = ALL_SYMBOLS.filter(s => !isStockSym(s) && !isMetalSym(s));
+      if (cryptoSyms.length) await recordOiSnapshot(cryptoSyms);
+    } catch (e) { console.error("OI snapshot greška:", e.message); }
+  }
+  setTimeout(recordOiNow, 20000);
+  setInterval(recordOiNow, 60 * 60 * 1000);
 });

@@ -1705,6 +1705,65 @@ export async function getOIForSymbols(symbols) {
   return result;
 }
 
+// ─── Capital Flow (OI 24h % promjena) ────────────────────────────────────────
+// 21.09., na zahtjev "vidjeti kad kapital ulazi u neki altcoin". Razmatran
+// DeFiLlama TVL (kao u referentnom alatu), ali TVL ne postoji za većinu
+// watchliste (dionice, DOGE/PEPE/XRP/TAO nemaju smart-contract TVL) — Open
+// Interest na Bitget futuresu radi za SVAKI kripto simbol koji stvarno tradamo
+// i izravno mjeri kapital koji ulazi u TAJ tržišni segment: rastući OI = novi
+// kapital otvara pozicije (bilo long ili short), padajući OI = kapital izlazi/
+// zatvara pozicije. Bitgetov open-interest endpoint vraća samo TRENUTNU
+// vrijednost (nema povijesni niz), pa se 24h promjena mora graditi ručno —
+// satni snapshot spremljen u oi_history.json, uspoređen s najbližim unosom
+// ~24h unatrag.
+const OI_HISTORY_MAX_H = 26;  // drži malo više od 24h zaliha da uvijek ima baseline
+function oiHistoryFile() { return `${DATA_DIR}/oi_history.json`; }
+function loadOiHistory() {
+  try { return JSON.parse(readFileSync(oiHistoryFile(), "utf8")); } catch { return {}; }
+}
+function saveOiHistory(h) {
+  try { writeFileSync(oiHistoryFile(), JSON.stringify(h)); } catch {}
+}
+
+export async function recordOiSnapshot(symbols) {
+  const hist   = loadOiHistory();
+  const now    = Date.now();
+  const cutoff = now - OI_HISTORY_MAX_H * 3600000;
+  await Promise.all(symbols.map(async sym => {
+    try {
+      const url = `${BITGET.baseUrl}/api/v2/mix/market/open-interest?symbol=${sym}&productType=USDT-FUTURES`;
+      const d   = await fetch(url).then(r => r.json());
+      const oi  = parseFloat(d?.data?.openInterestList?.[0]?.size || d?.data?.size || 0);
+      if (!oi) return;
+      const arr = (hist[sym] || []).filter(e => e.ts >= cutoff);
+      arr.push({ ts: now, oi });
+      hist[sym] = arr;
+    } catch {}
+  }));
+  saveOiHistory(hist);
+}
+
+// Sinkrono — čisti lokalni file read + matematika, bez mreže, pa se poziva
+// JEDNOM po scan ciklusu (isti obrazac kao _buildUltra4hCfg), ne po simbolu.
+export function getOiChangeMap(symbols) {
+  const hist  = loadOiHistory();
+  const now   = Date.now();
+  const target = now - 24 * 3600000;
+  const map = {};
+  for (const sym of symbols) {
+    const arr = hist[sym];
+    if (!arr || arr.length < 2) continue;
+    const current = arr[arr.length - 1];
+    let baseline = arr[0];
+    for (const e of arr) { if (e.ts <= target) baseline = e; }
+    if (baseline.ts === current.ts || baseline.oi <= 0) continue;
+    const pct  = (current.oi - baseline.oi) / baseline.oi * 100;
+    const ageH = (current.ts - baseline.ts) / 3600000;
+    map[sym] = { pct: +pct.toFixed(1), oi: current.oi, ageH: +ageH.toFixed(1) };
+  }
+  return map;
+}
+
 // ─── getLSRForSymbols — batch wrapper (koristi postojeći getLongShortRatio) ────
 export async function getLSRForSymbols(symbols) {
   const result = {};

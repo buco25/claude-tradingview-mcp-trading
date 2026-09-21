@@ -1720,6 +1720,11 @@ function renderHtml(allStats, allPositions, hb, rules = {}, ultra4hPositions = [
         <div style="font-size:10px;color:#9ca3af;margin-top:2px" id="btc-lsr-sub">retail long % · trend</div>
       </div>
       <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px;text-align:center">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">🐋 Whale L/S</div>
+        <div style="font-size:22px;font-weight:800" id="btc-whale-val">—</div>
+        <div style="font-size:10px;color:#9ca3af;margin-top:2px" id="btc-whale-sub">top-trader long % vs retail</div>
+      </div>
+      <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px;text-align:center">
         <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">Ključna razina</div>
         <div style="font-size:22px;font-weight:800" id="btc-key-val">—</div>
         <div style="font-size:10px;color:#9ca3af;margin-top:2px" id="btc-key-sub">tjedni close vs razina</div>
@@ -1810,6 +1815,18 @@ window.toggleScanFilter = function(btn) {
         lsrEl.style.color = squeeze ? '#059669' : trap ? '#dc2626' : '#d97706';
         const label = squeeze ? '🔥 Squeeze setup' : trap ? '⚠️ Long trap' : '⚖️ Neutral';
         document.getElementById('btc-lsr-sub').textContent = label + ' · ' + (lsr.trend || '');
+      }
+
+      // Whale (top-trader) L/S ratio
+      const wh = d.whale;
+      const whEl = document.getElementById('btc-whale-val');
+      if (wh && wh.topLongPct != null) {
+        const wl = wh.topLongPct;
+        whEl.textContent = wl.toFixed(1) + '% long / ' + (100 - wl).toFixed(1) + '% short';
+        whEl.style.color = wh.bias === 'BULLISH' ? '#059669' : wh.bias === 'BEARISH' ? '#dc2626' : '#d97706';
+        const whLabel = wh.bias === 'BULLISH' ? '🐂 Kitovi bullish' : wh.bias === 'BEARISH' ? '🐻 Kitovi bearish' : '⚖️ Neutralno';
+        document.getElementById('btc-whale-sub').textContent =
+          whLabel + ' · odmak ' + (wh.divergence > 0 ? '+' : '') + wh.divergence + 'pp od retaila (' + wh.globalLongPct + '%)';
       }
 
       // Režim bota — statusna traka
@@ -4892,6 +4909,12 @@ const server = http.createServer(async (req, res) => {
       // L/S Ratio (Binance global account ratio)
       try {
         result.lsr = await getLongShortRatio("BTCUSDT");
+      } catch {}
+
+      // Whale (top-trader) L/S ratio — 21.09., na zahtjev vidljivosti (do sad samo
+      // tooltip na Scanneru po simbolu, ovdje BTC brojka na prvi pogled)
+      try {
+        result.whale = await getWhaleDivergence("BTCUSDT");
       } catch {}
 
       // Ključna ciklus-razina (TraderaEdge): tjedni close vs btc_key_level

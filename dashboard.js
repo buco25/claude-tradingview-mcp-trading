@@ -4331,7 +4331,10 @@ const server = http.createServer(async (req, res) => {
             if (pnl       !== undefined) cols[9] = String(pnl);
             if (exitPrice !== undefined) cols[6] = String(exitPrice);
             // Automatski ispravi WIN/LOSS u Notes koloni na temelju novog P&L
-            const notesIdx = cols.length - 1;
+            // 21.09.: bio cols.length-1 — pretpostavljao je da je Notes ZADNJI stupac,
+            // ali bot.js CSV sad ima 6 dodatnih stupaca nakon Notes. Notes je FIKSNO
+            // na indeksu 15.
+            const notesIdx = 15;
             if (cols[notesIdx]) {
               const newPnl = parseFloat(cols[9]);
               cols[notesIdx] = cols[notesIdx]

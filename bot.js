@@ -3992,7 +3992,11 @@ export async function autoFixCsvFromBitget(pid = "synapse_t") {
       // Ispravi red
       cols[6] = String(newExitPrice > 0 ? newExitPrice : exitPrice);
       cols[9] = String(newPnl);
-      const notesIdx = cols.length - 1;
+      // 21.09.: bio cols.length-1 — pretpostavljao je da je Notes ZADNJI stupac, ali
+      // CSV sad ima 6 dodatnih stupaca nakon Notes (SigMask/EntryMode/BTCRegime.../
+      // Weekend) pa bi to sad mutiralo Weekend stupac umjesto Notes. Notes je FIKSNO
+      // na indeksu 15 (vidi CSV_HEADERS).
+      const notesIdx = 15;
       if (cols[notesIdx]) {
         cols[notesIdx] = cols[notesIdx]
           .replace(/^"?LOSS:/, newPnl >= 0 ? '"WIN:' : '"LOSS:')
@@ -4475,11 +4479,51 @@ async function checkPortfolioPositions(pid) {
 
 function csvFilePath(pid) { return `${DATA_DIR}/trades_${pid}.csv`; }
 
-const CSV_HEADERS = "Date,Time (UTC),Exchange,Symbol,Side,Quantity,Price,Total USD,Fee (est.),Net P&L,SL,TP,Order ID,Mode,Portfolio,Notes";
+// 21.09., prošireno na zahtjev (za automatski self-audit) — 6 novih stupaca dodano
+// NA KRAJ retka: SigMask/EntryMode strukturirano (bilo samo u slobodnom Notes tekstu),
+// BTCRegime1H/4H i Night/Weekend kao kontekst ulazne odluke. Postojeći stupci nisu
+// pomaknuti — sav kod koji čita po fiksnom indeksu (cols[9], cols[12]...) ostaje ispravan.
+const CSV_HEADERS = "Date,Time (UTC),Exchange,Symbol,Side,Quantity,Price,Total USD,Fee (est.),Net P&L,SL,TP,Order ID,Mode,Portfolio,Notes,SigMask,EntryMode,BTCRegime1H,BTCRegime4H,Night,Weekend";
 
+const _csvHeaderChecked = new Set();  // izbjegni ponovnu migraciju svakih 60s (ultra_4h zove initCsv po ciklusu)
 function initCsv(pid) {
   const f = csvFilePath(pid);
-  if (!existsSync(f)) writeFileSync(f, CSV_HEADERS + "\n");
+  if (!existsSync(f)) { writeFileSync(f, CSV_HEADERS + "\n"); _csvHeaderChecked.add(pid); return; }
+  if (_csvHeaderChecked.has(pid)) return;
+  _csvHeaderChecked.add(pid);
+  // Migracija starijeg CSV-a na prošireni header — mijenja SAMO prvi redak, postojeći
+  // podatkovni retci ostaju netaknuti (novi stupci će im biti prazni kad se čitaju po
+  // imenu — očekivano, kontekst prije ovog datuma nije bio zabilježen).
+  try {
+    const content = readFileSync(f, "utf8");
+    const nl = content.indexOf("\n");
+    const firstLine = nl >= 0 ? content.slice(0, nl) : content;
+    if (firstLine.trim() !== CSV_HEADERS) {
+      const rest = nl >= 0 ? content.slice(nl + 1) : "";
+      writeFileSync(f, CSV_HEADERS + "\n" + rest);
+      console.log(`  📋 [CSV] ${pid} — header migriran na prošireni format`);
+    }
+  } catch (e) { console.log(`  ⚠️  [CSV] ${pid} migracija greška: ${e.message}`); }
+}
+
+// 21.09., dodano — writeCsv se poziva niže (pyramid dodaci) ali NIKAD nije bio
+// definiran (ReferenceError, tiho hvatan vanjskim try/catch) — pyramid adicije se
+// nikad nisu upisivale u CSV. Generički niski-razinski writer jer pyramid treba
+// prilagođenu bilješku (writeEntryCsv gradi svoju "novi ulaz" poruku).
+function writeCsv(pid, r) {
+  const now  = new Date();
+  const date = now.toISOString().slice(0, 10);
+  const time = now.toISOString().slice(11, 19);
+  const row = [
+    date, time, "BitGet", r.symbol, r.side,
+    r.quantity, r.price, r.totalUSD,
+    "0", "OPEN",
+    r.sl, r.tp,
+    r.orderId || "", r.mode, pid,
+    `"${r.notes}"`,
+    "", "", "", "", "", "",
+  ].join(",");
+  appendFileSync(csvFilePath(pid), row + "\n");
 }
 
 function writeEntryCsv(pid, entry) {
@@ -4499,6 +4543,10 @@ function writeEntryCsv(pid, entry) {
     ? entry.sigMask.toString(2).split("").filter(b => b === "1").length
     : "?";
 
+  // 21.09., dodano za self-audit — kontekst ulazne odluke kao strukturirani stupci
+  const night   = now.getUTCHours() >= 20 || now.getUTCHours() < 6;
+  const weekend = [0, 6].includes(now.getUTCDay());
+
   const row = [
     date, time, "BitGet", entry.symbol, entry.signal,
     qty, fmtPrice(entry.price), entry.tradeSize.toFixed(2),
@@ -4506,6 +4554,7 @@ function writeEntryCsv(pid, entry) {
     fmtPrice(entry.sl), fmtPrice(entry.tp),
     entry.orderId || "", mode, pid,
     `"${entry.strategy} | ${entryMode} | Sig ${sigCount}/${SIG_NAMES.length} | SL ${entry.slPct??SL_PCT}% TP ${entry.tpPct??TP_PCT}%"`,
+    entry.sigMask ?? "", entryMode, entry.btcRegime1h ?? "", entry.btcRegime4h ?? "", night, weekend,
   ].join(",");
 
   appendFileSync(csvFilePath(pid), row + "\n");
@@ -4607,6 +4656,10 @@ export function writeExitCsv(pid, pos, exitPrice, reason, pnl) {
     fmtPrice(pos.sl), fmtPrice(pos.tp),
     pos.orderId || "", pos.mode, pid,
     `"${icon}: ${reason} | ${pos.entryMode || "PBK"} | Ulaz ${fmtPrice(pos.entryPrice)} → Izlaz ${fmtPrice(exitPrice)}"`,
+    // 21.09.: SigMask/EntryMode ponovljeni iz pozicije (nema potrebe spajati entry+exit
+    // redove po Order ID-u za osnovnu analizu) — regime/night/weekend su smisleni SAMO
+    // u trenutku ulazne odluke, ostaju prazni na exit retku.
+    pos.sigMask ?? "", pos.entryMode || "PBK", "", "", "", "",
   ].join(",");
 
   appendFileSync(csvFilePath(pid), row + "\n");
@@ -5790,9 +5843,9 @@ function _finalizeUltra4hSignal(result, candles) {
   const slPct   = slDist / price * 100;
   const tpPct   = slPct * ULTRA4H_RR;
   if (result.signal === "LONG") {
-    return { signal: "LONG", price, sl: price - slDist, tp: price + slDist * ULTRA4H_RR, slPct, tpPct, bullScore: result.bullScore, bearScore: result.bearScore, isMomentum: result.isMomentum === true };
+    return { signal: "LONG", price, sl: price - slDist, tp: price + slDist * ULTRA4H_RR, slPct, tpPct, bullScore: result.bullScore, bearScore: result.bearScore, isMomentum: result.isMomentum === true, sigMask: result.sigMask ?? null };
   }
-  return { signal: "SHORT", price, sl: price + slDist, tp: price - slDist * ULTRA4H_RR, slPct, tpPct, bullScore: result.bullScore, bearScore: result.bearScore, isMomentum: result.isMomentum === true };
+  return { signal: "SHORT", price, sl: price + slDist, tp: price - slDist * ULTRA4H_RR, slPct, tpPct, bullScore: result.bullScore, bearScore: result.bearScore, isMomentum: result.isMomentum === true, sigMask: result.sigMask ?? null };
 }
 
 // Laka verzija (bez weekly/daily/whale/bmsb fetcheva) — koristi se za praćenje
@@ -5905,6 +5958,9 @@ export async function runUltra4hStrategy() {
   // 4H signale, ne da posuđuje bržu 1H sliku od glavnog bota.
   let _btcRegime4 = "UNKNOWN";
   try { _btcRegime4 = await getBtcRegime(); } catch {}
+  // Samo za CSV log/audit kontekst (21.09.) — NE koristi se za gating, vidi napomenu iznad.
+  let _btcRegime1hLog = "UNKNOWN";
+  try { _btcRegime1hLog = (await getBtcRegime1H()).regime; } catch {}
   let _sp500Regime4 = "NEUTRAL";
   try { _sp500Regime4 = (await getSp500Data()).regime; } catch {}
   let _fearGreed4 = null;
@@ -6032,6 +6088,7 @@ export async function runUltra4hStrategy() {
         tradeSize: notional, margin, orderId: result.orderId, timestamp: Date.now(),
         strategy: ULTRA4H_PID, timeframe: ULTRA4H_TF, slPct: sig.slPct, tpPct: sig.tpPct,
         mode: "LIVE", entryMode: sig.isMomentum ? "MOM" : "PBK",
+        sigMask: sig.sigMask ?? null, btcRegime1h: _btcRegime1hLog, btcRegime4h: _btcRegime4,
       };
       addPosition(ULTRA4H_PID, entry);
       writeEntryCsv(ULTRA4H_PID, entry);
@@ -7369,7 +7426,7 @@ export async function run() {
         const timestamp = new Date().toISOString();
         const orderId   = `${isLive ? "LIVE" : "PAPER"}-${Date.now()}`;
         const mode      = isLive ? (BITGET_DEMO ? "DEMO" : "LIVE") : "PAPER";
-        const entry = { symbol, signal, price, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode, sigMask: result.sigMask ?? null, entryMode: (result.isMomentum ? "MOM" : "PBK") + (result._halfSize ? "-SOFT" : ""), signalStrength, vipSlot: result._vipSlot === true };
+        const entry = { symbol, signal, price, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode, sigMask: result.sigMask ?? null, entryMode: (result.isMomentum ? "MOM" : "PBK") + (result._halfSize ? "-SOFT" : ""), signalStrength, vipSlot: result._vipSlot === true, btcRegime1h: _btcRegime1h, btcRegime4h: _btcRegime };
 
         const _strengthEmoji = signalStrength === "strong" ? "💪" : "📊";
         const _rrLabel = `RR 1:${(tpPct/slPct).toFixed(1)}`;

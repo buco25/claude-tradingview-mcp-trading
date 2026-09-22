@@ -3264,9 +3264,12 @@ function analyzeUltra(candles, cfg) {
           reason: `PBK SHORT blokiran: cijena nije uz otpor — ne jurimo, čekamo zonu` };
       }
     }
-    return { price, signal: "SHORT", bullScore, bearScore,
-      nearSup, nearRes, vwap: vwapVal, _halfSize: _adxSoft,
-      reason: `ULTRA SHORT ↓${bearCnt}/8 ADX:${adx.toFixed(0)}${_adxSoft?"⚠soft":"✓"} RSI:${rsi.toFixed(0)}✓${bonusTag}${_newSigsBear?" "+_newSigsBear:""}${_adxSoft?" [POLA RIZIKA-ADX]":""}` };
+    {
+      const sigMask = sigs.reduce((mask, v, i) => v === -1 ? mask | (1 << i) : mask, 0);
+      return { price, signal: "SHORT", bullScore, bearScore, sigMask,
+        nearSup, nearRes, vwap: vwapVal, _halfSize: _adxSoft,
+        reason: `ULTRA SHORT ↓${bearCnt}/8 ADX:${adx.toFixed(0)}${_adxSoft?"⚠soft":"✓"} RSI:${rsi.toFixed(0)}✓${bonusTag}${_newSigsBear?" "+_newSigsBear:""}${_adxSoft?" [POLA RIZIKA-ADX]":""}` };
+    }
   }
   if (LONG_ONLY && bearScore >= MIN_CONFIRM && rsiShortOk) {
     return { price, signal: "NEUTRAL", bullScore, bearScore,
@@ -3308,6 +3311,11 @@ function analyzeUltra(candles, cfg) {
   const momPwhMstrBear = (_pwhInCombo && _mstrInCombo && momSigs[4] === -1 && momSigs[6] === -1) ? 1 : 0;
   const momBull = momBullBase + momPwhMstrBull;
   const momBear = momBearBase + momPwhMstrBear;
+  // 22.09. dodano (isti bug obrazac kao PBK SHORT) — sigMask za momentum grane je
+  // dosad bio potpuno izostavljen iz return objekta, pa su SVI momentum tradeovi
+  // (LONG i SHORT) trajno gubili signal-level analitiku (Sig ?/12 u CSV-u zauvijek).
+  const momSigMaskBull = momSigs.reduce((mask, v, i) => v === 1 ? mask | (1 << i) : mask, 0);
+  const momSigMaskBear = momSigs.reduce((mask, v, i) => v === -1 ? mask | (1 << i) : mask, 0);
 
   // Za momentum: bez 6SC gate (breakout sam potvrđuje smjer), ADX ≥ MOM_ADX_MIN (modul-level export)
   // Ako je _adxSoft već aktivan (glavni ADX gate gore propustio kroz soft zonu),
@@ -3316,12 +3324,12 @@ function analyzeUltra(candles, cfg) {
   const _momAdxFloor = _adxSoft ? _adxSoftFloor : MOM_ADX_MIN;
 
   if (momBull >= MOM_MIN && rsiLongOk && adx >= _momAdxFloor) {
-    return { price, signal: "LONG", bullScore: momBull, bearScore: momBear,
+    return { price, signal: "LONG", bullScore: momBull, bearScore: momBear, sigMask: momSigMaskBull,
       nearSup, nearRes, isMomentum: true, vwap: vwapVal, _halfSize: _adxSoft,
       reason: `MOMENTUM LONG ↑${momBullBase}/8 | ADX:${adx.toFixed(0)}${_adxSoft?"⚠soft":"✓"} RSI:${rsi.toFixed(0)}✓${_strongTrend?" [STRONG]":""}${sigRsiDiv===1?" RDIV✓":""}${sigMktStr===1?" MSTR✓":""}${sigFVG===1?" FVG✓":""}${_adxSoft?" [POLA RIZIKA-ADX]":""}` };
   }
   if (!LONG_ONLY && momBear >= MOM_MIN && rsiShortOk && adx >= _momAdxFloor) {
-    return { price, signal: "SHORT", bullScore: momBull, bearScore: momBear,
+    return { price, signal: "SHORT", bullScore: momBull, bearScore: momBear, sigMask: momSigMaskBear,
       nearSup, nearRes, isMomentum: true, vwap: vwapVal, _halfSize: _adxSoft,
       reason: `MOMENTUM SHORT ↓${momBearBase}/8 | ADX:${adx.toFixed(0)}${_adxSoft?"⚠soft":"✓"} RSI:${rsi.toFixed(0)}✓${_strongTrendS?" [STRONG]":""}${sigRsiDiv===-1?" RDIV✓":""}${sigMktStr===-1?" MSTR✓":""}${sigFVG===-1?" FVG✓":""}${_adxSoft?" [POLA RIZIKA-ADX]":""}` };
   }
@@ -3330,12 +3338,12 @@ function analyzeUltra(candles, cfg) {
   // uđi na pola rizika umjesto potpunog blocka. Kombinira se s ADX soft (max,
   // ne zbraja se — i dalje samo ×0.5, ne ×0.25, vidi position sizing).
   if (momBull === MOM_MIN - MOM_SOFT_BAND && rsiLongOk && adx >= _momAdxFloor) {
-    return { price, signal: "LONG", bullScore: momBull, bearScore: momBear,
+    return { price, signal: "LONG", bullScore: momBull, bearScore: momBear, sigMask: momSigMaskBull,
       nearSup, nearRes, isMomentum: true, vwap: vwapVal, _halfSize: true,
       reason: `MOMENTUM LONG (SOFT) ↑${momBullBase}/8, 1 ispod praga ${MOM_MIN}/8 | ADX:${adx.toFixed(0)}${_adxSoft?"⚠soft":"✓"} RSI:${rsi.toFixed(0)}✓ [POLA RIZIKA-MOM]` };
   }
   if (!LONG_ONLY && momBear === MOM_MIN - MOM_SOFT_BAND && rsiShortOk && adx >= _momAdxFloor) {
-    return { price, signal: "SHORT", bullScore: momBull, bearScore: momBear,
+    return { price, signal: "SHORT", bullScore: momBull, bearScore: momBear, sigMask: momSigMaskBear,
       nearSup, nearRes, isMomentum: true, vwap: vwapVal, _halfSize: true,
       reason: `MOMENTUM SHORT (SOFT) ↓${momBearBase}/8, 1 ispod praga ${MOM_MIN}/8 | ADX:${adx.toFixed(0)}${_adxSoft?"⚠soft":"✓"} RSI:${rsi.toFixed(0)}✓ [POLA RIZIKA-MOM]` };
   }

@@ -1067,15 +1067,19 @@ function buildPortfolioStats(pid) {
   }
   const currentDrawdownPct = ddPeak > 0 ? (ddPeak - equity) / ddPeak * 100 : 0;
 
-  // ── WR by entry mode (PBK / MOM) ─────────────────────────────────────────────
-  // Traži MOM/PBK u exit Notes-u (novi format) ili u entry Notes-u istog simbola (stari format)
+  // ── WR by entry mode (PBK / MOM / SWEEP / RANGE / VA-REV) ────────────────────
+  // Traži entryMode u exit Notes-u (novi format) ili u entry Notes-u istog simbola (stari format)
   // 08.09.: entryMode sad može nositi "-SOFT" sufiks (ADX/MOM soft-zone ulaz, vidi bot.js
   // analyzeUltra) — regex hvata bazni mod ODVOJENO od sufiksa da PBK/MOM bucketi ostanu
   // ispravni (stari exact "| MOM |" match bi soft ulaze tiho gurnuo u UNK, isti obrazac
   // duplikacije/parsing buga kao raniji _parseTradeCsv/buildPortfolioStats dedup slučaj).
-  const modeStats = { PBK: { wins: 0, losses: 0 }, MOM: { wins: 0, losses: 0 }, UNK: { wins: 0, losses: 0 } };
+  // 25.09.: dodani SWEEP/RANGE/VA-REV tagovi (zasebne strategije, vidi bot.js analyzeUltra)
+  // — prije su ovi tiho padali u UNK jer regex nije prepoznavao te vrijednosti. NAPOMENA:
+  // "-SOFT" se strippa kao SUFIKS (slice, ne split("-")) jer "VA-REV" sam sadrži crticu —
+  // split("-")[0] bi ga pogrešno skratio na "VA".
+  const modeStats = { PBK: { wins: 0, losses: 0 }, MOM: { wins: 0, losses: 0 }, SWEEP: { wins: 0, losses: 0 }, RANGE: { wins: 0, losses: 0 }, "VA-REV": { wins: 0, losses: 0 }, UNK: { wins: 0, losses: 0 } };
   const softStats = { soft: { wins: 0, losses: 0 }, normal: { wins: 0, losses: 0 } };  // NEW 08.09.: soft-zone vs normal WR
-  const _modeRe = /\|\s*(MOM|PBK)(-SOFT)?\s*\|/;
+  const _modeRe = /\|\s*(MOM|PBK|SWEEP|RANGE|VA-REV)(-SOFT)?\s*\|/;
   // Build lookup: symbol → entryMode iz entry redova (za stari CSV bez entryMode u exit Notes)
   const entryModeBySymbol = {};
   for (const r of entries) {
@@ -1090,8 +1094,8 @@ function buildPortfolioStats(pid) {
     let raw = mm ? mm[1] + (mm[2] ? "-SOFT" : "") : null;
     // Fallback: lookup iz entry reda za isti simbol (stari CSV)
     if (!raw) raw = entryModeBySymbol[r["Symbol"]] || null;
-    const m      = raw ? raw.split("-")[0] : "UNK";
-    const isSoft = raw ? raw.includes("-SOFT") : false;
+    const isSoft = raw ? raw.endsWith("-SOFT") : false;
+    const m      = raw ? (isSoft ? raw.slice(0, -5) : raw) : "UNK";
     const pnl = parseFloat(r["Net P&L"] || 0);
     if (pnl >= 0) modeStats[m].wins++;
     else          modeStats[m].losses++;
@@ -1171,6 +1175,19 @@ function pnlHtml(pnl) {
   return `<span style="color:${col}">${pnl > 0 ? "+" : ""}$${pnl.toFixed(2)}</span>`;
 }
 
+// 25.09.: entryMode sad može nositi zaseban strategy tag (SWEEP/RANGE/VA-REV,
+// vidi analyzeUltra u bot.js) uz stari MOM/PBK par — prije ovog fixa sve tri
+// su tiho padale u binarni MOM/PBK prikaz (uvijek "↩ PBK" jer ne počinju s "MOM"),
+// pa se nova VA-REV strategija ne bi vidjela nigdje na dashboardu.
+function entryModeBadge(entryMode) {
+  const em = entryMode || "";
+  if (em.startsWith("MOM")) return '<span style="background:rgba(251,146,60,0.15);border:1px solid #f97316;border-radius:20px;padding:2px 8px;font-size:10px;color:#f97316;font-weight:700">⚡ MOM</span>';
+  if (em === "VA-REV")      return '<span title="Value Area Reversal — proboj jučerašnje Value Area sa slabim volumenom + povratak s rastućim vol" style="background:rgba(168,85,247,0.15);border:1px solid #a855f7;border-radius:20px;padding:2px 8px;font-size:10px;color:#a855f7;font-weight:700">📊 VA-REV</span>';
+  if (em === "SWEEP")       return '<span title="Liquidity sweep + reclaim" style="background:rgba(168,85,247,0.15);border:1px solid #a855f7;border-radius:20px;padding:2px 8px;font-size:10px;color:#a855f7;font-weight:700">🎪 SWEEP</span>';
+  if (em === "RANGE")       return '<span title="Range bounce sa S/R ruba" style="background:rgba(168,85,247,0.15);border:1px solid #a855f7;border-radius:20px;padding:2px 8px;font-size:10px;color:#a855f7;font-weight:700">🎯 RANGE</span>';
+  return '<span style="background:rgba(96,165,250,0.15);border:1px solid #60a5fa;border-radius:20px;padding:2px 8px;font-size:10px;color:#60a5fa;font-weight:700">↩ PBK</span>';
+}
+
 // 11.09.: EMA/RSI eksperimentalna strategija — zasebna, jednostavna kartica jer
 // glavni renderHtml pretpostavlja jedan portfolio (PORTFOLIO_DEFS[0]). Ista
 // live-price polling logika kao glavne pos-card kartice, drugi ID prefiks
@@ -1190,9 +1207,7 @@ function renderUltra4hSection(positions) {
           <span class="symbol">${p.symbol}</span>
           <span class="badge ${isLong ? "badge-long" : "badge-short"}">${p.side}</span>
           <span style="background:rgba(34,211,238,0.15);border:1px solid #22d3ee;border-radius:20px;padding:2px 8px;font-size:10px;color:#22d3ee;font-weight:700">🚀 ULTRA-4H</span>
-          ${(p.entryMode || "").startsWith("MOM")
-            ? '<span style="background:rgba(251,146,60,0.15);border:1px solid #f97316;border-radius:20px;padding:2px 8px;font-size:10px;color:#f97316;font-weight:700">⚡ MOM</span>'
-            : '<span style="background:rgba(96,165,250,0.15);border:1px solid #60a5fa;border-radius:20px;padding:2px 8px;font-size:10px;color:#60a5fa;font-weight:700">↩ PBK</span>'}
+          ${entryModeBadge(p.entryMode)}
           <span class="badge badge-paper">${p.mode}</span>
           <span id="lp-${uid}" style="margin-left:auto;font-size:13px;font-weight:700;color:var(--text-muted)">—</span>
         </div>
@@ -1293,9 +1308,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}, ultra4hPositions = [
           <div class="pos-header">
             <span class="symbol">${p.symbol}</span>
             <span class="badge ${isLong ? "badge-long" : "badge-short"}">${p.side}</span>
-            ${(p.entryMode || "").startsWith("MOM")
-              ? '<span style="background:rgba(251,146,60,0.15);border:1px solid #f97316;border-radius:20px;padding:2px 8px;font-size:10px;color:#f97316;font-weight:700">⚡ MOM</span>'
-              : '<span style="background:rgba(96,165,250,0.15);border:1px solid #60a5fa;border-radius:20px;padding:2px 8px;font-size:10px;color:#60a5fa;font-weight:700">↩ PBK</span>'}
+            ${entryModeBadge(p.entryMode)}
             ${(p.entryMode || "").includes("-SOFT")
               ? '<span title="ADX ili momentum score je bio tek malo ispod praga na ulazu — otvoreno na pola position size-a" style="background:rgba(217,119,6,0.15);border:1px solid #d97706;border-radius:20px;padding:2px 8px;font-size:10px;color:#d97706;font-weight:700">½ RIZIK</span>'
               : ''}

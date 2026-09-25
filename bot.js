@@ -2916,21 +2916,29 @@ function analyzeUltra(candles, cfg) {
   // Bullish FVG: low[i] > high[i-2] → gap gore, cijena u njemu = support
   // Bearish FVG: high[i] < low[i-2] → gap dolje, cijena u njemu = resistance
   // Tražimo unmitigated FVG u zadnjih 30 bara koji cijena trenutno respektira
+  // 25.09., stegnuto na zahtjev ("LIVE DAY TRADING" video) — prije je "u gapu"
+  // značilo BILO GDJE unutar cijele zone (0-100% + mali buffer), pa je i tanki
+  // dodir ruba gapa brojao kao potvrda. Sad se traži DUBLJI retest — cijena mora
+  // biti u donjih 61.8%-100% gapa (mjereno od ruba kojim je cijena ušla natrag),
+  // isti "61.8% fib retracement u FVG zonu" koncept iz videa — plitak dodir ruba
+  // više NE broji kao FVG potvrda.
   let sigFVG = 0;
   {
-    const FVG_LOOKBACK = 30, FVG_MIN_PCT = 0.003;
+    const FVG_LOOKBACK = 30, FVG_MIN_PCT = 0.003, FVG_FIB = 0.618;
     for (let i = Math.max(2, n - FVG_LOOKBACK); i < n - 1 && sigFVG === 0; i++) {
       const c0h = candles[i-2].high, c0l = candles[i-2].low;
       const c2h = candles[i].high,   c2l = candles[i].low;
-      // Bullish FVG: c2.low > c0.high
+      // Bullish FVG: c2.low > c0.high — cijena se vraća odozgo, 61.8% razina bliže dnu gapa
       if (c2l > c0h) {
         const gapPct = (c2l - c0h) / c0h;
-        if (gapPct >= FVG_MIN_PCT && price >= c0h * 0.999 && price <= c2l * 1.005) sigFVG =  1;
+        const _fib618 = c2l - (c2l - c0h) * FVG_FIB;
+        if (gapPct >= FVG_MIN_PCT && price >= c0h * 0.999 && price <= _fib618) sigFVG =  1;
       }
-      // Bearish FVG: c0.low > c2.high
+      // Bearish FVG: c0.low > c2.high — cijena se vraća odozdo, 61.8% razina bliže vrhu gapa
       if (c0l > c2h) {
         const gapPct = (c0l - c2h) / c2h;
-        if (gapPct >= FVG_MIN_PCT && price <= c0l * 1.001 && price >= c2h * 0.995) sigFVG = -1;
+        const _fib618 = c2h + (c0l - c2h) * FVG_FIB;
+        if (gapPct >= FVG_MIN_PCT && price <= c0l * 1.001 && price >= _fib618) sigFVG = -1;
       }
     }
   }

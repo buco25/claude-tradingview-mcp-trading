@@ -944,6 +944,53 @@ function calcVolumeProfileHVN(candles, { bins = 24, lookback = 150, topK = 2 } =
     .map(x => x.level);
 }
 
+// ─── Prethodni dan Value Area (POC/VAH/VAL) — 25.09.2026 ─────────────────────
+// "World Cup trader" video (LuxAlgo Quant): session-anchored volume profile
+// (razlika od calcVolumeProfileHVN iznad koji gleda rolling lookback) — profil
+// izgrađen SAMO iz jučerašnjeg UTC dana. POC = cijena s najviše volumena, VAH/VAL
+// = rubovi zone koja sadrži valueAreaPct% ukupnog dnevnog volumena (expand od POC-a).
+// Koristi se u VALUE AREA REVERSAL strategiji (vidi analyzeUltra, "VA-REV" grana).
+function calcPrevDayValueArea(candles, { bins = 24, valueAreaPct = 70 } = {}) {
+  const now = new Date();
+  const todayStart     = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
+  const dayCandles = candles.filter(c => c.time >= yesterdayStart && c.time < todayStart);
+  if (dayCandles.length < 10) return null;  // nedovoljno svijeca za jucerasnji dan (npr. novi listing)
+
+  const hi = Math.max(...dayCandles.map(c => c.high));
+  const lo = Math.min(...dayCandles.map(c => c.low));
+  if (!(hi > lo)) return null;
+  const binSize = (hi - lo) / bins;
+  const volByBin = new Array(bins).fill(0);
+  for (const c of dayCandles) {
+    const typical = (c.high + c.low + c.close) / 3;
+    let idx = Math.floor((typical - lo) / binSize);
+    if (idx < 0) idx = 0; else if (idx >= bins) idx = bins - 1;
+    volByBin[idx] += (c.volume || 0);
+  }
+  const totalVol = volByBin.reduce((a, b) => a + b, 0);
+  if (totalVol <= 0) return null;
+
+  let pocBin = 0;
+  for (let i = 1; i < bins; i++) if (volByBin[i] > volByBin[pocBin]) pocBin = i;
+
+  // Prosiri od POC-a prema susjednom bin-u s vise volumena dok se ne dosegne valueAreaPct%
+  let loB = pocBin, hiB = pocBin, accVol = volByBin[pocBin];
+  const targetVol = totalVol * (valueAreaPct / 100);
+  while (accVol < targetVol && (loB > 0 || hiB < bins - 1)) {
+    const nextLoVol = loB > 0 ? volByBin[loB - 1] : -1;
+    const nextHiVol = hiB < bins - 1 ? volByBin[hiB + 1] : -1;
+    if (nextHiVol >= nextLoVol) { hiB++; accVol += volByBin[hiB]; }
+    else { loB--; accVol += volByBin[loB]; }
+  }
+
+  return {
+    poc: lo + (pocBin + 0.5) * binSize,
+    vah: lo + (hiB + 1) * binSize,
+    val: lo + loB * binSize,
+  };
+}
+
 // ─── Open Interest promjena — wrapper koji koristi postojeći getOpenInterest ──
 async function getOiChange(symbol) {
   try {
@@ -2564,7 +2611,7 @@ function analyzeSynapseT(candles, cfg) {
 // SL 1% / TP 2%
 
 function analyzeUltra(candles, cfg) {
-  const { minSig = DEFAULT_MIN_SIG, _dynAdx, symbol: _sym, _pwh = null, _pwl = null } = cfg;
+  const { minSig = DEFAULT_MIN_SIG, _dynAdx, symbol: _sym, _pwh = null, _pwl = null, _enableVaRev = false } = cfg;
   const effectiveAdx = _dynAdx ?? ADX_MIN;  // koristi dinamički ADX ako dostupan
   const closes = candles.map(c => c.close);
   const vols   = candles.map(c => c.volume || 0);
@@ -3174,6 +3221,60 @@ function analyzeUltra(candles, cfg) {
               _strategy: "RANGE", _slPrice: _slP, _tpPrice: _tpP, nearSup, nearRes,
               reason: `RANGE SHORT: rejection @ res ${nearRes.toFixed(4)} (zona ${_rWidth.toFixed(1)}%, RSI ${rsi.toFixed(0)}↓)` };
           }
+        }
+      }
+    }
+
+    // ── STRATEGIJA: VALUE AREA REVERSAL — 25.09.2026, na zahtjev ("World Cup
+    // trader" video). Proboj Value Area jučerašnjeg dana (VAL/VAH) sa SLABEĆIM
+    // volumenom (padajući nasuprot prethodnoj svijeći) = lažan proboj, nema
+    // stvarne prodaje/kupnje iza njega. Kad cijena zatvori NATRAG unutar zone
+    // uz RASTUĆI volumen (unutar VA_LOOKBACK svijeća od proboja) → reversal.
+    // Stop ispod/iznad ekstrema proboja, target = suprotni rub Value Area.
+    // Namjerno SAMO na 15m (cfg._enableVaRev, postavlja ga isključivo 15m fallback
+    // poziv u glavnoj petlji) — "5 svijeća" prozor i dnevni VA imaju smisla na 15m
+    // rezoluciji (video preporučuje 15-30m); na 1H bi isti prozor bio 5 SATI, drugi
+    // karakter signala, pa se ne evaluira tamo.
+    if (_enableVaRev) {
+      const _prevDayVA = calcPrevDayValueArea(candles);
+      if (_prevDayVA) {
+        const VA_LOOKBACK = 5;  // koliko svijeca nakon proboja signal jos vrijedi
+        const lastC = candles[n - 1], priorC = candles[n - 2];
+
+        // LONG: proboj ispod VAL sa slabecim bearish volumenom → povratak iznad VAL s rastucim vol
+        for (let bI = n - 2; bI >= Math.max(1, n - 1 - VA_LOOKBACK); bI--) {
+          const bc = candles[bI], bcPrev = candles[bI - 1];
+          if (bc.close >= _prevDayVA.val || bc.close >= bc.open) continue;  // nije bearish proboj ispod VAL
+          if (!(bcPrev.close < bcPrev.open) || !(bc.volume < bcPrev.volume)) continue;  // prodaja ne slabi
+          if (lastC.close > _prevDayVA.val && lastC.close > lastC.open && lastC.volume > priorC.volume && _prevDayVA.vah > price) {
+            const _slP = Math.min(...candles.slice(bI, n).map(c => c.low)) * 0.997;
+            const _slPctVA = (price - _slP) / price * 100;
+            if (_slPctVA >= 0.5 && _slPctVA <= 4.5) {
+              const _isEngulf = lastC.close > priorC.open && lastC.open < priorC.close && priorC.close < priorC.open;
+              return { price, signal: "LONG", bullScore: MIN_CONFIRM, bearScore: 0,
+                _strategy: "VA-REV", _slPrice: _slP, _tpPrice: _prevDayVA.vah, nearSup, nearRes,
+                reason: `VA-REV LONG: proboj VAL ${_prevDayVA.val.toFixed(4)} (slabi vol) → povratak+rastući vol${_isEngulf ? " +engulfing" : ""} | target VAH ${_prevDayVA.vah.toFixed(4)}` };
+            }
+          }
+          break;  // samo najbliži proboj se razmatra
+        }
+
+        // SHORT: simetrično, proboj iznad VAH
+        for (let bI = n - 2; bI >= Math.max(1, n - 1 - VA_LOOKBACK); bI--) {
+          const bc = candles[bI], bcPrev = candles[bI - 1];
+          if (bc.close <= _prevDayVA.vah || bc.close <= bc.open) continue;
+          if (!(bcPrev.close > bcPrev.open) || !(bc.volume < bcPrev.volume)) continue;
+          if (lastC.close < _prevDayVA.vah && lastC.close < lastC.open && lastC.volume > priorC.volume && _prevDayVA.val < price) {
+            const _slP = Math.max(...candles.slice(bI, n).map(c => c.high)) * 1.003;
+            const _slPctVA = (_slP - price) / price * 100;
+            if (_slPctVA >= 0.5 && _slPctVA <= 4.5) {
+              const _isEngulf = lastC.close < priorC.open && lastC.open > priorC.close && priorC.close > priorC.open;
+              return { price, signal: "SHORT", bullScore: 0, bearScore: MIN_CONFIRM,
+                _strategy: "VA-REV", _slPrice: _slP, _tpPrice: _prevDayVA.val, nearSup, nearRes,
+                reason: `VA-REV SHORT: proboj VAH ${_prevDayVA.vah.toFixed(4)} (slabi vol) → povratak+rastući vol${_isEngulf ? " +engulfing" : ""} | target VAL ${_prevDayVA.val.toFixed(4)}` };
+            }
+          }
+          break;
         }
       }
     }
@@ -6646,16 +6747,19 @@ export async function run() {
         let { signal, reason } = result;
 
         // ── 15m Momentum fallback — ako je 1H pullback NEUTRAL, provjeri 15m momentum ──
+        // 25.09.: isto ovdje provjeravamo 15m VALUE AREA REVERSAL (_enableVaRev) — "5
+        // svijeća" prozor i jučerašnji Value Area imaju smisla baš na 15m rezoluciji
+        // (vidi analyzeUltra, "VA-REV" grana), zato se šalje samo s ovog poziva.
         if (signal === "NEUTRAL" && pDef.strategy === "synapse_t") {
           try {
             const candles15m = await fetchCandles(symbol, "15m", 250);
-            const result15m  = await analyzeUltraPullback(symbol, candles15m, _bounceParams);
-            if (result15m.signal !== "NEUTRAL" && result15m.isMomentum) {
+            const result15m  = await analyzeUltraPullback(symbol, candles15m, { ..._bounceParams, _enableVaRev: true });
+            if (result15m.signal !== "NEUTRAL" && (result15m.isMomentum || result15m._strategy === "VA-REV")) {
               Object.assign(result, result15m);
               ({ signal } = result);
-              console.log(`  🚀 [15m MOM] ${symbol} — ${result15m.reason}`);
+              console.log(`  🚀 [15m ${result15m._strategy === "VA-REV" ? "VA-REV" : "MOM"}] ${symbol} — ${result15m.reason}`);
             }
-          } catch(e) { console.log(`  ⚠️  [15m MOM] ${symbol} fetch error: ${e.message}`); }
+          } catch(e) { console.log(`  ⚠️  [15m] ${symbol} fetch error: ${e.message}`); }
         }
 
         if (signal === "NEUTRAL") {

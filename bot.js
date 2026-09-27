@@ -2013,7 +2013,10 @@ export function getSymbolSideLossStreak(pid, symbol, side) {
       const pnl = parseFloat(cols[9] || 0);
       if (pnl >= 0) break;
       count++;
-      if (!lastTs) lastTs = new Date(cols[0]).getTime() || 0;
+      // 27.09. (audit nalaz #3): bilo Date konstruiran samo od cols[0] — cols[0] je SAMO
+      // datum, vrijeme je u cols[1], pa je lastTs bio ponoc UTC (do 24h prije stvarnog
+      // izlaska) i 24h prozor ispod se skracivao za toliko. Isti spoj kao checkCircuitBreaker/autoFix.
+      if (!lastTs) lastTs = new Date(`${cols[0]}T${cols[1] || "00:00:00"}Z`).getTime() || 0;
     }
     const blocked = count >= 2 && Date.now() - lastTs < 24 * 60 * 60 * 1000;
     return { count, blocked };
@@ -2033,7 +2036,10 @@ export function getDirLossStreak(pid, side) {
       const pnl = parseFloat(cols[9] || 0);
       if (pnl >= 0) break;                       // win tog smjera prekida niz
       count++;
-      if (!lastTs) lastTs = new Date(cols[0]).getTime() || 0;
+      // 27.09. (audit nalaz #3): bilo Date konstruiran samo od cols[0] — samo datum, pa je
+      // lastTs bio ponoc UTC i 4h DIR_COOLDOWN_MS je istekao za svaki SL zatvoren nakon
+      // 04:00 UTC → gate je bio mrtav veci dio dana. Isti spoj kao checkCircuitBreaker/autoFix.
+      if (!lastTs) lastTs = new Date(`${cols[0]}T${cols[1] || "00:00:00"}Z`).getTime() || 0;
     }
     const blocked = count >= DIR_STREAK_MAX && Date.now() - lastTs < DIR_COOLDOWN_MS;
     return { count, blocked };
@@ -3388,9 +3394,21 @@ function analyzeUltra(candles, cfg) {
 
   // ── MOMENTUM fallback (hibrid) ──────────────────────────────────────────────
   // Ako pullback signal nije dostigao prag, provjeri momentum/breakout logiku:
-  // Isti 13 signala ali 6 reversanih vraćamo u originalnu (trend-following) logiku.
-  // Viši prag (MOM_MIN) jer su momentum ulazi rizičniji od pullback ulaza.
-  const MOM_MIN = _combo?.minSig ?? 5;  // = combo minSig (4/5 za optimizirane simbole)
+  // NAPOMENA (27.09. audit nalaz #5, NIJE popravljeno u ovom zadatku): ovaj komentar je
+  // tvrdio "Isti 13 signala ali 6 reversanih" — momSigs je u stvarnosti 12 elemenata i
+  // ELEMENT-ZA-ELEMENT identican nizu `sigs` gore (nista nije invertirano). Momentum grana
+  // se od pullback grane razlikuje samo time sto ISPUSTA bonuse (Wyckoff/MDIV/whale/BMSB)
+  // i zone-confluence gate. Je li inverzija ikad bila namjera — otvoreno pitanje za vlasnika.
+  // 27.09. (audit nalaz #4): bilo `_combo?.minSig ?? 5` — golo, pa (a) bounce-mode
+  // _minSigOverride nikad nije stizao do momentum grane (isti bug koji je 21.09. popravljen
+  // SAMO za pullback, vidi _comboBase), i (b) NIJEDAN oprez-boost (vikend +2, CHILL +1,
+  // BTC-invalidacija +1, Wyckoff pending +2) nije vrijedio za MOMENTUM ulaz — vikend
+  // momentum je prolazio na neboostanoj bazi, protiv post-morterna zbog kojeg je vikend
+  // boost i uveden. Sad dijeli istu bazu i isti max-boost obrazac kao MIN_CONFIRM.
+  // NAPOMENA: stari komentar je tvrdio "visi prag jer su momentum ulazi rizicniji" — to
+  // nije bilo tocno ni prije (MOM_MIN == pullback baza), a nije ni sad. Ako se zeli STVARNO
+  // visi prag za momentum, to je promjena scoringa i ide kroz zaseban zahtjev.
+  const MOM_MIN = _comboBase + Math.max(_weekendBoost, _chillBoost);
   // 21.09. fix (audit nalaz #2): momSigs je imao samo 8 elemenata (indeksi 0-7), ali
   // TE_COMBO = [0,2,3,4,5,6,9,10] koji koristi SVAKI simbol referencira i indekse 9/10 —
   // momSigs[9]/[10] su bili undefined, pa je momentum grana tiho ocjenjivala na 6 signala
@@ -5987,10 +6005,14 @@ function _finalizeUltra4hSignal(result, candles) {
   const slDist  = atr * ULTRA4H_ATR_MULT;
   const slPct   = slDist / price * 100;
   const tpPct   = slPct * ULTRA4H_RR;
+  // 27.09. (audit nalaz #2 i #11): soft-zone flag i strategy tag su se tiho gubili jer ova
+  // funkcija gradi NOVI objekt s fiksnom listom polja. Posljedice su bile: (a) ULTRA-4H je
+  // soft-zone ulaze sizeao na PUNI rizik dok ih run() prepolovi (vidi _softSizeMult u run()),
+  // i (b) entryMode je za zonske setupe uvijek padao na MOM/PBK jer sig._strategy nije postojao.
   if (result.signal === "LONG") {
-    return { signal: "LONG", price, sl: price - slDist, tp: price + slDist * ULTRA4H_RR, slPct, tpPct, bullScore: result.bullScore, bearScore: result.bearScore, isMomentum: result.isMomentum === true, sigMask: result.sigMask ?? null };
+    return { signal: "LONG", price, sl: price - slDist, tp: price + slDist * ULTRA4H_RR, slPct, tpPct, bullScore: result.bullScore, bearScore: result.bearScore, isMomentum: result.isMomentum === true, sigMask: result.sigMask ?? null, _halfSize: result._halfSize === true, _strategy: result._strategy ?? null };
   }
-  return { signal: "SHORT", price, sl: price + slDist, tp: price - slDist * ULTRA4H_RR, slPct, tpPct, bullScore: result.bullScore, bearScore: result.bearScore, isMomentum: result.isMomentum === true, sigMask: result.sigMask ?? null };
+  return { signal: "SHORT", price, sl: price + slDist, tp: price - slDist * ULTRA4H_RR, slPct, tpPct, bullScore: result.bullScore, bearScore: result.bearScore, isMomentum: result.isMomentum === true, sigMask: result.sigMask ?? null, _halfSize: result._halfSize === true, _strategy: result._strategy ?? null };
 }
 
 // Laka verzija (bez weekly/daily/whale/bmsb fetcheva) — koristi se za praćenje
@@ -6266,6 +6288,13 @@ export async function runUltra4hStrategy() {
       if (sig.signal === "LONG" && _fearGreed4 !== null && _fearGreed4 >= 85) { _macroSizeMult4 *= 0.5; console.log(`  🤑 [ULTRA-4H][F&G] ${symbol} — Extreme Greed → LONG size ×0.5`); }
       if (sig.signal === "LONG" && _dxyChange4 !== null && _dxyChange4 > 0.3) { _macroSizeMult4 *= 0.7; console.log(`  💵 [ULTRA-4H][DXY] ${symbol} — jaki dolar → LONG size ×0.7`); }
       notional *= _macroSizeMult4;
+      // 27.09. (audit nalaz #2): ADX/MOM soft-zone ulaz → pola rizika, isto kao run()
+      // (_softSizeMult ~7620). Primjenjuje se ODVOJENO, nakon makro multiplikatora, jer
+      // halvira konacan iznos i ne smije se utopiti u njih.
+      if (sig._halfSize === true) {
+        notional *= 0.5;
+        console.log(`  🟡 [ULTRA-4H][SOFT] ${symbol} — ADX/MOM soft-zone ulaz → pozicija ×0.5 (pola rizika)`);
+      }
 
       const _minQtyNotional = (_minTradeNum[symbol] ?? 0) * sig.price * 1.05;
       const _minNotional = Math.max(ULTRA4H_MIN_NOTIONAL, _minQtyNotional);

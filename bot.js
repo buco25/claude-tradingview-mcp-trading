@@ -5972,6 +5972,13 @@ const ULTRA4H_MIN_NOTIONAL = 40;
 const ULTRA4H_RSI_LONG_MAX  = 72;  // ne ulazi LONG ako je RSI(14) iznad ovoga
 const ULTRA4H_RSI_SHORT_MIN = 30;  // ne ulazi SHORT ako je RSI(14) ispod ovoga
 
+// 27.09. (audit nalaz #1): shouldRunNow("4H") vraca true za CIJELI prozor utcMin<5, sto je
+// single-fire samo za 5-minutnog callera (vidi "Dokaz" komentar u shouldRunNow). ULTRA-4H se
+// zove svakih 60s (dashboard.js setInterval), pa je ulazna sekcija isla 5× po svijeci i
+// MAX_NEW_ENTRIES_PER_SCAN=2 je efektivno bio 10/svijeca (vidi incident 23.09. nize).
+// Bucket = indeks 4H bloka; ulazni scan se izvrsava tocno jednom po bloku.
+let _lastU4hEntryBucket = null;
+
 function _lastRsi14(closes) {
   const period = 14;
   if (closes.length <= period) return 50;
@@ -6100,6 +6107,13 @@ export async function runUltra4hStrategy() {
   // ── 2) Novi ulazi — samo na zatvaranju 4H svijeće ─────────────────────────
   const utcNow = new Date();
   if (!shouldRunNow(ULTRA4H_TF, utcNow.getUTCHours(), utcNow.getUTCMinutes())) return;
+  // 27.09. (audit nalaz #1): vlastiti once-per-candle guard — shouldRunNow-ov 5-min prozor
+  // nije dovoljan na 60s kadenci, vidi _lastU4hEntryBucket. Bucket se "potrosi" ODMAH, prije
+  // cap provjera nize: ako capovi blokiraju, ponavljanje scana u istoj svijeci nista ne
+  // mijenja (capovi se u te 4 minute nece otvoriti), a rate-limit mora ostati 2/svijeca.
+  const _u4hBucket = Math.floor(Date.now() / (4 * 60 * 60 * 1000));
+  if (_lastU4hEntryBucket === _u4hBucket) return;
+  _lastU4hEntryBucket = _u4hBucket;
 
   // 18.09., na zahtjev: ZAJEDNIČKI limit sa synapse_t (23.09.: 9 normalno / 12 uz VIP,
   // 7 kripto baza / 10 VIP strop, 2 dionice) preko OBJE strategije (ULTRA-4H trguje

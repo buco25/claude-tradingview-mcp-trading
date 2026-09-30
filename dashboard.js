@@ -3906,19 +3906,32 @@ const server = http.createServer(async (req, res) => {
         "7dana": 7 * 86400000,
         "30dana": 30 * 86400000,
       };
+      // 30.09.: paginirano preko idLessThan — Bitget history-position vraca max 100/poziv.
+      // Prije ovog fixa "30dana" je bez paginacije tiho uzimao samo najnovijih 100 od
+      // (u praksi cesto 200+) zatvorenih pozicija u 30-dnevnom prozoru, sto je zapravo
+      // otprilike zadnjih ~10-12 dana najnovijih po vremenu (Bitget vraca najnovije prvo),
+      // pogresno oznaceno kao "30 dana" — korisnik je vidio -$62 umjesto pravih -$1.78.
       async function fetchWindow(msBack) {
         const startTime = now - msBack;
-        const path = `/api/v2/mix/position/history-position?productType=USDT-FUTURES&startTime=${startTime}&endTime=${now}&limit=100`;
-        const ts   = Date.now().toString();
-        const sign = createHmac("sha256", BITGET_SECRET).update(`${ts}GET${path}`).digest("base64");
-        const r = await fetch(`${BITGET_BASE}${path}`, {
-          headers: { "ACCESS-KEY": BITGET_KEY, "ACCESS-SIGN": sign,
-            "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET_PASS, "Content-Type": "application/json" },
-        });
-        const d = await r.json();
-        const list = d?.data?.list ?? [];
-        const pnl = list.reduce((s, p) => s + parseFloat(p.netProfit || 0), 0);
-        return { pnl: parseFloat(pnl.toFixed(2)), trades: list.length };
+        let all = [];
+        let idLessThan;
+        for (let page = 0; page < 20; page++) {  // 20×100 = 2000 pozicija strop, sigurnosna kocnica
+          let path = `/api/v2/mix/position/history-position?productType=USDT-FUTURES&startTime=${startTime}&endTime=${now}&limit=100`;
+          if (idLessThan) path += `&idLessThan=${idLessThan}`;
+          const ts   = Date.now().toString();
+          const sign = createHmac("sha256", BITGET_SECRET).update(`${ts}GET${path}`).digest("base64");
+          const r = await fetch(`${BITGET_BASE}${path}`, {
+            headers: { "ACCESS-KEY": BITGET_KEY, "ACCESS-SIGN": sign,
+              "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET_PASS, "Content-Type": "application/json" },
+          });
+          const d = await r.json();
+          const list = d?.data?.list ?? [];
+          all = all.concat(list);
+          if (list.length < 100 || !d?.data?.endId) break;  // zadnja stranica
+          idLessThan = d.data.endId;
+        }
+        const pnl = all.reduce((s, p) => s + parseFloat(p.netProfit || 0), 0);
+        return { pnl: parseFloat(pnl.toFixed(2)), trades: all.length };
       }
       const [danas, d7, d30] = await Promise.all([
         fetchWindow(windows.danas), fetchWindow(windows["7dana"]), fetchWindow(windows["30dana"]),

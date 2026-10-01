@@ -29,6 +29,11 @@ const START_CAPITAL = 1000;   // po portfoliju
 export const RISK_PCT      = 1.5;    // bazni % banke po tradeu
 export const RISK_PCT_MIN  = 1.0;    // minimalni setup
 export const RISK_PCT_MAX  = 2.0;    // jak setup (score ≥ comboMinSig+2)
+// 01.10., na zahtjev — nakon analize rujna koja je pokazala da 1H (synapse_t) strukturno
+// podbacuje naspram 4H (ultra_4h) cijeli mjesec na svim score razinama: dok se razlog ne
+// razjasni, 1H trguje na POLA uloga 4H-a. Primjenjuje se na _symRiskPct u run(), NE na
+// ultra_4h (koji zadrzava puni RISK_PCT).
+export const RISK_MULT_1H  = 0.5;
 const SL_PCT        = 2.0;    // fallback SL % (Tier 1) — override per-simbol u symbol_sltp
 const TP_PCT        = 3.0;    // fallback TP % (Tier 1, 1.5×SL) — override per-simbol u symbol_sltp
 
@@ -46,10 +51,26 @@ const STRONG_SIGNAL_SCORE = 9;    // nekorišten za TP (zadržan za eventualne f
 const STRONG_TP_MULT      = 3.0;  // jako tržište → TP = SL × 3 (1:3 R:R)
 const NORMAL_TP_MULT      = 2.0;  // konsolidacija / neutralno → TP = SL × 2.0 (1:2 R:R min, TraderaEdge standard)
 const MAX_TRADES_PER_DAY = 100;
-export const MAX_OPEN_CRYPTO = 7;  // max otvorenih kripto pozicija BEZ VIP-a (23.09.: 12->7, na zahtjev — nakon dana s previše korelirane izloženosti, vidi MAX_OPEN_CRYPTO_VIP i ULTRA-4H same-dir gate niže). Dijeli se sa ULTRA-4H.
-export const MAX_OPEN_CRYPTO_VIP = 10; // 23.09., na zahtjev: strop za JAKE (VIP, score≥7/8) signale — smiju prekoraciti MAX_OPEN_CRYPTO do ovoga, isti obrazac kao MAX_SAME_DIR_CRYPTO/MAX_VIP_SAME_DIR
-export const MAX_OPEN_STOCKS = 2;  // (23.09.: 3->2, na zahtjev)
-const MAX_OPEN_PER_PORTFOLIO = MAX_OPEN_CRYPTO_VIP + MAX_OPEN_STOCKS;  // ukupni cap = 12 (gornji strop uz VIP kripto; svakodnevni normal je 9 = 7+2) — ZAJEDNIČKI za synapse_t + ultra_4h (18.09.)
+export const MAX_OPEN_CRYPTO = 8;  // max otvorenih kripto pozicija preko OBJE strategije (01.10.: 7->8, na zahtjev)
+// 01.10., na zahtjev: VIP produžetak ukinut (jednak bazi) — nakon analize rujna koja je
+// pokazala da 1H strukturno podbacuje, caps su sad strogi brojevi, bez iznimke za jake
+// signale dok se ne razjasni 1H problem. Kod VIP grane ostaje netaknut (inertan je kad su
+// ova dva broja jednaka), lako se vraća ako se poslije odluci da VIP treba headroom.
+export const MAX_OPEN_CRYPTO_VIP = 8;
+export const MAX_OPEN_STOCKS = 4;  // (01.10.: 2->4, na zahtjev)
+// 01.10., na zahtjev: strogo po strategiji, NE derivirano iz crypto+stocks (8+4=12 bi bilo
+// previse) — stvarni ukupni strop je 3(1H)+8(4H)=11, jer 1H MAX_OPEN_1H (3) i 4H MAX_OPEN_4H
+// (8) vezu zajedno strozi od klasnih (crypto/stock) capova. Vidi MAX_OPEN_1H/MAX_OPEN_4H niže
+// i provjere u run()/runUltra4hStrategy() koje ih primjenjuju PO STRATEGIJI, odvojeno od
+// ovog ukupnog broja koji ostaje kao vanjska sigurnosna granica.
+const MAX_OPEN_PER_PORTFOLIO = 11;
+// 01.10., na zahtjev — nakon analize rujna (47.5% WR / -$39.53 na 1H vs 77.1% WR / +$57.86
+// na 4H, cijeli mjesec, na svim score razinama): dok se ne razjasni ZAŠTO 1H strukturno
+// podbacuje, njegova ukupna izlozenost je ostro ogranicena, a 4H (dokazano bolji) dobiva
+// vecinu prostora. Provjerava se PO STRATEGIJI (loadPositions(pid).length), odvojeno od
+// kombiniranih crypto/stock capova iznad.
+export const MAX_OPEN_1H = 3;
+export const MAX_OPEN_4H = 8;
 const WEEKEND_MAX_OPEN = 5;  // 19.09., na zahtjev: preko vikenda (UTC subota/nedjelja) ukupni cap se stegne na 5, bez BTC bonus-slot iznimke
 function getMaxOpenPositions() {
   const dow = new Date().getUTCDay();
@@ -6079,13 +6100,16 @@ export async function runUltra4hStrategy() {
   const utcNow = new Date();
   if (!shouldRunNow(ULTRA4H_TF, utcNow.getUTCHours(), utcNow.getUTCMinutes())) return;
 
-  // 18.09., na zahtjev: ZAJEDNIČKI limit sa synapse_t (23.09.: 9 normalno / 12 uz VIP,
-  // 7 kripto baza / 10 VIP strop, 2 dionice) preko OBJE strategije (ULTRA-4H trguje
-  // samo kriptom), ne odvojeni cap.
+  // 18.09., na zahtjev: ZAJEDNIČKI limit sa synapse_t (01.10.: ukupno 11 = MAX_OPEN_1H(3)
+  // + MAX_OPEN_4H(8), uz klasne capove 8 kripto / 4 dionice preko OBJE strategije) —
+  // ULTRA-4H trguje samo kriptom.
   {
     const _synPos0     = loadPositions("synapse_t");
     const _u4hPos0     = loadPositions(ULTRA4H_PID);
     if (_synPos0.length + _u4hPos0.length >= getMaxOpenPositions()) return;
+    // 01.10., na zahtjev: strogi per-strategiju cap — 4H smije imati max MAX_OPEN_4H (8)
+    // SVOJIH pozicija, neovisno o kombiniranom/klasnom capu iznad.
+    if (_u4hPos0.length >= MAX_OPEN_4H) return;
     const _cryptoOpen0 = _synPos0.filter(p => !isStockSym(p.symbol)).length + _u4hPos0.length;
     // Jeftin rani filter na apsolutnom VIP stropu — stvarna baza (MAX_OPEN_CRYPTO)
     // provjerava se PO SIMBOLU niže, nakon signala (VIP score odlucuje smije li se prijeci baza).
@@ -6125,6 +6149,8 @@ export async function runUltra4hStrategy() {
     const openNow    = loadPositions(ULTRA4H_PID);
     const synOpenNow = loadPositions("synapse_t");
     if (openNow.length + synOpenNow.length >= getMaxOpenPositions()) break;
+    // 01.10., na zahtjev: strogi per-strategiju cap (4H max MAX_OPEN_4H, neovisno o ostalom).
+    if (openNow.length >= MAX_OPEN_4H) break;
     const cryptoOpenNow = synOpenNow.filter(p => !isStockSym(p.symbol)).length + openNow.length;
     // Isto — rani filter na VIP stropu, baza+VIP odluka je niže po signalu.
     if (cryptoOpenNow >= MAX_OPEN_CRYPTO_VIP) break;
@@ -6613,8 +6639,8 @@ export async function run() {
       }
 
       // Provjeri limit otvorenih pozicija (ukupni + po klasi: kripto/dionice)
-      // 18.09.: ZAJEDNIČKI cap sa ULTRA-4H (na zahtjev) — 9 normalno / 12 uz VIP
-      // (7 kripto baza / 10 VIP strop, 2 dionice) preko OBJE strategije, ne odvojeno
+      // 18.09.: ZAJEDNIČKI cap sa ULTRA-4H (na zahtjev) — 01.10.: ukupno 11 (3 1H + 8 4H),
+      // uz klasne capove 8 kripto / 4 dionice preko OBJE strategije, ne odvojeno
       // (dijele isti Bitget račun, nema smisla gledati odvojene limite).
       const _openNow    = loadPositions(pid);
       const _openNowU4h = loadPositions(ULTRA4H_PID);
@@ -6630,13 +6656,23 @@ export async function run() {
         _scanLogEntries.push({ symbol, signal: "SKIP", blocker: `MAX_POS(${currentOpen}/${_maxOpen})`, reason: "Max otvorenih pozicija dostignut (zajednički sa ULTRA-4H)" });
         continue;
       }
+      // 01.10., na zahtjev — nakon analize rujna (1H: 47.5% WR/-$39.53 vs 4H: 77.1%/+$57.86,
+      // cijeli mjesec, na svim score razinama) — 1H ukupna izlozenost je ostro ogranicena na
+      // MAX_OPEN_1H dok se ne razjasni zasto strukturno podbacuje. BEZ BTC iznimke namjerno
+      // (ostali capovi exempt-aju BTC, ovaj ne — svrha mu je upravo suziti izlozenost).
+      if (_openNow.length >= MAX_OPEN_1H) {
+        console.log(`  🔒 [${pDef.name}] Max ${MAX_OPEN_1H} 1H pozicija dostignut (${_openNow.length}) — preskačem ${symbol}`);
+        _scanLogEntries.push({ symbol, signal: "SKIP", blocker: `MAX_1H(${_openNow.length}/${MAX_OPEN_1H})`, reason: "Max 1H pozicija — privremeno strože dok se istražuje 1H underperformance" });
+        continue;
+      }
       const _symIsStock = isStockSym(symbol);
       // ULTRA-4H trguje samo kriptom → sve njene pozicije ulaze u kripto klasu
       const _classOpen  = _openNow.filter(p => isStockSym(p.symbol) === _symIsStock).length + (_symIsStock ? 0 : _openNowU4h.length);
-      // 23.09.: ovo je samo jeftin RANI filter na apsolutnom VIP stropu (10 kripto) —
-      // baza od 7 (MAX_OPEN_CRYPTO) se provjerava kasnije, NAKON signala, jer jaki
-      // (VIP, score≥7/8) signal smije prekoraciti bazu do ovog stropa (vidi niže,
-      // uz postojeći MAX_SAME_DIR_CRYPTO/VIP blok).
+      // 23.09.: ovo je samo jeftin RANI filter na apsolutnom VIP stropu — baza
+      // (MAX_OPEN_CRYPTO) se provjerava kasnije, NAKON signala, jer jaki (VIP, score≥7/8)
+      // signal smije prekoraciti bazu do ovog stropa (vidi niže, uz postojeći
+      // MAX_SAME_DIR_CRYPTO/VIP blok). 01.10.: VIP strop i baza su sad isti broj (vidi
+      // MAX_OPEN_CRYPTO_VIP definicija) pa je ovo trenutno hard cap, VIP grana inertna.
       const _classMax   = _symIsStock ? MAX_OPEN_STOCKS : MAX_OPEN_CRYPTO_VIP;
       if (_classOpen >= _classMax && symbol !== BTC_EXCEPTION && !openSymbols.includes(symbol)) {
         console.log(`  🔒 [${pDef.name}] Max ${_classMax} ${_symIsStock ? "dionica" : "kripto"} dostignut (${_classOpen}) — preskačem ${symbol}`);
@@ -7608,6 +7644,12 @@ export async function run() {
         // BTC je poseban (17.09., na zahtjev): +1 postotni poen rizika iznad
         // ostalih, bez obzira na RISK_PCT_MIN/MAX strop koji vrijedi za ostale.
         if (symbol === "BTCUSDT") _symRiskPct += 1;
+        // 01.10., na zahtjev — nakon analize rujna (1H: 47.5% WR/-$39.53 vs 4H: 77.1%/
+        // +$57.86, cijeli mjesec): dok se ne razjasni zašto 1H strukturno podbacuje, rizik
+        // po tradeu na 1H je prepolovljen u odnosu na 4H (koji i dalje koristi puni RISK_PCT,
+        // vidi riskAmount u runUltra4hStrategy). Primjenjuje se NA KRAJU, nakon BTC bonusa,
+        // da se i on proporcionalno prepolovi.
+        _symRiskPct *= RISK_MULT_1H;
         const riskAmount = equity * (_symRiskPct / 100);
         console.log(`  🎚️  [RISK] ${symbol} — score ${_entryScore}/${SYMBOL_COMBOS[symbol]?.sigIdx?.length ?? 8}, ${_isStrong ? "JAKO" : "normalno"} → rizik $${riskAmount.toFixed(2)} (${_symRiskPct}% od $${equity.toFixed(2)} [${_equitySrc}])`);
         // Ukupni size mult (macro + stable + vwap + oi) ne smije pasti ispod 0.5

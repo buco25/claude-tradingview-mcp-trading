@@ -29,11 +29,12 @@ const START_CAPITAL = 1000;   // po portfoliju
 export const RISK_PCT      = 1.5;    // bazni % banke po tradeu
 export const RISK_PCT_MIN  = 1.0;    // minimalni setup
 export const RISK_PCT_MAX  = 2.0;    // jak setup (score ≥ comboMinSig+2)
-// 01.10., na zahtjev — nakon analize rujna koja je pokazala da 1H (synapse_t) strukturno
-// podbacuje naspram 4H (ultra_4h) cijeli mjesec na svim score razinama: dok se razlog ne
-// razjasni, 1H trguje na POLA uloga 4H-a. Primjenjuje se na _symRiskPct u run(), NE na
-// ultra_4h (koji zadrzava puni RISK_PCT).
-export const RISK_MULT_1H  = 0.5;
+// 01.10., VRAĆENO NA 1.0 (bilo 0.5 par sati ranije) — daljnja analiza je pokazala da 1H
+// KRIPTA sama po sebi radi dobro (53.3% WR, +$21 u rujnu), cijeli minus je dolazio od
+// specifičnih dionica/metala (vidi PROBLEM_1H_SYMBOLS niže) koji se sad umjesto toga
+// isključuju direktno. Blanket pola-rizika na CIJELI 1H bi nepotrebno kaznio profitabilnu
+// 1H kripto stranu — kirurški rez na stvarnog krivca je točniji popravak.
+export const RISK_MULT_1H  = 1.0;
 const SL_PCT        = 2.0;    // fallback SL % (Tier 1) — override per-simbol u symbol_sltp
 const TP_PCT        = 3.0;    // fallback TP % (Tier 1, 1.5×SL) — override per-simbol u symbol_sltp
 
@@ -71,6 +72,14 @@ const MAX_OPEN_PER_PORTFOLIO = 11;
 // kombiniranih crypto/stock capova iznad.
 export const MAX_OPEN_1H = 3;
 export const MAX_OPEN_4H = 8;
+// 01.10., na zahtjev — kirurški rez umjesto blanket 1H kazne (vidi RISK_MULT_1H povijest
+// iznad): ovi simboli trguju SAMO na 1H i dosljedno su gubili cijeli rujan (TSLA 14% WR,
+// META/AMC/GOOGL 0% WR, COIN 25% WR, XAU/XAG/PAXG pristojan WR ali u minusu — short protiv
+// rastućeg zlata/srebra). Provjereno u run() odmah uz isBlacklisted (vidi "2b." niže).
+const PROBLEM_1H_SYMBOLS = new Set([
+  "TSLAUSDT", "METAUSDT", "AMCUSDT", "GOOGLUSDT", "COINUSDT",
+  "XAUUSDT", "XAGUSDT", "PAXGUSDT",
+]);
 const WEEKEND_MAX_OPEN = 5;  // 19.09., na zahtjev: preko vikenda (UTC subota/nedjelja) ukupni cap se stegne na 5, bez BTC bonus-slot iznimke
 function getMaxOpenPositions() {
   const dow = new Date().getUTCDay();
@@ -6689,6 +6698,15 @@ export async function run() {
 
       // ── 2. Symbol Blacklist ─────────────────────────────────────────────
       if (isBlacklisted(symbol)) continue;
+
+      // ── 2b. Trajno isključeni simboli — 01.10., na zahtjev ────────────────
+      // Analiza rujna (249 tradeova, score/mode/TF, spojeno s pravom Bitget poviješću):
+      // 1H kripta je profitabilna (53.3% WR, +$21), cijeli mjesečni minus dolazi od ovih
+      // specifičnih dionica/metala — katastrofalan WR (TSLA 14%, META/AMC/GOOGL 0%, COIN 25%)
+      // ili dosljedno u minusu usprkos pristojnom WR-u (XAU/XAG/PAXG — short protiv rastućeg
+      // zlata/srebra). Dionice/metali trguju SAMO na 1H (ULTRA-4H ih ionako ne dira), pa ovo
+      // isključenje efektivno gasi nova trgovanja tim simbolima u cijelom botu.
+      if (PROBLEM_1H_SYMBOLS.has(symbol)) continue;
 
       try {
         // ── Macro size multiplier — umjesto blokada smanjujemo poziciju ──────

@@ -945,6 +945,51 @@ function parseCsvFile(pid) {
   }).filter(r => r["Symbol"]);
 }
 
+// 01.10., na zahtjev — "Zadnjih 20 tradova" (Bitget, stvarni P&L) niže dobiva dodatne
+// stupce (TF 1H/4H, Mode, Score X/8) spojene iz CSV-a, isti obrazac kao ručna analiza
+// rujna koju je korisnik tražio tijekom sesije. Score se računa iz SigMask stupca
+// (bitmask preko TE_COMBO indeksa, isti onaj koji analyzeUltra koristi za MIN_CONFIRM) —
+// NAPOMENA: SigMask je prazan za SWEEP/RANGE/VA-REV grane (svjesno odgođeno, audit #12)
+// i za sve entryje prije 22.09. (commit d93944b) osim PBK LONG, pa "score" tad ostaje null.
+const _TE_MASK_DASH = DEFAULT_COMBO.reduce((m, i) => m | (1 << i), 0);
+function _scoreFromSigMask(sigMaskStr) {
+  if (!sigMaskStr) return null;
+  const sigMask = parseInt(sigMaskStr, 10);
+  if (isNaN(sigMask)) return null;
+  const combo8 = sigMask & _TE_MASK_DASH;
+  return combo8.toString(2).split("").filter(b => b === "1").length;
+}
+function _buildCsvEntryIndex() {
+  const entries = [];
+  for (const pid of ["synapse_t", "ultra_4h"]) {
+    for (const r of parseCsvFile(pid)) {
+      if (r.Side !== "LONG" && r.Side !== "SHORT") continue;
+      const ts = new Date(`${r.Date}T${r["Time (UTC)"]}Z`).getTime();
+      if (isNaN(ts)) continue;
+      const modeMatch = r.EntryMode || (r.Notes || "").match(/\|\s*([A-Z][A-Z0-9-]*)\s*\|/)?.[1] || "?";
+      entries.push({ symbol: r.Symbol, side: r.Side, ts, tf: pid === "ultra_4h" ? "4H" : "1H", mode: modeMatch, score: _scoreFromSigMask(r.SigMask) });
+    }
+  }
+  return entries;
+}
+// Matcha po simbol+strana+NAJBLIŽE vrijeme OTVARANJA (Bitget ctime naspram CSV entry
+// retka) — stabilniji anchor od zatvaranja jer entry retci ne trpe partial-close
+// dvosmislenost. usedIdx sprječava da dva stvarna zapisa pokupe isti CSV red.
+function _matchCsvMeta(entryIndex, usedIdx, symbol, holdSide, openTs) {
+  const wantSide = holdSide === "long" ? "LONG" : "SHORT";
+  let bestI = -1, bestDiff = Infinity;
+  for (let i = 0; i < entryIndex.length; i++) {
+    if (usedIdx.has(i)) continue;
+    const e = entryIndex[i];
+    if (e.symbol !== symbol || e.side !== wantSide) continue;
+    const diff = Math.abs(e.ts - openTs);
+    if (diff < bestDiff && diff < 5 * 60 * 1000) { bestDiff = diff; bestI = i; }
+  }
+  if (bestI < 0) return null;
+  usedIdx.add(bestI);
+  return entryIndex[bestI];
+}
+
 // Bitget sync ponekad upiše 2-3 duplicirana CLOSE retka za isti Order ID (isti qty,
 // blago drugačiji P&L, unutar par sekundi). Isti qty unutar istog Order ID = duplikat
 // (uzmi kronološki zadnji, najprecizniji); različit qty = prava odvojena noga partial
@@ -1424,8 +1469,8 @@ function renderHtml(allStats, allPositions, hb, rules = {}, ultra4hPositions = [
       <div id="collbody-bghist" style="display:none">
         <div class="table-wrap">
           <table class="trade-table" id="bghist-table">
-            <thead><tr><th>Zatvoreno</th><th>Symbol</th><th>Side</th><th>Entry→Close</th><th>Qty</th><th>Net P&amp;L</th></tr></thead>
-            <tbody id="bghist-tbody"><tr><td colspan="6" style="color:#9ca3af">Učitavam…</td></tr></tbody>
+            <thead><tr><th>Zatvoreno</th><th>Symbol</th><th>Side</th><th>TF</th><th>Mode</th><th>Score</th><th>Entry→Close</th><th>Qty</th><th>Net P&amp;L</th></tr></thead>
+            <tbody id="bghist-tbody"><tr><td colspan="9" style="color:#9ca3af">Učitavam…</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -1446,24 +1491,29 @@ function renderHtml(allStats, allPositions, hb, rules = {}, ultra4hPositions = [
           fetch('/api/bitget-history').then(function(r){ return r.json(); }).then(function(d){
             var tbody = document.getElementById('bghist-tbody');
             if (!d.ok || !d.list || !d.list.length) {
-              tbody.innerHTML = '<tr><td colspan="6" style="color:#9ca3af">' + (d.error || 'Nema podataka') + '</td></tr>';
+              tbody.innerHTML = '<tr><td colspan="9" style="color:#9ca3af">' + (d.error || 'Nema podataka') + '</td></tr>';
               return;
             }
             tbody.innerHTML = d.list.map(function(p){
               var win = p.netProfit >= 0;
               var closeD = new Date(p.closeTs);
               var dateStr = closeD.toISOString().slice(0,10) + ' ' + closeD.toISOString().slice(11,16);
+              var tfBadge = p.tf ? ('<span class="badge" style="background:' + (p.tf==='4H'?'rgba(34,211,238,0.15);border:1px solid #22d3ee;color:#22d3ee':'rgba(96,165,250,0.15);border:1px solid #60a5fa;color:#60a5fa') + '">' + p.tf + '</span>') : '<span style="color:#6b7280">—</span>';
+              var scoreStr = (p.score != null) ? (p.score + '/8') : '<span style="color:#6b7280">—</span>';
               return '<tr class="' + (win ? 'win-row' : 'loss-row') + '">' +
                 '<td>' + dateStr + '</td>' +
                 '<td style="font-weight:700">' + p.symbol + '</td>' +
                 '<td><span class="badge ' + (p.side === 'long' ? 'badge-long' : 'badge-short') + '">' + p.side.toUpperCase() + '</span></td>' +
+                '<td>' + tfBadge + '</td>' +
+                '<td>' + (p.mode || '<span style="color:#6b7280">—</span>') + '</td>' +
+                '<td>' + scoreStr + '</td>' +
                 '<td>' + p.entry + ' → ' + p.close + '</td>' +
                 '<td>' + p.qty + '</td>' +
                 '<td style="color:' + (win?'#059669':'#dc2626') + ';font-weight:700">' + (win?'+':'') + '$' + p.netProfit.toFixed(4) + '</td>' +
               '</tr>';
             }).join('');
           }).catch(function(e){
-            document.getElementById('bghist-tbody').innerHTML = '<tr><td colspan="6" style="color:#dc2626">Greška: ' + e.message + '</td></tr>';
+            document.getElementById('bghist-tbody').innerHTML = '<tr><td colspan="9" style="color:#dc2626">Greška: ' + e.message + '</td></tr>';
           });
         }
         (function restoreCollState() {
@@ -3965,16 +4015,24 @@ const server = http.createServer(async (req, res) => {
         },
       });
       const d = await r.json();
+      // 01.10., na zahtjev — spoji TF/Mode/Score iz CSV-a (vidi _buildCsvEntryIndex/
+      // _matchCsvMeta iznad). _usedIdx sprječava da dva stvarna zapisa pokupe isti CSV red.
+      const _entryIdx = _buildCsvEntryIndex();
+      const _usedIdx = new Set();
       const list = (d?.data?.list ?? [])
         .sort((a, b) => parseInt(b.utime) - parseInt(a.utime))
         .slice(0, 20)
-        .map(p => ({
-          symbol: p.symbol, side: p.holdSide,
-          entry: parseFloat(p.openAvgPrice), close: parseFloat(p.closeAvgPrice),
-          qty: parseFloat(p.closeTotalPos), netProfit: parseFloat(p.netProfit),
-          fees: parseFloat(p.openFee) + parseFloat(p.closeFee), funding: parseFloat(p.totalFunding),
-          openTs: parseInt(p.ctime), closeTs: parseInt(p.utime),
-        }));
+        .map(p => {
+          const meta = _matchCsvMeta(_entryIdx, _usedIdx, p.symbol, p.holdSide, parseInt(p.ctime));
+          return {
+            symbol: p.symbol, side: p.holdSide,
+            entry: parseFloat(p.openAvgPrice), close: parseFloat(p.closeAvgPrice),
+            qty: parseFloat(p.closeTotalPos), netProfit: parseFloat(p.netProfit),
+            fees: parseFloat(p.openFee) + parseFloat(p.closeFee), funding: parseFloat(p.totalFunding),
+            openTs: parseInt(p.ctime), closeTs: parseInt(p.utime),
+            tf: meta?.tf ?? null, mode: meta?.mode ?? null, score: meta?.score ?? null,
+          };
+        });
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: d.code === "00000", error: d.code !== "00000" ? `Bitget ${d.code}: ${d.msg}` : undefined, list }));
     } catch (e) {

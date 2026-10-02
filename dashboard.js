@@ -5,6 +5,7 @@
 
 import "dotenv/config";
 import http from "http";
+import { createHash, timingSafeEqual } from "crypto";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll, softExitMonitor,
   runUltra4hStrategy, analyzeUltraPullback,
@@ -895,13 +896,22 @@ async function fetchCandlesLocal(symbol, granularity, limit) {
 // ─── Auth ──────────────────────────────────────────────────────────────────────
 
 const DASH_USER = process.env.DASH_USER || "buco25";
-const DASH_PASS = process.env.DASH_PASS || "Din@mo2026";
+// Bez zadane lozinke u kodu (repo je javan). Ako DASH_PASS fali, dashboard odbija sve prijave, a bot nastavlja raditi.
+const DASH_PASS = process.env.DASH_PASS || "";
+if (!DASH_PASS) console.error("🔴 DASH_PASS nije postavljen — dashboard odbija sve prijave");
+
+const _sha256 = (s) => createHash("sha256").update(String(s)).digest();
 
 function checkAuth(req, res) {
   const auth = req.headers["authorization"] || "";
-  if (auth.startsWith("Basic ")) {
-    const [user, pass] = Buffer.from(auth.slice(6), "base64").toString().split(":");
-    if (user === DASH_USER && pass === DASH_PASS) return true;
+  if (DASH_PASS && auth.startsWith("Basic ")) {
+    const decoded = Buffer.from(auth.slice(6), "base64").toString();
+    const sep = decoded.indexOf(":");
+    if (sep >= 0) {
+      const userOk = timingSafeEqual(_sha256(decoded.slice(0, sep)), _sha256(DASH_USER));
+      const passOk = timingSafeEqual(_sha256(decoded.slice(sep + 1)), _sha256(DASH_PASS));
+      if (userOk && passOk) return true;
+    }
   }
   res.writeHead(401, { "WWW-Authenticate": 'Basic realm="Trading Bot Dashboard"', "Content-Type": "text/plain" });
   res.end("401 Unauthorized");
@@ -3822,8 +3832,11 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Sve osim /health traži prijavu (prije su regime, bitget-*, live i reset-dyn bili otvoreni)
+  if (!checkAuth(req, res)) return;
+
   // Reset dinamički ADX — briše SL cooldown i blacklist
-  if (url.pathname === "/api/reset-dyn") {
+  if (url.pathname === "/api/reset-dyn" && req.method === "POST") {
     try {
       const slFile = `${DATA_DIR}/sl_cooldown.json`;
       const blFile = `${DATA_DIR}/symbol_blacklist.json`;
@@ -4042,7 +4055,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Live price — bez auth
+  // Live price
   if (url.pathname === "/api/live") {
     const sym    = url.searchParams.get("sym") || "BTCUSDT";
     const prices = await fetchLivePrices([sym]);
@@ -4050,9 +4063,6 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({ symbol: sym, price: prices[sym] || null }));
     return;
   }
-
-  // Sve ostalo — auth
-  if (!checkAuth(req, res)) return;
 
   // Reset positions (samo otvorene)
   if (url.pathname === "/api/reset-positions" && req.method === "POST") {
@@ -4418,7 +4428,8 @@ const server = http.createServer(async (req, res) => {
       // Dinamički daily limit: 3% od Bitget equityja (min $20)
       let dailyLimit = 20;
       try {
-        const balR = await fetch(`http://localhost:${PORT}/api/bitget-balance`).then(r => r.json());
+        const _selfAuth = "Basic " + Buffer.from(`${DASH_USER}:${DASH_PASS}`).toString("base64");
+        const balR = await fetch(`http://localhost:${PORT}/api/bitget-balance`, { headers: { Authorization: _selfAuth } }).then(r => r.json());
         const eq   = parseFloat(balR?.balance?.equity || 0);
         if (eq > 0) dailyLimit = Math.max(eq * 0.03, 20);
       } catch { /* fallback na $20 */ }

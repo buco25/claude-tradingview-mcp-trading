@@ -2,3 +2,6 @@
 *.log
 safety-check-log.json
 node_modules/
+CLAUDE_PROMPT.md
+data/
+fetch_trades.mjs

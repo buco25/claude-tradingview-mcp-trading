@@ -3879,6 +3879,30 @@ async function fetchBitgetPositionSize(symbol, side) {
   }
 }
 
+// 02.10., fix: SOL 1H soft SL zatvorio je i 4H lot — Bitget spaja istu stranu istog simbola
+// u JEDNU poziciju, a soft-exit je slao bp.total (cijelu spojenu količinu).
+function _otherStrategiesQty(pos) {
+  let q = 0;
+  for (const pid of [...PORTFOLIO_IDS, ULTRA4H_PID]) {
+    for (const p of loadPositions(pid)) {
+      if (p.symbol === pos.symbol && p.side === pos.side && p.orderId !== pos.orderId) q += parseFloat(p.quantity) || 0;
+    }
+  }
+  return q;
+}
+
+function ownBitgetQty(pos, bp) {
+  const total = bp.total > 0 ? bp.total : bp.available;
+  const other = _otherStrategiesQty(pos);
+  if (other <= 0) return total;
+  const own = parseFloat(pos.quantity);
+  const est = total - other;
+  const q   = Math.min(est > 0 ? est : (own > 0 ? own : total), own > 0 ? own : Infinity, total);
+  const step = _minTradeNum[pos.symbol] ?? 0;
+  const aligned = step > 0 ? Math.floor(q / step + 1e-9) * step : q;
+  return aligned > 0 ? aligned : q;
+}
+
 // Dohvati sve stvarno otvorene pozicije na Bitgetu (za sve simbole)
 export async function fetchBitgetOpenPositions() {
   try {
@@ -4323,6 +4347,7 @@ async function checkPortfolioPositions(pid) {
           if (_gain1R >= _risk1R) {
             const _bp1R = await fetchBitgetPositionSize(pos.symbol, pos.side);
             if (_bp1R && !_bp1R.error) {
+              _bp1R.total = ownBitgetQty(pos, _bp1R);
               const _minQ = _minTradeNum[pos.symbol] ?? 0;
               const _gainPerUnit = Math.abs(liveP - pos.entryPrice);
               const _totalProfit = _gainPerUnit * _bp1R.total;
@@ -4357,7 +4382,7 @@ async function checkPortfolioPositions(pid) {
                   const _oldQty1R   = pos.quantity;
                   const _bpAfter1R  = await fetchBitgetPositionSize(pos.symbol, pos.side);
                   const _newQty1R   = (_bpAfter1R && !_bpAfter1R.error && _bpAfter1R.total > 0)
-                    ? _bpAfter1R.total
+                    ? Math.max(_bpAfter1R.total - _otherStrategiesQty(pos), 0)
                     : Math.max(_bp1R.total - _closeQty, 0);  // fallback ako fresh fetch padne
                   pos.quantity  = _newQty1R;
                   // 14.08.: totalUSD (Notional) se nikad nije ažurirao nakon partial close —
@@ -4439,7 +4464,7 @@ async function checkPortfolioPositions(pid) {
               stillOpen.push({ ...pos, _remove: true });
               continue;
             }
-            const closeQty  = (bitPos2.total > 0 ? bitPos2.total : bitPos2.available).toFixed(4);
+            const closeQty  = ownBitgetQty(pos, bitPos2).toFixed(4);
             const closeSide = pos.side === "LONG" ? "buy" : "sell";  // Bitget v2 hedge: close nosi side ISTOG smjera kao pozicija
             // Otkaži plan naloge PRIJE close-a (ne nakon 22002) — sprječava blokadu
             await cancelAllPlanOrders(pos.symbol, pos.side).catch(() => {});
@@ -4926,7 +4951,7 @@ async function partialClosePosition(pos, closePct = PARTIAL_CLOSE_PCT) {
   // može spremiti STVARNU preostalu količinu, ne pretpostavljenu.
   const bp = await fetchBitgetPositionSize(pos.symbol, pos.side);
   if (!bp || bp.error || !(bp.total > 0)) return false;
-  const baseQty   = bp.total;
+  const baseQty   = ownBitgetQty(pos, bp);
   const qty       = baseQty * (closePct / 100);
   const closeSide = pos.side === "LONG" ? "buy" : "sell";  // Bitget v2 hedge: close nosi side ISTOG smjera kao pozicija
   try {
@@ -4946,7 +4971,7 @@ async function partialClosePosition(pos, closePct = PARTIAL_CLOSE_PCT) {
       // tracka od stvarne pozicije (isti bug nađen i popravljen u +1R partial bloku).
       const bpAfter = await fetchBitgetPositionSize(pos.symbol, pos.side);
       const remainingQty = (bpAfter && !bpAfter.error && bpAfter.total > 0)
-        ? bpAfter.total
+        ? Math.max(bpAfter.total - _otherStrategiesQty(pos), 0)
         : Math.max(baseQty - qty, 0);  // fallback ako fresh fetch padne
       return { closedQty: qty, remainingQty };
     }
@@ -5055,7 +5080,7 @@ export async function softExitMonitor() {
           await tg(`🚨 <b>EMERGENCY CLOSE [ULTRA]</b> ${pos.symbol} ${pos.side}\nGubitak ${(_lossRatio*100).toFixed(0)}% margine — zatvaramo prije likvidacije!\nCijena: ${fmtPrice(liveP)} | Entry: ${fmtPrice(pos.entryPrice)} | P&L: $${_unrealPnl.toFixed(2)}`);
           const bitPos = await fetchBitgetPositionSize(pos.symbol, pos.side);
           if (bitPos && !bitPos.error) {
-            const qty = (bitPos.total > 0 ? bitPos.total : bitPos.available).toFixed(4);
+            const qty = ownBitgetQty(pos, bitPos).toFixed(4);
             const closeSide = pos.side === "LONG" ? "buy" : "sell";  // Bitget v2 hedge: close nosi side ISTOG smjera kao pozicija
             for (let attempt = 1; attempt <= 3; attempt++) {
               try {
@@ -5119,7 +5144,7 @@ export async function softExitMonitor() {
           continue;
         }
         // Koristi total (ne available) — available može biti 0 ako postoji pending order
-        const qty      = (bitPos.total > 0 ? bitPos.total : bitPos.available).toFixed(4);
+        const qty      = ownBitgetQty(pos, bitPos).toFixed(4);
         const closeSide = pos.side === "LONG" ? "buy" : "sell";  // Bitget v2 hedge: close nosi side ISTOG smjera kao pozicija
         console.log(`  📐 [SOFT ${reason}] ${pos.symbol} — Bitget veličina: ${qty} (lokalna: ${(pos.quantity ?? "?").toString()})`);
 
@@ -6164,6 +6189,8 @@ export async function runUltra4hStrategy() {
     // Isto — rani filter na VIP stropu, baza+VIP odluka je niže po signalu.
     if (cryptoOpenNow >= MAX_OPEN_CRYPTO_VIP) break;
     if (openNow.some(p => p.symbol === symbol)) continue;
+    // 02.10., na zahtjev: isti simbol ne smije drzati obje strategije (Bitget ih spaja u jednu poziciju).
+    if (synOpenNow.some(p => p.symbol === symbol)) continue;
 
     // ── Isti gate-ovi kao synapse_t (19.09., na zahtjev) ─────────────────────
     if (isBlacklisted(symbol)) continue;
@@ -6836,14 +6863,14 @@ export async function run() {
           continue;
         }
 
-        // ── Cross-strategy kolizija (18.09., olabavljeno na zahtjev nakon closeBitGetOrder
-        // fixa — Bitget merge vise nije opasan jer close sad zatvara SAMO nasu kolicinu).
-        // Isti obrazac kao Bitget-smjer-svjesna provjera ispod: dopusti isti smjer,
-        // blokiraj suprotan (EMA_RSI_PID trajno prazan, ULTRA4H_PID stvarna druga strategija).
+        // ── Cross-strategy kolizija. 18.09. je bio dopusten isti smjer, ali 02.10. je soft-exit
+        // (bp.total) zatvorio i tudji lot (SOL 1H+4H) — sad je blokiran svaki smjer.
+        // (EMA_RSI_PID trajno prazan, ULTRA4H_PID stvarna druga strategija).
         {
           const _otherPos = [...loadPositions(EMA_RSI_PID), ...loadPositions(ULTRA4H_PID)].find(p => p.symbol === symbol);
-          if (_otherPos && _otherPos.side !== signal) {
-            console.log(`  🔒 [${pDef.name}] ${symbol} — ${_otherPos.portfolio || "druga strategija"} drži ${_otherPos.side}, mi ${signal} → suprotan smjer, skip`);
+          // 02.10., na zahtjev: blokiraj i ISTI smjer — spojena pozicija je zatvorila tudji lot (SOL 1H/4H).
+          if (_otherPos) {
+            console.log(`  🔒 [${pDef.name}] ${symbol} — ${_otherPos.portfolio || "druga strategija"} drži ${_otherPos.side}, mi ${signal} → isti simbol dvije strategije, skip`);
             continue;
           }
         }
@@ -6935,7 +6962,7 @@ export async function run() {
             const _flipBitPos = await fetchBitgetPositionSize(symbol, existingPos.side).catch(() => null);
             if (_flipBitPos && !_flipBitPos.error) {
               await cancelAllPlanOrders(symbol, existingPos.side).catch(() => {});
-              const _flipQty      = (_flipBitPos.total > 0 ? _flipBitPos.total : _flipBitPos.available).toFixed(4);
+              const _flipQty      = ownBitgetQty(existingPos, _flipBitPos).toFixed(4);
               const _flipCloseSide = existingPos.side === "LONG" ? "buy" : "sell";  // v2 hedge close
               const _flipCloseRes  = await bitgetPost("/api/v2/mix/order/place-order", {
                 symbol, productType: "USDT-FUTURES", marginCoin: "USDT",

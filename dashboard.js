@@ -8,7 +8,7 @@ import http from "http";
 import { createHash, timingSafeEqual } from "crypto";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll, softExitMonitor,
-  runUltra4hStrategy, analyzeUltraPullback,
+  runUltra4hStrategy, analyzeUltraPullback, previewU4hGates,
   getAllFundingRates, getDailyPnlExport, getSymbolStats, getOIForSymbols,
   getFearGreed, getBtcDominance, getDxyData, getConsecutiveLossCount,
   getSessionInfo, calcAtrTrend, getSp500Data, calcSymbolCorrelation,
@@ -805,6 +805,7 @@ async function runScan(rules) {
           if (c4h) {
             const r4h = await analyzeUltraPullback(sym, c4h, {});
             s.sig4h = { signal: r4h.signal, bullScore: r4h.bullScore ?? 0, bearScore: r4h.bearScore ?? 0 };
+            if (r4h.signal !== "NEUTRAL") s.sig4h.gate = await previewU4hGates(sym, c4h, r4h).catch(() => null);
           }
         } catch { /* ignoriraj — 4H stupac ostaje prazan za ovaj simbol */ }
         const pending = pendingList.find(p => p.symbol === sym) || null;
@@ -3171,7 +3172,16 @@ async function doScan() {
       const sig4hCol   = sig4h.signal === 'LONG' ? '#10b981' : sig4h.signal === 'SHORT' ? '#ef4444' : '#6b7280';
       const sig4hIcon  = sig4h.signal === 'LONG' ? '▲' : sig4h.signal === 'SHORT' ? '▼' : '·';
       const sig4hScore = sig4h.signal === 'LONG' ? sig4h.bullScore : sig4h.signal === 'SHORT' ? sig4h.bearScore : Math.max(sig4h.bullScore, sig4h.bearScore);
-      const sig4hTitle = sig4h.signal === 'NEUTRAL' ? '4H: čeka se (nema aktivnog signala)' : '4H: ' + sig4h.signal + ' ' + sig4hScore + '/8 — ULTRA-4H strategija bi ovdje ušla';
+      const gate4h     = sig4h.gate || null;
+      const gate4hHtml = !gate4h ? '' : gate4h.ok
+        ? '<div style="font-size:9px;font-weight:700;color:#10b981;margin-top:1px">✓ ulaz ' + (gate4h.nextClose || '') + '</div>'
+        : gate4h.blockers && gate4h.blockers.length
+          ? '<div style="font-size:9px;font-weight:600;color:#f59e0b;margin-top:1px">⛔ ' + gate4h.blockers[0] + (gate4h.blockers.length > 1 ? ' +' + (gate4h.blockers.length - 1) : '') + '</div>'
+          : '';
+      const gate4hTip  = !gate4h ? '' : gate4h.ok
+        ? ' | prolazi sve filtere — ulaz na zatvaranju 4H svijeće u ' + (gate4h.nextClose || '?') + ' UTC (bez liq-risk provjere)'
+        : (gate4h.blockers && gate4h.blockers.length ? ' | BLOKIRANO: ' + gate4h.blockers.join(', ') : '');
+      const sig4hTitle = sig4h.signal === 'NEUTRAL' ? '4H: čeka se (nema aktivnog signala)' : '4H: ' + sig4h.signal + ' ' + sig4hScore + '/8 — signal je aktivan' + gate4hTip;
 
       const volR = s.volRatio ?? null;
       const volThr = s.volExhThreshold ?? 1.5;
@@ -3214,7 +3224,7 @@ async function doScan() {
           '<div style="font-size:9px;color:' + slTpCol + ';font-weight:500;margin-top:1px">' + slTp + '</div>' + rsiAdxInfo + '</td>' +
         '<td style="font-weight:600;white-space:nowrap;font-size:12px;padding:6px 8px">' + fmtLive(s.price) + entryInfo + '</td>' +
         '<td style="text-align:center;font-weight:800;color:' + t1hCol + ';font-size:13px;padding:6px 4px" title="1H EMA20: ' + t1h + '">' + t1hIcon + '</td>' +
-        '<td style="text-align:center;font-weight:800;color:' + sig4hCol + ';font-size:13px;padding:6px 4px" title="' + sig4hTitle + '">' + sig4hIcon + (sig4h.signal !== 'NEUTRAL' ? ' <span style="font-size:9px;font-weight:400;color:#94a3b8">' + sig4hScore + '/8</span>' : '') + '</td>' +
+        '<td style="text-align:center;font-weight:800;color:' + sig4hCol + ';font-size:13px;padding:6px 4px" title="' + sig4hTitle + '">' + sig4hIcon + (sig4h.signal !== 'NEUTRAL' ? ' <span style="font-size:9px;font-weight:400;color:#94a3b8">' + sig4hScore + '/8</span>' : '') + gate4hHtml + '</td>' +
         '<td style="padding:4px 4px">' + mandatoryBoxes(s) + sigBoxes(s.ultraSigs16, s.symbol) + '</td>' +
         '<td style="padding:4px 6px;text-align:center">' + scoreBox(s.ultraBull||0, s.ultraBear||0, s.ultraSig, s.ultraMinSig) + '</td>' +
         '<td style="padding:4px 6px">' + statusBox(s) + '</td>' +

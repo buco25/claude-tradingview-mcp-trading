@@ -6092,6 +6092,130 @@ export async function _buildUltra4hCfg(cryptoSymbols) {
   return cfg;
 }
 
+// ─── ULTRA-4H ulazni gate-ovi — JEDINI izvor istine ───────────────────────────────
+// 03.10., na zahtjev: koriste ih i runUltra4hStrategy (stvarni ulaz) i previewU4hGates
+// (dashboard prikaz "bi li 4H stvarno usao"), pa se ne mogu razici. Mijenjaj filtere OVDJE.
+
+// Apsolutni capovi (cijela strategija stoji kad su puni).
+function u4hAbsoluteCapReason() {
+  const u4h = loadPositions(ULTRA4H_PID), syn = loadPositions("synapse_t");
+  if (u4h.length + syn.length >= getMaxOpenPositions()) return "max pozicija";
+  if (u4h.length >= MAX_OPEN_4H) return `max 4H (${MAX_OPEN_4H})`;
+  if (syn.filter(p => !isStockSym(p.symbol)).length + u4h.length >= MAX_OPEN_CRYPTO_VIP) return "max kripto (VIP strop)";
+  return null;
+}
+
+// Per-simbol blokade koje ne trebaju candle-ove.
+function u4hPreBlock(symbol) {
+  if (loadPositions(ULTRA4H_PID).some(p => p.symbol === symbol)) return "već otvoren (4H)";
+  // 02.10.: isti simbol ne smije drzati obje strategije (Bitget ih spaja u jednu poziciju).
+  if (loadPositions("synapse_t").some(p => p.symbol === symbol)) return "drži 1H";
+  if (isBlacklisted(symbol)) return "blacklist";
+  // Noćna zona 20-06 UTC — hard block, dokazano -$9.19 kad je omeksano.
+  const h = new Date().getUTCHours();
+  if (h >= 20 || h < 6) return "noćna zona";
+  return null;
+}
+
+// Gate-ovi nakon signala. shortCircuit=true (stvarni ulaz) staje na prvoj blokadi;
+// false (dashboard) skuplja sve razloge. liqScore=null preskace liq-risk provjeru.
+async function evaluateU4hGates({ symbol, candles, sig, btcRegime, liqScore = null, shortCircuit = true }) {
+  const blockers = [], notes = [];
+  let vipSlot = false, dayRangeSizeMult = 1.0;
+  const dir = sig.signal;
+  const block = (text, log) => { blockers.push({ text, log }); return shortCircuit; };
+  const done  = () => ({ ok: blockers.length === 0, blockers, notes, vipSlot, dayRangeSizeMult });
+
+  const capReason = u4hAbsoluteCapReason();
+  if (capReason && block(capReason)) return done();
+
+  // ── Ukupni kripto cap + korelacijski (same-dir) cap — 23.09., na zahtjev.
+  // Prije toga ULTRA-4H nije imao NIKAKAV same-dir gate pa je 23.09. u 4 minute otvorio 8
+  // istovremenih LONG pozicija i sve su se ugasile zajedno ("jedna BTC oklada plaćena N puta").
+  // Računa ZAJEDNIČKI preko synapse_t + ultra_4h jer dijele isti Bitget račun/margin.
+  const syn = loadPositions("synapse_t"), u4h = loadPositions(ULTRA4H_PID);
+  const score       = dir === "LONG" ? (sig.bullScore ?? 0) : (sig.bearScore ?? 0);
+  const comboLen    = SYMBOL_COMBOS[symbol]?.sigIdx?.length ?? 8;
+  const vipEligible = score >= 7 && comboLen >= 8;
+
+  const cryptoTotal = syn.filter(p => !isStockSym(p.symbol)).length + u4h.length;
+  if (cryptoTotal >= MAX_OPEN_CRYPTO) {
+    if (vipEligible && cryptoTotal < MAX_OPEN_CRYPTO_VIP) {
+      notes.push(`  ⭐ [ULTRA-4H][VIP-CAP] ${symbol} — score ${score}/${comboLen} ≥ 7 → dozvoljen preko baze (${cryptoTotal}/${MAX_OPEN_CRYPTO}, VIP strop ${MAX_OPEN_CRYPTO_VIP})`);
+    } else if (block("max kripto", `  🔒 [ULTRA-4H][MAX-CRYPTO] ${symbol} — ${cryptoTotal}/${MAX_OPEN_CRYPTO} kripto ukupno (VIP strop ${MAX_OPEN_CRYPTO_VIP}) → preskačem`)) return done();
+  }
+
+  const sameDirPos = [...syn.filter(p => !isStockSym(p.symbol)), ...u4h].filter(p => p.side === dir);
+  if (sameDirPos.length >= MAX_SAME_DIR_CRYPTO) {
+    const vipCount = sameDirPos.filter(p => p.vipSlot === true).length;
+    if (vipEligible && vipCount < MAX_VIP_SAME_DIR) {
+      notes.push(`  ⭐ [ULTRA-4H][VIP] ${symbol} — score ${score}/${comboLen} ≥ 7 → VIP slot (${sameDirPos.length}/${MAX_SAME_DIR_CRYPTO}, VIP ${vipCount+1}/${MAX_VIP_SAME_DIR})`);
+      vipSlot = true;
+    } else if (block(`max ${dir} (${MAX_SAME_DIR_CRYPTO})`, `  🔗 [ULTRA-4H][SAME-DIR] ${symbol} — već ${sameDirPos.length} kripto ${dir} pozicija (max ${MAX_SAME_DIR_CRYPTO}, zajednički sa synapse_t) → preskačem`)) return done();
+  }
+
+  // BTC 4H regime alignment (LONG treba ne-BEAR, SHORT ne-BULL) — 4H regime, ne 1H
+  if ((dir === "LONG" && btcRegime === "BEAR") || (dir === "SHORT" && btcRegime === "BULL")) {
+    if (block(`BTC 4H režim ${btcRegime}`)) return done();
+  }
+
+  // Velocity kontra-signal gate — lagging signal protiv već obrnutog momentuma
+  const velocity = checkVelocity(candles);
+  if (velocity.sig !== 0 && ((dir === "LONG" && velocity.sig === -1) || (dir === "SHORT" && velocity.sig === 1))) {
+    if (block("velocity")) return done();
+  }
+
+  // 4H trend filter — close vs EMA20 na VLASTITOM 4H TF-u (19.09., ne posuđuje 1H sliku).
+  const closes = candles.map(c => c.close);
+  const ema20  = calcEMA(closes, 20);
+  const trend4 = ema20 ? (closes[closes.length - 1] > ema20 ? "BULL" : "BEAR") : "UNKNOWN";
+  if ((dir === "LONG" && trend4 === "BEAR") || (dir === "SHORT" && trend4 === "BULL")) {
+    if (block("4H trend")) return done();
+  }
+
+  // Day range filter — LONG samo u donjem dijelu dana (≤80% hard / ≤65% bez penala),
+  // SHORT samo u gornjem (≥20% hard / ≥35% bez penala). Isti obrazac kao synapse_t.
+  const dayHL = await fetchDayHL(symbol).catch(() => null);
+  if (dayHL && dayHL.high > dayHL.low) {
+    const liveP = (await fetchLivePrices([symbol]).catch(() => ({})))[symbol] ?? null;
+    if (liveP) {
+      const pos = (liveP - dayHL.low) / (dayHL.high - dayHL.low) * 100;
+      if ((dir === "LONG" && pos > 80) || (dir === "SHORT" && pos < 20)) {
+        if (block(`dan ${pos.toFixed(0)}%`)) return done();
+      } else if ((dir === "LONG" && pos > 65) || (dir === "SHORT" && pos < 35)) {
+        dayRangeSizeMult = 0.6;
+        notes.push(`  📊 [ULTRA-4H][DAY RANGE] ${symbol} — cijena na ${pos.toFixed(0)}% dana → ${dir} size ×0.6`);
+      }
+    }
+  }
+
+  // Liquidation Risk — visok rizik blokira LONG (kaskadni padovi mogući)
+  if (dir === "LONG" && liqScore !== null && liqScore > 75) {
+    if (block("liq risk")) return done();
+  }
+
+  return done();
+}
+
+// Dashboard: "bi li ULTRA-4H stvarno usao" — poziva ISTE gate-ove kao stvarni ulaz.
+let _u4hPreviewBtcRegime = { v: "UNKNOWN", ts: 0 };
+export async function previewU4hGates(symbol, candles4h, sig) {
+  if (!sig || sig.signal === "NEUTRAL" || !candles4h?.length) return { ok: false, blockers: [] };
+  if (isStockSym(symbol) || isMetalSym(symbol)) return { ok: false, blockers: ["nije kripto"] };
+  const now = Date.now();
+  const blockers = [];
+  const pre = u4hPreBlock(symbol);
+  if (pre) blockers.push(pre);
+  if (!checkVolumeAnomaly(candles4h).ok) blockers.push("volumen");
+  if (now - _u4hPreviewBtcRegime.ts > 60000) {
+    try { _u4hPreviewBtcRegime = { v: await getBtcRegime(), ts: now }; } catch { _u4hPreviewBtcRegime.ts = now; }
+  }
+  const g = await evaluateU4hGates({ symbol, candles: candles4h, sig, btcRegime: _u4hPreviewBtcRegime.v, liqScore: null, shortCircuit: false });
+  blockers.push(...g.blockers.map(b => b.text));
+  const nextClose = Math.ceil(now / (4 * 3600 * 1000)) * 4 * 3600 * 1000;
+  return { ok: blockers.length === 0, blockers, nextClose: new Date(nextClose).toISOString().slice(11, 16) };
+}
+
 export async function runUltra4hStrategy() {
   if (PAPER_TRADING) return;
   initCsv(ULTRA4H_PID);
@@ -6175,28 +6299,13 @@ export async function runUltra4hStrategy() {
   try { _dxyChange4 = (await getDxyData())?.change4h ?? null; } catch {}
   let _liqScore4 = null;
   try { _liqScore4 = (await getLiquidationRisk(symbols))?.overall ?? null; } catch {}
-  const _nightH4 = new Date().getUTCHours();
   const _dow4    = new Date().getUTCDay();
   let _newEntriesThisU4hScan = 0;
 
   for (const symbol of symbols) {
-    const openNow    = loadPositions(ULTRA4H_PID);
-    const synOpenNow = loadPositions("synapse_t");
-    if (openNow.length + synOpenNow.length >= getMaxOpenPositions()) break;
-    // 01.10., na zahtjev: strogi per-strategiju cap (4H max MAX_OPEN_4H, neovisno o ostalom).
-    if (openNow.length >= MAX_OPEN_4H) break;
-    const cryptoOpenNow = synOpenNow.filter(p => !isStockSym(p.symbol)).length + openNow.length;
-    // Isto — rani filter na VIP stropu, baza+VIP odluka je niže po signalu.
-    if (cryptoOpenNow >= MAX_OPEN_CRYPTO_VIP) break;
-    if (openNow.some(p => p.symbol === symbol)) continue;
-    // 02.10., na zahtjev: isti simbol ne smije drzati obje strategije (Bitget ih spaja u jednu poziciju).
-    if (synOpenNow.some(p => p.symbol === symbol)) continue;
-
-    // ── Isti gate-ovi kao synapse_t (19.09., na zahtjev) ─────────────────────
-    if (isBlacklisted(symbol)) continue;
-    // Noćna zona 20-06 UTC — hard block, dokazano -$9.19 kad je omeksano (vidi
-    // synapse_t komentar). Svi ULTRA-4H simboli su kripto, pa vrijedi za sve.
-    if (_nightH4 >= 20 || _nightH4 < 6) continue;
+    // Svi ulazni filteri su u u4hAbsoluteCapReason / u4hPreBlock / evaluateU4hGates (zajedno s dashboardom).
+    if (u4hAbsoluteCapReason()) break;
+    if (u4hPreBlock(symbol)) continue;
     if (_newEntriesThisU4hScan >= MAX_NEW_ENTRIES_PER_SCAN) continue;
 
     try {
@@ -6204,113 +6313,19 @@ export async function runUltra4hStrategy() {
 
       const volAnomaly = checkVolumeAnomaly(candles);
       if (!volAnomaly.ok) continue;
-      const velocity  = checkVelocity(candles);
       const atrTrend  = calcAtrTrend(candles);
 
       const sig = await analyzeUltra4hFull(candles, symbol, _u4hCfg);
       if (sig.signal === "NEUTRAL") continue;
 
-      // ── Ukupni kripto cap + korelacijski (same-dir) cap — 23.09., na zahtjev.
-      // Prije ovog fixa ULTRA-4H nije imao NIKAKAV same-dir gate (za razliku od
-      // synapse_t-ovog MAX_SAME_DIR_CRYPTO) — zato je 23.09. u 4 minute otvorio 8
-      // istovremenih LONG pozicija (BTC/ETH/SOL/BNB/LINK/RENDER/ATOM/ALGO) čim je
-      // BTC 4H regime flipnuo BULL, i sve su se ugasile zajedno kad se tržište
-      // okrenulo (isti obrazac kao 08.07. incident zbog kojeg je MAX_SAME_DIR_CRYPTO
-      // uveden — "jedna BTC oklada plaćena N puta"). Računa ZAJEDNIČKI preko
-      // synapse_t + ultra_4h jer dijele isti Bitget račun/margin.
-      {
-        const _u4hScore       = sig.signal === "LONG" ? (sig.bullScore ?? 0) : (sig.bearScore ?? 0);
-        const _u4hComboLen    = SYMBOL_COMBOS[symbol]?.sigIdx?.length ?? 8;
-        const _u4hVipEligible = _u4hScore >= 7 && _u4hComboLen >= 8;
-
-        // Ukupni crypto cap (baza MAX_OPEN_CRYPTO=7, VIP do MAX_OPEN_CRYPTO_VIP=10)
-        const _cryptoTotal = loadPositions("synapse_t").filter(p => !isStockSym(p.symbol)).length + loadPositions(ULTRA4H_PID).length;
-        if (_cryptoTotal >= MAX_OPEN_CRYPTO) {
-          if (_u4hVipEligible && _cryptoTotal < MAX_OPEN_CRYPTO_VIP) {
-            console.log(`  ⭐ [ULTRA-4H][VIP-CAP] ${symbol} — score ${_u4hScore}/${_u4hComboLen} ≥ 7 → dozvoljen preko baze (${_cryptoTotal}/${MAX_OPEN_CRYPTO}, VIP strop ${MAX_OPEN_CRYPTO_VIP})`);
-          } else {
-            console.log(`  🔒 [ULTRA-4H][MAX-CRYPTO] ${symbol} — ${_cryptoTotal}/${MAX_OPEN_CRYPTO} kripto ukupno (VIP strop ${MAX_OPEN_CRYPTO_VIP}) → preskačem`);
-            continue;
-          }
-        }
-
-        // Korelacijski cap — max MAX_SAME_DIR_CRYPTO kripto pozicija u ISTOM smjeru,
-        // ZAJEDNIČKI preko synapse_t + ultra_4h (jedan BTC-beta trade se ne smije
-        // platiti dvaput preko dvije strategije na istom računu).
-        const _openCryptoSameDir = [
-          ...loadPositions("synapse_t").filter(p => !isStockSym(p.symbol)),
-          ...loadPositions(ULTRA4H_PID),
-        ].filter(p => p.side === sig.signal);
-        const _sameDir4 = _openCryptoSameDir.length;
-        if (_sameDir4 >= MAX_SAME_DIR_CRYPTO) {
-          const _vipCount4 = _openCryptoSameDir.filter(p => p.vipSlot === true).length;
-          if (_u4hVipEligible && _vipCount4 < MAX_VIP_SAME_DIR) {
-            console.log(`  ⭐ [ULTRA-4H][VIP] ${symbol} — score ${_u4hScore}/${_u4hComboLen} ≥ 7 → VIP slot (${_sameDir4}/${MAX_SAME_DIR_CRYPTO}, VIP ${_vipCount4+1}/${MAX_VIP_SAME_DIR})`);
-            sig._vipSlot = true;
-          } else {
-            console.log(`  🔗 [ULTRA-4H][SAME-DIR] ${symbol} — već ${_sameDir4} kripto ${sig.signal} pozicija (max ${MAX_SAME_DIR_CRYPTO}, zajednički sa synapse_t) → preskačem`);
-            continue;
-          }
-        }
-      }
-
-      // BTC 4H regime alignment (LONG treba ne-BEAR, SHORT ne-BULL) — 4H regime, ne 1H
-      if (sig.signal === "LONG" && _btcRegime4 === "BEAR") continue;
-      if (sig.signal === "SHORT" && _btcRegime4 === "BULL") continue;
-
-      // Velocity kontra-signal gate — lagging signal protiv već obrnutog momentuma
-      if (velocity.sig !== 0) {
-        if (sig.signal === "LONG" && velocity.sig === -1) continue;
-        if (sig.signal === "SHORT" && velocity.sig === 1) continue;
-      }
-
-      // 4H trend filter — isti koncept kao synapse_t-ov "1H trend filter" (calcTrend1H:
-      // close vs EMA20), ali računat na VLASTITOM 4H TF-u (već dohvaćeni candles), ne na
-      // 1H — 19.09., ispravljeno na zahtjev: 4H strategija mora gledati 4H signale, ne
-      // posuđivati 1H sliku od glavnog bota.
-      const _closes4h = candles.map(c => c.close);
-      const _ema20_4h = calcEMA(_closes4h, 20);
-      const _trend4h  = _ema20_4h ? (_closes4h[_closes4h.length - 1] > _ema20_4h ? "BULL" : "BEAR") : "UNKNOWN";
-      if (sig.signal === "LONG" && _trend4h === "BEAR") continue;
-      if (sig.signal === "SHORT" && _trend4h === "BULL") continue;
-
-      // Day range filter — LONG samo u donjem dijelu dana (≤80% hard / ≤65% bez penala),
-      // SHORT samo u gornjem (≥20% hard / ≥35% bez penala). Isti obrazac kao synapse_t.
-      let _dayRangeSizeMult4 = 1.0;
-      {
-        const _dayHL4 = await fetchDayHL(symbol).catch(() => null);
-        if (_dayHL4 && _dayHL4.high > _dayHL4.low) {
-          const _hlRange4  = _dayHL4.high - _dayHL4.low;
-          const _liveMap4  = await fetchLivePrices([symbol]).catch(() => ({}));
-          const _liveP4    = _liveMap4[symbol] ?? null;
-          if (_liveP4) {
-            const _posInRange4 = (_liveP4 - _dayHL4.low) / _hlRange4 * 100;
-            if (sig.signal === "LONG" && _posInRange4 > 80) continue;
-            if (sig.signal === "SHORT" && _posInRange4 < 20) continue;
-            if (sig.signal === "LONG" && _posInRange4 > 65) {
-              _dayRangeSizeMult4 = 0.6;
-              console.log(`  📊 [ULTRA-4H][DAY RANGE] ${symbol} — cijena na ${_posInRange4.toFixed(0)}% dana → LONG size ×0.6`);
-            } else if (sig.signal === "SHORT" && _posInRange4 < 35) {
-              _dayRangeSizeMult4 = 0.6;
-              console.log(`  📊 [ULTRA-4H][DAY RANGE] ${symbol} — cijena na ${_posInRange4.toFixed(0)}% dana → SHORT size ×0.6`);
-            }
-          }
-        }
-      }
-
-      // Liquidation Risk — visok rizik blokira LONG (kaskadni padovi mogući)
-      if (sig.signal === "LONG" && _liqScore4 !== null && _liqScore4 > 75) continue;
-
-      // Cross-strategy kolizija (18.09., olabavljeno na zahtjev nakon closeBitGetOrder
-      // fixa — Bitget merge vise nije opasan jer close sad zatvara SAMO nasu kolicinu).
-      // Dopusteno: isti simbol, ISTI smjer (dodaje se na Bitgetov merge, obje strane
-      // i dalje prate SVOJ udio odvojeno). Blokirano: isti simbol, SUPROTAN smjer
-      // (hedge na dijeljenom racunu je besmislen — jedna bi strana placala spread).
-      const _otherPos = [...loadPositions("synapse_t"), ...loadPositions(EMA_RSI_PID)].find(p => p.symbol === symbol);
-      if (_otherPos && _otherPos.side !== sig.signal) {
-        console.log(`  🔒 [ULTRA-4H] ${symbol} — ${_otherPos.portfolio || "druga strategija"} drži ${_otherPos.side}, mi ${sig.signal} → suprotan smjer, skip`);
+      const gates = await evaluateU4hGates({ symbol, candles, sig, btcRegime: _btcRegime4, liqScore: _liqScore4, shortCircuit: true });
+      for (const n of gates.notes) console.log(n);
+      if (!gates.ok) {
+        if (gates.blockers[0]?.log) console.log(gates.blockers[0].log);
         continue;
       }
+      if (gates.vipSlot) sig._vipSlot = true;
+      const _dayRangeSizeMult4 = gates.dayRangeSizeMult;
 
       const lev = getSafeLeverage(sig.slPct);
       const _liveEq    = await fetchBitgetEquity();

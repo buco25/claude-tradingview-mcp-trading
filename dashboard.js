@@ -21,7 +21,7 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   DEFAULT_COMBO, DEFAULT_MIN_SIG,
   RISK_PCT, RISK_PCT_MIN, RISK_PCT_MAX,
   ADX_MIN, ADX_SOFT_BAND, ADX_SOFT_FLOOR, MOM_SOFT_BAND, MOM_ADX_MIN,
-  MAX_OPEN_CRYPTO, MAX_OPEN_STOCKS } from "./bot.js";
+  MAX_OPEN_CRYPTO, MAX_OPEN_STOCKS, getCapSnapshot } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -1456,6 +1456,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}, ultra4hPositions = [
     ? `<span class="badge green-badge">🟢 Bot ${hbLabel}</span>`
     : `<span class="badge red-badge">🔴 Bot ${hb ? hbLabel + " — STAO!" : "nikad nije radio"}</span>`;
   const modeLbl  = process.env.PAPER_TRADING !== "false" ? "PAPER" : process.env.BITGET_DEMO === "true" ? "DEMO" : "LIVE";
+  const capSnap  = getCapSnapshot();
 
   // ULTRA — jedini portfolio
   const def   = PORTFOLIO_DEFS[0];
@@ -1839,8 +1840,10 @@ function renderHtml(allStats, allPositions, hb, rules = {}, ultra4hPositions = [
     </div>
     <div class="stat-card">
       <div class="stat-label">Otvoreno <span style="font-size:10px;color:#9ca3af">(+ULTRA-4H)</span></div>
-      <div class="stat-value" style="color:#d97706">${positions.length + ultra4hPositions.length}<span style="font-size:14px;color:#6b7280">/${MAX_OPEN_CRYPTO + MAX_OPEN_STOCKS}</span></div>
-      <div class="stat-sub">${positions.filter(p => !isStockSym(p.symbol)).length + ultra4hPositions.length} kripto + ${positions.filter(p => isStockSym(p.symbol)).length} dionice (max ${MAX_OPEN_CRYPTO}+${MAX_OPEN_STOCKS})</div>
+      <div class="stat-value" style="color:${capSnap.total >= capSnap.totalMax ? "#ef4444" : "#d97706"}">${capSnap.total}<span style="font-size:14px;color:#6b7280">/${capSnap.totalMax}</span></div>
+      <div class="stat-sub">1H ${capSnap.h1}/${capSnap.h1Max} · 4H ${capSnap.h4}/${capSnap.h4Max}</div>
+      <div class="stat-sub">kripto ${capSnap.crypto}/${capSnap.cryptoMax} · dionice ${capSnap.stocks}/${capSnap.stocksMax}</div>
+      ${capSnap.weekend ? `<div class="stat-sub" style="color:#f59e0b">VIKEND: ukupni cap ${capSnap.totalMax}${capSnap.total >= capSnap.totalMax ? " — pun, nema novih ulaza" : ""}</div>` : ""}
     </div>
     <div class="stat-card">
       <div class="stat-label">Strategija</div>

@@ -85,6 +85,20 @@ function getMaxOpenPositions() {
   const dow = new Date().getUTCDay();
   return (dow === 0 || dow === 6) ? WEEKEND_MAX_OPEN : MAX_OPEN_PER_PORTFOLIO;
 }
+// 04.10., na zahtjev: jedan izvor istine za dashboard "Otvoreno" karticu — stvarni limiti (ukupni
+// cap je 11 radnim danom, a WEEKEND_MAX_OPEN=5 preko vikenda; 1H i 4H imaju svoje capove).
+export function getCapSnapshot() {
+  const syn = loadPositions("synapse_t"), u4h = loadPositions(ULTRA4H_PID);
+  const dow = new Date().getUTCDay();
+  return {
+    weekend:   dow === 0 || dow === 6,
+    total:     syn.length + u4h.length,   totalMax:  getMaxOpenPositions(),
+    h1:        syn.length,                h1Max:     MAX_OPEN_1H,
+    h4:        u4h.length,                h4Max:     MAX_OPEN_4H,
+    crypto:    syn.filter(p => !isStockSym(p.symbol)).length + u4h.length, cryptoMax: MAX_OPEN_CRYPTO,
+    stocks:    syn.filter(p => isStockSym(p.symbol)).length,               stocksMax: MAX_OPEN_STOCKS,
+  };
+}
 export const isStockSym = (s) => (SYMBOL_SECTORS[s] || "").startsWith("STOCK_");
 // Metali (PAXG/XAU/XAG, 26.08.) — zlato ne prati BTC kao altcoini, izuzeti iz
 // BTC-korelacijskih gateova (weekly key-level SHORT, BTC dEMA10 LONG, REL-STR vs BTC).

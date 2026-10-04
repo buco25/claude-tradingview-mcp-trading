@@ -18,7 +18,7 @@ audit nađe nalaz
 Pravila koja to drže na mjestu:
 
 - **Nalazi žive u `docs/AUDIT-2026-10-04.md`, ne u chatu.** Numeracija je neprekinuta kroz
-  prolaze (zadnji je #14). Nikad ne počinji numeraciju od 1 i ne prijavljuj ponovno nalaz koji
+  prolaze (zadnji je #18). Nikad ne počinji numeraciju od 1 i ne prijavljuj ponovno nalaz koji
   je tamo već zapisan — ako je regresirao, reci da je regresija.
 - **Predaja drugoj sesiji je datoteka, ne poruka.** Ako posao preuzima druga sesija, uputa joj je
   "pročitaj `CLAUDE.md` i `docs/AUDIT-2026-10-04.md`, pa popravi #N" — ne zalijepljeni blok.

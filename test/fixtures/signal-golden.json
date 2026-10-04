@@ -1,0 +1,5407 @@
+{
+  "_note": "Generirano s `node test/signal-regression.mjs --update`. Ne editiraj ručno.",
+  "_frozenClock": "2026-09-30T12:00:00.000Z",
+  "_cases": 600,
+  "rows": {
+    "1|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "1|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "1|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "1|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "1|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "1|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "1|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "1|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "1|choppy|TAOUSDT": {
+      "signal": "SHORT",
+      "bull": 2,
+      "bear": 3,
+      "mom": true,
+      "slPct": 3.6221,
+      "tpPct": 9.0552,
+      "sigMask": 73
+    },
+    "1|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "1|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "1|slow-up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "1|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "1|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "1|slow-down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "2|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "2|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "2|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "2|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "2|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "2|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "2|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "2|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "2|choppy|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "2|slow-up|BTCUSDT": {
+      "signal": "LONG",
+      "bull": 4,
+      "bear": 0,
+      "mom": true,
+      "slPct": 1.2786,
+      "tpPct": 3.1966,
+      "sigMask": 79
+    },
+    "2|slow-up|ETHUSDT": {
+      "signal": "LONG",
+      "bull": 4,
+      "bear": 0,
+      "mom": true,
+      "slPct": 1.2786,
+      "tpPct": 3.1966,
+      "sigMask": 79
+    },
+    "2|slow-up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "2|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "2|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "2|slow-down|TAOUSDT": {
+      "signal": "SHORT",
+      "bull": 1,
+      "bear": 3,
+      "mom": true,
+      "slPct": 1.2746,
+      "tpPct": 3.1865,
+      "sigMask": 73
+    },
+    "3|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "3|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "3|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "3|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "3|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "3|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "3|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "3|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "3|choppy|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "3|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "3|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "3|slow-up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "3|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "3|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "3|slow-down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "4|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "4|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "4|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "4|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "4|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "4|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "4|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "4|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "4|choppy|TAOUSDT": {
+      "signal": "SHORT",
+      "bull": 0,
+      "bear": 3,
+      "mom": true,
+      "slPct": 3.6632,
+      "tpPct": 9.1581,
+      "sigMask": 13
+    },
+    "4|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "4|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "4|slow-up|TAOUSDT": {
+      "signal": "LONG",
+      "bull": 3,
+      "bear": 1,
+      "mom": true,
+      "slPct": 1.1966,
+      "tpPct": 2.9914,
+      "sigMask": 203
+    },
+    "4|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "4|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "4|slow-down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "5|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "5|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "5|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "5|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "5|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "5|down|TAOUSDT": {
+      "signal": "SHORT",
+      "bull": 1,
+      "bear": 3,
+      "mom": true,
+      "slPct": 2.3216,
+      "tpPct": 5.804,
+      "sigMask": 75
+    },
+    "5|choppy|BTCUSDT": {
+      "signal": "LONG",
+      "bull": 4,
+      "bear": 0,
+      "mom": true,
+      "slPct": 3.782,
+      "tpPct": 9.4549,
+      "sigMask": 77
+    },
+    "5|choppy|ETHUSDT": {
+      "signal": "LONG",
+      "bull": 4,
+      "bear": 0,
+      "mom": true,
+      "slPct": 3.782,
+      "tpPct": 9.4549,
+      "sigMask": 77
+    },
+    "5|choppy|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "5|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "5|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "5|slow-up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "5|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "5|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "5|slow-down|TAOUSDT": {
+      "signal": "SHORT",
+      "bull": 1,
+      "bear": 3,
+      "mom": true,
+      "slPct": 1.3523,
+      "tpPct": 3.3807,
+      "sigMask": 75
+    },
+    "6|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "6|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "6|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "6|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "6|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "6|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "6|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "6|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "6|choppy|TAOUSDT": {
+      "signal": "LONG",
+      "bull": 3,
+      "bear": 0,
+      "mom": true,
+      "slPct": 3.318,
+      "tpPct": 8.2949,
+      "sigMask": 13
+    },
+    "6|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "6|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "6|slow-up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "6|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "6|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "6|slow-down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "7|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "7|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "7|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "7|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "7|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "7|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "7|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "7|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "7|choppy|TAOUSDT": {
+      "signal": "LONG",
+      "bull": 3,
+      "bear": 1,
+      "mom": true,
+      "slPct": 3.7425,
+      "tpPct": 9.3564,
+      "sigMask": 459
+    },
+    "7|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "7|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "7|slow-up|TAOUSDT": {
+      "signal": "LONG",
+      "bull": 3,
+      "bear": 1,
+      "mom": true,
+      "slPct": 1.2876,
+      "tpPct": 3.2191,
+      "sigMask": 75
+    },
+    "7|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "7|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "7|slow-down|TAOUSDT": {
+      "signal": "SHORT",
+      "bull": 1,
+      "bear": 3,
+      "mom": true,
+      "slPct": 1.3019,
+      "tpPct": 3.2547,
+      "sigMask": 13
+    },
+    "8|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "8|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "8|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "8|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "8|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "8|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "8|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "8|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "8|choppy|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "8|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "8|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "8|slow-up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "8|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "8|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "8|slow-down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "9|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "9|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "9|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "9|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "9|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "9|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "9|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "9|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "9|choppy|TAOUSDT": {
+      "signal": "LONG",
+      "bull": 3,
+      "bear": 1,
+      "mom": true,
+      "slPct": 3.5838,
+      "tpPct": 8.9594,
+      "sigMask": 75
+    },
+    "9|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "9|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "9|slow-up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "9|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "9|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "9|slow-down|TAOUSDT": {
+      "signal": "SHORT",
+      "bull": 0,
+      "bear": 3,
+      "mom": true,
+      "slPct": 1.2967,
+      "tpPct": 3.2418,
+      "sigMask": 13
+    },
+    "10|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "10|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "10|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "10|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "10|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "10|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "10|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "10|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "10|choppy|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "10|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "10|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "10|slow-up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "10|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "10|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "10|slow-down|TAOUSDT": {
+      "signal": "SHORT",
+      "bull": 2,
+      "bear": 3,
+      "mom": true,
+      "slPct": 1.4251,
+      "tpPct": 3.5628,
+      "sigMask": 75
+    },
+    "11|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "11|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "11|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "11|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "11|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "11|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "11|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "11|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "11|choppy|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "11|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "11|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "11|slow-up|TAOUSDT": {
+      "signal": "LONG",
+      "bull": 3,
+      "bear": 2,
+      "mom": true,
+      "slPct": 1.3111,
+      "tpPct": 3.2777,
+      "sigMask": 73
+    },
+    "11|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "11|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "11|slow-down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "12|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "12|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "12|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "12|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "12|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "12|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "12|choppy|BTCUSDT": {
+      "signal": "SHORT",
+      "bull": 0,
+      "bear": 4,
+      "mom": true,
+      "slPct": 3.8693,
+      "tpPct": 9.6732,
+      "sigMask": 79
+    },
+    "12|choppy|ETHUSDT": {
+      "signal": "SHORT",
+      "bull": 0,
+      "bear": 4,
+      "mom": true,
+      "slPct": 3.8693,
+      "tpPct": 9.6732,
+      "sigMask": 79
+    },
+    "12|choppy|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "12|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "12|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "12|slow-up|TAOUSDT": {
+      "signal": "LONG",
+      "bull": 3,
+      "bear": 1,
+      "mom": true,
+      "slPct": 1.2629,
+      "tpPct": 3.1573,
+      "sigMask": 73
+    },
+    "12|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "12|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "12|slow-down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "13|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "13|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "13|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "13|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "13|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "13|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "13|choppy|BTCUSDT": {
+      "signal": "LONG",
+      "bull": 4,
+      "bear": 0,
+      "mom": true,
+      "slPct": 3.6573,
+      "tpPct": 9.1432,
+      "sigMask": 79
+    },
+    "13|choppy|ETHUSDT": {
+      "signal": "LONG",
+      "bull": 4,
+      "bear": 0,
+      "mom": true,
+      "slPct": 3.6573,
+      "tpPct": 9.1432,
+      "sigMask": 79
+    },
+    "13|choppy|TAOUSDT": {
+      "signal": "LONG",
+      "bull": 4,
+      "bear": 0,
+      "mom": false,
+      "slPct": 3.6573,
+      "tpPct": 9.1432,
+      "sigMask": 79
+    },
+    "13|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "13|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "13|slow-up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "13|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "13|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "13|slow-down|TAOUSDT": {
+      "signal": "SHORT",
+      "bull": 1,
+      "bear": 3,
+      "mom": true,
+      "slPct": 1.2911,
+      "tpPct": 3.2277,
+      "sigMask": 73
+    },
+    "14|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "14|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "14|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "14|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "14|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "14|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "14|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "14|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "14|choppy|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "14|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "14|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "14|slow-up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "14|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "14|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "14|slow-down|TAOUSDT": {
+      "signal": "SHORT",
+      "bull": 1,
+      "bear": 3,
+      "mom": true,
+      "slPct": 1.3664,
+      "tpPct": 3.416,
+      "sigMask": 13
+    },
+    "15|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "15|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "15|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "15|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "15|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "15|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "15|choppy|BTCUSDT": {
+      "signal": "SHORT",
+      "bull": 0,
+      "bear": 4,
+      "mom": true,
+      "slPct": 3.9888,
+      "tpPct": 9.972,
+      "sigMask": 79
+    },
+    "15|choppy|ETHUSDT": {
+      "signal": "SHORT",
+      "bull": 0,
+      "bear": 4,
+      "mom": true,
+      "slPct": 3.9888,
+      "tpPct": 9.972,
+      "sigMask": 79
+    },
+    "15|choppy|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "15|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "15|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "15|slow-up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "15|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "15|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "15|slow-down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "16|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "16|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "16|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "16|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "16|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "16|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "16|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "16|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "16|choppy|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "16|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "16|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "16|slow-up|TAOUSDT": {
+      "signal": "LONG",
+      "bull": 3,
+      "bear": 2,
+      "mom": true,
+      "slPct": 1.2083,
+      "tpPct": 3.0207,
+      "sigMask": 75
+    },
+    "16|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "16|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "16|slow-down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "17|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "17|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "17|up|TAOUSDT": {
+      "signal": "LONG",
+      "bull": 3,
+      "bear": 1,
+      "mom": true,
+      "slPct": 2.1419,
+      "tpPct": 5.3547,
+      "sigMask": 75
+    },
+    "17|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "17|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "17|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "17|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "17|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "17|choppy|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "17|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "17|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "17|slow-up|TAOUSDT": {
+      "signal": "LONG",
+      "bull": 3,
+      "bear": 2,
+      "mom": true,
+      "slPct": 1.3014,
+      "tpPct": 3.2534,
+      "sigMask": 75
+    },
+    "17|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "17|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "17|slow-down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "18|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "18|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "18|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "18|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "18|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "18|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "18|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "18|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "18|choppy|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "18|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "18|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "18|slow-up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "18|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "18|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "18|slow-down|TAOUSDT": {
+      "signal": "SHORT",
+      "bull": 1,
+      "bear": 3,
+      "mom": true,
+      "slPct": 1.3228,
+      "tpPct": 3.3071,
+      "sigMask": 75
+    },
+    "19|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "19|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "19|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "19|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "19|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "19|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "19|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "19|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "19|choppy|TAOUSDT": {
+      "signal": "SHORT",
+      "bull": 0,
+      "bear": 3,
+      "mom": true,
+      "slPct": 3.6076,
+      "tpPct": 9.0191,
+      "sigMask": 13
+    },
+    "19|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "19|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "19|slow-up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "19|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "19|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "19|slow-down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "20|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "20|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "20|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "20|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "20|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "20|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "20|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "20|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "20|choppy|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "20|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "20|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "20|slow-up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "20|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "20|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "20|slow-down|TAOUSDT": {
+      "signal": "SHORT",
+      "bull": 1,
+      "bear": 3,
+      "mom": true,
+      "slPct": 1.2231,
+      "tpPct": 3.0578,
+      "sigMask": 75
+    },
+    "21|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "21|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "21|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "21|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "21|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "21|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "21|choppy|BTCUSDT": {
+      "signal": "LONG",
+      "bull": 4,
+      "bear": 0,
+      "mom": true,
+      "slPct": 3.7965,
+      "tpPct": 9.4913,
+      "sigMask": 77
+    },
+    "21|choppy|ETHUSDT": {
+      "signal": "LONG",
+      "bull": 4,
+      "bear": 0,
+      "mom": true,
+      "slPct": 3.7965,
+      "tpPct": 9.4913,
+      "sigMask": 77
+    },
+    "21|choppy|TAOUSDT": {
+      "signal": "LONG",
+      "bull": 4,
+      "bear": 0,
+      "mom": false,
+      "slPct": 3.7965,
+      "tpPct": 9.4913,
+      "sigMask": 77
+    },
+    "21|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "21|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "21|slow-up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "21|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "21|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "21|slow-down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "22|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "22|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "22|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "22|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "22|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "22|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "22|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "22|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "22|choppy|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "22|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "22|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "22|slow-up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "22|slow-down|BTCUSDT": {
+      "signal": "SHORT",
+      "bull": 0,
+      "bear": 4,
+      "mom": true,
+      "slPct": 1.4047,
+      "tpPct": 3.5118,
+      "sigMask": 79
+    },
+    "22|slow-down|ETHUSDT": {
+      "signal": "SHORT",
+      "bull": 0,
+      "bear": 4,
+      "mom": true,
+      "slPct": 1.4047,
+      "tpPct": 3.5118,
+      "sigMask": 79
+    },
+    "22|slow-down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "23|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "23|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "23|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "23|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "23|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "23|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "23|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "23|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "23|choppy|TAOUSDT": {
+      "signal": "SHORT",
+      "bull": 1,
+      "bear": 3,
+      "mom": true,
+      "slPct": 3.8571,
+      "tpPct": 9.6429,
+      "sigMask": 69
+    },
+    "23|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "23|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "23|slow-up|TAOUSDT": {
+      "signal": "LONG",
+      "bull": 3,
+      "bear": 2,
+      "mom": true,
+      "slPct": 1.3107,
+      "tpPct": 3.2768,
+      "sigMask": 75
+    },
+    "23|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "23|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "23|slow-down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "24|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "24|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "24|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "24|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "24|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "24|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "24|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "24|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "24|choppy|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "24|slow-up|BTCUSDT": {
+      "signal": "LONG",
+      "bull": 4,
+      "bear": 0,
+      "mom": true,
+      "slPct": 1.4139,
+      "tpPct": 3.5346,
+      "sigMask": 79
+    },
+    "24|slow-up|ETHUSDT": {
+      "signal": "LONG",
+      "bull": 4,
+      "bear": 0,
+      "mom": true,
+      "slPct": 1.4139,
+      "tpPct": 3.5346,
+      "sigMask": 79
+    },
+    "24|slow-up|TAOUSDT": {
+      "signal": "LONG",
+      "bull": 4,
+      "bear": 0,
+      "mom": false,
+      "slPct": 1.4139,
+      "tpPct": 3.5346,
+      "sigMask": 79
+    },
+    "24|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "24|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "24|slow-down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "25|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "25|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "25|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "25|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "25|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "25|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "25|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "25|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "25|choppy|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "25|slow-up|BTCUSDT": {
+      "signal": "LONG",
+      "bull": 4,
+      "bear": 0,
+      "mom": true,
+      "slPct": 1.1839,
+      "tpPct": 2.9598,
+      "sigMask": 77
+    },
+    "25|slow-up|ETHUSDT": {
+      "signal": "LONG",
+      "bull": 4,
+      "bear": 0,
+      "mom": true,
+      "slPct": 1.1839,
+      "tpPct": 2.9598,
+      "sigMask": 77
+    },
+    "25|slow-up|TAOUSDT": {
+      "signal": "LONG",
+      "bull": 4,
+      "bear": 0,
+      "mom": false,
+      "slPct": 1.1839,
+      "tpPct": 2.9598,
+      "sigMask": 77
+    },
+    "25|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "25|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "25|slow-down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "26|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "26|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "26|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "26|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "26|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "26|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "26|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "26|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "26|choppy|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "26|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "26|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "26|slow-up|TAOUSDT": {
+      "signal": "LONG",
+      "bull": 3,
+      "bear": 1,
+      "mom": true,
+      "slPct": 1.3186,
+      "tpPct": 3.2964,
+      "sigMask": 73
+    },
+    "26|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "26|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "26|slow-down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "27|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "27|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "27|up|TAOUSDT": {
+      "signal": "LONG",
+      "bull": 3,
+      "bear": 1,
+      "mom": true,
+      "slPct": 2.0054,
+      "tpPct": 5.0136,
+      "sigMask": 73
+    },
+    "27|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "27|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "27|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "27|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "27|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "27|choppy|TAOUSDT": {
+      "signal": "SHORT",
+      "bull": 1,
+      "bear": 3,
+      "mom": true,
+      "slPct": 3.8087,
+      "tpPct": 9.5218,
+      "sigMask": 15
+    },
+    "27|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "27|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "27|slow-up|TAOUSDT": {
+      "signal": "LONG",
+      "bull": 3,
+      "bear": 1,
+      "mom": true,
+      "slPct": 1.2302,
+      "tpPct": 3.0755,
+      "sigMask": 73
+    },
+    "27|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "27|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "27|slow-down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "28|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "28|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "28|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "28|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "28|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "28|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "28|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "28|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "28|choppy|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "28|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "28|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "28|slow-up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "28|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "28|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "28|slow-down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "29|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "29|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "29|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "29|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "29|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "29|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "29|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "29|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "29|choppy|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "29|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "29|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "29|slow-up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "29|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "29|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "29|slow-down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "30|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "30|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "30|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "30|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "30|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "30|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "30|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "30|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "30|choppy|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "30|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "30|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "30|slow-up|TAOUSDT": {
+      "signal": "LONG",
+      "bull": 3,
+      "bear": 1,
+      "mom": true,
+      "slPct": 1.3496,
+      "tpPct": 3.3739,
+      "sigMask": 75
+    },
+    "30|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "30|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "30|slow-down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "31|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "31|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "31|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "31|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "31|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "31|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "31|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "31|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "31|choppy|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "31|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "31|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "31|slow-up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "31|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "31|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "31|slow-down|TAOUSDT": {
+      "signal": "SHORT",
+      "bull": 1,
+      "bear": 3,
+      "mom": true,
+      "slPct": 1.2397,
+      "tpPct": 3.0993,
+      "sigMask": 75
+    },
+    "32|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "32|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "32|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "32|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "32|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "32|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "32|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "32|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "32|choppy|TAOUSDT": {
+      "signal": "LONG",
+      "bull": 3,
+      "bear": 1,
+      "mom": true,
+      "slPct": 3.6348,
+      "tpPct": 9.0869,
+      "sigMask": 73
+    },
+    "32|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "32|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "32|slow-up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "32|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "32|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "32|slow-down|TAOUSDT": {
+      "signal": "SHORT",
+      "bull": 0,
+      "bear": 3,
+      "mom": true,
+      "slPct": 1.3016,
+      "tpPct": 3.2541,
+      "sigMask": 15
+    },
+    "33|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "33|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "33|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "33|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "33|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "33|down|TAOUSDT": {
+      "signal": "SHORT",
+      "bull": 1,
+      "bear": 3,
+      "mom": true,
+      "slPct": 2.3309,
+      "tpPct": 5.8272,
+      "sigMask": 203
+    },
+    "33|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "33|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "33|choppy|TAOUSDT": {
+      "signal": "LONG",
+      "bull": 3,
+      "bear": 1,
+      "mom": true,
+      "slPct": 3.7839,
+      "tpPct": 9.4598,
+      "sigMask": 13
+    },
+    "33|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "33|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "33|slow-up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "33|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "33|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "33|slow-down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "34|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "34|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "34|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "34|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "34|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "34|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "34|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "34|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "34|choppy|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "34|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "34|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "34|slow-up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "34|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "34|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "34|slow-down|TAOUSDT": {
+      "signal": "SHORT",
+      "bull": 1,
+      "bear": 3,
+      "mom": true,
+      "slPct": 1.1585,
+      "tpPct": 2.8962,
+      "sigMask": 73
+    },
+    "35|up|BTCUSDT": {
+      "signal": "LONG",
+      "bull": 4,
+      "bear": 1,
+      "mom": true,
+      "slPct": 2.3028,
+      "tpPct": 5.757,
+      "sigMask": 79
+    },
+    "35|up|ETHUSDT": {
+      "signal": "LONG",
+      "bull": 4,
+      "bear": 1,
+      "mom": true,
+      "slPct": 2.3028,
+      "tpPct": 5.757,
+      "sigMask": 79
+    },
+    "35|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "35|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "35|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "35|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "35|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "35|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "35|choppy|TAOUSDT": {
+      "signal": "SHORT",
+      "bull": 1,
+      "bear": 3,
+      "mom": true,
+      "slPct": 4.1785,
+      "tpPct": 10.4462,
+      "sigMask": 73
+    },
+    "35|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "35|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "35|slow-up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "35|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "35|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "35|slow-down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "36|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "36|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "36|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "36|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "36|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "36|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "36|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "36|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "36|choppy|TAOUSDT": {
+      "signal": "SHORT",
+      "bull": 1,
+      "bear": 3,
+      "mom": true,
+      "slPct": 3.6848,
+      "tpPct": 9.212,
+      "sigMask": 75
+    },
+    "36|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "36|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "36|slow-up|TAOUSDT": {
+      "signal": "LONG",
+      "bull": 3,
+      "bear": 0,
+      "mom": true,
+      "slPct": 1.2251,
+      "tpPct": 3.0629,
+      "sigMask": 13
+    },
+    "36|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "36|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "36|slow-down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "37|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "37|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "37|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "37|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "37|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "37|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "37|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "37|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "37|choppy|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "37|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "37|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "37|slow-up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "37|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "37|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "37|slow-down|TAOUSDT": {
+      "signal": "SHORT",
+      "bull": 2,
+      "bear": 3,
+      "mom": true,
+      "slPct": 1.2737,
+      "tpPct": 3.1842,
+      "sigMask": 75
+    },
+    "38|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "38|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "38|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "38|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "38|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "38|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "38|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "38|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "38|choppy|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "38|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "38|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "38|slow-up|TAOUSDT": {
+      "signal": "LONG",
+      "bull": 3,
+      "bear": 2,
+      "mom": true,
+      "slPct": 1.2122,
+      "tpPct": 3.0304,
+      "sigMask": 75
+    },
+    "38|slow-down|BTCUSDT": {
+      "signal": "SHORT",
+      "bull": 1,
+      "bear": 4,
+      "mom": true,
+      "slPct": 1.2756,
+      "tpPct": 3.189,
+      "sigMask": 77
+    },
+    "38|slow-down|ETHUSDT": {
+      "signal": "SHORT",
+      "bull": 1,
+      "bear": 4,
+      "mom": true,
+      "slPct": 1.2756,
+      "tpPct": 3.189,
+      "sigMask": 77
+    },
+    "38|slow-down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "39|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "39|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "39|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "39|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "39|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "39|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "39|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "39|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "39|choppy|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "39|slow-up|BTCUSDT": {
+      "signal": "LONG",
+      "bull": 4,
+      "bear": 0,
+      "mom": true,
+      "slPct": 1.3774,
+      "tpPct": 3.4436,
+      "sigMask": 77
+    },
+    "39|slow-up|ETHUSDT": {
+      "signal": "LONG",
+      "bull": 4,
+      "bear": 0,
+      "mom": true,
+      "slPct": 1.3774,
+      "tpPct": 3.4436,
+      "sigMask": 77
+    },
+    "39|slow-up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "39|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "39|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "39|slow-down|TAOUSDT": {
+      "signal": "SHORT",
+      "bull": 2,
+      "bear": 3,
+      "mom": true,
+      "slPct": 1.4252,
+      "tpPct": 3.5631,
+      "sigMask": 75
+    },
+    "40|up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "40|up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "40|up|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "40|down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "40|down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "40|down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "40|choppy|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "40|choppy|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "40|choppy|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "40|slow-up|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "40|slow-up|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "40|slow-up|TAOUSDT": {
+      "signal": "LONG",
+      "bull": 3,
+      "bear": 1,
+      "mom": true,
+      "slPct": 1.1679,
+      "tpPct": 2.9197,
+      "sigMask": 73
+    },
+    "40|slow-down|BTCUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "40|slow-down|ETHUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    },
+    "40|slow-down|TAOUSDT": {
+      "signal": "NEUTRAL",
+      "bull": null,
+      "bear": null,
+      "mom": false,
+      "slPct": null,
+      "tpPct": null,
+      "sigMask": null
+    }
+  }
+}

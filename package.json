@@ -7,7 +7,9 @@
   "scripts": {
     "start": "node dashboard.js",
     "dev": "node dashboard.js",
-    "bot": "node bot.js"
+    "bot": "node bot.js",
+    "test": "node test/signal-regression.mjs",
+    "test:update": "node test/signal-regression.mjs --update"
   },
   "dependencies": {
     "adm-zip": "^0.5.17",

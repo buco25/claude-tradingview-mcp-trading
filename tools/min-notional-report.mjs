@@ -57,12 +57,18 @@ function analyse(pid) {
   // Samo ULAZNI retci (izlazni imaju CLOSE_LONG/CLOSE_SHORT)
   const entries = rows.filter(r => r.Side === "LONG" || r.Side === "SHORT");
   const out = [];
+  let skippedNoSl = 0;
   for (const r of entries) {
     const notional = num(r["Total USD"]);
     const price = num(r.Price);
     const sl = num(r.SL);
-    if (notional === null || !price || sl === null) continue;
+    if (notional === null || !price) continue;
+    // Stari retci (do ~05/2026) imaju SL = 0 jer se tada SL nije upisivao u CSV. Bez njega
+    // slPct ispadne 100% i "rizik" postane cijeli notional — to je rušilo median i max
+    // (vidjeno: max $522 na računu od ~$300). Takvi se preskaču i broje odvojeno.
+    if (sl === null || sl <= 0) { skippedNoSl++; continue; }
     const slPct = Math.abs(price - sl) / price * 100;
+    if (!(slPct > 0) || slPct >= 50) { skippedNoSl++; continue; }  // neispravan SL
     out.push({
       date: r.Date, time: r["Time (UTC)"], symbol: r.Symbol, side: r.Side,
       mode: r.EntryMode || "?", weekend: r.Weekend === "true", night: r.Night === "true",
@@ -70,7 +76,7 @@ function analyse(pid) {
       atFloor: Math.abs(notional - FLOOR) <= NEAR,
     });
   }
-  return { pid, entries: out };
+  return { pid, entries: out, skippedNoSl };
 }
 
 const pct = (a, b) => b ? (100 * a / b).toFixed(1) + "%" : "—";
@@ -83,12 +89,13 @@ for (const pid of ["ultra_4h", "synapse_t"]) {
   const res = analyse(pid);
   console.log(`\n${"─".repeat(64)}\n${pid}`);
   if (res.missing) { console.log("  nema trades_" + pid + ".csv u DATA_DIR"); continue; }
-  const { entries } = res;
-  if (!entries.length) { console.log("  nema ulaznih redaka"); continue; }
+  const { entries, skippedNoSl } = res;
+  if (!entries.length) { console.log("  nema upotrebljivih ulaznih redaka"); continue; }
   anyData = true;
 
   const onFloor = entries.filter(e => e.atFloor);
   console.log(`  ulaza: ${entries.length}  |  na podu: ${onFloor.length} (${pct(onFloor.length, entries.length)})`);
+  if (skippedNoSl) console.log(`  preskočeno ${skippedNoSl} starih redaka bez ispravnog SL-a (rizik se iz njih ne može izračunati)`);
 
   const risks = entries.map(e => e.risk).sort((a, b) => a - b);
   const med = risks[Math.floor(risks.length / 2)];

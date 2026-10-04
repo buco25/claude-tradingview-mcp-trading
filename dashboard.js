@@ -8,7 +8,7 @@ import http from "http";
 import { createHash, timingSafeEqual } from "crypto";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll, softExitMonitor,
-  runUltra4hStrategy, analyzeUltraPullback, previewU4hGates,
+  runUltra4hStrategy, analyzeUltraPullback, previewU4hGates, analyzeUltra4hFull, _buildUltra4hCfg,
   getAllFundingRates, getDailyPnlExport, getSymbolStats, getOIForSymbols,
   getFearGreed, getBtcDominance, getDxyData, getConsecutiveLossCount,
   getSessionInfo, calcAtrTrend, getSp500Data, calcSymbolCorrelation,
@@ -520,16 +520,32 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
     else if (synapse7Bear === minSig - 1 && scaleDn >= 3) synapse7Sig = "SETUP↓";
   }
 
-  // ── ULTRA v3 — 8 signala + 3 gateva (identično bot.js analyzeUltra) ──
-  // Signali: E50↑, CVD↑, MACD, E145, PWHL, RDIV, MSTR, FVG
-  // Gatevi (obvezni, ne broje se u score): ADX≥20, VOL_EXH (21.09. fix nalaz #15 — ADX_MIN je 20, ne 22)
+  // ── ULTRA v3 — preview istog scoringa koji bot.js analyzeUltra radi ──
+  // 04.10. ispravljeno (audit nalaz #4): zaglavlje je pisalo "8 signala + 3 gateva (identično
+  // bot.js analyzeUltra)", a nijedno nije bilo točno — niz ima 12 signala (od kojih TE_COMBO
+  // broji 8: [0,2,3,4,5,6,9,10]), a od 3 obavezna gatea skener je primjenjivao samo ADX.
+  // Signali (12): E50, CVD, MACD, E145, PWHL, RDIV, MSTR, FVG, OB, DEMA, LHUNT, MDIV
+  //   — u score ulaze samo TE_COMBO indeksi; CVD/FVG/OB/MDIV se NE broje (vidi nalaz #10).
+  // Gatevi (obvezni, ne broje se u score): DEMA, ADX≥20 (ADX_MIN), zone-confluence.
+  //   VOL_EXH se racuna u runScan (volHigh) i prikazuje odvojeno, ne blokira ovaj preview.
+  // Ovo je i dalje DRUGA implementacija istog scoringa — formule su 04.10. uskladeńe s
+  // bot.js, ali dugorocno treba jedan izvor (vidi nalaz #4: exportati izracun iz bot.js).
 
   // PWHL signal (Previous Weekly High/Low)
   let sigPWHLD = 0;
   {
+    // 04.10. fix (audit nalaz #4): ovdje je falio SWEEP predsvjet koji bot.js (sigPWHL)
+    // zahtijeva — bot trazi da je cijena u zadnja SWEEP_BARS bara stvarno probila razinu
+    // (uzela SL-ove) i tek onda zatvorila natrag. Bez toga je skener palio PWHL signal na
+    // pukoj blizini razine, pa je pokazivao signale koje bot nikad nije imao.
     const PWHL_ZONE = 0.015;
-    if (_pwl !== null && (price - _pwl) / price < PWHL_ZONE && price > _pwl && rsiRising)  sigPWHLD =  1;
-    if (_pwh !== null && (_pwh - price) / price < PWHL_ZONE && price < _pwh && rsiFalling) sigPWHLD = -1;
+    const SWEEP_BARS = 4;
+    const recentLows  = candles.slice(-SWEEP_BARS - 1, -1).map(c => c.low);
+    const recentHighs = candles.slice(-SWEEP_BARS - 1, -1).map(c => c.high);
+    const sweptPWL = _pwl !== null && recentLows.some(l => l < _pwl);
+    const sweptPWH = _pwh !== null && recentHighs.some(h => h > _pwh);
+    if (sweptPWL && price > _pwl && (price - _pwl) / price < PWHL_ZONE && rsiRising)  sigPWHLD =  1;
+    if (sweptPWH && price < _pwh && (_pwh - price) / price < PWHL_ZONE && rsiFalling) sigPWHLD = -1;
   }
 
   // MSTR signal (Market Structure HH/HL vs LL/LH)
@@ -560,12 +576,24 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
   // FVG signal (Fair Value Gap)
   let sigFVGD = 0;
   {
-    const FVG_LOOKBACK = 30, FVG_MIN_PCT = 0.003;
+    // 04.10. fix (audit nalaz #4): ovdje je ostao LABAVI test iz vremena prije 25.09. —
+    // "cijena bilo gdje u gapu + mali buffer". bot.js je 25.09. stegnut na DUBLJI retest:
+    // cijena mora biti u donjih 61.8%-100% gapa (mjereno od ruba kojim je usla natrag), pa
+    // plitak dodir ruba vise NE broji. Formula je sad prepisana 1:1 iz bot.js sigFVG.
+    const FVG_LOOKBACK = 30, FVG_MIN_PCT = 0.003, FVG_FIB = 0.618;
     for (let i = Math.max(2, n - FVG_LOOKBACK); i < n - 1 && sigFVGD === 0; i++) {
       const c0h = candles[i-2].high, c0l = candles[i-2].low;
       const c2h = candles[i].high,   c2l = candles[i].low;
-      if (c2l > c0h && (c2l - c0h) / c0h >= FVG_MIN_PCT && price >= c0h * 0.999 && price <= c2l * 1.005) sigFVGD =  1;
-      if (c0l > c2h && (c0l - c2h) / c2h >= FVG_MIN_PCT && price <= c0l * 1.001 && price >= c2h * 0.995) sigFVGD = -1;
+      if (c2l > c0h) {
+        const gapPct = (c2l - c0h) / c0h;
+        const _fib618 = c2l - (c2l - c0h) * FVG_FIB;
+        if (gapPct >= FVG_MIN_PCT && price >= c0h * 0.999 && price <= _fib618) sigFVGD =  1;
+      }
+      if (c0l > c2h) {
+        const gapPct = (c0l - c2h) / c2h;
+        const _fib618 = c2h + (c0l - c2h) * FVG_FIB;
+        if (gapPct >= FVG_MIN_PCT && price <= c0l * 1.001 && price >= _fib618) sigFVGD = -1;
+      }
     }
   }
 
@@ -630,8 +658,12 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
                       _zones?.monthlyHigh, _zones?.monthlyLow, _pwh, _pwl]
                      .filter(v => v != null && v > 0);
         if (lvls.length > 0) {
-          const rLows  = candles.slice(-8).map(c => c.low);
-          const rHighs = candles.slice(-8).map(c => c.high);
+          // 04.10. fix (audit nalaz #4): prozor je bio 8 barova, a bot.js (sigMOPEN) je
+          // 10.07. NAMJERNO prosiren na 192 bara (~48h) jer HTF sweep traje danima —
+          // stari uski prozor je propustao bas one sweepove zbog kojih signal postoji.
+          const LHUNT_SWEEP_BARS = 192;
+          const rLows  = candles.slice(-LHUNT_SWEEP_BARS).map(c => c.low);
+          const rHighs = candles.slice(-LHUNT_SWEEP_BARS).map(c => c.high);
           let swB = 0, swS = 0;
           for (const lvl of lvls) {
             const near = Math.abs(price - lvl) / price < 0.015;
@@ -668,8 +700,28 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
       ];
 
       const _activeSigsD = _comboIdxD.map(i => ultraSigs16[i]);
-      ultraBull = _activeSigsD.filter(s => s === 1).length;
-      ultraBear = _activeSigsD.filter(s => s === -1).length;
+      const _bullCntD = _activeSigsD.filter(s => s === 1).length;
+      const _bearCntD = _activeSigsD.filter(s => s === -1).length;
+
+      // ── 04.10. fix (audit nalaz #4 + #12): BONUSI u score ─────────────────────
+      // Skener je prikazivao i usporedjivao SAMO combo count (bullCnt), a bot prag usporedjuje
+      // s bullScore = bullCnt + bonusi (PWH+MSTR, Wyckoff, MDIV, WHALE, BMSB). Zato je skener
+      // pokazivao manji score od onoga s kojim bot stvarno odlucuje. Izrazi 1:1 iz bot.js;
+      // ulazni podaci dolaze iz _buildUltra4hCfg preko ultraCfg (vidi runScan).
+      const _pwhInComboD  = _comboIdxD.includes(4);
+      const _mstrInComboD = _comboIdxD.includes(6);
+      const _pwhMstrBullD = (_pwhInComboD && _mstrInComboD && ultraSigs16[4] === 1  && ultraSigs16[6] === 1)  ? 1 : 0;
+      const _pwhMstrBearD = (_pwhInComboD && _mstrInComboD && ultraSigs16[4] === -1 && ultraSigs16[6] === -1) ? 1 : 0;
+      const _wyBonusBullD = (symbol === "BTCUSDT" && ultraCfg._wyckoffBullish === true) ? 1 : 0;
+      const _wyBonusBearD = (symbol === "BTCUSDT" && ultraCfg._wyckoffBearish === true) ? 1 : 0;
+      const _mdivBullD    = (sigMacdDivD === 1)  ? 1 : 0;
+      const _mdivBearD    = (sigMacdDivD === -1) ? 1 : 0;
+      const _whaleBullD   = (ultraCfg._whaleBiasMap?.[symbol] === "BULLISH") ? 1 : 0;
+      const _whaleBearD   = (ultraCfg._whaleBiasMap?.[symbol] === "BEARISH") ? 1 : 0;
+      const _bmsbBullD    = (ultraCfg._bmsbBiasMap?.[symbol] === "BULLISH") ? 1 : 0;
+      const _bmsbBearD    = (ultraCfg._bmsbBiasMap?.[symbol] === "BEARISH") ? 1 : 0;
+      ultraBull = _bullCntD + _pwhMstrBullD + _wyBonusBullD + _mdivBullD + _whaleBullD + _bmsbBullD;
+      ultraBear = _bearCntD + _pwhMstrBearD + _wyBonusBearD + _mdivBearD + _whaleBearD + _bmsbBearD;
 
       // ADX/MOM soft zone (08.09.2026) — identično bot.js analyzeUltra, iste konstante
       // uvezene iz bot.js (ADX_MIN/ADX_SOFT_BAND/ADX_SOFT_FLOOR/MOM_SOFT_BAND/MOM_ADX_MIN)
@@ -678,37 +730,91 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
       const adxOk   = adxV >= ADX_MIN;
       const adxSoft = !adxOk && adxV >= _adxSoftFloorD;
 
-      // Pullback signali — bez RSI gate (uklonjen iz bota)
-      if      ((adxOk || adxSoft) && ultraBull >= minSig)          { ultraSig = "LONG";  ultraHalfSize = adxSoft; }
-      else if ((adxOk || adxSoft) && ultraBear >= minSig)          { ultraSig = "SHORT"; ultraHalfSize = adxSoft; }
-      else if (adxOk && ultraBull === minSig - 1)     ultraSig = "SETUP↑";
-      else if (adxOk && ultraBear === minSig - 1)     ultraSig = "SETUP↓";
+      // ── 04.10. fix (audit nalaz #4): minSig BUSTOVI ────────────────────────────
+      // Skener je prikazivao LONG/SHORT na baznom minSig-u iako bot na vikend/CHILL/
+      // invalidaciju/Wyckoff-pending digne prag (MIN_CONFIRM_LONG/SHORT u analyzeUltra) —
+      // zato je dashboard pisao "SIGNAL 6/8" dok ga je bot odbijao. Isti izrazi kao bot.js,
+      // uklj. pravilo da se bustovi NE zbrajaju nego se uzima MAX aktivnog razloga.
+      const _dowD = new Date().getUTCDay();
+      const _weekendBoostD = (_dowD === 0 || _dowD === 6) ? 2 : 0;
+      const _isStockD = isStockSym(symbol), _isMetalD = isMetalSym(symbol);
+      const _chillBoostD = (ultraCfg._chillMode && !_isStockD) ? 1 : 0;
+      const _invalBoostD = (ultraCfg._invalBoost && !_isStockD) ? 1 : 0;
+      const _wyLongBoostD  = (ultraCfg._wyckoffSosPending === true && !_isStockD && !_isMetalD) ? 2 : 0;
+      const _wyShortBoostD = (ultraCfg._wyckoffSowPending === true && !_isStockD && !_isMetalD) ? 2 : 0;
+      const minSigLong  = minSig + Math.max(_weekendBoostD, _chillBoostD, _invalBoostD, _wyLongBoostD);
+      const minSigShort = minSig + Math.max(_weekendBoostD, _chillBoostD, _wyShortBoostD);
+      // Prikazani "min:" u scoreBox-u mora biti STVARNI prag, ne bazni.
+      ultraMinSig = Math.max(minSigLong, minSigShort);
 
-      // Momentum fallback
-      if (ultraSig === "—") {
-        const momSigsD = [
-          ema50  ? (price > ema50  ?  1 : -1) : 0,
-          cvdSum > 0 ?  1 : -1,
-          macdH !== null ? (macdH > 0 ? 1 : -1) : 0,
-          ema145 ? (price > ema145 ?  1 : -1) : 0,
-          sigPWHLD,
-          sigRsiDivD,
-          sigMktStrD,
-          sigFVGD,
-          sigOBD,
-          sigDEMAD,
-          sigLHUNTD,
-          sigMacdDivD,
-        ];
-        const _momActiveSigsD = _comboIdxD.map(i => momSigsD[i]);
-        const momBullD = _momActiveSigsD.filter(s => s === 1).length;
-        const momBearD = _momActiveSigsD.filter(s => s === -1).length;
+      // DEMA gate se primjenjuje nize, u bloku odluke (bot.js ga ima kao "0. DEMA gate").
+      // Skeneru je prije 04.10. potpuno falio, pa je pokazivao smjer koji bot blokira.
+
+      // ── 04.10. fix (audit nalaz #4): zone-confluence gate ─────────────────────
+      // bot.js PBK grane traze potporu/otpor unutar 1.5% ("ne jurimo, cekamo zonu") i inace
+      // vracaju NEUTRAL. Skener to nije imao. NAPOMENA: bot u listu ukljucuje i Volume-Profile
+      // HVN razine (calcVolumeProfileHVN) koje skener ne racuna, pa je ovdje confluence za
+      // dlaku strozi od bota — moze pokazati "—" gdje bot ipak ulazi preko HVN razine.
+      const _confLvlsLong  = [_nearSup, _pwl, _zones?.monthlyLow, _zones?.weeklyOpen,
+                              _zones?.monthlyOpen, _zones?.yearlyOpen]
+        .filter(v => v != null && v > 0 && v <= price * 1.002);
+      const _confLvlsShort = [_nearRes, _pwh, _zones?.monthlyHigh, _zones?.weeklyOpen,
+                              _zones?.monthlyOpen, _zones?.yearlyOpen]
+        .filter(v => v != null && v > 0 && v >= price * 0.998);
+      const _confOkLong  = _confLvlsLong.some(l => (price - l) / price <= 0.015);
+      const _confOkShort = _confLvlsShort.some(l => (l - price) / price <= 0.015);
+
+      // ── Odluka: PRESLIKANA kontrola toka iz bot.js analyzeUltra ───────────────
+      // KLJUCNO (04.10.): u bot.js svaki od ovih gateova RETURN-a, tj. kad DEMA gate blokira
+      // ili kad score PRIJEDE prag ali padne na zone-confluenceu, rezultat je NEUTRAL i
+      // momentum grana se NIKAD ne dosegne. Prvi pokusaj ovog fixa bio je `else if` lanac, pa
+      // je pad na confluenceu propadao u momentum i skener je pokazivao MOM↓ gdje bot vraca
+      // NEUTRAL (uhvaceno diferencijalnim testom). Zato `_decided` zastavica = "bot bi tu
+      // vratio rezultat i stao".
+      let _decided = false;
+
+      // 0. DEMA gate (bot koristi MIN_CONFIRM = baza + max(vikend, chill), ne LONG/SHORT prag)
+      const _minConfirmD = minSig + Math.max(_weekendBoostD, _chillBoostD);
+      if (sigDEMAD === -1 && ultraBull >= _minConfirmD && ultraBear < _minConfirmD) {
+        ultraSig = "—"; _decided = true;                        // LONG blokiran: ispod daily EMA10
+      } else if (sigDEMAD === 1 && ultraBear >= _minConfirmD && ultraBull < _minConfirmD) {
+        ultraSig = "—"; _decided = true;                        // SHORT blokiran: iznad daily EMA10
+      }
+
+      // 1. ADX pod. NAPOMENA: kad je ADX ispod praga bot prvo probava SWEEP / RANGE / VA-REV
+      // zonske strategije (mogu dati LONG/SHORT) — skener ih ne modelira, pa tu moze pisati
+      // "—" gdje bot ipak ulazi zonskom strategijom. Poznat i prihvacen gap ovog previewa.
+      if (!_decided && !adxOk && !adxSoft) { ultraSig = "—"; _decided = true; }
+
+      // 2. PBK LONG / SHORT — prag pa zone-confluence; oba ishoda su konacna.
+      if (!_decided && ultraBull >= minSigLong) {
+        ultraSig = _confOkLong ? "LONG" : "—";
+        ultraHalfSize = _confOkLong ? adxSoft : false;
+        _decided = true;
+      } else if (!_decided && ultraBear >= minSigShort) {
+        ultraSig = _confOkShort ? "SHORT" : "—";
+        ultraHalfSize = _confOkShort ? adxSoft : false;
+        _decided = true;
+      }
+
+      // 3. Momentum fallback — samo ako score NIJE dosegao PBK prag (isto kao bot).
+      // 04.10. fix (audit nalaz #2 i #4): `momSigsD` je bio izraz-za-izraz identicna kopija
+      // `ultraSigs16`, pa su momBullD/momBearD uvijek bili === ultraBull/ultraBear — kopija je
+      // uklonjena. Prag je sad minSigLong/minSigShort (isto kao bot.js MOM_MIN_LONG/SHORT),
+      // ne bazni minSig; momentum grana i dalje NE provjerava confluence, isto kao bot.
+      if (!_decided) {
+        const momBullD = ultraBull, momBearD = ultraBear;
         const _momAdxFloorD = adxSoft ? _adxSoftFloorD : MOM_ADX_MIN;
-        if (_momAdxFloorD <= adxV && momBullD >= minSig)      { ultraSig = "MOM↑"; ultraBull = momBullD; ultraHalfSize = adxSoft; }
-        else if (_momAdxFloorD <= adxV && momBearD >= minSig) { ultraSig = "MOM↓"; ultraBear = momBearD; ultraHalfSize = adxSoft; }
-        // MOM soft zona — score tek 1 ispod praga → pola rizika umjesto blocka
-        else if (_momAdxFloorD <= adxV && momBullD === minSig - MOM_SOFT_BAND) { ultraSig = "MOM↑"; ultraBull = momBullD; ultraHalfSize = true; }
-        else if (_momAdxFloorD <= adxV && momBearD === minSig - MOM_SOFT_BAND) { ultraSig = "MOM↓"; ultraBear = momBearD; ultraHalfSize = true; }
+        if (_momAdxFloorD <= adxV && momBullD >= minSigLong)       { ultraSig = "MOM↑"; ultraHalfSize = adxSoft; }
+        else if (_momAdxFloorD <= adxV && momBearD >= minSigShort) { ultraSig = "MOM↓"; ultraHalfSize = adxSoft; }
+        // MOM soft zona — score tek MOM_SOFT_BAND ispod praga → pola rizika umjesto blocka
+        else if (_momAdxFloorD <= adxV && momBullD === minSigLong  - MOM_SOFT_BAND) { ultraSig = "MOM↑"; ultraHalfSize = true; }
+        else if (_momAdxFloorD <= adxV && momBearD === minSigShort - MOM_SOFT_BAND) { ultraSig = "MOM↓"; ultraHalfSize = true; }
+        // 4. SETUP↑/↓ — ciste display oznake ("1 signal do praga"), ne postoje u bot.js.
+        if (ultraSig === "—" && adxOk) {
+          if      (ultraBull === minSigLong  - 1) ultraSig = "SETUP↑";
+          else if (ultraBear === minSigShort - 1) ultraSig = "SETUP↓";
+        }
       }
     }
   }
@@ -757,6 +863,14 @@ async function runScan(rules) {
   // read, jednom po scan ciklusu (isti obrazac kao _buildUltra4hCfg).
   const _oiFlowMap = getOiChangeMap(ALL_SYMBOLS.filter(s => !isStockSym(s) && !isMetalSym(s)));
 
+  // 04.10. fix (audit nalaz #3): 4H stupac/badge mora dijeliti i SIGNALNU fazu sa stvarnom
+  // ULTRA-4H strategijom, ne samo gate fazu. Zato se bonus cfg (whale/bmsb/wyckoff/chill +
+  // getDynamicAdx) gradi JEDNOM po scan ciklusu, isti obrazac kao runUltra4hStrategy.
+  let _u4hCfgD = {};
+  try {
+    _u4hCfgD = await _buildUltra4hCfg(ALL_SYMBOLS.filter(s => !isStockSym(s) && !isMetalSym(s)));
+  } catch { /* ostaje {} — preview pada na default pragove */ }
+
   const results = [];
   const BATCH = 5;
   for (let i = 0; i < ALL_SYMBOLS.length; i += BATCH) {
@@ -784,7 +898,9 @@ async function runScan(rules) {
           }
         } catch(e) { /* ignoriraj — PWHL ostaje 0 */ }
         const _zones  = await fetchLhZones(sym);
-        const s       = scanSymbol(sym, candles, {}, {}, {}, ultraCfg, _pwh, _pwl, _zones);
+        // 04.10. (audit nalaz #4): makro zastavice (chill/inval/wyckoff) idu u ultraCfg da
+        // skener moze primijeniti ISTE minSig bustove kao bot. _u4hCfgD ih gradi jednom po ciklusu.
+        const s       = scanSymbol(sym, candles, {}, {}, {}, { ...ultraCfg, ..._u4hCfgD }, _pwh, _pwl, _zones);
         s.isStock = isStockSym(sym);  // 14.08.: za odvajanje dionica/kripta u scanner tablici
         // Strong/Weak vs BTC (samo kripto altovi; 30-min cache u bot.js)
         s.relStr = (sym !== "BTCUSDT" && !isStockSym(sym))
@@ -798,12 +914,17 @@ async function runScan(rules) {
           ? await getBullMarketSupportBand(sym).catch(() => null) : null;
         // Capital Flow (OI 24h %) — 21.09., na zahtjev
         s.oiFlow = _oiFlowMap[sym] || null;
-        // 4H signal (18.09., na zahtjev "stavi na skener dal se ceka ulaz na 1h ili 4h") —
-        // ista prava logika (analyzeUltraPullback) kao ULTRA-4H strategija, samo za prikaz.
+        // 4H signal (18.09., na zahtjev "stavi na skener dal se ceka ulaz na 1h ili 4h").
+        // 04.10. fix (audit nalaz #3): bio je `analyzeUltraPullback(sym, c4h, {})` — SIROVI
+        // signal, pa je preskakao `_finalizeUltra4hSignal` koji stvarni ulaz primjenjuje preko
+        // analyzeUltra4hFull: ULTRA4H_RSI_LONG_MAX=72 / ULTRA4H_RSI_SHORT_MIN=30 ekstrem filter
+        // i `atr == null` → NEUTRAL zastitu. Prazan cfg je uz to gasio getDynamicAdx i sve bonus
+        // signale. Posljedica: badge je mogao pisati "bi usao" za setup koji strategija odbaci
+        // JOS PRIJE gate-ova. Sad ide kroz istu funkciju i isti cfg kao runUltra4hStrategy.
         try {
           const c4h = await fetchCandlesLocal(sym, "4H", 250);
           if (c4h) {
-            const r4h = await analyzeUltraPullback(sym, c4h, {});
+            const r4h = await analyzeUltra4hFull(c4h, sym, _u4hCfgD);
             s.sig4h = { signal: r4h.signal, bullScore: r4h.bullScore ?? 0, bearScore: r4h.bearScore ?? 0 };
             if (r4h.signal !== "NEUTRAL") s.sig4h.gate = await previewU4hGates(sym, c4h, r4h).catch(() => null);
           }
@@ -4737,7 +4858,14 @@ const server = http.createServer(async (req, res) => {
           );
           const j1d = await r1d.json();
           const d1 = (j1d?.data ?? []);
-          if (d1.length >= 2) { pdh = +d1[1][2]; pdl = +d1[1][3]; }
+          // 04.10. fix (audit nalaz #11): bio `d1[1]`, sto pretpostavlja da odgovor UVIJEK ima
+          // tocno 3 reda (jucer na indeksu 1). Uz gard `length >= 2`, odgovor s 2 reda je tiho
+          // davao PDH/PDL TEKUCEG, jos neformiranog dana. Svaka druga "zadnja dovrsena svijeca"
+          // u repou se cita kao data[data.length - 2] — sad i ovdje.
+          if (d1.length >= 2) {
+            const prevDay = d1[d1.length - 2];
+            pdh = +prevDay[2]; pdl = +prevDay[3];
+          }
         } catch(_) {}
 
         // Round numbers — ovisno o cijeni

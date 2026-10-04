@@ -155,7 +155,7 @@ const SL_COOLDOWN_MS = 4 * 60 * 60 * 1000;  // 4h cooldown po simbolu nakon SL-a
 // (22/18 u dashboardu vs 20 u botu) i preview je zavaravao.
 export const ADX_SOFT_BAND  = 5;   // koliko ispod effectiveAdx ulazimo u soft zonu
 export const ADX_SOFT_FLOOR = 12;  // apsolutni pod — ispod ovoga nema ulaza uopće
-export const MOM_SOFT_BAND  = 1;   // koliko ispod MOM_MIN (score) dopuštamo soft ulaz
+export const MOM_SOFT_BAND  = 1;   // koliko ispod momentum praga (MOM_MIN_LONG/SHORT) dopuštamo soft ulaz
 export const MOM_ADX_MIN    = 20;  // ADX pod za momentum granu (identično bot.js unutarnjoj const)
 
 // ─── Trailing stop — aktivira se nakon dovoljnog profita ─────────────────────
@@ -1166,20 +1166,27 @@ function checkVolumeAnomaly(candles) {
 // ─── Velocity — post-kapitulacijska akceleracija (ROC-of-ROC) ────────────────
 // Gann/TraderaEdge teorija (03.08.): cijena < vrijeme < volumen < velocity po važnosti.
 // Velocity ovdje NIJE obična brzina nego brzina PROMJENE SMJERA nakon iscrpljivanja
-// prodavača/kupaca (V-shape recovery) — usporedi ROC zadnjih VEL_WINDOW svijeća s ROC-om
-// prethodnog jednako dugog perioda. LOG-ONLY faza — ne utječe na ulaze, samo promatramo
-// ponašanje uživo prije nego se ožiči kao bonus u sweep/reclaim (LHUNT) logici.
-const VEL_WINDOW    = 4;    // broj svijeća po prozoru (15m TF → 1h svaki prozor)
+// prodavača/kupaca (V-shape recovery) — usporedi ROC zadnjih `window` svijeća s ROC-om
+// prethodnog jednako dugog perioda.
+//
+// 04.10. ispravljeno zaglavlje (audit nalaz #8): ovdje je pisalo "LOG-ONLY faza — ne utječe
+// na ulaze", što je prestalo biti točno 07.09. — velocity je sad HARD blokada ulaza na dva
+// mjesta: run() (velocity kontra-signal gate, nakon KAITOUSDT incidenta) i evaluateU4hGates
+// (4H strategija). Također je `VEL_WINDOW` nosio komentar "15m TF → 1h svaki prozor", a
+// pozivatelji danas predaju 1H svijeće (run) i 4H svijeće (evaluateU4hGates), pa su prozori
+// stvarno 4h i 16h. Prozor je sad parametar koji pozivatelj zada po timeframeu; default
+// ostaje 4 svijeće da se ponašanje postojećih poziva NE mijenja ovim bug-fixom.
+const VEL_WINDOW    = 4;    // default broj svijeća po prozoru (pozivatelj može zadati svoj)
 const VEL_CAPIT_PCT = 0.8;  // % — prethodni prozor mora se pomaknuti barem ovoliko da se zove "kapitulacija/euforija"
 const VEL_ACCEL_PCT = 1.2;  // % — minimalna promjena ROC-a (akceleracija) da se zove "velocity" obrat
-function checkVelocity(candles) {
-  if (candles.length < VEL_WINDOW * 2 + 3) return { sig: 0, accel: 0, rocRecent: 0, rocPrior: 0 };
+function checkVelocity(candles, window = VEL_WINDOW) {
+  if (candles.length < window * 2 + 3) return { sig: 0, accel: 0, rocRecent: 0, rocPrior: 0 };
   // koristi zatvorene svijeće (isključi aktivnu, kao i checkVolumeAnomaly)
   const closes = candles.slice(0, -1).map(c => c.close);
   const n = closes.length;
   const cNow   = closes[n - 1];
-  const cMid   = closes[n - 1 - VEL_WINDOW];
-  const cPrior = closes[n - 1 - VEL_WINDOW * 2];
+  const cMid   = closes[n - 1 - window];
+  const cPrior = closes[n - 1 - window * 2];
   const rocRecent = cMid   > 0 ? (cNow - cMid)   / cMid   * 100 : 0;
   const rocPrior  = cPrior > 0 ? (cMid - cPrior) / cPrior * 100 : 0;
   const accel = rocRecent - rocPrior;
@@ -1427,11 +1434,26 @@ export function calcAtrTrend(candles, atrLen = 14, lookback = 14) {
 }
 
 // ─── 1H Trend Filter ─────────────────────────────────────────────────────────
-// Viši timeframe trend — dozvoljava samo LONG kad je 1H bull, SHORT kad je 1H bear
+// 1H close vs 1H EMA20 — dozvoljava samo LONG kad je 1H bull, SHORT kad je 1H bear.
+//
+// 04.10. ispravljen komentar (audit nalaz #5): godinama je ovdje pisalo "Viši timeframe
+// trend", što je bilo točno dok je synapse_t skenirao 15m svijeće. Danas synapse_t svoj
+// signal računa IZ 1H svijeća (vidi run(): candleTf = "1H"), pa ovo NIJE potvrda s višeg
+// TF-a nego dodatni EMA20 filter na istim barovima iz kojih je došao score. Ponašanje je
+// namjerno ostavljeno kakvo je (gate na 7332 je kalibriran na njega); ako se želi stvarna
+// HTF potvrda, to je promjena strategije (4H/1D) i ide kroz tjedni audit.
+// Usporedi: 4H strategija je 19.09. ispravljena da računa trend na VLASTITOM 4H TF-u
+// (evaluateU4hGates), a ne da posuđuje ovu 1H sliku.
+//
+// 04.10. fix (audit nalaz #6): limit je bio 30 svijeća, pa je calcEMA(closes, 50) UVIJEK
+// vraćao null (calcEMA vraća null kad je closes.length < period), a EMA20 je dobivao samo
+// 10 koraka zaglađivanja nakon SMA20 seeda — bitno drugačiju vrijednost od iste EMA20 koju
+// evaluateU4hGates računa na 250 svijeća. Sad 250, isto kao svi ostali fetchevi signala.
+const TREND1H_CANDLES = 250;
 
 export async function calcTrend1H(symbol) {
   try {
-    const candles = await fetchCandles(symbol, '1H', 30);
+    const candles = await fetchCandles(symbol, '1H', TREND1H_CANDLES);
     const closes  = candles.map(c => c.close);
     const ema20   = calcEMA(closes, 20);
     const ema50   = calcEMA(closes, 50);
@@ -2283,7 +2305,12 @@ async function fetchDayHL(symbol) {
   const cached = _dayHLCache[symbol];
   if (cached && now - cached.ts < 5 * 60 * 1000) return cached; // 5min cache
   try {
-    const url = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=1D&limit=1`;
+    // 04.10. fix (audit nalaz #7): bio `granularity=1D`, jedini dnevni fetch u repou koji
+    // NIJE poravnat na UTC (Bitgetov "1D" ima drugu dnevnu granicu od "1Dutc"). Posljedica:
+    // day-range gate (hard LONG blok >80% dana / SHORT <20%, + ×0.6 size penali u run() i
+    // evaluateU4hGates) mjerio je poziciju unutar DRUGAČIJE omeđenog dana od svakog drugog
+    // dnevnog izračuna — uklj. dashboardovu BTC "Day Range" karticu koja već koristi 1Dutc.
+    const url = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=1Dutc&limit=1`;
     const res  = await fetch(url);
     const json = await res.json();
     if (json.code !== "00000" || !json.data?.length) return null;
@@ -2657,27 +2684,18 @@ function analyzeUltra(candles, cfg) {
     for (let i = p; i < n; i++) v = closes[i] * k + v * (1 - k);
     return v;
   }
-  function emaSeries(p) {
-    const k = 2 / (p + 1); const r = new Array(n).fill(null);
-    let v = closes.slice(0, p).reduce((a, b) => a + b, 0) / p; r[p-1] = v;
-    for (let i = p; i < n; i++) { v = closes[i] * k + v * (1 - k); r[i] = v; }
-    return r;
-  }
-
-  const e9s  = emaSeries(9); const e21s = emaSeries(21);
-  const ema9 = e9s[n-1]; const ema21 = e21s[n-1];
+  // 04.10. uklonjeno (audit nalaz #10): lokalni emaSeries() helper + e9s/e21s serije i
+  // ema9/ema21/ema200 vrijednosti. Računali su se na svakom scanu i nikad nisu bili
+  // čitani — jedini potrošač serija ("recent EMA cross" blok niže) i sam je bio mrtav kod.
   const ema50  = ema(50);
-  const ema145 = ema(145); const ema200 = ema(200);
+  const ema145 = ema(145);
 
-  // RSI series (last 6 bars za detekciju recovery)
+  // RSI series (zadnje 3 svijeće — dovoljno za rsiRising/rsiFalling i RDIV swingove)
+  // 04.10. uklonjeno (audit nalaz #10): rsi3/rsi4 i rsiMin5/rsiMax5 — nikad čitani.
   const rsiArr2 = _rsiSeries(closes, 14);
   const rsi  = rsiArr2[n-1] ?? 50;
   const rsi1 = rsiArr2[n-2] ?? rsi;  // prethodna svjeća
   const rsi2 = rsiArr2[n-3] ?? rsi1; // dvije svjeće unazad
-  const rsi3 = rsiArr2[n-4] ?? rsi2;
-  const rsi4 = rsiArr2[n-5] ?? rsi3;
-  const rsiMin5 = Math.min(rsi1, rsi2, rsi3, rsi4, rsi);  // minimum zadnjih 5 bara
-  const rsiMax5 = Math.max(rsi1, rsi2, rsi3, rsi4, rsi);  // maximum zadnjih 5 bara
   const rsiRising  = rsi > rsi1 && rsi1 > rsi2;  // RSI raste zadnje 2 svjeće
   const rsiFalling = rsi < rsi1 && rsi1 < rsi2;  // RSI pada zadnje 2 svjeće
 
@@ -2704,16 +2722,9 @@ function analyzeUltra(candles, cfg) {
   let adx = dx.slice(0,p14).reduce((a,b)=>a+b,0)/p14;
   for (let i = p14; i < dx.length; i++) adx = (adx*(p14-1)+dx[i])/p14;
 
-  // Choppiness
-  const sl14 = candles.slice(-15);
-  let trSum = 0;
-  for (let i = 1; i < sl14.length; i++) {
-    const h=sl14[i].high,l=sl14[i].low,pc=sl14[i-1].close;
-    trSum += Math.max(h-l, Math.abs(h-pc), Math.abs(l-pc));
-  }
-  const hh14 = Math.max(...sl14.slice(1).map(c=>c.high));
-  const ll14 = Math.min(...sl14.slice(1).map(c=>c.low));
-  const chop = (hh14-ll14) > 0 ? 100*Math.log10(trSum/(hh14-ll14))/Math.log10(14) : 100;
+  // Choppiness — 04.10. uklonjeno (audit nalaz #10): `chop` se računao na svakom scanu
+  // (sl14/trSum/hh14/ll14) i nikad nije bio čitan. Dashboard ima vlastiti izračun
+  // (scanSymbol), a modul-level calcChop() ostaje dostupan ako ga ikad treba ovdje.
 
   // MACD histogram
   function emaSlice(arr, p) {
@@ -2786,23 +2797,15 @@ function analyzeUltra(candles, cfg) {
   const supBelow = supports.filter(s => s < price * 0.999).sort((a,b) => b - a);
   const nearRes  = resAbove[0] ?? null;
   const nearSup  = supBelow[0] ?? null;
-  const srZone   = 0.012;   // 1.2% = unutar zone
 
   // Volume Profile HVN razine (Fixed Range) — dodatni izvor S/R za zone-confluence gate niže
   const _hvnLevels = calcVolumeProfileHVN(candles);
 
-  // sig17: Bounce/Rejection od S/R razine (cijena reagira na zonu)
-  let sig17sr = 0;
-  if (nearSup !== null && (price - nearSup) / price < srZone && rsiRising)   sig17sr =  1;
-  if (nearRes !== null && (nearRes - price) / price < srZone && rsiFalling)   sig17sr = -1;
-
-  // sig18: Breakout/Breakdown kroz S/R razinu (u zadnja 3 bara)
-  let sig18bk = 0;
-  for (let k = Math.max(1, n - 3); k < n && sig18bk === 0; k++) {
-    const pc = closes[k - 1], cc = closes[k];
-    for (const r of resistances) if (pc < r && cc > r) { sig18bk =  1; break; }
-    for (const s of supports)    if (pc > s && cc < s) { sig18bk = -1; break; }
-  }
+  // 04.10. uklonjeno (audit nalaz #10): sig17 (bounce/rejection od S/R) i sig18
+  // (breakout/breakdown kroz S/R) + njihov `srZone` prag. Oba su se računala na svakom
+  // scanu i rezultat se NIKAD nije čitao — nisu bili ni u `sigs` nizu ni u return objektu,
+  // pa nikad nisu utjecali ni na score ni na gate. Ako ih treba stvarno uključiti, to je
+  // promjena scoringa (dodavanje u sigs + TE_COMBO) i ide kroz tjedni audit.
 
   // sig19: RSI divergencija — klasični reversal signal
   // Bullish div: cijena LL ali RSI HL → LONG (dno bez momentum potvrde = iscrpljeni selleri)
@@ -3007,10 +3010,18 @@ function analyzeUltra(candles, cfg) {
     }
   }
 
-  // ── sig10: Daily EMA 10 / EMA 20 retest (TraderaEdge Smart Hub) ─────────────
-  // Bullish: daily EMA10 > EMA20 (dnevni uptrend) + cijena iznad EMA10 = bull kontekst
-  // Bearish: daily EMA10 < EMA20 (dnevni downtrend) + cijena ispod EMA10 = bear kontekst
+  // ── sig10 / DEMA: cijena vs daily EMA10 (TraderaEdge Smart Hub) ─────────────
+  // Bullish: cijena IZNAD daily EMA10 = bull kontekst | Bearish: ISPOD = bear kontekst
   // Najjači signal: cijena je retestirala EMA10 (unutar 1.5%) i RSI raste/pada
+  //
+  // 04.10. ispravljen komentar (audit nalaz #9): ovdje je pisalo "daily EMA10 > EMA20
+  // (dnevni uptrend) + cijena iznad EMA10", ali kod NIKAD nije testirao EMA10 vs EMA20 —
+  // `_dailyEma20` se koristi isključivo kao provjera da su dnevni podaci dohvaćeni. Kako je
+  // DEMA i signal koji se broji (TE_COMBO indeks 9) i OBAVEZNI gate (vidi "0. DEMA gate"
+  // niže), dodavanje EMA10>EMA20 člana bi pooštrilo i score i gate, tj. smanjilo broj
+  // ulaza — to je promjena strategije, ne bug-fix, i ide kroz tjedni audit. Komentar je
+  // zato usklađen s kodom, a ne obrnuto. Stroža varijanta bila bi:
+  //   const dailyUp = _dailyEma10 > _dailyEma20;  →  sigDailyEMA = aboveEma10 && dailyUp ? 1 : -1
   const { _dailyEma10 = null, _dailyEma20 = null } = cfg;
   let sigDailyEMA = 0;
   if (_dailyEma10 !== null && _dailyEma20 !== null) {
@@ -3083,19 +3094,18 @@ function analyzeUltra(candles, cfg) {
   const volAvg20 = vols.slice(-21, -1).reduce((a,b)=>a+b,0) / 20;
   const volLast  = vols[n-2];
 
-  // Recent EMA cross (last 3 bars)
-  let hadCrossUp = false, hadCrossDn = false;
-  for (let i = Math.max(1, n-3); i < n; i++) {
-    if (e9s[i-1] !== null && e21s[i-1] !== null) {
-      if (e9s[i-1] <= e21s[i-1] && e9s[i] > e21s[i]) hadCrossUp = true;
-      if (e9s[i-1] >= e21s[i-1] && e9s[i] < e21s[i]) hadCrossDn = true;
-    }
-  }
+  // Recent EMA cross — 04.10. uklonjeno (audit nalaz #10): hadCrossUp/hadCrossDn su se
+  // postavljali i nikad čitali (ni score, ni gate, ni return objekt), pa su s njima
+  // otpale i e9s/e21s serije koje su im bile jedini potrošač.
 
-  // ── 9 signala: +1 = bullish, -1 = bearish, 0 = neutral ──
-  // OBAVEZNI GATING (3 gateva): ADX≥dynamic, RSI asimetričan, VOL_EXH
-  // REVERSANI (logika invertirana za pullback): E50, CVD
-  // NOVO (06.06.2026): PWH/PWL (weekly S/R), MktStr (market structure), FVG (fair value gap)
+  // ── 12 signala: +1 = bullish, -1 = bearish, 0 = neutral ──
+  // 04.10. ispravljeno (audit nalaz #12): zaglavlje je pisalo "9 signala" iznad niza s 12
+  // unosa, a gate listu je navodilo kao "ADX, RSI asimetričan, VOL_EXH" — RSI gate je
+  // ukinut (rsiLongOk/rsiShortOk su hardkodirani na true, vidi niže), a stvarni treći
+  // obavezni gate je DEMA.
+  // OBAVEZNI GATEVI (3): DEMA (cijena vs daily EMA10), ADX ≥ dinamički prag, VOL_EXH
+  // NE BROJE SE U SCORE za nijedan simbol (TE_COMBO = [0,2,3,4,5,6,9,10]): CVD (1),
+  //   FVG (7), OB (8), MDIV (11 — bonus-only po dizajnu). Vidi audit nalaz #10.
   const sigs = [
     price > ema50 ? 1 : -1,                            //  1. E50   TREND: iznad EMA50 = bullish
     cvdSum > 0 ? 1 : -1,                              //  2. CVD   TREND: kupci dominiraju = bullish
@@ -3114,6 +3124,10 @@ function analyzeUltra(candles, cfg) {
   // Per-simbol combo filter — koristi samo signale iz SYMBOL_COMBOS
   const _combo    = SYMBOL_COMBOS[_sym];
   const _comboIdx = _combo?.sigIdx ?? DEFAULT_COMBO;
+  // Stvarna duljina comba (TE_COMBO = 8) — koristi se u SVIM reason stringovima umjesto
+  // hardkodiranog "/8" (04.10., audit nalaz #12). Dignuto ovdje gore jer ga trebaju i
+  // PBK return grane, ne samo završna "whyNot" dijagnoza.
+  const _comboLen = _comboIdx.length;
   const _activeSigs = _comboIdx.map(i => sigs[i]);
   const bullCnt = _activeSigs.filter(s => s === 1).length;
   const bearCnt = _activeSigs.filter(s => s === -1).length;
@@ -3121,11 +3135,12 @@ function analyzeUltra(candles, cfg) {
   // 21.09. uklonjeno (audit nalaz #6): "CVD+E145 premium bonus" je zahtijevao
   // _comboIdx.includes(1), ali CVD (indeks 1) nije dio TE_COMBO=[0,2,3,4,5,6,9,10]
   // koji koristi SVAKI simbol — bonus je bio trajno mrtav kod (uvijek 0), a tag
-  // "CVD+E145" u reason stringu nedostižan. Čisto uklanjanje, nema promjene ponašanja
-  // (bilo je uvijek 0). Aktiviranje bonusa bi bila stvarna promjena scoringa i ide
-  // kroz normalan proces (tjedni audit), ne kroz ovaj bug-fix.
-  const _premiumBonusBull = 0;
-  const _premiumBonusBear = 0;
+  // "CVD+E145" u reason stringu nedostižan. Aktiviranje bonusa bi bila stvarna promjena
+  // scoringa i ide kroz normalan proces (tjedni audit), ne kroz bug-fix.
+  // 04.10. dovršeno (audit nalaz #12): tada su ostale `_premiumBonusBull/Bear = 0`
+  // konstante i njihov "CVD+E145" unos u _bonusBullTag/_bonusBearTag, pa je uklanjanje
+  // bilo samo djelomično — tag je i dalje bio nedostižan mrtav kod. Sad su i konstante i
+  // tag unosi uklonjeni; score se ne mijenja (pribrojnik je bio 0).
   // Bonus 2: PWHL + MSTR u istom smjeru (samo ako oba u combu)
   const _pwhInCombo  = _comboIdx.includes(4);
   const _mstrInCombo = _comboIdx.includes(6);
@@ -3151,8 +3166,8 @@ function analyzeUltra(candles, cfg) {
   // uptrenda = dip-buy; dodir odozdo tijekom downtrenda = rejection. Isti bonus-only obrazac.
   const _bmsbBonusBull = (cfg._bmsbBiasMap?.[_sym] === "BULLISH") ? 1 : 0;
   const _bmsbBonusBear = (cfg._bmsbBiasMap?.[_sym] === "BEARISH") ? 1 : 0;
-  const bullScore = bullCnt + _premiumBonusBull + _pwhMstrBonusBull + _wyckoffBonusBull + _macdDivBonusBull + _whaleBonusBull + _bmsbBonusBull;
-  const bearScore = bearCnt + _premiumBonusBear + _pwhMstrBonusBear + _wyckoffBonusBear + _macdDivBonusBear + _whaleBonusBear + _bmsbBonusBear;
+  const bullScore = bullCnt + _pwhMstrBonusBull + _wyckoffBonusBull + _macdDivBonusBull + _whaleBonusBull + _bmsbBonusBull;
+  const bearScore = bearCnt + _pwhMstrBonusBear + _wyckoffBonusBear + _macdDivBonusBear + _whaleBonusBear + _bmsbBonusBear;
   // Vikend: +2 signala — subotom/nedjeljom tanka likvidnost, samo najjači setupi.
   // (post-mortem 05.07.: svi likvidirani ulazi bili subotnji minimalni 5/8 → +1 uveden,
   // ali 16.08. opet cijeli vikend batch (SOL/RENDER/BTC) u SL-u na minimalnom +1 pragu.
@@ -3241,7 +3256,6 @@ function analyzeUltra(candles, cfg) {
         // LONG bounce s donjeg ruba: cijena na supportu + RSI okreće gore iz niskog
         if (_supDist <= 0.5 && rsiRising && rsi < 45) {
           const _slP = nearSup * 0.996;
-          const _slPctR = (price - _slP) / price * 100;
           const _tpP = Math.min(nearRes * 0.998, price + (price - _slP) * 2);
           if ((_tpP - price) >= (price - _slP) * 1.5) {  // min 1:1.5 unutar zone
             return { price, signal: "LONG", bullScore: MIN_CONFIRM, bearScore: 0,
@@ -3252,7 +3266,6 @@ function analyzeUltra(candles, cfg) {
         // SHORT rejection s gornjeg ruba
         if (_resDist <= 0.5 && rsiFalling && rsi > 55) {
           const _slP = nearRes * 1.004;
-          const _slPctR = (_slP - price) / price * 100;
           const _tpP = Math.max(nearSup * 1.002, price - (_slP - price) * 2);
           if ((price - _tpP) >= (_slP - price) * 1.5) {
             return { price, signal: "SHORT", bullScore: 0, bearScore: MIN_CONFIRM,
@@ -3358,21 +3371,19 @@ function analyzeUltra(candles, cfg) {
   const vwapVal = calcVWAP(candles);
 
   const _bonusBullTag = [
-    _premiumBonusBull   ? "CVD+E145" : "",
     _pwhMstrBonusBull   ? "PWH+MSTR" : "",
     _macdDivBonusBull   ? "MDIV" : "",
     _whaleBonusBull     ? "WHALE" : "",
     _bmsbBonusBull      ? "BMSB" : "",
   ].filter(Boolean).join(",");
   const _bonusBearTag = [
-    _premiumBonusBear   ? "CVD+E145" : "",
     _pwhMstrBonusBear   ? "PWH+MSTR" : "",
     _macdDivBonusBear   ? "MDIV" : "",
     _whaleBonusBear     ? "WHALE" : "",
     _bmsbBonusBear      ? "BMSB" : "",
   ].filter(Boolean).join(",");
-  const bonusTag = _bonusBullTag ? ` [+${_premiumBonusBull+_pwhMstrBonusBull+_macdDivBonusBull+_whaleBonusBull+_bmsbBonusBull}:${_bonusBullTag}]`
-                : _bonusBearTag ? ` [+${_premiumBonusBear+_pwhMstrBonusBear+_macdDivBonusBear+_whaleBonusBear+_bmsbBonusBear}:${_bonusBearTag}]` : "";
+  const bonusTag = _bonusBullTag ? ` [+${_pwhMstrBonusBull+_macdDivBonusBull+_whaleBonusBull+_bmsbBonusBull}:${_bonusBullTag}]`
+                : _bonusBearTag ? ` [+${_pwhMstrBonusBear+_macdDivBonusBear+_whaleBonusBear+_bmsbBonusBear}:${_bonusBearTag}]` : "";
 
   // Dodaj extra info za nove signale u reason
   const _newSigsBull = [sigPWHL===1?"PWL✓":"", sigMktStr===1?"MSTR✓":"", sigFVG===1?"FVG✓":""].filter(Boolean).join(" ");
@@ -3392,7 +3403,7 @@ function analyzeUltra(candles, cfg) {
     const sigMask = sigs.reduce((mask, v, i) => v === 1 ? mask | (1 << i) : mask, 0);
     return { price, signal: "LONG", bullScore, bearScore, sigMask,
       nearSup, nearRes, vwap: vwapVal, _halfSize: _adxSoft,
-      reason: `ULTRA LONG ↑${bullCnt}/8 ADX:${adx.toFixed(0)}${_adxSoft?"⚠soft":"✓"} RSI:${rsi.toFixed(0)}✓${bonusTag}${_newSigsBull?" "+_newSigsBull:""}${_adxSoft?" [POLA RIZIKA-ADX]":""}` };
+      reason: `ULTRA LONG ↑${bullScore}/${_comboLen} (combo ${bullCnt}, prag ${MIN_CONFIRM_LONG}) ADX:${adx.toFixed(0)}${_adxSoft?"⚠soft":"✓"} RSI:${rsi.toFixed(0)}✓${bonusTag}${_newSigsBull?" "+_newSigsBull:""}${_adxSoft?" [POLA RIZIKA-ADX]":""}` };
   }
   if (!LONG_ONLY && bearScore >= MIN_CONFIRM_SHORT && rsiShortOk) {
     // Zone confluence — trend SHORT samo uz otpor (15m pivot res ili HTF zona ≤1.5% iznad)
@@ -3408,54 +3419,48 @@ function analyzeUltra(candles, cfg) {
       const sigMask = sigs.reduce((mask, v, i) => v === -1 ? mask | (1 << i) : mask, 0);
       return { price, signal: "SHORT", bullScore, bearScore, sigMask,
         nearSup, nearRes, vwap: vwapVal, _halfSize: _adxSoft,
-        reason: `ULTRA SHORT ↓${bearCnt}/8 ADX:${adx.toFixed(0)}${_adxSoft?"⚠soft":"✓"} RSI:${rsi.toFixed(0)}✓${bonusTag}${_newSigsBear?" "+_newSigsBear:""}${_adxSoft?" [POLA RIZIKA-ADX]":""}` };
+        reason: `ULTRA SHORT ↓${bearScore}/${_comboLen} (combo ${bearCnt}, prag ${MIN_CONFIRM_SHORT}) ADX:${adx.toFixed(0)}${_adxSoft?"⚠soft":"✓"} RSI:${rsi.toFixed(0)}✓${bonusTag}${_newSigsBear?" "+_newSigsBear:""}${_adxSoft?" [POLA RIZIKA-ADX]":""}` };
     }
   }
   if (LONG_ONLY && bearScore >= MIN_CONFIRM && rsiShortOk) {
     return { price, signal: "NEUTRAL", bullScore, bearScore,
-      reason: `SHORT↓${bearCnt}/8 blokiran — LONG_ONLY mod aktivan` };
+      reason: `SHORT↓${bearScore}/${_comboLen} blokiran — LONG_ONLY mod aktivan` };
   }
 
   // ── MOMENTUM fallback (hibrid) ──────────────────────────────────────────────
-  // Ako pullback signal nije dostigao prag, provjeri momentum/breakout logiku:
-  // Isti 13 signala ali 6 reversanih vraćamo u originalnu (trend-following) logiku.
-  // Viši prag (MOM_MIN) jer su momentum ulazi rizičniji od pullback ulaza.
-  const MOM_MIN = _combo?.minSig ?? 5;  // = combo minSig (4/5 za optimizirane simbole)
-  // 21.09. fix (audit nalaz #2): momSigs je imao samo 8 elemenata (indeksi 0-7), ali
-  // TE_COMBO = [0,2,3,4,5,6,9,10] koji koristi SVAKI simbol referencira i indekse 9/10 —
-  // momSigs[9]/[10] su bili undefined, pa je momentum grana tiho ocjenjivala na 6 signala
-  // umjesto 8 (DEMA i LHUNT slotovi nikad nisu brojani). Prošireno na isti raspored kao
-  // pullback "sigs" niz (indeksi 8-11 su identične varijable, ne treba ih preračunavati).
-  const momSigs = [
-    price > ema50  ?  1 : -1,                          //  1. E50   MOM: >EMA50 = trend gore = +1
-    cvdSum > 0 ?  1 : -1,                              //  2. CVD   MOM: kupni vol = potvrda pumpa = +1
-    macdHist !== null ? (macdHist > 0 ? 1 : -1) : 0,  //  3. MACD  MOM: isti
-    price > ema145 ?  1 : -1,                          //  4. E145  TREND: isti
-    sigPWHL,                                            //  5. PWHL  Weekly: isti
-    sigRsiDiv,                                          //  6. RDIV  RSI div: isti
-    sigMktStr,                                          //  7. MSTR  Market Structure: isti
-    sigFVG,                                             //  8. FVG   Fair Value Gap: isti
-    sigOB,                                              //  9. OB    Order Block: isti
-    sigDailyEMA,                                        // 10. DEMA  Daily EMA10/20 retest: isti
-    sigMOPEN,                                           // 11. LHUNT Liquidity Hunt: isti
-    sigMacdDiv,                                         // 12. MDIV  MACD div (bonus-only): isti
-  ];
-  const _momActiveSigs = _comboIdx.map(i => momSigs[i]);
-  const momBullBase = _momActiveSigs.filter(s => s === 1).length;
-  const momBearBase = _momActiveSigs.filter(s => s === -1).length;
-  // 21.09. uklonjeno (audit nalaz #6, isti obrazac kao pullback grana) — CVD+E145
-  // momentum bonus je zahtijevao _comboIdx.includes(1), a CVD nije u TE_COMBO za
-  // nijedan simbol, pa je bio trajno mrtav (uvijek 0). Čisto uklanjanje.
-  // Bonus: PWHL + MSTR za momentum (samo ako oba u combu)
-  const momPwhMstrBull = (_pwhInCombo && _mstrInCombo && momSigs[4] === 1  && momSigs[6] === 1)  ? 1 : 0;
-  const momPwhMstrBear = (_pwhInCombo && _mstrInCombo && momSigs[4] === -1 && momSigs[6] === -1) ? 1 : 0;
-  const momBull = momBullBase + momPwhMstrBull;
-  const momBear = momBearBase + momPwhMstrBear;
+  // Ako pullback grana nije dostigla prag, provjeri momentum/breakout put: isti score,
+  // ali BEZ zone-confluence zahtjeva koji PBK grane iznad primjenjuju.
+  //
+  // 04.10. fix (audit nalaz #2): komentar je ovdje tvrdio "Isti 13 signala ali 6 reversanih
+  // vraćamo u originalnu (trend-following) logiku", a `momSigs` niz je bio izraz-za-izraz
+  // IDENTIČNA kopija `sigs` niza — nijedan signal nije bio invertiran, pa je momBullBase
+  // uvijek bio točno === bullCnt. Kopija je uklonjena i grana sad otvoreno koristi `sigs`.
+  // Ako momentum ikad treba STVARNO drugačije čitati tržište, to je promjena scoringa i
+  // ide kroz tjedni audit, ne kroz ovaj bug-fix.
+  //
+  // 04.10. fix (audit nalaz #1): MOM_MIN je bio `_combo?.minSig ?? 5` — čisti bazni prag BEZ
+  // vikend/CHILL/invalidacija/Wyckoff bustova koje pullback grana primjenjuje preko
+  // MIN_CONFIRM_LONG/SHORT, i bez cfg._minSigOverride. Posljedica: vikend LONG od 5/8 koji je
+  // PBK grana ispravno odbila na 7/8 propao bi kroz nju i ušao OVDJE na 5/8, bez ikakve zone —
+  // točno onaj "subotnji minimalni 5/8" batch zbog kojeg je vikend bust i uveden
+  // (post-mortem 05.07. i 16.08.). Sad momentum koristi ISTI prag po strani kao pullback.
+  //
+  // NAPOMENA (posljedica gornja dva nalaza, nije dodatno pooštrenje): kako je momSigs bio
+  // kopija sigs, vrijedi momBull <= bullScore uvijek, pa se pullback grana okida prva na
+  // istom pragu i glavne momentum grane ispod su sad nedostižne — efektivno ostaje samo MOM
+  // soft zona. Ako se želi ZASEBAN momentum put, treba mu dati vlastiti signal set (nalaz #2)
+  // ili eksplicitno vlastiti prag — promijeni dvije konstante ispod.
+  const MOM_MIN_LONG  = MIN_CONFIRM_LONG;
+  const MOM_MIN_SHORT = MIN_CONFIRM_SHORT;
+  // momBullBase/momBearBase su po definiciji isti kao bullCnt/bearCnt (vidi nalaz #2 iznad),
+  // a PWHL+MSTR bonus je isti izraz kao _pwhMstrBonusBull/Bear — ponovno se koriste.
+  const momBull = bullCnt + _pwhMstrBonusBull;
+  const momBear = bearCnt + _pwhMstrBonusBear;
   // 22.09. dodano (isti bug obrazac kao PBK SHORT) — sigMask za momentum grane je
   // dosad bio potpuno izostavljen iz return objekta, pa su SVI momentum tradeovi
   // (LONG i SHORT) trajno gubili signal-level analitiku (Sig ?/12 u CSV-u zauvijek).
-  const momSigMaskBull = momSigs.reduce((mask, v, i) => v === 1 ? mask | (1 << i) : mask, 0);
-  const momSigMaskBear = momSigs.reduce((mask, v, i) => v === -1 ? mask | (1 << i) : mask, 0);
+  const momSigMaskBull = sigs.reduce((mask, v, i) => v === 1 ? mask | (1 << i) : mask, 0);
+  const momSigMaskBear = sigs.reduce((mask, v, i) => v === -1 ? mask | (1 << i) : mask, 0);
 
   // Za momentum: bez 6SC gate (breakout sam potvrđuje smjer), ADX ≥ MOM_ADX_MIN (modul-level export)
   // Ako je _adxSoft već aktivan (glavni ADX gate gore propustio kroz soft zonu),
@@ -3463,35 +3468,36 @@ function analyzeUltra(candles, cfg) {
   // presjekao momentum granu čim je stvarni ADX ispod baze.
   const _momAdxFloor = _adxSoft ? _adxSoftFloor : MOM_ADX_MIN;
 
-  if (momBull >= MOM_MIN && rsiLongOk && adx >= _momAdxFloor) {
+  if (momBull >= MOM_MIN_LONG && rsiLongOk && adx >= _momAdxFloor) {
     return { price, signal: "LONG", bullScore: momBull, bearScore: momBear, sigMask: momSigMaskBull,
       nearSup, nearRes, isMomentum: true, vwap: vwapVal, _halfSize: _adxSoft,
-      reason: `MOMENTUM LONG ↑${momBullBase}/8 | ADX:${adx.toFixed(0)}${_adxSoft?"⚠soft":"✓"} RSI:${rsi.toFixed(0)}✓${_strongTrend?" [STRONG]":""}${sigRsiDiv===1?" RDIV✓":""}${sigMktStr===1?" MSTR✓":""}${sigFVG===1?" FVG✓":""}${_adxSoft?" [POLA RIZIKA-ADX]":""}` };
+      reason: `MOMENTUM LONG ↑${momBull}/${_comboIdx.length} (prag ${MOM_MIN_LONG}) | ADX:${adx.toFixed(0)}${_adxSoft?"⚠soft":"✓"} RSI:${rsi.toFixed(0)}✓${_strongTrend?" [STRONG]":""}${sigRsiDiv===1?" RDIV✓":""}${sigMktStr===1?" MSTR✓":""}${sigFVG===1?" FVG✓":""}${_adxSoft?" [POLA RIZIKA-ADX]":""}` };
   }
-  if (!LONG_ONLY && momBear >= MOM_MIN && rsiShortOk && adx >= _momAdxFloor) {
+  if (!LONG_ONLY && momBear >= MOM_MIN_SHORT && rsiShortOk && adx >= _momAdxFloor) {
     return { price, signal: "SHORT", bullScore: momBull, bearScore: momBear, sigMask: momSigMaskBear,
       nearSup, nearRes, isMomentum: true, vwap: vwapVal, _halfSize: _adxSoft,
-      reason: `MOMENTUM SHORT ↓${momBearBase}/8 | ADX:${adx.toFixed(0)}${_adxSoft?"⚠soft":"✓"} RSI:${rsi.toFixed(0)}✓${_strongTrendS?" [STRONG]":""}${sigRsiDiv===-1?" RDIV✓":""}${sigMktStr===-1?" MSTR✓":""}${sigFVG===-1?" FVG✓":""}${_adxSoft?" [POLA RIZIKA-ADX]":""}` };
+      reason: `MOMENTUM SHORT ↓${momBear}/${_comboIdx.length} (prag ${MOM_MIN_SHORT}) | ADX:${adx.toFixed(0)}${_adxSoft?"⚠soft":"✓"} RSI:${rsi.toFixed(0)}✓${_strongTrendS?" [STRONG]":""}${sigRsiDiv===-1?" RDIV✓":""}${sigMktStr===-1?" MSTR✓":""}${sigFVG===-1?" FVG✓":""}${_adxSoft?" [POLA RIZIKA-ADX]":""}` };
   }
 
-  // ── MOM soft zone (08.09.2026) — score tek 1 ispod MOM_MIN → ne blokiraj,
-  // uđi na pola rizika umjesto potpunog blocka. Kombinira se s ADX soft (max,
-  // ne zbraja se — i dalje samo ×0.5, ne ×0.25, vidi position sizing).
-  if (momBull === MOM_MIN - MOM_SOFT_BAND && rsiLongOk && adx >= _momAdxFloor) {
+  // ── MOM soft zone (08.09.2026) — score tek MOM_SOFT_BAND ispod momentum praga →
+  // ne blokiraj, uđi na pola rizika umjesto potpunog blocka. Kombinira se s ADX soft
+  // (max, ne zbraja se — i dalje samo ×0.5, ne ×0.25, vidi position sizing).
+  // 04.10.: prag sad prati MOM_MIN_LONG/SHORT (= pullback prag te strane), pa se soft zona
+  // pomiče zajedno s vikend/CHILL/invalidacija/Wyckoff bustovima umjesto da stoji na bazi.
+  if (momBull === MOM_MIN_LONG - MOM_SOFT_BAND && rsiLongOk && adx >= _momAdxFloor) {
     return { price, signal: "LONG", bullScore: momBull, bearScore: momBear, sigMask: momSigMaskBull,
       nearSup, nearRes, isMomentum: true, vwap: vwapVal, _halfSize: true,
-      reason: `MOMENTUM LONG (SOFT) ↑${momBullBase}/8, 1 ispod praga ${MOM_MIN}/8 | ADX:${adx.toFixed(0)}${_adxSoft?"⚠soft":"✓"} RSI:${rsi.toFixed(0)}✓ [POLA RIZIKA-MOM]` };
+      reason: `MOMENTUM LONG (SOFT) ↑${momBull}/${_comboIdx.length}, ${MOM_SOFT_BAND} ispod praga ${MOM_MIN_LONG}/${_comboIdx.length} | ADX:${adx.toFixed(0)}${_adxSoft?"⚠soft":"✓"} RSI:${rsi.toFixed(0)}✓ [POLA RIZIKA-MOM]` };
   }
-  if (!LONG_ONLY && momBear === MOM_MIN - MOM_SOFT_BAND && rsiShortOk && adx >= _momAdxFloor) {
+  if (!LONG_ONLY && momBear === MOM_MIN_SHORT - MOM_SOFT_BAND && rsiShortOk && adx >= _momAdxFloor) {
     return { price, signal: "SHORT", bullScore: momBull, bearScore: momBear, sigMask: momSigMaskBear,
       nearSup, nearRes, isMomentum: true, vwap: vwapVal, _halfSize: true,
-      reason: `MOMENTUM SHORT (SOFT) ↓${momBearBase}/8, 1 ispod praga ${MOM_MIN}/8 | ADX:${adx.toFixed(0)}${_adxSoft?"⚠soft":"✓"} RSI:${rsi.toFixed(0)}✓ [POLA RIZIKA-MOM]` };
+      reason: `MOMENTUM SHORT (SOFT) ↓${momBear}/${_comboIdx.length}, ${MOM_SOFT_BAND} ispod praga ${MOM_MIN_SHORT}/${_comboIdx.length} | ADX:${adx.toFixed(0)}${_adxSoft?"⚠soft":"✓"} RSI:${rsi.toFixed(0)}✓ [POLA RIZIKA-MOM]` };
   }
 
   // Dijagnoza zašto nema signala. Napomena: "/N" ispod prati stvarnu duljinu comba
-  // (_comboIdx.length, TE_COMBO=8) — bilo hardkodirano na "/9" (relikt starog seta),
+  // (_comboLen, TE_COMBO=8) — bilo hardkodirano na "/9" (relikt starog seta),
   // ispravljeno 26.08. nakon što je korisnik primijetio nesklad s "Score: X/8" prikazom.
-  const _comboLen = _comboIdx.length;
   const dirStr = scaleOkLong ? `LONG(${scaleUp}/6)` : scaleOkShort ? `SHORT(${scaleDn}/6)` : `6Sc✗`;
   const _rsiLongPrag  = _strongTrend  ? 85 : 72;
   const _rsiShortPrag = _strongTrendS ? 15 : 30;
@@ -3507,7 +3513,7 @@ function analyzeUltra(candles, cfg) {
     : `↓${bearScore}/${_comboLen} ${dirStr}${!rsiShortOk ? ` RSI${rsi.toFixed(0)}≤${_rsiShortPrag}✗` : ""} | MOM:${momBear}/${_comboLen}`;
   return { price, signal: "NEUTRAL", bullScore, bearScore,
     momBull, momBear,
-    reason: `ULTRA: ${whyNot} (treba ${_sideConfirm}/${_comboLen} pullback ili ${MOM_MIN}/${_comboLen} momentum)` };
+    reason: `ULTRA: ${whyNot} (treba ${_sideConfirm}/${_comboLen} pullback ili ${_isBullSide ? MOM_MIN_LONG : MOM_MIN_SHORT}/${_comboLen} momentum, soft ${_isBullSide ? MOM_MIN_LONG - MOM_SOFT_BAND : MOM_MIN_SHORT - MOM_SOFT_BAND})` };
 }
 
 // ─── ULTRA Immediate Entry ─────────────────────────────────────────────────────
@@ -5995,8 +6001,10 @@ function _atrSeriesX(candles, period = 14) {
 const ULTRA4H_PID          = "ultra_4h";
 const ULTRA4H_TF           = "4H";
 // ULTRA4H_MAX_POS uklonjen (18.09., na zahtjev) — ULTRA-4H sad dijeli ZAJEDNIČKI
-// limit sa synapse_t (23.09.: MAX_OPEN_PER_PORTFOLIO=12 / MAX_OPEN_CRYPTO=7,
-// MAX_OPEN_CRYPTO_VIP=10), vidi runUltra4hStrategy.
+// limit sa synapse_t — za trenutne brojeve vidi definicije MAX_OPEN_PER_PORTFOLIO /
+// MAX_OPEN_CRYPTO / MAX_OPEN_CRYPTO_VIP / MAX_OPEN_4H na vrhu fajla (04.10., audit nalaz
+// #12: ovdje su bili prepisani stari 12/7/10, a stvarni su 11/8/8 od 01.10.).
+// Vidi runUltra4hStrategy.
 const ULTRA4H_MIN_SIG      = 5;    // isti default prag kao SYMBOL_COMBOS fallback
 const ULTRA4H_RR           = 2.5;
 const ULTRA4H_ATR_MULT     = 1.5;
@@ -6912,7 +6920,8 @@ export async function run() {
         // ── C) Per-simbol Liq Zone Filter ────────────────────────────────────────────
         // Svaki simbol provjerava VLASTITE liq zone iz već dohvaćenih 1H candles.
         // DANGER  (< 1%): MM ima razlog sweepnuti baš ovaj simbol → skip
-        // CAUTION (< 2.5%): traži score ≥ 6/7 (umjesto 4/7 PBK ili 5/7 MOM)
+        // CAUTION (< 2.5%): traži score ≥ 6/8 (umjesto baznog minSig 5/8 koji važi i za PBK i
+        //          za MOM granu — 04.10., audit nalaz #12: komentar je pisao stari 6/7 / 4/7 / 5/7)
         // CLEAR   (≥ 2.5%): normalno
         if (pDef.strategy === "synapse_t" && !existingPos) {
           const _liqStatus = calcLiqZones(candles);

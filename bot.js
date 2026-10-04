@@ -5476,43 +5476,51 @@ export async function closeBitGetOrder(pos) {
   const isFullPosition = bitgetTotal == null || Math.abs(bitgetTotal - ownQty) / bitgetTotal < 0.02;
 
   const closeSide = pos.side === "LONG" ? "buy" : "sell";  // Bitget v2 hedge: close nosi side ISTOG smjera kao pozicija
-  const path = "/api/v2/mix/order/place-order";
-  const orderBody = {
+  // 04.10., audit #15: racun je HEDGE, pa je tradeSide:"close" obavezan, a reduceOnly vrijedi samo
+  // u one-way modu. Stari body (side + reduceOnly, bez tradeSide) dao je 40774 pri SVAKOM pozivu
+  // i sve je zatvaranje tiho padalo na flash-close. Body je isti kao u soft-SL/partial-TP putu.
+  const data = await bitgetPost("/api/v2/mix/order/place-order", {
     symbol:      pos.symbol,
     productType: "USDT-FUTURES",
-    marginMode:  "isolated",
     marginCoin:  "USDT",
     side:        closeSide,
+    tradeSide:   "close",
+    marginMode:  "isolated",
+    holdSide,
     orderType:   "market",
     size:        closeQty.toFixed(4),
-    reduceOnly:  "YES",
-  };
-  const timestamp = Date.now().toString();
-  const body = JSON.stringify(orderBody);
-  const headers = {
-    "Content-Type":      "application/json",
-    "ACCESS-KEY":        BITGET.apiKey.trim(),
-    "ACCESS-SIGN":       signBitGet(timestamp, "POST", path, body),
-    "ACCESS-TIMESTAMP":  timestamp,
-    "ACCESS-PASSPHRASE": BITGET.passphrase.trim(),
-  };
-  if (BITGET_DEMO) headers["x-simulated-trading"] = "1";
-  const res  = await fetch(`${BITGET.baseUrl}${path}`, { method: "POST", headers, body });
-  const data = await res.json();
-  console.log(`  📨 BitGet sized close (qty ${closeQty.toFixed(4)}): code=${data.code} msg=${data.msg}`);
-  if (data.code === "00000") return data.data;
+  });
+  console.log(`  📨 BitGet sized close (qty ${closeQty.toFixed(4)}): code=${data?.code} msg=${data?.msg}`);
+  if (data?.code === "00000") return data.data;
 
   // Fallback: sized close nije uspio (npr. ispod min qty). Flash-close-sve SAMO ako
   // smo sigurni da je nasa kolicina ~cijela pozicija (nema tudjeg dijela za pojesti).
   if (!isFullPosition) {
-    throw new Error(`Sized close (${closeQty.toFixed(4)}) failed: ${data.msg} — NE koristim flash-close jer nasa kolicina (${ownQty.toFixed(4)}) nije cijela pozicija (${bitgetTotal?.toFixed(4)}), moglo bi zatvoriti tudju poziciju`);
+    throw new Error(`Sized close (${closeQty.toFixed(4)}) failed: ${data?.msg} — NE koristim flash-close jer nasa kolicina (${ownQty.toFixed(4)}) nije cijela pozicija (${bitgetTotal?.toFixed(4)}), moglo bi zatvoriti tudju poziciju`);
   }
   const r1 = await bitgetPost("/api/v2/mix/order/close-positions", {
     symbol: pos.symbol, productType: "USDT-FUTURES", holdSide,
   });
   console.log(`  📨 BitGet close-positions (fallback, cijela pozicija je nasa): code=${r1?.code} msg=${r1?.msg}`);
   if (r1?.code === "00000") return r1.data;
-  throw new Error(`BitGet close: ${data.msg}`);
+  throw new Error(`BitGet close: ${data?.msg}`);
+}
+
+// true SAMO ako je close uspio ILI Bitget potvrdi da pozicije vise nema (audit #15) — inace
+// pozivatelj NE smije brisati praćenje: pozicija je tada i dalje otvorena bez soft SL-a.
+async function closeOrConfirmGone(pos, tag) {
+  try {
+    await closeBitGetOrder(pos);
+    return true;
+  } catch (e) {
+    const chk = await fetchBitgetPositionSize(pos.symbol, pos.side).catch(() => ({ error: true }));
+    if (chk === null) {
+      console.log(`  ℹ️  ${tag} ${pos.symbol} — close pao (${e.message}), ali pozicije nema na Bitgetu → cleanup trackinga`);
+      return true;
+    }
+    console.log(`  ⚠️  ${tag} ${pos.symbol} close FAIL: ${e.message} — pozicija OSTAJE praćena (retry sljedeći ciklus)`);
+    return false;
+  }
 }
 
 // Zatvori višak pozicija — ostavlja prvih `target` pozicija, zatvara ostale market orderom
@@ -5554,14 +5562,10 @@ export async function closeBitGetExcess(pid, target = MAX_OPEN_PER_PORTFOLIO) {
       ? (exitPrice - pos.entryPrice) * qty
       : (pos.entryPrice - exitPrice) * qty;
 
-    try {
-      await closeBitGetOrder(pos);
-      console.log(`  🔴 MANUAL CLOSE [${pos.symbol}] ${pos.side} P&L: ${pnl.toFixed(4)}`);
-    } catch (e) {
-      // Pozicija možda već zatvorena na Bitgetu — svejedno ukloni iz trackinga
-      console.log(`  ⚠️  MANUAL CLOSE FAIL [${pos.symbol}]: ${e.message} — uklanjam iz trackinga`);
-    }
-    // Uvijek ukloni iz tracked pozicija i zabilježi u CSV
+    // 04.10., audit #15: bez uspjelog close-a (ili potvrde da pozicije nema) NE uklanjamo praćenje.
+    if (!(await closeOrConfirmGone(pos, "MANUAL CLOSE"))) continue;
+    console.log(`  🔴 MANUAL CLOSE [${pos.symbol}] ${pos.side} P&L: ${pnl.toFixed(4)}`);
+    // Ukloni iz tracked pozicija i zabilježi u CSV
     const remaining = loadPositions(pid).filter(p => !(p.symbol === pos.symbol && p.side === pos.side));
     savePositions(pid, remaining);
     writeExitCsv(pid, pos, exitPrice, "Ručno zatvoreno (višak pozicija)", pnl);
@@ -6257,7 +6261,8 @@ export async function runUltra4hStrategy() {
         ? (exitPrice - pos.entryPrice) * pos.quantity
         : (pos.entryPrice - exitPrice) * pos.quantity;
       console.log(`  🔄 [ULTRA-4H] ${pos.symbol} ${pos.side} — ${reason} @ ${fmtPrice(exitPrice)} → zatvaramo`);
-      try { await closeBitGetOrder(pos); } catch (e) { console.log(`  ⚠️  [ULTRA-4H] close fail: ${e.message}`); }
+      // 04.10., audit #15: ako close pada, pozicija OSTAJE praćena (inace ostaje na Bitgetu bez soft SL-a).
+      if (!(await closeOrConfirmGone(pos, "[ULTRA-4H]"))) continue;
       savePositions(ULTRA4H_PID, loadPositions(ULTRA4H_PID).filter(p => p.orderId !== pos.orderId));
       writeExitCsv(ULTRA4H_PID, pos, exitPrice, reason, pnl);
       await tg(`🔄 <b>ULTRA-4H ${reason}</b> ${pos.symbol} ${pos.side}\nZatvoreno @ ${fmtPrice(exitPrice)} | P&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}`);

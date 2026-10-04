@@ -57,6 +57,23 @@ export { analyzeUltra as analyzeUltraForTest };
 - Ulazni gate-ovi za 4H su u `evaluateU4hGates` — **jedini izvor istine**, dijele ga stvarni
   ulaz (`runUltra4hStrategy`) i dashboard badge (`previewU4hGates`). Mijenjaj filtere TAMO.
 
+## Zašto "momentum prag +1" NE radi (probano i vraćeno 04.10.)
+
+Pokušaj `MOM_MIN_LONG/SHORT = MIN_CONFIRM_LONG/SHORT + 1` (commit 73735e0, vraćen u f3def0d)
+**ugasio je momentum u cijelosti**: u regresijskom testu momentum ulazi 468 → 0, a SHORT ukupno
+258 → 31 (bot postaje gotovo samo-long). Nemoj to ponovno pokušavati s drugim pragom.
+
+- `momBull = bullCnt + _pwhMstrBonusBull` je **podskup** `bullScore` (koji ima i Wyckoff, MDIV,
+  WHALE, BMSB bonuse), pa uvijek vrijedi `momBull ≤ bullScore`.
+- Pullback grana (`bullScore >= MIN_CONFIRM`) **uvijek radi `return`** — i kad zone-confluence
+  odbije ulaz (vraća NEUTRAL "PBK ... blokiran"), ne propušta slučaj dalje u momentum.
+- Momentum se zato izvršava samo kad je `bullScore < MIN_CONFIRM`. Svaki momentum prag
+  `>= MIN_CONFIRM` je strukturno nedostižan; prag `< MIN_CONFIRM` vraća rupu iz nalaza #1
+  (vikend 5/8 ulazi kao momentum, bez zone).
+- Zaključak: "strožiji momentum" traži **drugačiji score** (vlastiti signal set, nalaz #2), ne
+  drugačiji prag. Prije toga neka tjedni job s pravim podacima kaže isplate li se momentum
+  uopće. Regresijski test je ovo uhvatio — pokreni `npm test` prije svake promjene praga.
+
 ## Dnevne svijeće
 
 Koristi **`granularity=1Dutc`**, ne `1D`. Bitgetov `1D` nije poravnat na UTC i daje drugu

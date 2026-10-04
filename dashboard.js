@@ -601,6 +601,7 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
   let ultraBull = 0, ultraBear = 0;
   let ultraSigs16 = new Array(11).fill(0);
   let ultraMinSig = 4;  // default
+  let ultraMinSigLong = null, ultraMinSigShort = null;  // stvarni pragovi po smjeru
   let ultraHalfSize = false;  // ADX/MOM soft-zone ulaz (08.09.) — bot bi ovo izvršio na pola rizika
   {
     const _symCombo = SYMBOL_COMBOS[symbol];  // jedan izvor istine — bot.js
@@ -608,7 +609,7 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
     // (dashboard TE_COMBO/minSig=4 vs bot.js [0..7]/minSig=8) — sad dijele iste konstante.
     const _comboIdxD = _symCombo?.sigIdx ?? DEFAULT_COMBO;
     const { minSig = DEFAULT_MIN_SIG } = _symCombo ?? {};
-    ultraMinSig = minSig;
+    ultraMinSig = minSig; ultraMinSigLong = minSig; ultraMinSigShort = minSig;
     if (n >= 200 && ema9 && ema21) {
       const rsiV  = rsi ?? 50;
       const adxV  = adx ?? 0;
@@ -745,6 +746,12 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
       const minSigLong  = minSig + Math.max(_weekendBoostD, _chillBoostD, _invalBoostD, _wyLongBoostD);
       const minSigShort = minSig + Math.max(_weekendBoostD, _chillBoostD, _wyShortBoostD);
       // Prikazani "min:" u scoreBox-u mora biti STVARNI prag, ne bazni.
+      // 04.10. ispravljeno: bio `Math.max(minSigLong, minSigShort)`, pa je UI prikazivao
+      // LONG prag i za SHORT stranu. Kad je Wyckoff SOS/invalidacija aktivna, LONG prag je
+      // baza+2 a SHORT baza — "min:" i žuto near-miss upozorenje su se tad palili po krivom
+      // broju za SHORT. Sad se nose oba; ultraMinSig ostaje zbog starih potrošača.
+      ultraMinSigLong  = minSigLong;
+      ultraMinSigShort = minSigShort;
       ultraMinSig = Math.max(minSigLong, minSigShort);
 
       // DEMA gate se primjenjuje nize, u bloku odluke (bot.js ga ima kao "0. DEMA gate").
@@ -827,7 +834,7 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
     trend: trendLabel,
     emaRsiSig, megaSig,
     synapse7Sig, synapse7Bull, synapse7Bear, synapse7Subs,
-    ultraSig, ultraBull, ultraBear, ultraSigs16, ultraMinSig, ultraHalfSize,
+    ultraSig, ultraBull, ultraBear, ultraSigs16, ultraMinSig, ultraMinSigLong, ultraMinSigShort, ultraHalfSize,
     synapseTSig: ultraSig,
     scaleUp, scaleDn,   // direktni 6Sc rezultati za badge display
   };
@@ -3066,7 +3073,7 @@ function sigBoxes(sigs, symbol) {
   }).join('');
 }
 
-function scoreBox(bull, bear, sig, minSig) {
+function scoreBox(bull, bear, sig, minSig, minSigLong, minSigShort) {
   const total = 8;  // Future combo — 8 signala
   const minLabel = minSig ? '<br><span style="color:#444;font-size:9px">min:' + minSig + '</span>' : '';
   if (sig === "LONG")   return '<div style="background:rgba(5,150,105,0.15);border:1px solid #059669;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#059669;font-weight:800;font-size:16px">↑' + bull + '</span><span style="color:#94a3b8;font-size:11px">/' + total + '</span><br><span class="sig-long" style="font-size:11px">▲ LONG</span></div>';
@@ -3074,15 +3081,29 @@ function scoreBox(bull, bear, sig, minSig) {
   if (sig === "SETUP↑") return '<div style="background:rgba(240,165,0,0.1);border:1px solid #d9770644;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#d97706;font-weight:800;font-size:16px">↑' + bull + '</span><span style="color:#94a3b8;font-size:11px">/' + total + '</span><br><span style="color:#d97706;font-size:11px">◈ SETUP↑</span></div>';
   if (sig === "SETUP↓") return '<div style="background:rgba(240,165,0,0.1);border:1px solid #d9770644;border-radius:6px;padding:4px 8px;text-align:center"><span style="color:#d97706;font-weight:800;font-size:16px">↓' + bear + '</span><span style="color:#94a3b8;font-size:11px">/' + total + '</span><br><span style="color:#d97706;font-size:11px">◈ SETUP↓</span></div>';
   const top = Math.max(bull, bear);
-  // Ako je bull blizu minSig — prikaži žuto upozorenje (1 signal nedostaje)
-  const nearMiss = minSig && bull === minSig - 1;
+  // 04.10. ispravljeno: near-miss je gledao SAMO bull stranu, pa SHORT koji je jedan signal
+  // do praga nikad nije dobio žuto upozorenje — a LONG jest. Sad svaka strana ide protiv SVOG
+  // praga (LONG i SHORT se razlikuju kad je Wyckoff/invalidacija bust aktivan, vidi analyzeUltra).
+  const mLong  = minSigLong  || minSig;
+  const mShort = minSigShort || minSig;
+  const nearLong  = mLong  && bull === mLong  - 1;
+  const nearShort = mShort && bear === mShort - 1;
+  const nearMiss  = nearLong || nearShort;
+  // Boja prati stranu koja je blizu; ako su obje, pobjeđuje jači score.
+  const nearSide = (nearLong && nearShort) ? (bull >= bear ? 'L' : 'S') : nearLong ? 'L' : nearShort ? 'S' : null;
   const col = nearMiss ? '#d97706' : bull > bear ? '#05966950' : bear > bull ? '#dc262650' : '#555';
   const bg  = nearMiss ? 'rgba(247,183,49,0.06)' : 'transparent';
   const brd = nearMiss ? 'border:1px solid #d9770633;border-radius:6px;' : '';
-  return '<div style="text-align:center;padding:2px;' + brd + 'background:' + bg + '" title="Bull: ' + bull + ' / Bear: ' + bear + ' / Minimum: ' + (minSig||'?') + '">' +
+  // "min:" prikazuje prag strane koja je relevantna; kad se pragovi razlikuju, pišu se oba.
+  const minTxt = (mLong && mShort && mLong !== mShort)
+    ? (nearSide === 'S' ? mShort + '↓/' + mLong + '↑' : mLong + '↑/' + mShort + '↓')
+    : (mLong || mShort || '');
+  const tip = 'Bull: ' + bull + ' (prag ' + (mLong || '?') + ') / Bear: ' + bear + ' (prag ' + (mShort || '?') + ')'
+    + (nearSide === 'L' ? ' — LONG 1 do praga' : nearSide === 'S' ? ' — SHORT 1 do praga' : '');
+  return '<div style="text-align:center;padding:2px;' + brd + 'background:' + bg + '" title="' + tip + '">' +
     '<span style="color:' + col + ';font-size:14px;font-weight:700">' + top + '</span>' +
     '<span style="color:#444;font-size:11px">/' + total + '</span>' +
-    (minSig ? '<br><span style="color:' + (nearMiss ? '#d97706' : '#333') + ';font-size:9px">min:' + minSig + (nearMiss ? ' ⚠' : '') + '</span>' : '') +
+    (minTxt ? '<br><span style="color:' + (nearMiss ? '#d97706' : '#333') + ';font-size:9px">min:' + minTxt + (nearMiss ? ' ⚠' + (nearSide === 'S' ? '↓' : '↑') : '') + '</span>' : '') +
     '</div>';
 }
 
@@ -3350,7 +3371,7 @@ async function doScan() {
         '<td style="text-align:center;font-weight:800;color:' + t1hCol + ';font-size:13px;padding:6px 4px" title="1H EMA20: ' + t1h + '">' + t1hIcon + '</td>' +
         '<td style="text-align:center;font-weight:800;color:' + sig4hCol + ';font-size:13px;padding:6px 4px" title="' + sig4hTitle + '">' + sig4hIcon + (sig4h.signal !== 'NEUTRAL' ? ' <span style="font-size:9px;font-weight:400;color:#94a3b8">' + sig4hScore + '/8</span>' : '') + gate4hHtml + '</td>' +
         '<td style="padding:4px 4px">' + mandatoryBoxes(s) + sigBoxes(s.ultraSigs16, s.symbol) + '</td>' +
-        '<td style="padding:4px 6px;text-align:center">' + scoreBox(s.ultraBull||0, s.ultraBear||0, s.ultraSig, s.ultraMinSig) + '</td>' +
+        '<td style="padding:4px 6px;text-align:center">' + scoreBox(s.ultraBull||0, s.ultraBear||0, s.ultraSig, s.ultraMinSig, s.ultraMinSigLong, s.ultraMinSigShort) + '</td>' +
         '<td style="padding:4px 6px">' + statusBox(s) + '</td>' +
         '</tr>';
     }

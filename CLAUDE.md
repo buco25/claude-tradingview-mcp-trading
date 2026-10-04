@@ -117,6 +117,38 @@ je jedini izvor te računice; `liqDistPct(lev) = (1/lev − 0.005) × 100`.
 - `slPct >= 19.5%` je strukturno neizvedivo: `getSafeLeverage` ima pod na 5×, čija je liq na
   19.5%. Takav ulaz `liqBlocksEntry` odbija (oba puta + `setupSymbol` kao zadnja mreža).
 
+## Equity, rizik i stropovi
+
+- **`equityForSizing(pid, startCapital)` je jedini put do equityja za sizing.** Vraća
+  `{ equity, src, live }` i `src` MORA ići u log ulaza — bez toga se iz logova ne vidi po kojoj
+  je osnovici trade uzet (nalaz #20 je upravo tako ostao nevidljiv).
+- **`fetchBitgetEquity()` vraća objekt, ne broj.** `{ ok:true, equity:0 }` znači "račun je
+  stvarno prazan" i drawdown zaštita se na tome MORA okinuti; `{ ok:false }` znači "ne znamo"
+  i tek tad ide CSV procjena. Nikad ne spajaj ta dva slučaja u `null` (nalaz #21).
+- **`ACCOUNT_START_CAPITAL` je jedina polazna vrijednost.** Račun je jedan. `ultra_4h` nije
+  portfolio u `buildPortfolios`, pa svaki novi `startCapital` fallback mora ići kroz tu
+  konstantu — ne kroz novi lokalni broj (tako je nastao nalaz #20, a `dashboard.js` je držao
+  vlastitu kopiju `$1000`).
+- **Stropovi na rizik, od najužeg prema najširem:** `RISK_PCT*` po tradeu →
+  `MAX_PYRAMID_RISK_PCT` (5%) po simbolu → `MAX_PORTFOLIO_RISK_PCT` (20%) na sumu preko OBJE
+  strategije → `MAX_OPEN_1H/4H` na broj pozicija. Dodaješ li novi ulazni put, provjeri sva
+  četiri; sizing stropovi se provjeravaju **prije** `checkDailyLimit`, koji ima *side effect*
+  (inkrementira dnevni brojač), pa blokiran ulaz ne smije proći kroz njega.
+- **Zaštite moraju postojati na OBA puta.** `run()` (1H) i `runUltra4hStrategy` (4H) se pozivaju
+  neovisno — 4H iz schedulera u `dashboard.js`. Drawdown i dnevni limit su do 04.10. postojali
+  samo u `run()` (nalaz #23). Blokiraju se **novi ulazi**, nikad upravljanje postojećim
+  pozicijama (izlazi i trail moraju raditi i kad su ulazi zabranjeni).
+
+## Bitget auth
+
+`bitgetHeaders(method, path, body)` u `bot.js` je **jedino** mjesto koje sastavlja potpisane
+headere, i izvezeno je za `dashboard.js`. Nikad ne sastavljaj headere ručno:
+
+- samo taj helper dodaje `x-simulated-trading` u demo modu. Do 04.10. ga je imao samo
+  `bitgetPost`, pa je uz `BITGET_DEMO=true` bot **pisao na demo a čitao živi račun** — equity,
+  pozicije, fillove i zatvoreni P&L (nalaz #22).
+- timestamp se izračuna i potpiše u istom pozivu, pa `ts` i `sign` ne mogu raziđeti.
+
 ## Dnevne svijeće
 
 Koristi **`granularity=1Dutc`**, ne `1D`. Bitgetov `1D` nije poravnat na UTC i daje drugu
@@ -131,8 +163,11 @@ najdirektnije dira novac:
 - izlaz/monitoring: `softExitMonitor`, `checkPortfolioPositions`, `applyTrail`,
   `partialClosePosition`, `moveSLtoBreakEven`, `addToPyramid`
 - sinkronizacija s Bitgetom: `syncPositionsFromBitget`, `ownBitgetQty`, `_otherStrategiesQty`
-- računica: `getPortfolioEquity`, `fetchBitgetClosedPnl`, CSV pisanje/čitanje
+- računica: `fetchBitgetClosedPnl`, CSV pisanje/čitanje
 - auth na dashboardu
+
+Equity put (`getPortfolioEquity`, `fetchBitgetEquity`) je auditiran 04.10. — nalazi #20–#24,
+svi popravljeni.
 
 Vidi `docs/AUDIT-2026-10-04.md` za nalaze i otvorene odluke.
 

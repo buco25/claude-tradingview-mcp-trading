@@ -21,11 +21,13 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   DEFAULT_COMBO, DEFAULT_MIN_SIG,
   RISK_PCT, RISK_PCT_MIN, RISK_PCT_MAX,
   ADX_MIN, ADX_SOFT_BAND, ADX_SOFT_FLOOR, MOM_SOFT_BAND, MOM_ADX_MIN,
-  MAX_OPEN_CRYPTO, MAX_OPEN_STOCKS, getCapSnapshot } from "./bot.js";
+  MAX_OPEN_CRYPTO, MAX_OPEN_STOCKS, getCapSnapshot, bitgetHeaders, ACCOUNT_START_CAPITAL } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
-const START_CAPITAL = 1000;
+// 04.10. (nalaz #20): bila lokalna kopija $1000. ultra_4h nema `startCapital` u
+// PORTFOLIO_DEFS, pa je njegov prikazani equity polazio od $1000 na racunu od ~$300.
+const START_CAPITAL = ACCOUNT_START_CAPITAL;
 
 // ─── Timezone offset — UTC+2 (CEST) ───────────────────────────────────────────
 const TZ_OFFSET_H = 2;  // sati ispred UTC
@@ -4029,21 +4031,11 @@ const server = http.createServer(async (req, res) => {
   // Bitget live balance — bez auth
   if (url.pathname === "/api/bitget-balance") {
     try {
-      const BITGET_KEY    = (process.env.BITGET_API_KEY    || "").trim();
-      const BITGET_SECRET = (process.env.BITGET_SECRET_KEY || "").trim();
-      const BITGET_PASS   = (process.env.BITGET_PASSPHRASE || "").trim();
+      // 04.10. (nalaz #22): headere potpisuje bitgetHeaders iz bot.js — jedno mjesto,
+      // i jedino koje dodaje x-simulated-trading u demo modu.
       const BITGET_BASE   = (process.env.BITGET_BASE_URL   || "https://api.bitget.com").trim();
       const path = "/api/v2/mix/account/accounts?productType=USDT-FUTURES";
-      const ts   = Date.now().toString();
-      const { createHmac } = await import("crypto");
-      const sign = createHmac("sha256", BITGET_SECRET).update(`${ts}GET${path}`).digest("base64");
-      const r = await fetch(`${BITGET_BASE}${path}`, {
-        headers: {
-          "ACCESS-KEY": BITGET_KEY, "ACCESS-SIGN": sign,
-          "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET_PASS,
-          "Content-Type": "application/json",
-        },
-      });
+      const r = await fetch(`${BITGET_BASE}${path}`, { headers: bitgetHeaders("GET", path) });
       const d = await r.json();
       const acc = d?.data?.[0];
       const balance = acc ? {
@@ -4064,22 +4056,12 @@ const server = http.createServer(async (req, res) => {
   // Bitget Win Rate iz zatvorenih pozicija (zadnjih 100)
   if (url.pathname === "/api/bitget-wr") {
     try {
-      const BITGET_KEY    = (process.env.BITGET_API_KEY    || "").trim();
-      const BITGET_SECRET = (process.env.BITGET_SECRET_KEY || "").trim();
-      const BITGET_PASS   = (process.env.BITGET_PASSPHRASE || "").trim();
+      // 04.10. (nalaz #22): headere potpisuje bitgetHeaders iz bot.js — jedno mjesto,
+      // i jedino koje dodaje x-simulated-trading u demo modu.
       const BITGET_BASE   = (process.env.BITGET_BASE_URL   || "https://api.bitget.com").trim();
       // history-position: svaka zatvorena pozicija s netProfit — pouzdano za WR
       const path = "/api/v2/mix/position/history-position?productType=USDT-FUTURES&limit=100";
-      const ts   = Date.now().toString();
-      const { createHmac } = await import("crypto");
-      const sign = createHmac("sha256", BITGET_SECRET).update(`${ts}GET${path}`).digest("base64");
-      const r = await fetch(`${BITGET_BASE}${path}`, {
-        headers: {
-          "ACCESS-KEY": BITGET_KEY, "ACCESS-SIGN": sign,
-          "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET_PASS,
-          "Content-Type": "application/json",
-        },
-      });
+      const r = await fetch(`${BITGET_BASE}${path}`, { headers: bitgetHeaders("GET", path) });
       const d = await r.json();
       const list   = d?.data?.list ?? [];
       const rows   = list.map(p => ({ sym: p.symbol, pnl: parseFloat(p.netProfit) })).filter(r => isFinite(r.pnl));
@@ -4112,11 +4094,9 @@ const server = http.createServer(async (req, res) => {
   // startTime/endTime pa se svaki prozor dohvaća posebnim pozivom, sum(netProfit).
   if (url.pathname === "/api/bitget-period-pnl") {
     try {
-      const BITGET_KEY    = (process.env.BITGET_API_KEY    || "").trim();
-      const BITGET_SECRET = (process.env.BITGET_SECRET_KEY || "").trim();
-      const BITGET_PASS   = (process.env.BITGET_PASSPHRASE || "").trim();
+      // 04.10. (nalaz #22): headere potpisuje bitgetHeaders iz bot.js — jedno mjesto,
+      // i jedino koje dodaje x-simulated-trading u demo modu.
       const BITGET_BASE   = (process.env.BITGET_BASE_URL   || "https://api.bitget.com").trim();
-      const { createHmac } = await import("crypto");
       const now = Date.now();
       const todayStart = new Date(); todayStart.setUTCHours(0, 0, 0, 0);
       const windows = {
@@ -4136,12 +4116,7 @@ const server = http.createServer(async (req, res) => {
         for (let page = 0; page < 20; page++) {  // 20×100 = 2000 pozicija strop, sigurnosna kocnica
           let path = `/api/v2/mix/position/history-position?productType=USDT-FUTURES&startTime=${startTime}&endTime=${now}&limit=100`;
           if (idLessThan) path += `&idLessThan=${idLessThan}`;
-          const ts   = Date.now().toString();
-          const sign = createHmac("sha256", BITGET_SECRET).update(`${ts}GET${path}`).digest("base64");
-          const r = await fetch(`${BITGET_BASE}${path}`, {
-            headers: { "ACCESS-KEY": BITGET_KEY, "ACCESS-SIGN": sign,
-              "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET_PASS, "Content-Type": "application/json" },
-          });
+          const r = await fetch(`${BITGET_BASE}${path}`, { headers: bitgetHeaders("GET", path) });
           const d = await r.json();
           const list = d?.data?.list ?? [];
           all = all.concat(list);
@@ -4167,21 +4142,11 @@ const server = http.createServer(async (req, res) => {
   // za usporedbu s lokalnim CSV-om koji zna drift-ati (partial close, fill-price fetch).
   if (url.pathname === "/api/bitget-history") {
     try {
-      const BITGET_KEY    = (process.env.BITGET_API_KEY    || "").trim();
-      const BITGET_SECRET = (process.env.BITGET_SECRET_KEY || "").trim();
-      const BITGET_PASS   = (process.env.BITGET_PASSPHRASE || "").trim();
+      // 04.10. (nalaz #22): headere potpisuje bitgetHeaders iz bot.js — jedno mjesto,
+      // i jedino koje dodaje x-simulated-trading u demo modu.
       const BITGET_BASE   = (process.env.BITGET_BASE_URL   || "https://api.bitget.com").trim();
       const path = "/api/v2/mix/position/history-position?productType=USDT-FUTURES&limit=30";
-      const ts   = Date.now().toString();
-      const { createHmac } = await import("crypto");
-      const sign = createHmac("sha256", BITGET_SECRET).update(`${ts}GET${path}`).digest("base64");
-      const r = await fetch(`${BITGET_BASE}${path}`, {
-        headers: {
-          "ACCESS-KEY": BITGET_KEY, "ACCESS-SIGN": sign,
-          "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET_PASS,
-          "Content-Type": "application/json",
-        },
-      });
+      const r = await fetch(`${BITGET_BASE}${path}`, { headers: bitgetHeaders("GET", path) });
       const d = await r.json();
       // 01.10., na zahtjev — spoji TF/Mode/Score iz CSV-a (vidi _buildCsvEntryIndex/
       // _matchCsvMeta iznad). _usedIdx sprječava da dva stvarna zapisa pokupe isti CSV red.

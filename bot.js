@@ -22,7 +22,14 @@ import { fileURLToPath } from "url";
 const TIMEFRAME     = "1H";
 const LEVERAGE      = 50;     // 50x default → SL 1.5% = 75% margine (više prostora za šum)
 const BTC_LEVERAGE  = 75;    // BTC posebno — 75x
-const START_CAPITAL = 1000;   // po portfoliju
+// 04.10. (nalaz #20): ovdje je do 04.10. stajao `START_CAPITAL = 1000` "po portfoliju".
+// `ultra_4h` NIJE portfolio u buildPortfolios, pa je njegov CSV fallback isao na tih
+// $1000 — tri i pol puta iznad stvarnog racuna — i prva mrezna greska na
+// fetchBitgetEquity je davala ~3.3x preveliku 4H poziciju. Racun je JEDAN, pa i polazna
+// vrijednost mora biti jedna. 296.99 je broj koji je synapse_t vec koristio
+// (buildPortfolios), sad mu je ovo izvor. Konstanta se izvozi da dashboard ne drzi
+// vlastitu kopiju koja se moze raziti.
+export const ACCOUNT_START_CAPITAL = 296.99;
 // SURVIVAL MODE ukinut (16.08.) — prvi profitabilan tjedan potvrđen (dedupliciranom
 // metodologijom): WR 78-81%, R:R ~1:1, Total P&L pozitivan 7 dana zaredom. Uvjet iz
 // starog komentara (20.07.) ispunjen → vraćeno na 1.0/1.5/2.0 kako je i planirano.
@@ -118,6 +125,22 @@ const MAX_VIP_PYRAMID        = 4;   // ukupno legs (initial + adicije) čak i uz
 // cap 5% pusta 2 noge, cap 6% pusta 3. Odabrano 5% — reze najgori slucaj sa 7.45% na 3.82%,
 // a zadrzava pyramid kao znacajku. Mijenja se ovdje, jedan broj.
 const MAX_PYRAMID_RISK_PCT   = 5.0;
+// 04.10. (nalaz #24): strop na UKUPNI istovremeni rizik cijelog racuna. Postojali su
+// strop po tradeu (RISK_PCT*), po simbolu (MAX_PYRAMID_RISK_PCT) i po broju pozicija
+// (MAX_OPEN_1H/4H), ali nijedan na njihovu SUMU — a `fetchBitgetEquity` vraca JEDAN,
+// racun-wide broj koji obje strategije koriste kao vlastiti kapital, pa se rizik sabira.
+// Izmjereno na postojecim stropovima:
+//   1H 3 pozicije (BTC 3% + 2x2%)        =  7.0%
+//   4H 8 pozicija (8 x RISK_PCT 1.5%)    = 12.0%
+//   ukupno bez pyramida                  = 19.0%
+//   s dva simbola pyramidirana na 5%     = 24.0%
+// Za usporedbu, dnevni limit gubitka je 3% — ali on reagira NAKON zatvaranja, a kripta
+// je po priznanju samog koda "jedan BTC-beta trade", pa jedan korelirani potez moze
+// uzeti cijelu sumu odjednom. Odabrano 20%: NE dira nista sto postojeci stropovi vec
+// dopustaju (19%), a rezi upravo onaj rep koji nitko ne pokriva — kombinaciju
+// pyramida i punog broja pozicija. Hoce li biti strozi je trading odluka: 10% bi
+// spustio efektivni broj istovremenih pozicija s 11 na ~7. Mijenja se ovdje, jedan broj.
+const MAX_PORTFOLIO_RISK_PCT = 20.0;
 const MAX_NEW_ENTRIES_PER_SCAN = 2; // max NOVIH ulaza po scan ciklusu (08.07.: 4 longa u istom scanu = 1 oklada ×4)
 const MAX_SAME_DIR_CRYPTO = 4;      // max kripto pozicija u ISTOM smjeru — svi altovi su jedan BTC-beta trade
                                      // (28.08.: 3→4 na korisnikov zahtjev nakon analize 20.08. rallyja gdje je
@@ -542,12 +565,7 @@ export async function getAccountTransfers() {
     const endTime = Date.now(), startTime = endTime - 89 * 24 * 3600 * 1000;
     for (const businessType of ["trans_from_exchange", "trans_to_exchange"]) {
       const path = `/api/v2/mix/account/bill?productType=USDT-FUTURES&coin=USDT&businessType=${businessType}&startTime=${startTime}&endTime=${endTime}&limit=100`;
-      const ts = Date.now().toString();
-      const sign = signBitGet(ts, "GET", path);
-      const r = await fetch(`${BITGET.baseUrl}${path}`, {
-        headers: { "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": sign,
-          "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET.passphrase, "Content-Type": "application/json" },
-      });
+      const r = await fetch(`${BITGET.baseUrl}${path}`, { headers: bitgetHeaders("GET", path) });
       const d = await r.json();
       if (d.code === "00000" && Array.isArray(d.data?.bills)) {
         for (const b of d.data.bills) {
@@ -2247,18 +2265,7 @@ console.log(`🔑 BitGet key: ${BITGET.apiKey.slice(0,8)}... len=${BITGET.apiKey
 async function testBitGetAuth() {
   try {
     const path = "/api/v2/mix/account/accounts?productType=USDT-FUTURES";
-    const timestamp = Date.now().toString();
-    const sign = crypto.createHmac("sha256", BITGET.secretKey)
-      .update(`${timestamp}GET${path}`).digest("base64");
-    const res = await fetch(`${BITGET.baseUrl}${path}`, {
-      headers: {
-        "ACCESS-KEY":        BITGET.apiKey,
-        "ACCESS-SIGN":       sign,
-        "ACCESS-TIMESTAMP":  timestamp,
-        "ACCESS-PASSPHRASE": BITGET.passphrase,
-        "Content-Type":      "application/json",
-      },
-    });
+    const res = await fetch(`${BITGET.baseUrl}${path}`, { headers: bitgetHeaders("GET", path) });
     const data = await res.json();
     if (data.code === "00000") {
       console.log(`✅ BitGet auth OK — accounts: ${JSON.stringify(data.data?.slice(0,1))}`);
@@ -2330,7 +2337,7 @@ function buildPortfolios(rules) {
       timeframe:    tfs.synapse_t    || "15m",
       slPct:        1.0, tpPct: 2.0,
       live:         true,
-      startCapital: 296.99,
+      startCapital: ACCOUNT_START_CAPITAL,
     },
   };
 }
@@ -4004,14 +4011,8 @@ async function fetchBitgetPositionSize(symbol, side) {
     const holdSide = side === "LONG" ? "long" : "short";
     // Koristi all-position (single-position ne postoji u Standard/Classic API-ju)
     const path = "/api/v2/mix/position/all-position?productType=USDT-FUTURES&marginCoin=USDT";
-    const ts   = Date.now().toString();
-    const sign = signBitGet(ts, "GET", path);
     const r    = await fetch(`${BITGET.baseUrl}${path}`, {
-      headers: {
-        "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": sign,
-        "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET.passphrase,
-        "Content-Type": "application/json",
-      },
+      headers: bitgetHeaders("GET", path),
       signal: AbortSignal.timeout(5000),
     });
     const d = await r.json();
@@ -4059,15 +4060,7 @@ function ownBitgetQty(pos, bp) {
 export async function fetchBitgetOpenPositions() {
   try {
     const path = "/api/v2/mix/position/all-position?productType=USDT-FUTURES&marginCoin=USDT";
-    const ts   = Date.now().toString();
-    const sign = signBitGet(ts, "GET", path);
-    const r    = await fetch(`${BITGET.baseUrl}${path}`, {
-      headers: {
-        "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": sign,
-        "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET.passphrase,
-        "Content-Type": "application/json",
-      },
-    });
+    const r    = await fetch(`${BITGET.baseUrl}${path}`, { headers: bitgetHeaders("GET", path) });
     const d = await r.json();
     if (d.code !== "00000") return null;
     // Vrati set "SYMBOL:holdSide" koji su stvarno otvoreni
@@ -4089,15 +4082,7 @@ export async function fetchBitgetOpenPositions() {
 async function fetchBitgetClosedPnl(symbol, pos, attempt = 1) {
   try {
     const path = `/api/v2/mix/order/fill-history?symbol=${symbol}&productType=USDT-FUTURES&limit=50`;
-    const ts   = Date.now().toString();
-    const sign = signBitGet(ts, "GET", path);
-    const r    = await fetch(`${BITGET.baseUrl}${path}`, {
-      headers: {
-        "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": sign,
-        "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET.passphrase,
-        "Content-Type": "application/json",
-      },
-    });
+    const r    = await fetch(`${BITGET.baseUrl}${path}`, { headers: bitgetHeaders("GET", path) });
     const d = await r.json();
     if (d.code !== "00000" || !d.data?.fillList?.length) {
       if (attempt < 3) {
@@ -4196,14 +4181,8 @@ async function fetchBitgetPositionHistory(symbol, startMs, endMs) {
   // Bitget v2: position/history-position — zatvorene pozicije s achievedProfits i closeAvgPrice
   const path = `/api/v2/mix/position/history-position?productType=USDT-FUTURES&symbol=${symbol}&startTime=${startMs}&endTime=${endMs}&limit=100`;
   try {
-    const ts   = Date.now().toString();
-    const sign = signBitGet(ts, "GET", path);
     const r    = await fetch(`${BITGET.baseUrl}${path}`, {
-      headers: {
-        "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": sign,
-        "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET.passphrase,
-        "Content-Type": "application/json",
-      },
+      headers: bitgetHeaders("GET", path),
       signal: AbortSignal.timeout(15000),
     });
     const d = await r.json();
@@ -4909,10 +4888,10 @@ function writeEntryCsv(pid, entry) {
 }
 
 // ─── Portfolio Equity ────────────────────────────────────────────────────────────
-// Stvarna raspoloživa equity = START_CAPITAL + zatvoreni P&L − rizik otvorenih pozicija.
+// Stvarna raspoloživa equity = startCapital + zatvoreni P&L − rizik otvorenih pozicija.
 // Svaka otvorena pozicija "zaključava" točno riskAmount = tradeSize × slPct/100.
 // Na taj način sljedeći trade se uvijek veliča prema trenutno raspoloživom kapitalu.
-function getPortfolioEquity(pid, startCapital = START_CAPITAL) {
+function getPortfolioEquity(pid, startCapital = ACCOUNT_START_CAPITAL) {
   // 1) Baza: startCapital + suma zatvorenih Net P&L iz CSV-a
   let closedEquity = startCapital;
   const f = csvFilePath(pid);
@@ -4926,7 +4905,7 @@ function getPortfolioEquity(pid, startCapital = START_CAPITAL) {
         const val = parseFloat(netPnlStr);
         if (isFinite(val)) closedEquity += val;
       }
-    } catch { /* nastavi s START_CAPITAL */ }
+    } catch { /* nastavi s polaznom vrijednoscu */ }
   }
 
   // 2) Oduzmi rizik svih trenutno otvorenih pozicija
@@ -4943,44 +4922,88 @@ function getPortfolioEquity(pid, startCapital = START_CAPITAL) {
   return closedEquity - lockedRisk;
 }
 
-// ─── Pravi BitGet equity (za live mod drawdown provjeru) ───────────────────────
-// Vraća null ako nije live ili ako API poziv padne
+// ─── Ukupni istovremeni rizik svih otvorenih pozicija ($) ─────────────────────
+// Sumira rizik preko OBJE strategije, jer je racun jedan (nalaz #24). Rizik pozicije je
+// totalUSD x |entryPrice - sl| / entryPrice — ista formula koju koristi getPortfolioEquity.
+// Napomena: `syncPositionsFromBitget` sve sync pozicije vodi pod `synapse_t`, pa 4H
+// pozicija koja je i sync-ana moze biti brojana dvaput. To je konzervativno (blokira
+// ranije, ne kasnije) i ostaje tako do audita same sinkronizacije.
+function positionRisk(pos) {
+  if (!pos || !pos.totalUSD || !pos.entryPrice || !pos.sl) return 0;
+  return pos.totalUSD * Math.abs(pos.entryPrice - pos.sl) / pos.entryPrice;
+}
+
+function portfolioOpenRisk() {
+  let risk = 0;
+  for (const pid of ["synapse_t", ULTRA4H_PID]) {
+    for (const pos of loadPositions(pid)) risk += positionRisk(pos);
+  }
+  return risk;
+}
+
+// ─── Pravi BitGet equity (za sizing i drawdown provjeru) ──────────────────────
+// Vraća { ok, equity, src } — NE goli broj. Razlika je bitna (04.10., nalaz #21):
+//   ok:true, equity 0   → Bitget je rekao da je račun prazan. To je PODATAK, i drawdown
+//                         zaštita se na njemu MORA okinuti.
+//   ok:false            → ne znamo (paper mod, API greška). Tek tad ide CSV procjena.
+// Stara verzija je oba slučaja vraćala kao `null`, pa je prazan/likvidiran račun padao
+// na CSV izračun koji ne zna ni za isplate ni za likvidaciju — i zaštita se nije okidala
+// točno u scenariju u kojem je najpotrebnija.
 let _lastBitgetEquity = null;
 let _lastBitgetEquityTs = 0;
-const BITGET_EQUITY_TTL = 60_000; // cache 60s
+const BITGET_EQUITY_TTL = 60_000;            // cache 60s
+const BITGET_EQUITY_STALE_MAX = 15 * 60_000; // kad API padne, zadnja poznata vrijednost vrijedi 15 min
+
+// Kad poziv padne: zadnja poznata ŽIVA vrijednost je bolja procjena od CSV-a (koji ne zna
+// za uplate/isplate), ali samo dok je razumno svježa.
+function _staleBitgetEquity(reason) {
+  const age = Date.now() - _lastBitgetEquityTs;
+  if (_lastBitgetEquity !== null && age < BITGET_EQUITY_STALE_MAX) {
+    return { ok: true, equity: _lastBitgetEquity, src: `BitGet~${Math.round(age / 1000)}s`, stale: true };
+  }
+  return { ok: false, equity: null, src: `CSV(${reason})`, stale: false };
+}
 
 async function fetchBitgetEquity() {
-  if (PAPER_TRADING) return null;
+  if (PAPER_TRADING) return { ok: false, equity: null, src: "CSV(paper)", stale: false };
   if (Date.now() - _lastBitgetEquityTs < BITGET_EQUITY_TTL && _lastBitgetEquity !== null) {
-    return _lastBitgetEquity;
+    return { ok: true, equity: _lastBitgetEquity, src: "BitGet", stale: false };
   }
   try {
     const path = "/api/v2/mix/account/accounts?productType=USDT-FUTURES";
-    const ts   = Date.now().toString();
-    const sign = crypto.createHmac("sha256", BITGET.secretKey)
-      .update(`${ts}GET${path}`).digest("base64");
-    const res = await fetch(`${BITGET.baseUrl}${path}`, {
-      headers: {
-        "ACCESS-KEY":        BITGET.apiKey,
-        "ACCESS-SIGN":       sign,
-        "ACCESS-TIMESTAMP":  ts,
-        "ACCESS-PASSPHRASE": BITGET.passphrase,
-        "Content-Type":      "application/json",
-      },
-    });
+    const res = await fetch(`${BITGET.baseUrl}${path}`, { headers: bitgetHeaders("GET", path) });
     const d = await res.json();
-    if (d.code !== "00000" || !d.data?.[0]) return null;
-    const acc = d.data[0];
-    const eq  = parseFloat(acc.usdtEquity || acc.equity || acc.available || 0);
-    if (eq > 0) {
-      _lastBitgetEquity   = eq;
-      _lastBitgetEquityTs = Date.now();
+    if (d.code !== "00000" || !d.data?.[0]) {
+      console.log(`  ⚠️  fetchBitgetEquity: code=${d.code} msg=${d.msg}`);
+      return _staleBitgetEquity(`code ${d.code}`);
     }
-    return eq > 0 ? eq : null;
+    // ?? umjesto || — da legitimna nula ne propadne na sljedeće polje. `available`
+    // isključuje zaključanu marginu pa je zadnji izbor, ne ravnopravan.
+    const acc = d.data[0];
+    const raw = [acc.usdtEquity, acc.equity, acc.available].find(v => v !== undefined && v !== null && v !== "");
+    const eq  = parseFloat(raw);
+    if (!Number.isFinite(eq) || eq < 0) return _staleBitgetEquity("neispravan equity");
+    _lastBitgetEquity   = eq;
+    _lastBitgetEquityTs = Date.now();
+    return { ok: true, equity: eq, src: "BitGet", stale: false };
   } catch (e) {
     console.log(`  ⚠️  fetchBitgetEquity: ${e.message}`);
-    return null;
+    return _staleBitgetEquity(e.message);
   }
+}
+
+// ─── Jedna definicija equityja za sizing (04.10., nalaz #24) ──────────────────
+// Oba ulazna puta (1H `run()` i 4H `runUltra4hStrategy`) moraju zvati OVO, a ne svaki
+// svoju kombinaciju live/CSV izvora — tako je i nastao nalaz #20 (4H je kao fallback
+// imao $1000, 1H $296.99). Vraća i `src`, koji ide u log, da se iz logova vidi po kojoj
+// je osnovici trade uzet.
+// Napomena na semantiku: `usdtEquity` je BRUTO (nerealizirani P&L + zaključana margina),
+// a `getPortfolioEquity` je NETO raspoloživo (minus rizik otvorenih). Fallback je time
+// namjerno konzervativniji od live vrijednosti — manje pozicije, ne veće.
+async function equityForSizing(pid, startCapital = ACCOUNT_START_CAPITAL) {
+  const r = await fetchBitgetEquity();
+  if (r.ok) return { equity: r.equity, src: r.src, live: true };
+  return { equity: getPortfolioEquity(pid, startCapital), src: r.src, live: false };
 }
 
 export function writeExitCsv(pid, pos, exitPrice, reason, pnl) {
@@ -5020,18 +5043,30 @@ function signBitGet(timestamp, method, path, body = "") {
     .update(`${timestamp}${method}${path}${body}`).digest("base64");
 }
 
-async function bitgetPost(path, body) {
-  const timestamp = Date.now().toString();
-  const b = JSON.stringify(body);
-  const headers = {
-    "Content-Type": "application/json",
+// ─── Bitget auth headeri — JEDNO mjesto (04.10., nalaz #22) ───────────────────
+// Prije ovoga je svaki potpisani poziv sastavljao headere ručno: 13 kopija u bot.js
+// i 4 u dashboard.js. Nijedna osim `bitgetPost` nije dodavala `x-simulated-trading`,
+// pa je uz BITGET_DEMO=true bot PISAO na demo račun a ČITAO živi — equity, pozicije,
+// fillove i zatvoreni P&L. Sizing je time išao po živom balansu, a syncPositionsFromBitget
+// bi žive pozicije upisao kao svoje.
+// Drugi efekt: timestamp se izračuna i potpiše u istom pozivu, pa `ts` i `sign` više
+// ne mogu raziđeti (prije su bile dvije odvojene lokalne varijable na svakom mjestu).
+export function bitgetHeaders(method, path, body = "") {
+  const ts = Date.now().toString();
+  const h = {
     "ACCESS-KEY":        BITGET.apiKey.trim(),
-    "ACCESS-SIGN":       signBitGet(timestamp, "POST", path, b),
-    "ACCESS-TIMESTAMP":  timestamp,
+    "ACCESS-SIGN":       signBitGet(ts, method, path, body),
+    "ACCESS-TIMESTAMP":  ts,
     "ACCESS-PASSPHRASE": BITGET.passphrase.trim(),
+    "Content-Type":      "application/json",
   };
-  if (BITGET_DEMO) headers["x-simulated-trading"] = "1";
-  const res = await fetch(`${BITGET.baseUrl}${path}`, { method: "POST", headers, body: b });
+  if (BITGET_DEMO) h["x-simulated-trading"] = "1";
+  return h;
+}
+
+async function bitgetPost(path, body) {
+  const b = JSON.stringify(body);
+  const res = await fetch(`${BITGET.baseUrl}${path}`, { method: "POST", headers: bitgetHeaders("POST", path, b), body: b });
   const data = await res.json();
   if (data.code !== "00000") {
     console.log(`  ⚠️  bitgetPost ${path} → code=${data.code} msg=${data.msg}`);
@@ -5606,14 +5641,8 @@ async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp, slPct, tpP
     await new Promise(r => setTimeout(r, 2000));
     try {
       const detailPath = `/api/v2/mix/order/detail?symbol=${symbol}&productType=USDT-FUTURES&orderId=${orderId}`;
-      const ts2   = Date.now().toString();
-      const sign2 = signBitGet(ts2, "GET", detailPath);
       const det = await fetch(`${BITGET.baseUrl}${detailPath}`, {
-        headers: {
-          "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": sign2,
-          "ACCESS-TIMESTAMP": ts2, "ACCESS-PASSPHRASE": BITGET.passphrase,
-          "Content-Type": "application/json",
-        },
+        headers: bitgetHeaders("GET", detailPath),
       }).then(r => r.json());
       if (det.code === "00000" && det.data?.priceAvg) {
         fillPrice = parseFloat(det.data.priceAvg);
@@ -5639,14 +5668,8 @@ async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp, slPct, tpP
   if (orderId) {
     try {
       const detailPath2 = `/api/v2/mix/order/detail?symbol=${symbol}&productType=USDT-FUTURES&orderId=${orderId}`;
-      const ts3   = Date.now().toString();
-      const sign3 = signBitGet(ts3, "GET", detailPath2);
       const det2  = await fetch(`${BITGET.baseUrl}${detailPath2}`, {
-        headers: {
-          "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": sign3,
-          "ACCESS-TIMESTAMP": ts3, "ACCESS-PASSPHRASE": BITGET.passphrase,
-          "Content-Type": "application/json",
-        },
+        headers: bitgetHeaders("GET", detailPath2),
       }).then(r => r.json());
       if (det2.code === "00000" && det2.data?.baseVolume) {
         fillQty = parseFloat(det2.data.baseVolume);
@@ -5806,13 +5829,8 @@ async function cancelTpOrder(pos) {
   const { symbol, side } = pos;
   const holdSide = side === "LONG" ? "long" : "short";
   try {
-    const ts   = Date.now().toString();
     const path = `/api/v2/mix/order/orders-plan-pending?symbol=${symbol}&productType=USDT-FUTURES&planType=pos_profit`;
-    const sign = signBitGet(ts, "GET", path);
-    const r    = await fetch(`${BITGET.baseUrl}${path}`, {
-      headers: { "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": sign,
-        "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET.passphrase, "Content-Type": "application/json" },
-    });
+    const r    = await fetch(`${BITGET.baseUrl}${path}`, { headers: bitgetHeaders("GET", path) });
     const d = await r.json();
     const orders = (d.data?.entrustedList || []).filter(o => o.holdSide === holdSide);
     if (orders.length > 0) {
@@ -5837,13 +5855,8 @@ async function cancelAllPlanOrders(symbol, side) {
   let cancelled = 0;
   for (const planType of planTypes) {
     try {
-      const ts   = Date.now().toString();
       const path = `/api/v2/mix/order/orders-plan-pending?symbol=${symbol}&productType=USDT-FUTURES&planType=${planType}`;
-      const sign = signBitGet(ts, "GET", path);
-      const r    = await fetch(`${BITGET.baseUrl}${path}`, {
-        headers: { "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": sign,
-          "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET.passphrase, "Content-Type": "application/json" },
-      });
+      const r    = await fetch(`${BITGET.baseUrl}${path}`, { headers: bitgetHeaders("GET", path) });
       const d = await r.json();
       const orders = (d.data?.entrustedList || []).filter(o => o.holdSide === holdSide);
       for (const o of orders) {
@@ -5895,10 +5908,8 @@ async function addToPyramid(pid, existingPos, signal, newTradeSize, slPct, tpPct
     try {
       const orderId = orderData.data?.orderId;
       const detPath = `/api/v2/mix/order/detail?symbol=${symbol}&productType=USDT-FUTURES&orderId=${orderId}`;
-      const ts2 = Date.now().toString();
       const det = await fetch(`${BITGET.baseUrl}${detPath}`, {
-        headers: { "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": signBitGet(ts2, "GET", detPath),
-          "ACCESS-TIMESTAMP": ts2, "ACCESS-PASSPHRASE": BITGET.passphrase, "Content-Type": "application/json" },
+        headers: bitgetHeaders("GET", detPath),
       }).then(r => r.json());
       if (det.code === "00000" && det.data?.priceAvg) fillPrice = parseFloat(det.data.priceAvg);
     } catch(e) { console.log(`  ⚠️  [PYRAMID] Fill fetch: ${e.message}`); }
@@ -6118,15 +6129,7 @@ export async function syncPositionsFromBitget(pid = "synapse_t") {
   if (PAPER_TRADING) return { synced: 0, message: "PAPER mode — nema sinca" };
 
   const posPath  = `/api/v2/mix/position/all-position?productType=USDT-FUTURES&marginCoin=USDT`;
-  const ts       = Date.now().toString();
-  const sign     = signBitGet(ts, "GET", posPath);
-  const r        = await fetch(`${BITGET.baseUrl}${posPath}`, {
-    headers: {
-      "ACCESS-KEY": BITGET.apiKey, "ACCESS-SIGN": sign,
-      "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": BITGET.passphrase,
-      "Content-Type": "application/json",
-    },
-  });
+  const r        = await fetch(`${BITGET.baseUrl}${posPath}`, { headers: bitgetHeaders("GET", posPath) });
   const d = await r.json();
   if (d.code !== "00000") throw new Error(`Bitget error: ${d.msg}`);
 
@@ -6482,6 +6485,38 @@ export async function runUltra4hStrategy() {
   const utcNow = new Date();
   if (!shouldRunNow(ULTRA4H_TF, utcNow.getUTCHours(), utcNow.getUTCMinutes())) return;
 
+  // ── Drawdown zaštita + dnevni limit gubitka (04.10., nalaz #23) ────────────
+  // Oba su do 04.10. postojala SAMO u `run()` (1H put). `runUltra4hStrategy` se poziva
+  // neovisno, iz schedulera u dashboard.js, pa je 4H nastavljao ulaziti kad je dnevni
+  // limit suspendirao 1H, i trgovao i kad je equity pao ispod CB_DRAWDOWN_MIN.
+  // Ovo MIJENJA PONAŠANJE: 4H ulazi se sad blokiraju u tim stanjima, isto kao 1H.
+  // Upravljanje postojećim pozicijama (dio 1 gore) se namjerno NE blokira — izlazi
+  // moraju raditi i kad su ulazi zabranjeni.
+  {
+    const _eqGate4 = await equityForSizing(ULTRA4H_PID);
+    if (_eqGate4.equity < CB_DRAWDOWN_MIN) {
+      console.log(`  🛑 [ULTRA-4H] DRAWDOWN ZAŠTITA — equity $${_eqGate4.equity.toFixed(2)} (${_eqGate4.src}) < $${CB_DRAWDOWN_MIN} — novi ulazi blokirani!`);
+      const cb = loadCircuitBreaker();
+      const _lastDd4 = cb[ULTRA4H_PID]?.lastDrawdownAlert || 0;
+      if (Date.now() - _lastDd4 > 60 * 60 * 1000) {
+        await tg(`🛑 <b>DRAWDOWN ZAŠTITA [ULTRA-4H]</b>\nEquity: $${_eqGate4.equity.toFixed(2)} (${_eqGate4.src}) — ispod minimuma $${CB_DRAWDOWN_MIN}\nNovi ulazi blokirani. Resetiraj ručno kad budeš spreman.`);
+        cb[ULTRA4H_PID] = { ...(cb[ULTRA4H_PID] || {}), lastDrawdownAlert: Date.now() };
+        saveCircuitBreaker(cb);
+      }
+      return;
+    }
+    const _dailyLimit4 = Math.max(_eqGate4.equity * DAILY_LOSS_LIMIT_PCT / 100, DAILY_LOSS_LIMIT_MIN);
+    const _dailyPnl4   = getDailyPnl(ULTRA4H_PID);
+    if (_dailyPnl4 < -_dailyLimit4) {
+      console.log(`  🛑 [ULTRA-4H] DNEVNI LIMIT — P&L danas: $${_dailyPnl4.toFixed(2)} < -$${_dailyLimit4.toFixed(0)} (${DAILY_LOSS_LIMIT_PCT}% od $${_eqGate4.equity.toFixed(0)} [${_eqGate4.src}]) → ulazi suspendirani do ponoći`);
+      await tg(`🛑 Dnevni gubitak limit [ULTRA-4H]: $${_dailyPnl4.toFixed(2)} (${DAILY_LOSS_LIMIT_PCT}% od $${_eqGate4.equity.toFixed(0)}) — ulazi pauzirani do ponoći`);
+      return;
+    }
+    if (_dailyPnl4 < -(_dailyLimit4 * DAILY_WARN_PCT / 100)) {
+      console.log(`  ⚠️  [ULTRA-4H] Dnevni P&L upozorenje: $${_dailyPnl4.toFixed(2)} (${(Math.abs(_dailyPnl4) / _dailyLimit4 * 100).toFixed(0)}% od $${_dailyLimit4.toFixed(0)} limita)`);
+    }
+  }
+
   // 18.09., na zahtjev: ZAJEDNIČKI limit sa synapse_t (01.10.: ukupno 11 = MAX_OPEN_1H(3)
   // + MAX_OPEN_4H(8), uz klasne capove 8 kripto / 4 dionice preko OBJE strategije) —
   // ULTRA-4H trguje samo kriptom.
@@ -6560,8 +6595,10 @@ export async function runUltra4hStrategy() {
         continue;
       }
       const lev = getSafeLeverage(sig.slPct);
-      const _liveEq    = await fetchBitgetEquity();
-      const equity     = _liveEq ?? getPortfolioEquity(ULTRA4H_PID, START_CAPITAL);
+      // 04.10. (nalaz #20): isti helper kao 1H put, pa 4H ne moze imati vlastitu
+      // (pogresnu) polaznu vrijednost. `src` ide u log nize.
+      const _eq4       = await equityForSizing(ULTRA4H_PID);
+      const equity     = _eq4.equity;
       const riskAmount = equity * (RISK_PCT / 100);
       let notional = riskAmount / (sig.slPct / 100);
 
@@ -6594,10 +6631,19 @@ export async function runUltra4hStrategy() {
         console.log(`  📏 [ULTRA-4H][MIN] ${symbol} — size $${notional.toFixed(2)} < $${_minNotional.toFixed(2)} (minQty ${_minTradeNum[symbol] ?? "?"}) → podignut na minimum | rizik $${_riskWanted.toFixed(2)} → $${_riskActual.toFixed(2)} (${_mult.toFixed(1)}× namjere, makro mult ×${_macroSizeMult4.toFixed(2)})`);
         notional = _minNotional;
       }
+      // Strop na UKUPNI rizik racuna (04.10., nalaz #24) — nakon poda minimalnog
+      // notionala, jer pod moze podignuti i rizik (vidi nalaz #14).
+      const _portRisk4  = portfolioOpenRisk() + notional * (sig.slPct / 100);
+      const _portRisk4P = equity > 0 ? (_portRisk4 / equity * 100) : Infinity;
+      if (_portRisk4P > MAX_PORTFOLIO_RISK_PCT) {
+        console.log(`  ⛔ [ULTRA-4H][PORTFOLIO RISK] ${symbol} ${sig.signal} — ukupni rizik bi bio $${_portRisk4.toFixed(2)} (${_portRisk4P.toFixed(2)}% od $${equity.toFixed(2)}), strop je ${MAX_PORTFOLIO_RISK_PCT}% → preskačem`);
+        continue;
+      }
+
       const margin = notional / lev;
       const score = sig.signal === "LONG" ? sig.bullScore : sig.bearScore;
 
-      console.log(`  🎯 [ULTRA-4H] ${symbol} ${sig.signal} @ ${fmtPrice(sig.price)} | SL ${fmtPrice(sig.sl)} TP ${fmtPrice(sig.tp)} | score ${score}/8 | rizik $${riskAmount.toFixed(2)} (${RISK_PCT}% od $${equity.toFixed(2)}) → margin $${margin.toFixed(2)} × ${lev}x`);
+      console.log(`  🎯 [ULTRA-4H] ${symbol} ${sig.signal} @ ${fmtPrice(sig.price)} | SL ${fmtPrice(sig.sl)} TP ${fmtPrice(sig.tp)} | score ${score}/8 | rizik $${riskAmount.toFixed(2)} (${RISK_PCT}% od $${equity.toFixed(2)} [${_eq4.src}]) → margin $${margin.toFixed(2)} × ${lev}x`);
       const result = await placeBitGetOrder(symbol, sig.signal, notional, sig.price, sig.sl, sig.tp, sig.slPct, sig.tpPct, lev);
       _newEntriesThisU4hScan++;
       const entry = {
@@ -6657,10 +6703,10 @@ export async function run() {
     // ── Drawdown zaštita ───────────────────────────────────────────────────────
     // U live modu: koristi stvarni BitGet balans (ne CSV izračun)
     // U paper modu: koristi CSV izračun
-    const liveEq  = await fetchBitgetEquity();  // null u paper modu
-    const csvEq   = getPortfolioEquity(pid, pDef.startCapital || START_CAPITAL);
-    const equityNow = liveEq ?? csvEq;
-    const equitySrc = liveEq !== null ? "BitGet" : "CSV";
+    const _eqNow    = await equityForSizing(pid, pDef.startCapital || ACCOUNT_START_CAPITAL);
+    const csvEq     = getPortfolioEquity(pid, pDef.startCapital || ACCOUNT_START_CAPITAL);
+    const equityNow = _eqNow.equity;
+    const equitySrc = _eqNow.src;
 
     console.log(`  💰 [${pDef.name}] Equity: $${equityNow.toFixed(2)} (${equitySrc}) | CSV: $${csvEq.toFixed(2)}`);
 
@@ -7938,10 +7984,10 @@ export async function run() {
         // stvarni Bitget $269 nakon uplate $150). Sad koristi isti live Bitget equity
         // kao drawdown zastita (fetchBitgetEquity, 60s cache) — CSV equity ostaje
         // samo fallback za paper mod ili ako API poziv padne.
-        const startCap    = pDef.startCapital ?? START_CAPITAL;
-        const _liveEquity = await fetchBitgetEquity();
-        const equity      = _liveEquity ?? getPortfolioEquity(pid, startCap);
-        const _equitySrc  = _liveEquity !== null ? "BitGet" : "CSV";
+        const startCap    = pDef.startCapital ?? ACCOUNT_START_CAPITAL;
+        const _eqSizing   = await equityForSizing(pid, startCap);
+        const equity      = _eqSizing.equity;
+        const _equitySrc  = _eqSizing.src;
 
         const _entryScore  = signal === "LONG" ? (result.bullScore ?? 0) : (result.bearScore ?? 0);
         const _comboMinSig = SYMBOL_COMBOS[symbol]?.minSig ?? 5;
@@ -7981,6 +8027,23 @@ export async function run() {
           tradeSize = _minNotional;
         }
         const margin     = tradeSize / LEVERAGE;  // preliminarno — ažurira se nakon setupSymbol
+
+        // Strop na UKUPNI rizik racuna (04.10., nalaz #24) — prije pyramid grane, pa
+        // vrijedi i za adicije i za nove ulaze.
+        // Pyramid adicija NE dodaje rizik na postojeci — nakon adicije se SL preracuna od
+        // prosjecnog ulaza, pa rizik cijele pozicije postaje totalUSD_nakon * slPct/100.
+        // Rizik stare noge se zato oduzima, ne sabire. (Namjerno se ne koristi `_isPyramid`:
+        // deklariran je nize, pa bi referenca ovdje bila TDZ — tocno greska iz nalaza #1.)
+        const _pyrHere    = !!(existingPos && existingPos.side === signal);
+        const _portRisk1  = _pyrHere
+          ? portfolioOpenRisk() - positionRisk(existingPos) + ((existingPos.totalUSD ?? 0) + tradeSize) * (slPct / 100)
+          : portfolioOpenRisk() + tradeSize * (slPct / 100);
+        const _portRisk1P = equity > 0 ? (_portRisk1 / equity * 100) : Infinity;
+        if (_portRisk1P > MAX_PORTFOLIO_RISK_PCT) {
+          console.log(`  ⛔ [${pDef.name}][PORTFOLIO RISK] ${symbol} ${signal} — ukupni rizik bi bio $${_portRisk1.toFixed(2)} (${_portRisk1P.toFixed(2)}% od $${equity.toFixed(2)}), strop je ${MAX_PORTFOLIO_RISK_PCT}% → preskačem`);
+          _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: `PORTFOLIO_RISK(${_portRisk1P.toFixed(1)}%>${MAX_PORTFOLIO_RISK_PCT}%)`, reason: `Ukupni rizik racuna bi presao strop` });
+          continue;
+        }
 
         // Odluka #3 (04.10.): likvidacija unutar stopa i na 5x → nema ulaza.
         // Stoji prije checkDailyLimit da ni pyramid adicija ne prode (addToPyramid

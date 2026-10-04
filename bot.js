@@ -6375,9 +6375,24 @@ export async function runUltra4hStrategy() {
       if (sig.signal === "LONG" && _dxyChange4 !== null && _dxyChange4 > 0.3) { _macroSizeMult4 *= 0.7; console.log(`  💵 [ULTRA-4H][DXY] ${symbol} — jaki dolar → LONG size ×0.7`); }
       notional *= _macroSizeMult4;
 
+      // 04.10. (audit nalaz #14): pod minimalnog notionala se primjenjuje NAKON svih makro
+      // size multiplikatora (vikend ×0.5, chill ×0.7, day-range ×0.6, SP500, F&G, DXY), pa kad
+      // se upali vrati natrag sve sto su oni smanjili — stvarni rizik tad prelazi riskAmount
+      // (pri equity $300 / RISK_PCT 1.5% i slPct 7.9% sa slozenim multiplikatorima do ~5.6x).
+      // 1H put to barem logira (vidi "[MIN]" nize), 4H je dizao TIHO, pa se iz logova i
+      // Telegrama nije moglo vidjeti da je trade prekoracio svoj risk budget. Sad logira isto.
+      // NAPOMENA: pod se ne moze samo ukloniti — Bitget odbija order ispod minimalne kolicine.
+      // Preskakanje takvog ulaza iznad nekog faktora je promjena strategije i ceka odluku
+      // vlasnika; ovo je samo vidljivost, bez promjene ponasanja.
       const _minQtyNotional = (_minTradeNum[symbol] ?? 0) * sig.price * 1.05;
       const _minNotional = Math.max(ULTRA4H_MIN_NOTIONAL, _minQtyNotional);
-      if (notional < _minNotional) notional = _minNotional;
+      if (notional < _minNotional) {
+        const _riskWanted = notional * (sig.slPct / 100);
+        const _riskActual = _minNotional * (sig.slPct / 100);
+        const _mult = _riskWanted > 0 ? (_riskActual / _riskWanted) : Infinity;
+        console.log(`  📏 [ULTRA-4H][MIN] ${symbol} — size $${notional.toFixed(2)} < $${_minNotional.toFixed(2)} (minQty ${_minTradeNum[symbol] ?? "?"}) → podignut na minimum | rizik $${_riskWanted.toFixed(2)} → $${_riskActual.toFixed(2)} (${_mult.toFixed(1)}× namjere, makro mult ×${_macroSizeMult4.toFixed(2)})`);
+        notional = _minNotional;
+      }
       const margin = notional / lev;
       const score = sig.signal === "LONG" ? sig.bullScore : sig.bearScore;
 

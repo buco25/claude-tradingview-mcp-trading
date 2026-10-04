@@ -1930,6 +1930,79 @@ async function fetchCryptoNews(limit = 5) {
   } catch { return []; }
 }
 
+// ─── Hyperliquid pozicioniranje po PnL skupinama (Coinversa API) ──────────────
+// 04.10., na zahtjev: samo za dnevni izvještaj, NE ulazi ni u jedan signal ni gate.
+// Coinversa dijeli HL tradere po profitabilnosti; gledamo Apex (money_printer, malo
+// novčanika, velik notional), Sharps (smart_money) i masu (exit_liquidity). Bias je
+// (long − short) / (long + short) po notionalu, od −1 do +1. Bez COINVERSA_API_KEY
+// funkcija vraća null i sekcija se ne prikazuje.
+const COINVERSA_COIN_MAP = { PEPEUSDT: "kPEPE", XAUUSDT: "xyz:GOLD", XAGUSDT: "xyz:SILVER", SPYUSDT: "xyz:SP500" };
+const COINVERSA_SKIP     = new Set(["QQQUSDT", "SPCXUSDT"]);  // nema jednoznačnog HL marketa
+
+function _coinversaCoin(sym) {
+  if (COINVERSA_COIN_MAP[sym]) return COINVERSA_COIN_MAP[sym];
+  const base = sym.replace(/USDT$/, "");
+  return isStockSym(sym) ? `xyz:${base}` : base;
+}
+
+async function fetchHlCohortBias(symbols) {
+  const key = (process.env.COINVERSA_API_KEY || "").trim();
+  if (!key) return null;
+  const rows = [];
+  let rateLimited = false;
+  for (const sym of symbols) {
+    if (COINVERSA_SKIP.has(sym)) continue;
+    try {
+      const url = `https://api.coinversa.ai/api/public/v1/live/cohort-bias/${encodeURIComponent(_coinversaCoin(sym))}`;
+      const res = await fetch(url, { headers: { "X-API-Key": key, "Accept": "application/json" }, signal: AbortSignal.timeout(8000) });
+      if (res.status === 429) { rateLimited = true; break; }
+      if (!res.ok) continue;  // market ne postoji na HL-u → preskoči simbol
+      const list = await res.json();
+      if (!Array.isArray(list) || !list.length) continue;
+      const tier = t => list.find(r => r.pnlTier === t);
+      const apex = tier("money_printer"), sharps = tier("smart_money"), crowd = tier("exit_liquidity");
+      if (!apex || !crowd) continue;
+      rows.push({
+        symbol: sym,
+        apex:   apex.netBiasByNotional,   apexWallets: (apex.longCount || 0) + (apex.shortCount || 0),
+        apexUsd: (apex.longNotional || 0) + (apex.shortNotional || 0),
+        sharps: sharps?.netBiasByNotional ?? null,
+        crowd:  crowd.netBiasByNotional,
+      });
+    } catch { /* jedan simbol ne smije srušiti izvještaj */ }
+    await new Promise(r => setTimeout(r, 250));  // ~4 req/s, ostaje unutar REST limita
+  }
+  return { rows, rateLimited };
+}
+
+// Klasifikacija za izvještaj. Apex s < 5 novčanika je prerijedak da išta znači (često
+// jedan market maker ili hedge), pa takav redak ide samo u markdown tablicu.
+const _HL_BIAS_MIN = 0.3;
+function _classifyHlBias(r) {
+  const solid = r.apexWallets >= 5;
+  const apexDir  = r.apex  >=  _HL_BIAS_MIN ? "LONG" : r.apex  <= -_HL_BIAS_MIN ? "SHORT" : null;
+  const crowdDir = r.crowd >=  _HL_BIAS_MIN ? "LONG" : r.crowd <= -_HL_BIAS_MIN ? "SHORT" : null;
+  const sharpDir = r.sharps == null ? null : r.sharps >= 0.2 ? "LONG" : r.sharps <= -0.2 ? "SHORT" : null;
+  if (!solid || !apexDir) return { kind: "none", apexDir };
+  if (sharpDir === apexDir) return { kind: "aligned", apexDir };              // Apex i Sharps zajedno
+  if (crowdDir && crowdDir !== apexDir) return { kind: "divergent", apexDir }; // Apex protiv mase
+  return { kind: "apex", apexDir };
+}
+
+function _summarizeHlBias(hlBias) {
+  if (!hlBias || !hlBias.rows?.length) return null;
+  const rows = hlBias.rows.map(r => ({ ...r, cls: _classifyHlBias(r) }))
+    .sort((a, b) => Math.abs(b.apex) - Math.abs(a.apex));
+  const tag = r => `${r.symbol.replace("USDT", "")} ${r.cls.apexDir === "LONG" ? "↑" : "↓"}`;
+  const aligned   = rows.filter(r => r.cls.kind === "aligned").map(tag);
+  const divergent = rows.filter(r => r.cls.kind === "divergent").map(tag);
+  const bySym = Object.fromEntries(rows.map(r => [r.symbol, r]));
+  const openVs = (hlBias.open || [])
+    .filter(p => { const c = bySym[p.symbol]?.cls; return c && c.kind !== "none" && c.apexDir !== p.side; })
+    .map(p => `${p.symbol.replace("USDT", "")} ${p.side}`);
+  return { rows, aligned, divergent, openVs: [...new Set(openVs)], count: rows.length };
+}
+
 // ─── BTC Dominance ────────────────────────────────────────────────────────────
 let _domCache = { btc: null, change: null, ts: 0 };
 const DOM_TTL = 15 * 60 * 1000;
@@ -8089,7 +8162,7 @@ function _fmtPerf(label, stats) {
   return s;
 }
 
-function _buildReport(dateStr, stats, statsU4h, fg, news, pivots, outlook, posInfo, blActive, regime1h, regime4h, isWeekend) {
+function _buildReport(dateStr, stats, statsU4h, fg, news, pivots, outlook, posInfo, blActive, regime1h, regime4h, isWeekend, hlBias = null) {
   const { verdict, reason: verdictReason } = _buildStrategyVerdict(stats);
 
   // ── Telegram message (max ~2000 char) ──────────────────────────────────────
@@ -8129,6 +8202,18 @@ function _buildReport(dateStr, stats, statsU4h, fg, news, pivots, outlook, posIn
     : `🚫 <b>Blacklist:</b> svi simboli aktivni\n\n`;
 
   tgMsg += `⚖️ Strategija: <b>${verdict}</b> — ${verdictReason}`;
+
+  // Hyperliquid pozicioniranje (04.10.) — samo kompaktni sažetak, puna tablica je u .md
+  const hl = _summarizeHlBias(hlBias);
+  if (hl) {
+    tgMsg += `\n\n🐋 <b>Hyperliquid — Apex/Sharps vs masa</b> (${hl.count} simbola)\n`;
+    if (hl.aligned.length)   tgMsg += `✅ Apex+Sharps zajedno: ${hl.aligned.join(", ")}\n`;
+    if (hl.divergent.length) tgMsg += `⚔️ Apex protiv mase: ${hl.divergent.join(", ")}\n`;
+    if (hl.openVs.length)    tgMsg += `⚠️ Tvoje pozicije protiv Apexa: ${hl.openVs.join(", ")}\n`;
+    else if (hlBias.open?.length) tgMsg += `👍 Nijedna otvorena pozicija nije protiv Apexa\n`;
+    if (hlBias.rateLimited)  tgMsg += `<i>(rate limit — djelomični podaci)</i>\n`;
+    tgMsg += `<i>Kontekst, ne signal — podaci s HL-a, ne Bitgeta.</i>`;
+  }
 
   if (news && news.length > 0) {
     tgMsg += `\n\n📰 <b>Top vijesti</b>\n` + news.map((n, i) => `${i + 1}. <a href="${n.url}">${n.title}</a>`).join("\n");
@@ -8189,6 +8274,19 @@ function _buildReport(dateStr, stats, statsU4h, fg, news, pivots, outlook, posIn
   md += blActive.length
     ? blActive.map(([sym,v])=>`- ${sym}: još ${((v.until-Date.now())/3600000).toFixed(1)}h (${v.reason})`).join("\n") + "\n\n"
     : `_Svi simboli aktivni._\n\n`;
+
+  if (hl) {
+    md += `## 🐋 Hyperliquid — pozicioniranje po PnL skupinama (Coinversa)\n\n`;
+    md += `Bias = (long − short) / (long + short) po notionalu. Apex = najprofitabilniji, Sharps = stabilno profitabilni, Masa = exit_liquidity.\n\n`;
+    md += `| Simbol | Apex | Apex novč. | Sharps | Masa | Ocjena |\n|---|---|---|---|---|---|\n`;
+    const _pct = v => v == null ? "—" : `${v >= 0 ? "+" : ""}${Math.round(v * 100)}%`;
+    const _lbl = { aligned: "Apex+Sharps zajedno", divergent: "Apex protiv mase", apex: "samo Apex", none: "—" };
+    for (const r of hl.rows) {
+      md += `| ${r.symbol.replace("USDT", "")} | ${_pct(r.apex)} | ${r.apexWallets} | ${_pct(r.sharps)} | ${_pct(r.crowd)} | ${_lbl[r.cls.kind]}${r.cls.apexDir ? ` (${r.cls.apexDir})` : ""} |\n`;
+    }
+    if (hl.openVs.length) md += `\n**Otvorene pozicije protiv Apexa:** ${hl.openVs.join(", ")}\n`;
+    md += `\n_Kontekst, ne signal. Apex s < 5 novčanika se ne ocjenjuje._\n\n`;
+  }
 
   md += `## ⚖️ Zaključak\n\n`;
   md += `**Strategija: ${verdict}** — ${verdictReason}\n\n`;
@@ -8505,8 +8603,20 @@ export async function generateDailyReport() {
   const bl = loadBlacklist();
   const blActive = Object.entries(bl).filter(([, v]) => Date.now() < v.until);
 
+  // 2h. Hyperliquid pozicioniranje po PnL skupinama (04.10., Coinversa) — watchlist + otvorene
+  let hlBias = null;
+  try {
+    const _wl = JSON.parse(readFileSync("rules.json", "utf8")).watchlist_synapse_t || [];
+    const _openPos = [..._openSyn, ..._openU4h];
+    const _syms = [...new Set([..._wl, ..._openPos.map(p => p.symbol)])];
+    hlBias = await fetchHlCohortBias(_syms);
+    if (hlBias) hlBias.open = _openPos.map(p => ({ symbol: p.symbol, side: p.side }));
+  } catch (e) {
+    console.log(`  ⚠️ [Daily Report] Coinversa: ${e.message}`);
+  }
+
   // 3. Build report
-  const report = _buildReport(dateStr, stats, statsU4h, fg, news, pivots, outlook, posInfo, blActive, regime1h?.regime ?? "UNKNOWN", regime4h, isWeekend);
+  const report = _buildReport(dateStr, stats, statsU4h, fg, news, pivots, outlook, posInfo, blActive, regime1h?.regime ?? "UNKNOWN", regime4h, isWeekend, hlBias);
 
   // 4. Spremi u fajl
   try {

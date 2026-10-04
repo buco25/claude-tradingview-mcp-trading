@@ -103,6 +103,20 @@ Pokušaj `MOM_MIN_LONG/SHORT = MIN_CONFIRM_LONG/SHORT + 1` (commit 73735e0, vra�
   drugačiji prag. Prije toga neka tjedni job s pravim podacima kaže isplate li se momentum
   uopće. Regresijski test je ovo uhvatio — pokreni `npm test` prije svake promjene praga.
 
+## Leverage i likvidacija
+
+Redoslijed okidanja mora biti **soft SL → ghost SL (+0.5%) → likvidacija**. `getSafeLeverage(slPct)`
+je jedini izvor te računice; `liqDistPct(lev) = (1/lev − 0.005) × 100`.
+
+- `rules.json` → `symbol_sltp.leverage` **nije** autoritet. `setupSymbol` ga od 04.10. (nalaz #19)
+  spušta na `getSafeLeverage(slPct)` kad je veći, i nikad ne diže. Prije toga je BTC s 52× uz SL
+  1.5% imao liq na 1.42% — **unutar** stopa, pa soft SL nikad nije mogao odraditi.
+- Dizanje leveragea u `rules.json` ne povećava poziciju. Sizing je risk-based
+  (`notional = riskAmount / slPct`), pa leverage mijenja samo zaključanu marginu. Ako želiš veću
+  poziciju, dira se rizik, ne leverage.
+- `slPct >= 19.5%` je strukturno neizvedivo: `getSafeLeverage` ima pod na 5×, čija je liq na
+  19.5%. Takav ulaz `liqBlocksEntry` odbija (oba puta + `setupSymbol` kao zadnja mreža).
+
 ## Dnevne svijeće
 
 Koristi **`granularity=1Dutc`**, ne `1D`. Bitgetov `1D` nije poravnat na UTC i daje drugu

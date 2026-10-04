@@ -109,6 +109,15 @@ const MAX_PYRAMID           = 1;   // max 1 adicija u istom smjeru (BTC only mod
 // toliko tanak da je "Emergency close (pre-likvidacija)" morao intervenirati $550+
 // prije stvarnog SL-a. Strop sad sprječava da VIP pyramid ikad opet naraste toliko.
 const MAX_VIP_PYRAMID        = 4;   // ukupno legs (initial + adicije) čak i uz VIP score≥7/8
+// 04.10., odluka vlasnika (#2): strop na UKUPNI rizik pyramidirane pozicije. Dosad je
+// postojao samo strop na BROJ nogu, a svaka noga dobiva PUNI risk budget — BTC na 1H ima
+// +1 postotni poen (vidi _symRiskPct), pa uz jak signal ide 3% po nozi. Stvarni niz 30.09.
+// na racunu od $550: $387 -> $1400 -> $2013 -> $2730, tj. rizik 1.06% -> 3.82% -> 5.49% ->
+// 7.45% racuna u JEDNOM simbolu, dok RISK_PCT nosi komentar "bazni % banke po tradeu".
+// Izracunato na tom nizu: cap 3-4% blokira vec PRVU adiciju (pyramid efektivno mrtav),
+// cap 5% pusta 2 noge, cap 6% pusta 3. Odabrano 5% — reze najgori slucaj sa 7.45% na 3.82%,
+// a zadrzava pyramid kao znacajku. Mijenja se ovdje, jedan broj.
+const MAX_PYRAMID_RISK_PCT   = 5.0;
 const MAX_NEW_ENTRIES_PER_SCAN = 2; // max NOVIH ulaza po scan ciklusu (08.07.: 4 longa u istom scanu = 1 oklada ×4)
 const MAX_SAME_DIR_CRYPTO = 4;      // max kripto pozicija u ISTOM smjeru — svi altovi su jedan BTC-beta trade
                                      // (28.08.: 3→4 na korisnikov zahtjev nakon analize 20.08. rallyja gdje je
@@ -5059,15 +5068,19 @@ async function moveSLtoBreakEven(pos) {
   if (PAPER_TRADING) return false;
 
   const { symbol, side, entryPrice, portfolio: pid } = pos;
-  // Novi SL: entry + buffer. ISTI izraz za obje strane, pa ishod NIJE simetrican:
-  //   LONG  — SL je IZNAD ulaza  -> zakljucava +BE_BUFFER_PCT% dobitka
-  //   SHORT — SL je takoder iznad -> zakljucava -BE_BUFFER_PCT% GUBITKA
-  // 04.10., audit #18: poruka je za obje strane tvrdila "Profit zagarantiran", sto je za
-  // SHORT bilo netocno — zakljucavao se gubitak, a izvjestaj je govorio suprotno. Sam smjer
-  // je ostavljen kakav je: simetricni entry * (1 - BE_BUFFER_PCT/100) za SHORT je promjena
-  // ponasanja izlaza i ceka odluku vlasnika (vidi docs/AUDIT, otvorene odluke).
-  const newSlPrice = entryPrice * (1 + BE_BUFFER_PCT / 100);
-  const _beLocksProfit = side === "LONG";
+  // Novi SL: entry +/- buffer, SIMETRICNO po strani.
+  //   LONG  — SL IZNAD ulaza  (entry * (1 + BE%))  -> zakljucava +BE% dobitka
+  //   SHORT — SL ISPOD ulaza  (entry * (1 - BE%))  -> zakljucava +BE% dobitka
+  //
+  // 04.10., audit #18: obje strane su koristile ISTI izraz `entry * (1 + BE%)`. Za SHORT je
+  // to SL IZNAD ulaza, dakle zagarantirani GUBITAK od BE%, dok je TG poruka tvrdila "Profit
+  // zagarantiran". Prvo je popravljena samo poruka; smjer je 04.10. ispravljen na zahtjev
+  // vlasnika (odluka #1) jer "break-even stop" koji garantira gubitak ne radi ono sto mu ime
+  // kaze. POSLJEDICA: SHORT BE-stop je sad ~2*BE% blizi cijeni nego prije, pa ce izbacivati
+  // ranije i cesce — ali kad izbaci, izlazi u plusu umjesto u minusu.
+  const _beSign = side === "LONG" ? 1 : -1;
+  const newSlPrice = entryPrice * (1 + _beSign * BE_BUFFER_PCT / 100);
+  const _beLocksProfit = true;  // sad vrijedi za obje strane
 
   // Ažuriraj pos.sl u JSON-u — koristi pos.portfolio direktno (19.09. fix: stari kod
   // je petljao SAMO kroz PORTFOLIO_IDS pa bi za ultra_4h/druge pid-ove tiho vratio
@@ -5084,11 +5097,10 @@ async function moveSLtoBreakEven(pos) {
   savePositions(pid, allPos);
 
   // Soft SL — samo ažuriraj lokalno, nema Bitget nalog
-  const _beEffect = _beLocksProfit
-    ? `zaključano +${BE_BUFFER_PCT}% dobitka pri povratku na entry`
-    : `zaključan −${BE_BUFFER_PCT}% GUBITKA (SL je iznad ulaza, nije break-even)`;
-  console.log(`  🔒 [BE-STOP] ${symbol} ${side} — soft SL pomaknut na ${fmtPrice(newSlPrice, symbol)} (+${BE_BUFFER_PCT}% od entry ${fmtPrice(entryPrice)}) — ${_beEffect}`);
-  await tg(`🔒 <b>BE-STOP [ULTRA]</b> ${symbol} ${side}\nSoft SL pomaknut na entry+${BE_BUFFER_PCT}%: ${fmtPrice(newSlPrice, symbol)}\n${_beLocksProfit ? "✅" : "⚠️"} ${_beEffect}.`);
+  const _beDir = side === "LONG" ? "+" : "−";
+  const _beEffect = `zaključano +${BE_BUFFER_PCT}% dobitka`;
+  console.log(`  🔒 [BE-STOP] ${symbol} ${side} — soft SL pomaknut na ${fmtPrice(newSlPrice, symbol)} (entry ${_beDir}${BE_BUFFER_PCT}%, entry ${fmtPrice(entryPrice)}) — ${_beEffect}`);
+  await tg(`🔒 <b>BE-STOP [ULTRA]</b> ${symbol} ${side}\nSoft SL pomaknut na entry${_beDir}${BE_BUFFER_PCT}%: ${fmtPrice(newSlPrice, symbol)}\n✅ ${_beEffect}.`);
   return true;
 }
 
@@ -5420,6 +5432,29 @@ function getSafeLeverage(slPct) {
   // Provjera: SL0.7%→50x(liq@1.9%) SL1%→45x(liq@2.2%) SL2%→30x(cap) SL2.5%→27x(liq@3.7%)
 }
 
+// ─── Odluka vlasnika #3 (04.10.): likvidacija NE SMIJE pasti unutar stopa ────
+// getSafeLeverage to drzi na mjestu snizavanjem leveragea, ali ima dva otvorena
+// puta kojima se moze zaobici:
+//   a) preferredLeverage iz rules.json (symbol_sltp.leverage) ima prioritet nad
+//      getSafeLeverage u setupSymbol, pa prolazi i kad je prevelik za taj SL.
+//   b) pod na 5x: kad je stop siri od liq distance na 5x, nijedan leverage ne
+//      pomaze — pozicija bi bila likvidirana PRIJE nego SL odradi.
+// (a) se popravlja (leverage se spusti, rizik u dolarima je isti jer je sizing
+// risk-based — mijenja se samo zakljucana margina), (b) se odbija.
+const LIQ_MAINT_PCT = 0.5;   // maintenance margin + rezerva; isti broj kao u "liq @" logovima
+const MIN_LEVERAGE  = 5;     // isti pod kao u getSafeLeverage
+
+function liqDistPct(lev) { return (1 / lev - LIQ_MAINT_PCT / 100) * 100; }
+
+// Vraca null kad je ulaz izvediv, inace tekst razloga (za log i scan log).
+// Gleda SAMO sam pod (5x) — sve iznad toga je popravljivo snizavanjem leveragea.
+function liqBlocksEntry(slPct) {
+  if (!Number.isFinite(slPct) || slPct <= 0) return null;   // nepoznat SL — ne odlucuje se ovdje
+  const liq = liqDistPct(MIN_LEVERAGE);
+  if (liq > slPct) return null;
+  return `SL ${slPct.toFixed(1)}% >= liq ${liq.toFixed(1)}% na ${MIN_LEVERAGE}x`;
+}
+
 async function setupSymbol(symbol, slPct, preferredLeverage = null, side = null) {
   // 1) Isolated margin mode
   const mm = await bitgetPost("/api/v2/mix/account/set-margin-mode", {
@@ -5429,12 +5464,29 @@ async function setupSymbol(symbol, slPct, preferredLeverage = null, side = null)
 
   // 2) Tier-based leverage — sprječava likvidaciju PRIJE SL-a
   //    Prioritet: preferredLeverage (iz symbol_sltp.leverage) > getSafeLeverage(slPct) > globalni
+  // Odluka #3 (04.10.): ulaz kojem je likvidacija unutar stopa i na 5x ne ide
+  // na burzu. Ovo je zadnja mreza — oba ulazna puta provjeravaju prije sizinga.
+  const _liqBlock = liqBlocksEntry(slPct);
+  if (_liqBlock) throw new Error(`liq unutar stopa: ${_liqBlock}`);
+
   let targetLev;
   if (preferredLeverage != null) {
-    // Direktno iz rules.json — već je izračunat za tier
-    targetLev = preferredLeverage;
+    // Direktno iz rules.json — već je izračunat za tier.
+    // 04.10. (odluka #3): rules.json je drzao leverage koji likvidaciju stavlja
+    // UNUTAR stopa (BTC 52x uz SL 1.5% → liq @ 1.42%; ETH/SOL/XRP/LINK/ADA/DOGE/
+    // PEPE/BNB isto), a ovaj put je imao prioritet nad getSafeLeverage pa je taj
+    // broj isao na burzu kakav je. Soft SL tad nikad ne stigne odraditi. Sad se
+    // tier leverage spusta na getSafeLeverage kad je prevelik za SL — nikad se ne
+    // dize. Rizik u dolarima ostaje isti (sizing je risk-based), raste samo
+    // zakljucana margina (BTC: $5.8 → $8.1 na notionalu od $300).
+    const _safeLev = slPct != null ? getSafeLeverage(slPct) : preferredLeverage;
+    targetLev = Math.min(preferredLeverage, _safeLev);
     const liqDist = ((1 / targetLev - 0.005) * 100).toFixed(2);
-    console.log(`  🛡️  ${symbol} Tier leverage ${targetLev}x (liq @ ~${liqDist}%)`);
+    if (targetLev !== preferredLeverage) {
+      console.log(`  🛡️  ${symbol} Tier leverage ${preferredLeverage}x → ${targetLev}x (SL=${slPct}%, liq bi bila @ ~${((1 / preferredLeverage - 0.005) * 100).toFixed(2)}% UNUTAR stopa → liq @ ~${liqDist}%)`);
+    } else {
+      console.log(`  🛡️  ${symbol} Tier leverage ${targetLev}x (liq @ ~${liqDist}%)`);
+    }
   } else if (slPct != null) {
     targetLev = getSafeLeverage(slPct);
     const liqDist = ((1 / targetLev - 0.005) * 100).toFixed(2);
@@ -6499,6 +6551,14 @@ export async function runUltra4hStrategy() {
       if (gates.vipSlot) sig._vipSlot = true;
       const _dayRangeSizeMult4 = gates.dayRangeSizeMult;
 
+      // Odluka #3 (04.10.): 4H SL je atr*1.5/price — nema clampa kao tierSlMax na 1H,
+      // pa na siroko-ATR simbolu moze proci stop sirok preko 19.5%. Tad je likvidacija
+      // unutar stopa i na najnizem leverageu (5x) — pozicija se ne moze drzati do SL-a.
+      const _liqBlock4 = liqBlocksEntry(sig.slPct);
+      if (_liqBlock4) {
+        console.log(`  ⛔ [ULTRA-4H][LIQ] ${symbol} ${sig.signal} — ${_liqBlock4} → preskačem ulaz (likvidacija bi pala unutar stopa)`);
+        continue;
+      }
       const lev = getSafeLeverage(sig.slPct);
       const _liveEq    = await fetchBitgetEquity();
       const equity     = _liveEq ?? getPortfolioEquity(ULTRA4H_PID, START_CAPITAL);
@@ -7922,6 +7982,16 @@ export async function run() {
         }
         const margin     = tradeSize / LEVERAGE;  // preliminarno — ažurira se nakon setupSymbol
 
+        // Odluka #3 (04.10.): likvidacija unutar stopa i na 5x → nema ulaza.
+        // Stoji prije checkDailyLimit da ni pyramid adicija ne prode (addToPyramid
+        // koristi isti slPct i isti setupSymbol).
+        const _liqBlock1 = liqBlocksEntry(slPct);
+        if (_liqBlock1) {
+          console.log(`  ⛔ [${pDef.name}][LIQ] ${symbol} ${signal} — ${_liqBlock1} → preskačem ulaz (likvidacija bi pala unutar stopa)`);
+          _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: `LIQ_IN_STOP(${slPct.toFixed(1)}%)`, reason: `Likvidacija bi pala unutar stopa i na ${MIN_LEVERAGE}x` });
+          continue;
+        }
+
         if (!checkDailyLimit(pid)) {
           console.log(`  ❌ [${pDef.name}] Dnevni limit dostignut`);
           continue;
@@ -7938,6 +8008,16 @@ export async function run() {
 
         // ── PYRAMID: merged avg entry, single SL/TP na BitGetu ──────────────────
         if (_isPyramid) {
+          // Strop na UKUPNI rizik pyramida (04.10., odluka #2). Nakon adicije SL se preracuna
+          // od prosjecnog ulaza na slPct, pa je rizik cijele pozicije = totalUSD * slPct/100.
+          const _pyrNotionalAfter = (existingPos.totalUSD ?? 0) + tradeSize;
+          const _pyrRiskAfter     = _pyrNotionalAfter * (slPct / 100);
+          const _pyrRiskPctAfter  = equity > 0 ? (_pyrRiskAfter / equity * 100) : Infinity;
+          if (_pyrRiskPctAfter > MAX_PYRAMID_RISK_PCT) {
+            console.log(`  ⛔ [PYRAMID CAP] ${symbol} ${signal} — adicija bi digla ukupni rizik na $${_pyrRiskAfter.toFixed(2)} (${_pyrRiskPctAfter.toFixed(2)}% od $${equity.toFixed(2)}), strop je ${MAX_PYRAMID_RISK_PCT}% → preskačem adiciju`);
+            _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: `PYRAMID_RISK(${_pyrRiskPctAfter.toFixed(1)}%>${MAX_PYRAMID_RISK_PCT}%)`, reason: `Ukupni rizik pyramida bi presao strop` });
+            continue;
+          }
           const pyramidResult = await addToPyramid(pid, existingPos, signal, tradeSize, slPct, tpPct, _isLive, symSltp);
           if (pyramidResult) {
             _newEntriesThisScan++;
@@ -7971,7 +8051,9 @@ export async function run() {
           _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: "ENTERED", reason: `${result.isMomentum?"MOM":"PBK"} ulaz @ ${fmtPrice(price)} SL ${fmtPrice(sl)} TP ${fmtPrice(tp)}${result._halfSize?" [POLA RIZIKA]":""}`, vwapDist: result.vwap ? ((price-result.vwap)/result.vwap*100).toFixed(2) : null });
           // Dinamički leverage: zone-based SL → getSafeLeverage izračunava; tier SL → fiksni
           const _dynLev = slMethod === "tier" ? (symSltp.leverage ?? null) : null;
-          const _displayLev = _dynLev ?? getSafeLeverage(slPct);
+          // odluka #3: ista kapica kao u setupSymbol, da paper poruka ne pokazuje leverage
+          // koji live put vise ne bi postavio
+          const _displayLev = _dynLev != null ? Math.min(_dynLev, getSafeLeverage(slPct)) : getSafeLeverage(slPct);
           await tg(`📋 PAPER [${pDef.name}/${pDef.timeframe}] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b> ${_strengthEmoji}${_vipTag}\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} (${slPct.toFixed(1)}%) | TP: ${fmtPrice(tp)} (${tpPct.toFixed(1)}%) | ${_rrLabel}\nEquity: $${equity.toFixed(2)} | Risk: $${riskAmount.toFixed(2)} | Notional: $${tradeSize.toFixed(0)} | Margin: $${margin.toFixed(2)} | ${_displayLev}x [${slMethod}]`);
         } else {
           try {

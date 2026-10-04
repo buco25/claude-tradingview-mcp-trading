@@ -3711,11 +3711,15 @@ export function savePositions(pid, positions) {
 
 function addPosition(pid, entry) {
   const positions = loadPositions(pid);
+  // run() prije poziva postavlja entry.entryPrice/entry.quantity na STVARNE fill vrijednosti
+  // iz placeBitGetOrder; entry.price i tradeSize/price su samo procjena (nalaz #13).
+  const _entryPx  = entry.entryPrice ?? entry.price;
+  const _entryQty = entry.quantity ?? (entry.tradeSize / _entryPx);
   positions.push({
     symbol:     entry.symbol,
     side:       entry.signal,
-    entryPrice: entry.price,
-    quantity:   entry.tradeSize / entry.price,
+    entryPrice: _entryPx,
+    quantity:   _entryQty,
     totalUSD:   entry.tradeSize,
     margin:     entry.margin,
     sl:         entry.sl,
@@ -6364,6 +6368,7 @@ export async function runUltra4hStrategy() {
       const entry = {
         symbol, signal: sig.signal, price: result.fillPrice, sl: result.slFromFill, tp: result.tpFromFill,
         tradeSize: notional, margin, orderId: result.orderId, timestamp: Date.now(),
+        quantity: result.fillQty ?? undefined,
         strategy: ULTRA4H_PID, timeframe: ULTRA4H_TF, slPct: sig.slPct, tpPct: sig.tpPct,
         mode: "LIVE", entryMode: sig._strategy ?? (sig.isMomentum ? "MOM" : "PBK"),
         sigMask: sig.sigMask ?? null, btcRegime1h: _btcRegime1hLog, btcRegime4h: _btcRegime4,

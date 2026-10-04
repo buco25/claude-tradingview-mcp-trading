@@ -3450,12 +3450,8 @@ function analyzeUltra(candles, cfg) {
   // istom pragu i glavne momentum grane ispod su sad nedostižne — efektivno ostaje samo MOM
   // soft zona. Ako se želi ZASEBAN momentum put, treba mu dati vlastiti signal set (nalaz #2)
   // ili eksplicitno vlastiti prag — promijeni dvije konstante ispod.
-  // 04.10., odluka vlasnika (promjena strategije): momentum ima VLASTITI prag, jedan iznad
-  // pullbacka (MIN_CONFIRM_* + 1). Soft zona (MOM_MIN - MOM_SOFT_BAND) tako pada tocno na
-  // pullback prag, pa je momentum ulaz jeftiniji (pola rizika) samo tamo gdje ga pullback grana
-  // nije vec preuzela. Dashboard (scanSymbol) mora imati isti +1.
-  const MOM_MIN_LONG  = MIN_CONFIRM_LONG  + 1;
-  const MOM_MIN_SHORT = MIN_CONFIRM_SHORT + 1;
+  const MOM_MIN_LONG  = MIN_CONFIRM_LONG;
+  const MOM_MIN_SHORT = MIN_CONFIRM_SHORT;
   // momBullBase/momBearBase su po definiciji isti kao bullCnt/bearCnt (vidi nalaz #2 iznad),
   // a PWHL+MSTR bonus je isti izraz kao _pwhMstrBonusBull/Bear — ponovno se koriste.
   const momBull = bullCnt + _pwhMstrBonusBull;

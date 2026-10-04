@@ -805,13 +805,11 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
       if (!_decided) {
         const momBullD = ultraBull, momBearD = ultraBear;
         const _momAdxFloorD = adxSoft ? _adxSoftFloorD : MOM_ADX_MIN;
-        // 04.10.: momentum prag = pullback prag + 1 (isto kao bot.js MOM_MIN_LONG/SHORT)
-        const _momMinLongD = minSigLong + 1, _momMinShortD = minSigShort + 1;
-        if (_momAdxFloorD <= adxV && momBullD >= _momMinLongD)       { ultraSig = "MOM↑"; ultraHalfSize = adxSoft; }
-        else if (_momAdxFloorD <= adxV && momBearD >= _momMinShortD) { ultraSig = "MOM↓"; ultraHalfSize = adxSoft; }
+        if (_momAdxFloorD <= adxV && momBullD >= minSigLong)       { ultraSig = "MOM↑"; ultraHalfSize = adxSoft; }
+        else if (_momAdxFloorD <= adxV && momBearD >= minSigShort) { ultraSig = "MOM↓"; ultraHalfSize = adxSoft; }
         // MOM soft zona — score tek MOM_SOFT_BAND ispod praga → pola rizika umjesto blocka
-        else if (_momAdxFloorD <= adxV && momBullD === _momMinLongD  - MOM_SOFT_BAND) { ultraSig = "MOM↑"; ultraHalfSize = true; }
-        else if (_momAdxFloorD <= adxV && momBearD === _momMinShortD - MOM_SOFT_BAND) { ultraSig = "MOM↓"; ultraHalfSize = true; }
+        else if (_momAdxFloorD <= adxV && momBullD === minSigLong  - MOM_SOFT_BAND) { ultraSig = "MOM↑"; ultraHalfSize = true; }
+        else if (_momAdxFloorD <= adxV && momBearD === minSigShort - MOM_SOFT_BAND) { ultraSig = "MOM↓"; ultraHalfSize = true; }
         // 4. SETUP↑/↓ — ciste display oznake ("1 signal do praga"), ne postoje u bot.js.
         if (ultraSig === "—" && adxOk) {
           if      (ultraBull === minSigLong  - 1) ultraSig = "SETUP↑";

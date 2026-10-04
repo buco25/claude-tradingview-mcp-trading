@@ -8493,6 +8493,9 @@ export async function generateDailyReport() {
   return report.md;
 }
 
+// Samo za test/signal-regression.mjs (bogati način: bullScore/bearScore i za NEUTRAL, cfg varijante).
+export { analyzeUltra as analyzeUltraForTest };
+
 // ─── Entry point ───────────────────────────────────────────────────────────────
 
 const _botFile = fileURLToPath(import.meta.url);

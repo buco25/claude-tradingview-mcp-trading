@@ -2,6 +2,35 @@
 
 Upute za Claude Code sesije na ovom repou. **Ovo je bot koji trguje pravim novcem na Bitgetu.**
 
+## Radni tok — gdje se nalazi prijavljuju i gdje se popravljaju
+
+Tjedni audit (rutina, nedjeljom) okida se u sesiji koja **ima ovaj repo i pravo pisanja**, pa se
+nalaz i popravak rješavaju **na istom mjestu**. Nema prepisivanja teksta između sesija.
+
+```
+audit nađe nalaz
+  → zapiše ga u docs/AUDIT-2026-10-04.md (+ komentar na GitHub issue #17)
+  → vlasnik kaže "popravi #N"
+  → popravak + npm test  (u sesiji koja ima repo)
+  → vlasnik odobri push
+```
+
+Pravila koja to drže na mjestu:
+
+- **Nalazi žive u `docs/AUDIT-2026-10-04.md`, ne u chatu.** Numeracija je neprekinuta kroz
+  prolaze (zadnji je #14). Nikad ne počinji numeraciju od 1 i ne prijavljuj ponovno nalaz koji
+  je tamo već zapisan — ako je regresirao, reci da je regresija.
+- **Predaja drugoj sesiji je datoteka, ne poruka.** Ako posao preuzima druga sesija, uputa joj je
+  "pročitaj `CLAUDE.md` i `docs/AUDIT-2026-10-04.md`, pa popravi #N" — ne zalijepljeni blok.
+  Blok zalijepljen iz druge sesije opisuje stanje KOJE TAMO POSTOJI; ako taj commit nije pushan,
+  uputa se referira na kod koji primatelj ne vidi. To se 04.10. dogodilo i zaustavilo posao.
+- **Nikad ne piši uputu koja pretpostavlja nepushani commit.** Prvo push (uz odobrenje), pa uputa.
+- **Način dopuštenja postavlja površina koja je pokrenula sesiju** i ne mijenja se iz chata, ni
+  zastavicom ni `settings.json`-om. Kad push ili izmjena budu blokirani, **pitaj vlasnika i čekaj
+  njegovo "odobravam" u ovom chatu** — to je mehanizam, ne zaobilaženje. Ne ponavljaj blokiranu
+  akciju bez te riječi, i ne traži drugi put do istog ishoda.
+- **Odobrenje vrijedi za jednu akciju.** "Odobravam push" za jedan commit ne pokriva sljedeći.
+
 ## Prvo i najvažnije
 
 1. **Nikad ne importaj `dashboard.js` u testu ili skriptu.** Na module-levelu diže HTTP server

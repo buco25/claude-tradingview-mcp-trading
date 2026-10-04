@@ -3747,6 +3747,13 @@ function savePending(pid, list) {
 // Cache pricePlace + minTradeNum po simbolu (dohvat iz BitGet contracts API)
 const _pricePlace = {};
 const _minTradeNum = {};
+// 04.10., audit #16/#17: Bitget uz pricePlace/minTradeNum vraca i volumePlace (broj decimala
+// KOLICINE), sizeMultiplier (kolicina mora biti visekratnik ovoga) i maxLever. Dosad se nista
+// od toga nije citalo, pa su se nalozi slali na toFixed(4) i Bitget ih je TIHO odsijecao
+// (0.0483 -> 0.04, -17%), a set-leverage je pokusavao leverage iznad simbolovog maksimuma.
+const _volumePlace = {};
+const _sizeMultiplier = {};
+const _maxLever = {};
 
 async function loadPricePrecision() {
   try {
@@ -3761,12 +3768,51 @@ async function loadPricePrecision() {
         if (c.symbol && c.minTradeNum !== undefined) {
           _minTradeNum[c.symbol] = parseFloat(c.minTradeNum);
         }
+        if (c.symbol && c.volumePlace !== undefined) {
+          _volumePlace[c.symbol] = parseInt(c.volumePlace);
+        }
+        if (c.symbol && c.sizeMultiplier !== undefined) {
+          _sizeMultiplier[c.symbol] = parseFloat(c.sizeMultiplier);
+        }
+        if (c.symbol && c.maxLever !== undefined) {
+          _maxLever[c.symbol] = parseInt(c.maxLever);
+        }
       }
-      console.log(`✅ Učitano ${Object.keys(_pricePlace).length} simbola s pricePlace + minTradeNum`);
+      console.log(`✅ Učitano ${Object.keys(_pricePlace).length} simbola s pricePlace + minTradeNum + volumePlace/sizeMultiplier/maxLever`);
     }
   } catch (e) {
     console.log(`⚠️  loadPricePrecision greška: ${e.message}`);
   }
+}
+
+// ─── Kolicina naloga u Bitgetovom koraku (audit #16) ─────────────────────────
+// Bitget NE odbija nalog s previse decimala nego ga TIHO odsijece. Primjeri iz loga:
+// 0.0483 -> 0.04 (-17%), 6.7698 -> 6 (-11%), 0.3374 -> 0.3 (-11%), 0.0692 -> 0.06 (-13%).
+// Od 52 simbola u rules.json njih 50 ima volumePlace < 4, a slali smo toFixed(4) — pa je
+// stvarni fill bio sistematski manji od onoga sto sizing racuna, uvijek nanize.
+// Zajedno s #13 (fill kolicina se odbacivala) lokalni pos.quantity je mogao biti 10-20%
+// veci od stvarne pozicije, a po njemu se racuna P&L, _otherStrategiesQty i ownBitgetQty.
+//
+// Ovdje se kolicina zaokruzuje NANIZE na isti korak koji Bitget primjenjuje, pa nasa
+// procjena odgovara onome sto ce se stvarno izvrsiti. IZVRSENA kolicina se time ne mijenja
+// (Bitget bi ionako odsjekao) — mijenja se samo to sto bot sad zna koliko je poslao.
+// Ako zaokruzivanje padne ispod minTradeNum, vraca se minTradeNum (inace nalog pada 45110/45111).
+function fmtQty(symbol, qty) {
+  const q = parseFloat(qty);
+  if (!Number.isFinite(q) || q <= 0) return "0";
+  const place = _volumePlace[symbol];
+  const mult  = _sizeMultiplier[symbol];
+  const min   = _minTradeNum[symbol];
+  let out = q;
+  // 1) visekratnik sizeMultiplier-a (npr. PEPE 1000)
+  if (Number.isFinite(mult) && mult > 0) out = Math.floor(out / mult + 1e-9) * mult;
+  // 2) broj decimala (volumePlace); bez podatka ostaje stari toFixed(4)
+  const dp = Number.isFinite(place) ? place : 4;
+  const f = Math.pow(10, dp);
+  out = Math.floor(out * f + 1e-9) / f;
+  // 3) nikad ispod minimalne kolicine simbola
+  if (Number.isFinite(min) && min > 0 && out < min) out = min;
+  return out.toFixed(dp);
 }
 
 function fmtPrice(p, symbol) {
@@ -4465,7 +4511,7 @@ async function checkPortfolioPositions(pid) {
                   symbol: pos.symbol, productType: "USDT-FUTURES", marginCoin: "USDT",
                   side: pos.side === "LONG" ? "buy" : "sell", tradeSide: "close", marginMode: "isolated",
                   holdSide: pos.side === "LONG" ? "long" : "short",
-                  orderType: "market", size: _closeQty.toFixed(4),
+                  orderType: "market", size: fmtQty(pos.symbol, _closeQty),   // audit #16
                 }).catch(() => null);
                 if (_r1R?.code === "00000") {
                   const _pnl1R = _gainPerUnit * _closeQty;
@@ -5013,8 +5059,15 @@ async function moveSLtoBreakEven(pos) {
   if (PAPER_TRADING) return false;
 
   const { symbol, side, entryPrice, portfolio: pid } = pos;
-  // Novi SL: entry + buffer (LONG: dobitak pri povratku, SHORT: minimalni gubitak)
+  // Novi SL: entry + buffer. ISTI izraz za obje strane, pa ishod NIJE simetrican:
+  //   LONG  — SL je IZNAD ulaza  -> zakljucava +BE_BUFFER_PCT% dobitka
+  //   SHORT — SL je takoder iznad -> zakljucava -BE_BUFFER_PCT% GUBITKA
+  // 04.10., audit #18: poruka je za obje strane tvrdila "Profit zagarantiran", sto je za
+  // SHORT bilo netocno — zakljucavao se gubitak, a izvjestaj je govorio suprotno. Sam smjer
+  // je ostavljen kakav je: simetricni entry * (1 - BE_BUFFER_PCT/100) za SHORT je promjena
+  // ponasanja izlaza i ceka odluku vlasnika (vidi docs/AUDIT, otvorene odluke).
   const newSlPrice = entryPrice * (1 + BE_BUFFER_PCT / 100);
+  const _beLocksProfit = side === "LONG";
 
   // Ažuriraj pos.sl u JSON-u — koristi pos.portfolio direktno (19.09. fix: stari kod
   // je petljao SAMO kroz PORTFOLIO_IDS pa bi za ultra_4h/druge pid-ove tiho vratio
@@ -5031,8 +5084,11 @@ async function moveSLtoBreakEven(pos) {
   savePositions(pid, allPos);
 
   // Soft SL — samo ažuriraj lokalno, nema Bitget nalog
-  console.log(`  🔒 [BE-STOP] ${symbol} ${side} — soft SL pomaknut na ${fmtPrice(newSlPrice, symbol)} (+${BE_BUFFER_PCT}% od entry ${fmtPrice(entryPrice)})`);
-  await tg(`🔒 <b>BE-STOP [ULTRA]</b> ${symbol} ${side}\nSoft SL pomaknut na entry+${BE_BUFFER_PCT}%: ${fmtPrice(newSlPrice, symbol)}\nProfit zagarantiran pri povratku na entry.`);
+  const _beEffect = _beLocksProfit
+    ? `zaključano +${BE_BUFFER_PCT}% dobitka pri povratku na entry`
+    : `zaključan −${BE_BUFFER_PCT}% GUBITKA (SL je iznad ulaza, nije break-even)`;
+  console.log(`  🔒 [BE-STOP] ${symbol} ${side} — soft SL pomaknut na ${fmtPrice(newSlPrice, symbol)} (+${BE_BUFFER_PCT}% od entry ${fmtPrice(entryPrice)}) — ${_beEffect}`);
+  await tg(`🔒 <b>BE-STOP [ULTRA]</b> ${symbol} ${side}\nSoft SL pomaknut na entry+${BE_BUFFER_PCT}%: ${fmtPrice(newSlPrice, symbol)}\n${_beLocksProfit ? "✅" : "⚠️"} ${_beEffect}.`);
   return true;
 }
 
@@ -5057,7 +5113,7 @@ async function partialClosePosition(pos, closePct = PARTIAL_CLOSE_PCT) {
       side: closeSide, tradeSide: "close", marginMode: "isolated",
       holdSide: pos.side === "LONG" ? "long" : "short",
       orderType: "market",
-      size: parseFloat(qty.toFixed(4)).toString(),
+      size: fmtQty(symbol, qty),   // audit #16
     });
     if (res.code === "00000") {
       console.log(`  📦 [PARTIAL-TP] ${pos.symbol} ${pos.side} — zatvoreno ${closePct}% (qty: ${qty.toFixed(4)}) | ostatak čeka TP`);
@@ -5392,9 +5448,20 @@ async function setupSymbol(symbol, slPct, preferredLeverage = null, side = null)
   }
 
   // Generiraj listu fallback leveragea u silaznom redoslijedu (uvijek niži, nikad viši)
-  const levFallbacks = [targetLev];
+  // 04.10., audit #17: lista je isla od ciljanog leveragea nanize i zvala API dok jedan ne
+  // prode. Za simbole s maxLever 20-25 (dionice, VIRTUAL, VVV) to je do 10 neuspjelih poziva
+  // PO NALOGU (40797 Exceeded the maximum settable leverage), sto trosi rate limit i odgada
+  // ulaz ~2-3 s. contracts endpoint vec vraca maxLever, pa se lista odmah odsijece.
+  const _symMaxLev = _maxLever[symbol];
+  const _cappedTarget = Number.isFinite(_symMaxLev) && _symMaxLev > 0
+    ? Math.min(targetLev, _symMaxLev)
+    : targetLev;
+  if (_cappedTarget !== targetLev) {
+    console.log(`  ℹ️  ${symbol}: maxLever je ${_symMaxLev}x — ciljani ${targetLev}x odsječen na ${_cappedTarget}x (bez uzaludnih 40797 poziva)`);
+  }
+  const levFallbacks = [_cappedTarget];
   for (const f of [50, 45, 40, 35, 30, 25, 20, 15, 10]) {
-    if (f < targetLev) levFallbacks.push(f);
+    if (f < _cappedTarget) levFallbacks.push(f);
   }
 
   // 08.09.: actualLeverage se PRIJE pratio samo za "long" holdSide bez obzira koji je smjer
@@ -5402,7 +5469,7 @@ async function setupSymbol(symbol, slPct, preferredLeverage = null, side = null)
   // značilo da margin/ROE prikaz koristi krivi (viši) leverage jer "long" strana slučajno
   // prihvati ciljani leverage dok "short" padne na niži exchange-side cap. Sad se prati
   // ZASEBNO po holdSide-u i vraća se leverage koji odgovara STVARNOM smjeru ovog tradea.
-  const actualLeverageBySide = { long: targetLev, short: targetLev };
+  const actualLeverageBySide = { long: _cappedTarget, short: _cappedTarget };
   for (const holdSide of ["long", "short"]) {
     let set = false;
     for (const lev of levFallbacks) {
@@ -5411,7 +5478,7 @@ async function setupSymbol(symbol, slPct, preferredLeverage = null, side = null)
         leverage: String(lev), holdSide,
       });
       if (lv.code === "00000") {
-        if (lev !== targetLev) {
+        if (lev !== _cappedTarget) {
           console.log(`  ℹ️  ${symbol} ${holdSide}: max leverage je ${lev}x (ne ${targetLev}x) — sizing prilagođen`);
           actualLeverageBySide[holdSide] = lev;
         }
@@ -5462,7 +5529,8 @@ async function placeBitGetOrder(symbol, side, sizeUSD, price, sl, tp, slPct, tpP
   // Postavi isolated margin + tier-based leverage prije svakog naloga
   // preferredLeverage (iz symbol_sltp.leverage) ima prioritet nad getSafeLeverage
   const actualLeverage = await setupSymbol(symbol, slPct, preferredLeverage, side);
-  const quantity  = (sizeUSD / price).toFixed(4);
+  // audit #16: Bitgetov korak kolicine, ne slijepi toFixed(4)
+  const quantity  = fmtQty(symbol, sizeUSD / price);
   const holdSide  = side === "LONG" ? "long" : "short";
 
   // Bez preset SL/TP u main orderu — koristimo fill-adjusted tpsl-order (ne duplikat)
@@ -5575,7 +5643,7 @@ export async function closeBitGetOrder(pos) {
     marginMode:  "isolated",
     holdSide,
     orderType:   "market",
-    size:        closeQty.toFixed(4),
+    size:        fmtQty(pos.symbol, closeQty),   // audit #16
   });
   console.log(`  📨 BitGet sized close (qty ${closeQty.toFixed(4)}): code=${data?.code} msg=${data?.msg}`);
   if (data?.code === "00000") return data.data;
@@ -5761,7 +5829,7 @@ async function addToPyramid(pid, existingPos, signal, newTradeSize, slPct, tpPct
       symbol, productType: "USDT-FUTURES",
       marginMode: "isolated", marginCoin: "USDT",
       side: side === "LONG" ? "buy" : "sell",
-      tradeSide: "open", orderType: "market", size: newQty.toFixed(4),
+      tradeSide: "open", orderType: "market", size: fmtQty(symbol, newQty),   // audit #16
     };
     const orderData = await bitgetPost("/api/v2/mix/order/place-order", orderBody);
     if (!orderData || orderData.code !== "00000") {
@@ -6594,7 +6662,7 @@ export async function run() {
                   side: "sell", tradeSide: "close", marginMode: "isolated",  // v2 hedge: close SHORT = side sell
                   holdSide: "short",
                   orderType: "market",
-                  size: (await fetchBitgetPositionSize(_sp.symbol, "SHORT"))?.total?.toFixed(4) ?? "0",
+                  size: fmtQty(_sp.symbol, (await fetchBitgetPositionSize(_sp.symbol, "SHORT"))?.total ?? 0),   // audit #16
                 });
                 if (_closeRes.code !== "00000") throw new Error(`${_closeRes.code} ${_closeRes.msg}`);
               }

@@ -122,10 +122,16 @@ je jedini izvor te računice; `liqDistPct(lev) = (1/lev − 0.005) × 100`.
 - **`equityForSizing(pid, startCapital)` je jedini put do equityja za sizing.** Vraća
   `{ equity, src, live }` i `src` MORA ići u log ulaza — bez toga se iz logova ne vidi po kojoj
   je osnovici trade uzet (nalaz #20 je upravo tako ostao nevidljiv).
+- **Sizing i zaštite idu ISKLJUČIVO po stvarnom stanju računa na Bitgetu — nikad po CSV procjeni**
+  (vlasnik je to tražio više puta; 05.10. je CSV pokazivao $91 uz stvarnih $571). Kad API zakaže
+  koristi se zadnje stvarno stanje (sprema se u `last_equity.json`, preživi restart, vrijedi 6 h);
+  ako ga nema, `equity` je `null` i pozivatelji **preskaču nove ulaze** (upravljanje otvorenim
+  pozicijama radi dalje). CSV procjena postoji samo u PAPER modu. Svaki novi ulazni put mora
+  obraditi `equity == null`.
 - **`fetchBitgetEquity()` vraća objekt, ne broj.** `{ ok:true, equity:0 }` znači "račun je
   stvarno prazan" i drawdown zaštita se na tome MORA okinuti; `{ ok:false }` znači "ne znamo"
-  i tek tad ide CSV procjena. Nikad ne spajaj ta dva slučaja u `null` (nalaz #21).
-- **`ACCOUNT_START_CAPITAL` je jedina polazna vrijednost.** Račun je jedan. `ultra_4h` nije
+  (tad se gleda zadnje spremljeno stanje, vidi gore). Nikad ne spajaj ta dva slučaja u `null` (nalaz #21).
+- **`ACCOUNT_START_CAPITAL` je jedina polazna vrijednost za CSV procjenu (samo PAPER/prikaz).** Račun je jedan. `ultra_4h` nije
   portfolio u `buildPortfolios`, pa svaki novi `startCapital` fallback mora ići kroz tu
   konstantu — ne kroz novi lokalni broj (tako je nastao nalaz #20, a `dashboard.js` je držao
   vlastitu kopiju `$1000`).

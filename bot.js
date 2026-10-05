@@ -4996,13 +4996,24 @@ function portfolioOpenRisk() {
 // Stara verzija je oba slučaja vraćala kao `null`, pa je prazan/likvidiran račun padao
 // na CSV izračun koji ne zna ni za isplate ni za likvidaciju — i zaštita se nije okidala
 // točno u scenariju u kojem je najpotrebnija.
+// 05.10., na zahtjev vlasnika (ponovljeno više puta): sizing i zaštite se vode po STVARNOM
+// stanju računa na Bitgetu, nikad po CSV procjeni. Zadnje stvarno stanje se sprema na disk
+// (last_equity.json) da preživi restart; kad API zakaže, koristi se ono, a ako ga nema ili je
+// prestaro, equity je NEPOZNAT i novi ulazi se preskaču (vidi equityForSizing). CSV procjena
+// ostaje samo za PAPER mod, gdje stvarnog balansa nema — na live računu je bila $91 uz stvarnih $571.
+const BITGET_EQUITY_FILE = `${DATA_DIR}/last_equity.json`;
 let _lastBitgetEquity = null;
 let _lastBitgetEquityTs = 0;
-const BITGET_EQUITY_TTL = 60_000;            // cache 60s
-const BITGET_EQUITY_STALE_MAX = 15 * 60_000; // kad API padne, zadnja poznata vrijednost vrijedi 15 min
+try {
+  const _saved = JSON.parse(readFileSync(BITGET_EQUITY_FILE, "utf8"));
+  if (Number.isFinite(_saved?.equity) && _saved.equity > 0 && Number.isFinite(_saved?.ts)) {
+    _lastBitgetEquity = _saved.equity; _lastBitgetEquityTs = _saved.ts;
+  }
+} catch { /* nema spremljenog stanja — nastavi bez njega */ }
+const BITGET_EQUITY_TTL = 60_000;                 // cache 60s
+const BITGET_EQUITY_STALE_MAX = 6 * 3600_000;     // kad API padne, zadnje STVARNO stanje vrijedi 6 h
 
-// Kad poziv padne: zadnja poznata ŽIVA vrijednost je bolja procjena od CSV-a (koji ne zna
-// za uplate/isplate), ali samo dok je razumno svježa.
+// Kad poziv padne: zadnje poznato STVARNO stanje računa (spremljeno i na disk). CSV se ne koristi.
 function _staleBitgetEquity(reason) {
   const age = Date.now() - _lastBitgetEquityTs;
   if (_lastBitgetEquity !== null && age < BITGET_EQUITY_STALE_MAX) {
@@ -5032,6 +5043,8 @@ async function fetchBitgetEquity() {
     if (!Number.isFinite(eq) || eq < 0) return _staleBitgetEquity("neispravan equity");
     _lastBitgetEquity   = eq;
     _lastBitgetEquityTs = Date.now();
+    // spremi samo pozitivno stanje (0 je podatak za zaštitu, ali nije osnovica za nakon restarta)
+    if (eq > 0) { try { writeFileSync(BITGET_EQUITY_FILE, JSON.stringify({ equity: eq, ts: _lastBitgetEquityTs })); } catch { /* disk nije kritičan */ } }
     return { ok: true, equity: eq, src: "BitGet", stale: false };
   } catch (e) {
     console.log(`  ⚠️  fetchBitgetEquity: ${e.message}`);
@@ -5047,10 +5060,14 @@ async function fetchBitgetEquity() {
 // Napomena na semantiku: `usdtEquity` je BRUTO (nerealizirani P&L + zaključana margina),
 // a `getPortfolioEquity` je NETO raspoloživo (minus rizik otvorenih). Fallback je time
 // namjerno konzervativniji od live vrijednosti — manje pozicije, ne veće.
+// 05.10.: na live računu NIKAD CSV. Vraća equity=null kad stvarno stanje nije poznato (API pao
+// i nema svježeg spremljenog stanja) — pozivatelji tada PRESKAČU nove ulaze. Samo PAPER mod
+// (nema stvarnog balansa) koristi CSV procjenu.
 async function equityForSizing(pid, startCapital = ACCOUNT_START_CAPITAL) {
   const r = await fetchBitgetEquity();
   if (r.ok) return { equity: r.equity, src: r.src, live: true };
-  return { equity: getPortfolioEquity(pid, startCapital), src: r.src, live: false };
+  if (PAPER_TRADING) return { equity: getPortfolioEquity(pid, startCapital), src: r.src, live: false };
+  return { equity: null, src: r.src, live: false };
 }
 
 export function writeExitCsv(pid, pos, exitPrice, reason, pnl) {
@@ -6548,6 +6565,17 @@ export async function runUltra4hStrategy() {
   // moraju raditi i kad su ulazi zabranjeni.
   {
     const _eqGate4 = await equityForSizing(ULTRA4H_PID);
+    if (_eqGate4.equity == null) {
+      // 05.10.: stvarno stanje nepoznato → nema novih 4H ulaza (CSV se na live računu ne koristi)
+      console.log(`  ⚠️  [ULTRA-4H] Stvarno stanje računa nepoznato (${_eqGate4.src}) — preskačem NOVE ulaze`);
+      const cbU4 = loadCircuitBreaker();
+      if (Date.now() - (cbU4[ULTRA4H_PID]?.lastEquityUnknownAlert || 0) > 60 * 60 * 1000) {
+        await tg(`⚠️ <b>[ULTRA-4H] Equity nepoznat</b> (${_eqGate4.src}) — Bitget balans se ne može dohvatiti, novi ulazi preskočeni dok se ne vrati.`);
+        cbU4[ULTRA4H_PID] = { ...(cbU4[ULTRA4H_PID] || {}), lastEquityUnknownAlert: Date.now() };
+        saveCircuitBreaker(cbU4);
+      }
+      return;
+    }
     if (_eqGate4.equity < CB_DRAWDOWN_MIN) {
       console.log(`  🛑 [ULTRA-4H] DRAWDOWN ZAŠTITA — equity $${_eqGate4.equity.toFixed(2)} (${_eqGate4.src}) < $${CB_DRAWDOWN_MIN} — novi ulazi blokirani!`);
       const cb = loadCircuitBreaker();
@@ -6653,6 +6681,7 @@ export async function runUltra4hStrategy() {
       // 04.10. (nalaz #20): isti helper kao 1H put, pa 4H ne moze imati vlastitu
       // (pogresnu) polaznu vrijednost. `src` ide u log nize.
       const _eq4       = await equityForSizing(ULTRA4H_PID);
+      if (_eq4.equity == null) { console.log(`  ⚠️  [ULTRA-4H] ${symbol} — stanje računa nepoznato (${_eq4.src}) → preskačem ulaz`); continue; }
       const equity     = _eq4.equity;
       const riskAmount = equity * (RISK_PCT / 100);
       let notional = riskAmount / (sig.slPct / 100);
@@ -6762,6 +6791,19 @@ export async function run() {
     const csvEq     = getPortfolioEquity(pid, pDef.startCapital || ACCOUNT_START_CAPITAL);
     const equityNow = _eqNow.equity;
     const equitySrc = _eqNow.src;
+
+    // 05.10.: stvarno stanje računa nepoznato (API pao, nema svježeg spremljenog) → NE trgujemo
+    // po CSV procjeni, preskačemo nove ulaze. Upravljanje postojećim pozicijama je već gore odrađeno.
+    if (equityNow == null) {
+      console.log(`  ⚠️  [${pDef.name}] Stvarno stanje računa nepoznato (${equitySrc}) — preskačem NOVE ulaze (CSV se na live računu ne koristi)`);
+      const cbU = loadCircuitBreaker();
+      if (Date.now() - (cbU[pid]?.lastEquityUnknownAlert || 0) > 60 * 60 * 1000) {
+        await tg(`⚠️ <b>[${pDef.name}] Equity nepoznat</b> (${equitySrc}) — Bitget balans se ne može dohvatiti, novi ulazi preskočeni dok se ne vrati.`);
+        cbU[pid] = { ...(cbU[pid] || {}), lastEquityUnknownAlert: Date.now() };
+        saveCircuitBreaker(cbU);
+      }
+      continue;
+    }
 
     console.log(`  💰 [${pDef.name}] Equity: $${equityNow.toFixed(2)} (${equitySrc}) | CSV: $${csvEq.toFixed(2)}`);
 
@@ -8050,6 +8092,7 @@ export async function run() {
         // samo fallback za paper mod ili ako API poziv padne.
         const startCap    = pDef.startCapital ?? ACCOUNT_START_CAPITAL;
         const _eqSizing   = await equityForSizing(pid, startCap);
+        if (_eqSizing.equity == null) { console.log(`  ⚠️  [${pDef.name}] ${symbol} — stanje računa nepoznato (${_eqSizing.src}) → preskačem ulaz`); continue; }
         const equity      = _eqSizing.equity;
         const _equitySrc  = _eqSizing.src;
 

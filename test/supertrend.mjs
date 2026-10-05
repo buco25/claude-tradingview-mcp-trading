@@ -87,6 +87,10 @@ ok(stBuildOrder({ signal: "SHORT", price: 100, line: 99.5, equity: 570 }).skip, 
 ok(/izvan/.test(stBuildOrder({ signal: "LONG", price: 100, line: 99.8, equity: 570 }).skip || ""), `SL ${(0.2).toFixed(1)}% < ${ST_SL_MIN_PCT}% → preskoči`);
 ok(/izvan/.test(stBuildOrder({ signal: "LONG", price: 100, line: 94, equity: 570 }).skip || ""), `SL 6% > ${ST_SL_MAX_PCT}% → preskoči`);
 ok(!stBuildOrder({ signal: "LONG", price: 100, line: 95.6, equity: 570 }).skip, "SL 4.4% (unutar raspona) prolazi");
+ok(ST_SL_MIN_PCT === 0.8, "minimum SL-a je 0.8%");
+ok(/izvan/.test(stBuildOrder({ signal: "LONG", price: 100, line: 99.3, equity: 570 }).skip || ""), "SL 0.7% (bio bi prošao uz staro 0.5%) → preskoči");
+ok(/izvan/.test(stBuildOrder({ signal: "SHORT", price: 100, line: 100.53, equity: 570 }).skip || ""), "SL 0.53% (trade od 04.10.) → preskoči");
+ok(!stBuildOrder({ signal: "LONG", price: 100, line: 99.1, equity: 570 }).skip, "SL 0.9% prolazi");
 o = stBuildOrder({ signal: "LONG", price: 100, line: 98, equity: 50, minNotional: 40 });
 ok(o.floored && o.tradeSize === 40, "premala pozicija → podignuta na minimum (floored=true)");
 ok(stBuildOrder({ signal: "LONG", price: 0, line: 98, equity: 570 }).skip && stBuildOrder({ signal: "LONG", price: 100, line: 0, equity: 570 }).skip, "nevažeća cijena/linija → preskoči");

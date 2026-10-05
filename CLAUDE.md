@@ -185,11 +185,13 @@ običan `synapse_t` s `entryMode: "ST"` (CSV stupac EntryMode), pa nasljeđuju S
   (capovi, cooldowni, noć, vikend ×0.5, kolizija, strop rizika, liq, dnevni limit, equity nepoznat).
   Novi 1H uvjet je "zaštita" samo ako ograničava izloženost; ako filtrira kvalitetu signala, ST ga NE gleda.
 - **Običan 1H put ne smije pyramidirati ni flipati ST poziciju** (guard `entryMode === "ST"` u `run()`).
-- Konstante: `ST_SYMBOLS` (BTC/ETH/SOL), `ST_RISK_PCT` 1.0, `ST_RR` 3, SL raspon 0.5–4.5% (izvan → preskoči).
+- Konstante: `ST_SYMBOLS` (BTC/ETH/SOL), `ST_RISK_PCT` 1.0, `ST_RR` 3, SL raspon 0.8–4.5% (izvan → preskoči).
 - Testovi: `test/supertrend.mjs` (izračun, odluka, gradnja naloga). Runner nema repo-test jer ovisi o
   desetak globala iz `bot.js`; provjeren je izvršavanjem izvučenog bloka (scratchpad, 34 provjere).
-- Backtest 04–10/2026 (BTC/ETH/SOL, 1H povijest, naknade 0.12%): ~26–43 tradea, očekivanje +0.06…+0.21R,
-  LONG ≈ 0, SHORT ≈ +0.4R — statistički neznačajno. Prati `EntryMode=ST` u CSV-u prije povećanja rizika.
+- Backtest 04–10/2026 (BTC/ETH/SOL, 1H povijest, naknade 0.12%, SL min 0.8%): 25–42 tradea; čisti 1:3 s noćnim
+  blokom +0.05R/trade (+1.2R ukupno), varijanta najbliža botu (BE nakon +1R + noć) −0.03R/trade (−0.8R). LONG
+  dosljedno negativan (−0.1…−0.2R), SHORT pozitivan (+0.2…+0.5R). Statistički neznačajno; uz stari min 0.5%
+  bilo je +0.06…+0.21R (jedan dobitni BTC trade od 04.10. s SL 0.53% otpao). Prati `EntryMode=ST` u CSV-u.
 
 ## Bitget auth
 

@@ -6843,7 +6843,7 @@ export const ST_RISK_PCT         = 1.0;    // % računa do SL-a (nova, nedokazan
 export const ST_ATR_LEN          = 10;     // TradingView default: ta.supertrend(3, 10)
 export const ST_FACTOR           = 3;
 export const ST_RR               = 3;      // TP = 3 × SL
-export const ST_SL_MIN_PCT       = 0.5;    // SL linija bliže od ovoga ili dalje od ST_SL_MAX_PCT → preskoči ulaz
+export const ST_SL_MIN_PCT       = 0.8;    // SL linija bliže od ovoga ili dalje od ST_SL_MAX_PCT → preskoči ulaz (0.5→0.8 na zahtjev: pri 0.53% naknade pojedu ~četvrtinu rizika, a šum izbaci stop)
 export const ST_SL_MAX_PCT       = 4.5;    // (isti apsolutni raspon kao zonske strategije, RANGE/SWEEP)
 export const ST_ENTRY_WINDOW_MIN = 25;     // ulaz samo unutar 25 min od zatvaranja 1H svijeće obrata (run() ide svakih 15 min)
 const ST_STATE_FILE = `${DATA_DIR}/supertrend_state.json`;   // dedupe: jedan ulaz po obratu

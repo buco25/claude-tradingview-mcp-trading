@@ -1371,6 +1371,7 @@ function entryModeBadge(entryMode) {
   if (em === "VA-REV")      return '<span title="Value Area Reversal — proboj jučerašnje Value Area sa slabim volumenom + povratak s rastućim vol" style="background:rgba(168,85,247,0.15);border:1px solid #a855f7;border-radius:20px;padding:2px 8px;font-size:10px;color:#a855f7;font-weight:700">📊 VA-REV</span>';
   if (em === "SWEEP")       return '<span title="Liquidity sweep + reclaim" style="background:rgba(168,85,247,0.15);border:1px solid #a855f7;border-radius:20px;padding:2px 8px;font-size:10px;color:#a855f7;font-weight:700">🎪 SWEEP</span>';
   if (em === "RANGE")       return '<span title="Range bounce sa S/R ruba" style="background:rgba(168,85,247,0.15);border:1px solid #a855f7;border-radius:20px;padding:2px 8px;font-size:10px;color:#a855f7;font-weight:700">🎯 RANGE</span>';
+  if (em === "ST")          return '<span title="Supertrend 1D/4H/1H — ulaz na obratu 1H uz usklađene 1D i 4H, izlaz SL (linija) / TP 1:3 / trail" style="background:rgba(34,211,238,0.15);border:1px solid #22d3ee;border-radius:20px;padding:2px 8px;font-size:10px;color:#22d3ee;font-weight:700">🧭 ST</span>';
   return '<span style="background:rgba(96,165,250,0.15);border:1px solid #60a5fa;border-radius:20px;padding:2px 8px;font-size:10px;color:#60a5fa;font-weight:700">↩ PBK</span>';
 }
 

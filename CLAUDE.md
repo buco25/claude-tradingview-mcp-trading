@@ -171,6 +171,26 @@ količina ne poklapa (±5%) — takav redak ima sufiks `(est.)` u razlogu. Razlo
 centi procjena okreće predznak (BTC 28.09./29.09. po Bitgetu +$0.18), a CSV hrani brojač suspenzije,
 circuit breaker i analize. Novi izlazni put koji piše `writeExitCsv` treba koristiti isto.
 
+## Supertrend 1D/4H/1H (05.10.) — način ulaza unutar 1H
+
+Blok `// ===== SUPERTREND BEGIN/END =====` u `bot.js`. Ulaz: 1D i 4H Supertrend u istom smjeru, 1H se
+**obrne** u taj smjer i svijeća se zatvori (unutar 25 min). Izlaz (odluka vlasnika, ne izvorni
+"izlaz na obrnuti signal"): SL = linija 1H Supertrenda, TP = 3 × SL, postojeći trail. Pozicije su
+običan `synapse_t` s `entryMode: "ST"` (CSV stupac EntryMode), pa nasljeđuju SL/TP/trail/BE/time-stop.
+
+- **`calcSupertrend` je identičan TradingViewu** (`ta.supertrend(3, 10)`, hl2, ATR = RMA): na živoj
+  BTC 1H svijeći poklapa se do centa (fixture `test/fixtures/st-btc-1h.json`). Ne mijenjaj ATR/RMA
+  zagrijavanje ni ratchet — linija je putanjski ovisna i već mala razlika pomakne sve nakon nje.
+- **Preskače signalne gejtove** (score/ADX/regime/velocity/day-range/funding/…), **zadržava zaštite**
+  (capovi, cooldowni, noć, vikend ×0.5, kolizija, strop rizika, liq, dnevni limit, equity nepoznat).
+  Novi 1H uvjet je "zaštita" samo ako ograničava izloženost; ako filtrira kvalitetu signala, ST ga NE gleda.
+- **Običan 1H put ne smije pyramidirati ni flipati ST poziciju** (guard `entryMode === "ST"` u `run()`).
+- Konstante: `ST_SYMBOLS` (BTC/ETH/SOL), `ST_RISK_PCT` 1.0, `ST_RR` 3, SL raspon 0.5–4.5% (izvan → preskoči).
+- Testovi: `test/supertrend.mjs` (izračun, odluka, gradnja naloga). Runner nema repo-test jer ovisi o
+  desetak globala iz `bot.js`; provjeren je izvršavanjem izvučenog bloka (scratchpad, 34 provjere).
+- Backtest 04–10/2026 (BTC/ETH/SOL, 1H povijest, naknade 0.12%): ~26–43 tradea, očekivanje +0.06…+0.21R,
+  LONG ≈ 0, SHORT ≈ +0.4R — statistički neznačajno. Prati `EntryMode=ST` u CSV-u prije povećanja rizika.
+
 ## Bitget auth
 
 `bitgetHeaders(method, path, body)` u `bot.js` je **jedino** mjesto koje sastavlja potpisane

@@ -6820,6 +6820,289 @@ export async function runUltra4hStrategy() {
   }
 }
 
+// ===== SUPERTREND BEGIN =====
+// ─── Supertrend 1D/4H/1H (05.10., na zahtjev) — novi NAČIN ULAZA unutar 1H (synapse_t) ────
+// Ideja (TraderaEdge): viši TF određuje smjer, 1H daje ulaz. 1D i 4H Supertrend moraju biti u
+// istom smjeru; kad se 1H Supertrend OBRNE u taj smjer i svijeća se ZATVORI, ulazimo.
+// IZLAZ je promijenjen na zahtjev vlasnika: ne čeka se obrnuti signal nego SL = linija 1H
+// Supertrenda u trenutku ulaza, TP = ST_RR × udaljenost SL-a (R:R 1:3), plus postojeći trail.
+//
+// Što je PRESKOČENO (signalni gejtovi 1H puta): score/ADX/DEMA/VOL_EXH, volumen, velocity,
+// BTC režim/align/EMA50/ključna razina, day-range, rel. snaga, funding, BTC.D, 1H trend, liq-zone,
+// candle filter, OI/VWAP/LSR/whale/squeeze/macro multiplikatori. Ulaz odlučuje SAMO Supertrend.
+// Što VRIJEDI i dalje (zaštite/limiti): drawdown, dnevni limit, nepoznat equity, econ kalendar,
+// dinamička pauza (sve prije petlje, jer ST radi unutar iste petlje portfelja); capovi (ukupno,
+// MAX_OPEN_1H, kripto, same-dir, sektor, novih po scanu, vikend); blacklist i isključeni simboli;
+// SL cooldowni (simbol, smjer, simbol+smjer); noćna zona; kolizija s drugom strategijom i
+// Bitget pozicijom; strop rizika portfelja; liq zaštita; dnevni brojač; vikend ×0.5 i chill ×0.7.
+// Supertrend poziciju običan 1H put NE smije pyramidirati ni flipati (vidi guard u run()) —
+// vodi je samo SL/TP/trail.
+export const ST_ENABLED          = true;
+export const ST_SYMBOLS          = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
+export const ST_RISK_PCT         = 1.0;    // % računa do SL-a (nova, nedokazana strategija — ispod 1.5% koliko ima 4H)
+export const ST_ATR_LEN          = 10;     // TradingView default: ta.supertrend(3, 10)
+export const ST_FACTOR           = 3;
+export const ST_RR               = 3;      // TP = 3 × SL
+export const ST_SL_MIN_PCT       = 0.5;    // SL linija bliže od ovoga ili dalje od ST_SL_MAX_PCT → preskoči ulaz
+export const ST_SL_MAX_PCT       = 4.5;    // (isti apsolutni raspon kao zonske strategije, RANGE/SWEEP)
+export const ST_ENTRY_WINDOW_MIN = 25;     // ulaz samo unutar 25 min od zatvaranja 1H svijeće obrata (run() ide svakih 15 min)
+const ST_STATE_FILE = `${DATA_DIR}/supertrend_state.json`;   // dedupe: jedan ulaz po obratu
+
+// Supertrend IDENTIČAN TradingViewu (ta.supertrend(factor, atrLen), src = hl2, ATR = RMA/Wilder).
+// bull[i]: true = uzlazni trend (TV direction -1), false = silazni, null dok ATR nije zagrijan.
+export function calcSupertrend(candles, atrLen = ST_ATR_LEN, factor = ST_FACTOR) {
+  const n = candles.length;
+  const bull = new Array(n).fill(null), line = new Array(n).fill(null), atr = new Array(n).fill(null);
+  const tr = candles.map((c, i) => i === 0
+    ? c.high - c.low
+    : Math.max(c.high - c.low, Math.abs(c.high - candles[i - 1].close), Math.abs(c.low - candles[i - 1].close)));
+  let seed = 0;
+  for (let i = 0; i < n; i++) {                       // ta.rma: prva vrijednost = SMA prvih atrLen TR-ova
+    if (i < atrLen - 1) { seed += tr[i]; continue; }
+    if (i === atrLen - 1) { seed += tr[i]; atr[i] = seed / atrLen; continue; }
+    atr[i] = (atr[i - 1] * (atrLen - 1) + tr[i]) / atrLen;
+  }
+  let pL = 0, pU = 0, pST = null;                     // nz(...) = 0 dok nema prethodne vrijednosti
+  for (let i = 0; i < n; i++) {
+    if (atr[i] == null) continue;
+    const c = candles[i], src = (c.high + c.low) / 2, pc = i > 0 ? candles[i - 1].close : null;
+    let lo = src - factor * atr[i], up = src + factor * atr[i];
+    lo = (lo > pL || (pc != null && pc < pL)) ? lo : pL;
+    up = (up < pU || (pc != null && pc > pU)) ? up : pU;
+    let dir;                                          // TV: -1 uzlazno, 1 silazno
+    if (i === 0 || atr[i - 1] == null) dir = 1;
+    else if (pST === pU) dir = c.close > up ? -1 : 1;
+    else dir = c.close < lo ? 1 : -1;
+    const st = dir === -1 ? lo : up;
+    bull[i] = dir === -1; line[i] = st;
+    pL = lo; pU = up; pST = st;
+  }
+  return { bull, line, atr };
+}
+
+// Samo ZATVORENE svijeće (zadnja iz Bitgeta je ona koja se još formira) — isto kao checkVelocity.
+function _stClosed(candles, periodMs, nowMs) {
+  const last = candles[candles.length - 1];
+  return last && last.time + periodMs > nowMs ? candles.slice(0, -1) : candles;
+}
+
+// Stanje zadnje zatvorene svijeće: smjer, linija, je li upravo došlo do obrata.
+export function supertrendState(closed) {
+  const st = calcSupertrend(closed), i = closed.length - 1;
+  if (i < 1 || st.bull[i] == null) return null;
+  return { bull: st.bull[i], line: st.line[i], flipped: st.bull[i - 1] != null && st.bull[i] !== st.bull[i - 1], time: closed[i].time };
+}
+
+// Čista odluka iz tri stanja (testabilno bez mreže): LONG/SHORT samo kad su 1D i 4H u istom smjeru
+// i 1H se upravo obrnuo U TAJ smjer, unutar prozora od zatvaranja svijeće obrata.
+export function supertrendDecision(s1d, s4h, s1h, nowMs, windowMin = ST_ENTRY_WINDOW_MIN) {
+  if (!s1d || !s4h || !s1h) return { signal: null, reason: "nedovoljno podataka" };
+  if (s1d.bull !== s4h.bull) return { signal: null, reason: "1D i 4H nisu usklađeni" };
+  if (!s1h.flipped)          return { signal: null, reason: "1H nije obrnuo" };
+  if (s1h.bull !== s1d.bull) return { signal: null, reason: "1H obrat protiv 1D/4H" };
+  const ageMin = (nowMs - (s1h.time + 3600e3)) / 60e3;
+  if (ageMin > windowMin)    return { signal: null, reason: `obrat prije ${Math.round(ageMin)} min (prozor ${windowMin})` };
+  return { signal: s1h.bull ? "LONG" : "SHORT", line: s1h.line, flipTs: s1h.time, ageMin };
+}
+
+async function supertrendSignal(symbol, nowMs = Date.now()) {
+  const [d1, h4, h1] = await Promise.all([
+    fetchCandles(symbol, "1Dutc", 250), fetchCandles(symbol, "4H", 250), fetchCandles(symbol, "1H", 250),
+  ]);
+  const dec = supertrendDecision(
+    supertrendState(_stClosed(d1, 86400e3, nowMs)),
+    supertrendState(_stClosed(h4, 4 * 3600e3, nowMs)),
+    supertrendState(_stClosed(h1, 3600e3, nowMs)), nowMs);
+  return { ...dec, price: h1[h1.length - 1].close, candles1h: h1 };
+}
+
+// Čista gradnja naloga: SL = linija Supertrenda, TP = ST_RR×SL, veličina iz rizika. Vraća {skip} ili nalog.
+export function stBuildOrder({ signal, price, line, equity, riskPct = ST_RISK_PCT, sizeMult = 1, minNotional = 40 }) {
+  if (!(price > 0) || !(line > 0)) return { skip: "nema cijene/linije" };
+  if ((signal === "LONG" && line >= price) || (signal === "SHORT" && line <= price))
+    return { skip: "cijena je već prešla liniju Supertrenda" };
+  const slPct = Math.abs(price - line) / price * 100;
+  if (slPct < ST_SL_MIN_PCT || slPct > ST_SL_MAX_PCT)
+    return { skip: `SL linija ${slPct.toFixed(2)}% izvan ${ST_SL_MIN_PCT}–${ST_SL_MAX_PCT}%`, slPct };
+  const tpPct = slPct * ST_RR;
+  const sl = line;
+  const tp = signal === "LONG" ? price * (1 + tpPct / 100) : price * (1 - tpPct / 100);
+  const riskAmount = equity * (riskPct * sizeMult) / 100;
+  let tradeSize = riskAmount / (slPct / 100);
+  let floored = false;
+  if (tradeSize < minNotional) { tradeSize = minNotional; floored = true; }
+  return { slPct, tpPct, sl, tp, riskAmount, tradeSize, floored };
+}
+
+function _stLoadState() { try { return JSON.parse(readFileSync(ST_STATE_FILE, "utf8")); } catch { return {}; } }
+function _stSaveState(s) { try { writeFileSync(ST_STATE_FILE, JSON.stringify(s)); } catch { /* nije kritično */ } }
+
+// Skenira ST_SYMBOLS i otvara ulaze. Zove se iz run() NAKON glavne petlje, unutar iste petlje
+// portfelja — pa nasljeđuje sve zaštite na razini portfelja. Vraća broj otvorenih ulaza.
+async function runSupertrendEntries(ctx) {
+  const { pid, pDef, rules, isLive, scanLog, btcRegime1h, btcRegime4h } = ctx;
+  let entered = 0;
+  const BTC = "BTCUSDT";
+  for (const symbol of ST_SYMBOLS) {
+    try {
+      if (!pDef.symbols.includes(symbol)) continue;           // watchlist/suspenzija se poštuje
+      if (isBlacklisted(symbol) || PROBLEM_1H_SYMBOLS.has(symbol)) continue;
+
+      // ── Kolizija: isti simbol ne smije držati više strategija (Bitget ih spaja u jednu poziciju) ──
+      const open1h = loadPositions(pid), open4h = loadPositions(ULTRA4H_PID);
+      if (open1h.some(p => p.symbol === symbol)) continue;    // vlastita/1H pozicija: nema pyramida ni flipa
+      if ([...loadPositions(EMA_RSI_PID), ...open4h].some(p => p.symbol === symbol)) continue;
+
+      const sig = await supertrendSignal(symbol);
+      if (!sig.signal) continue;                              // tihi korak — uobičajeno stanje
+      const state = _stLoadState();
+      if (state[symbol] === sig.flipTs) continue;             // ovaj obrat je već obrađen
+      const signal = sig.signal;
+      console.log(`  🧭 [ST] ${symbol} — ${signal}: 1D+4H usklađeni, 1H obrat prije ${Math.round(sig.ageMin)} min, linija ${fmtPrice(sig.line)}`);
+
+      // ── Capovi (isti brojevi kao 1H put) ──
+      const _maxBase = getMaxOpenPositions();
+      const _isWeekendCap = _maxBase === WEEKEND_MAX_OPEN;
+      const currentOpen = open1h.length + open4h.length;
+      if (currentOpen >= _maxBase && (symbol !== BTC || _isWeekendCap)) {
+        console.log(`  🔒 [ST] ${symbol} — max ${_maxBase}${_isWeekendCap ? " (vikend)" : ""} pozicija (${currentOpen}, uklj. 4H) → preskačem`);
+        scanLog.push({ symbol, signal: "SKIP", blocker: `ST_MAX_POS(${currentOpen}/${_maxBase})`, reason: "Supertrend: max pozicija" });
+        continue;
+      }
+      if (open1h.length >= MAX_OPEN_1H) {
+        console.log(`  🔒 [ST] ${symbol} — max ${MAX_OPEN_1H} 1H pozicija (${open1h.length}) → preskačem`);
+        scanLog.push({ symbol, signal: "SKIP", blocker: `ST_MAX_1H(${open1h.length}/${MAX_OPEN_1H})`, reason: "Supertrend: max 1H pozicija" });
+        continue;
+      }
+      const cryptoOpen = open1h.filter(p => !isStockSym(p.symbol)).length + open4h.length;
+      if (cryptoOpen >= MAX_OPEN_CRYPTO_VIP && symbol !== BTC) {
+        console.log(`  🔒 [ST] ${symbol} — max ${MAX_OPEN_CRYPTO_VIP} kripto (${cryptoOpen}) → preskačem`);
+        continue;
+      }
+      if (symbol !== BTC && cryptoOpen >= MAX_OPEN_CRYPTO) {   // ST nije VIP-kvalitete (nema score-a) → baza je tvrda
+        console.log(`  🔒 [ST] ${symbol} — ${cryptoOpen}/${MAX_OPEN_CRYPTO} kripto ukupno → preskačem`);
+        continue;
+      }
+      if (symbol !== BTC) {
+        const sameDir = [...open1h.filter(p => !isStockSym(p.symbol)), ...open4h].filter(p => p.side === signal).length;
+        if (sameDir >= MAX_SAME_DIR_CRYPTO) {
+          console.log(`  🔗 [ST] ${symbol} — već ${sameDir} kripto ${signal} (max ${MAX_SAME_DIR_CRYPTO}) → preskačem`);
+          continue;
+        }
+        const sector = SYMBOL_SECTORS[symbol];
+        if (sector && sector !== "BTC" && open1h.filter(p => SYMBOL_SECTORS[p.symbol] === sector).length >= MAX_PER_SECTOR) {
+          console.log(`  🔗 [ST] ${symbol} — sektor "${sector}" pun → preskačem`);
+          continue;
+        }
+        if ((ctx.newEntries + entered) >= MAX_NEW_ENTRIES_PER_SCAN) {
+          console.log(`  🚦 [ST] ${symbol} — max ${MAX_NEW_ENTRIES_PER_SCAN} novih ulaza ovaj scan → preskačem`);
+          continue;
+        }
+      }
+
+      // ── Vrijeme: noćna zona (tvrdi blok) i vikend (veličina ×0.5) ──
+      const nowD = new Date(), hUtc = nowD.getUTCHours(), dow = nowD.getUTCDay();
+      if (hUtc >= 20 || hUtc < 6) {
+        console.log(`  🌙 [ST] ${symbol} — noćna zona ${hUtc}:00 UTC → blokiran ulaz`);
+        scanLog.push({ symbol, signal, blocker: "ST_NIGHT", reason: "Supertrend: noćna zona" });
+        continue;
+      }
+      let sizeMult = 1;
+      if (dow === 0 || dow === 6) sizeMult *= 0.5;
+      if (pDef.params._chillMode) sizeMult *= 0.7;
+
+      // ── Cooldowni nakon SL-a ──
+      const lastSl = symbolSlCooldown.get(symbol);
+      if (lastSl && (Date.now() - lastSl) < SL_COOLDOWN_MS) {
+        console.log(`  🕐 [ST] ${symbol} — SL cooldown još ${Math.ceil((SL_COOLDOWN_MS - (Date.now() - lastSl)) / 60000)}min → preskačem`);
+        continue;
+      }
+      if (getDirLossStreak(pid, signal).blocked) { console.log(`  🧊 [ST] ${symbol} — ${signal} smjer na cooldownu (uzastopni SL) → preskačem`); continue; }
+      if (getSymbolSideLossStreak(pid, symbol, signal).blocked) { console.log(`  🧊 [ST] ${symbol} — ${symbol} ${signal} na cooldownu → preskačem`); continue; }
+
+      // ── Bitget: nikakva postojeća pozicija na simbolu (ni ručna, ni druga strategija) ──
+      if (isLive) {
+        const bp = await fetchBitgetOpenPositions();
+        if (bp && (bp.has(`${symbol}:long`) || bp.has(`${symbol}:short`))) {
+          console.log(`  🚫 [ST] ${symbol} — Bitget već ima poziciju na simbolu → preskačem`);
+          continue;
+        }
+      }
+
+      // ── Gradnja naloga + veličina iz STVARNOG stanja računa ──
+      const eq = await equityForSizing(pid, pDef.startCapital ?? ACCOUNT_START_CAPITAL);
+      if (eq.equity == null) { console.log(`  ⚠️  [ST] ${symbol} — stanje računa nepoznato (${eq.src}) → preskačem ulaz`); continue; }
+      const equity = eq.equity;
+      const price = sig.price;
+      const minNotional = Math.max(40, (_minTradeNum[symbol] ?? 0) * price * 1.05);
+      const o = stBuildOrder({ signal, price, line: sig.line, equity, sizeMult, minNotional });
+      if (o.skip) {
+        console.log(`  🧭 [ST] ${symbol} ${signal} — ${o.skip} → preskačem`);
+        scanLog.push({ symbol, signal, blocker: "ST_SL_RANGE", reason: `Supertrend: ${o.skip}` });
+        state[symbol] = sig.flipTs; _stSaveState(state);      // definitivno odbijen — ne ponavljaj svakih 15 min
+        continue;
+      }
+      if (o.floored) console.log(`  📏 [ST][MIN] ${symbol} — size podignut na minimum $${minNotional.toFixed(0)} (rizik raste iznad namjere)`);
+      const { slPct, tpPct, sl, tp, riskAmount, tradeSize } = o;
+      console.log(`  🎚️  [ST][RISK] ${symbol} — rizik $${riskAmount.toFixed(2)} (${ST_RISK_PCT * sizeMult}% od $${equity.toFixed(2)} [${eq.src}]) | SL ${fmtPrice(sl)} (${slPct.toFixed(2)}%) TP ${fmtPrice(tp)} (${tpPct.toFixed(2)}%) RR 1:${ST_RR}`);
+
+      // ── Strop rizika portfelja, liq zaštita, dnevni brojač ──
+      const portRisk = portfolioOpenRisk() + tradeSize * (slPct / 100);
+      const portRiskP = equity > 0 ? portRisk / equity * 100 : Infinity;
+      if (portRiskP > MAX_PORTFOLIO_RISK_PCT) {
+        console.log(`  ⛔ [ST][PORTFOLIO RISK] ${symbol} — ukupni rizik bi bio ${portRiskP.toFixed(2)}% (strop ${MAX_PORTFOLIO_RISK_PCT}%) → preskačem`);
+        continue;
+      }
+      const liqBlock = liqBlocksEntry(slPct);
+      if (liqBlock) { console.log(`  ⛔ [ST][LIQ] ${symbol} — ${liqBlock} → preskačem`); continue; }
+      if (!checkDailyLimit(pid)) { console.log(`  ❌ [ST] ${symbol} — dnevni limit dostignut`); continue; }
+
+      // ── Ulaz ──
+      const margin = tradeSize / LEVERAGE;
+      const entry = {
+        symbol, signal, price, sl, tp, tradeSize, margin,
+        orderId: `${isLive ? "LIVE" : "PAPER"}-${Date.now()}`, timestamp: new Date().toISOString(),
+        strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct,
+        mode: isLive ? (BITGET_DEMO ? "DEMO" : "LIVE") : "PAPER",
+        sigMask: null, entryMode: "ST", signalStrength: "normal", vipSlot: false,
+        btcRegime1h, btcRegime4h, candlePat: detectCandlePattern(sig.candles1h).name,
+      };
+      console.log(`🎯 [${pDef.name}] NEW ${signal} ${symbol} @ ${fmtPrice(price)} | SL ${fmtPrice(sl)} | TP ${fmtPrice(tp)} | $${tradeSize.toFixed(0)} [SUPERTREND]`);
+      if (!isLive) {
+        addPosition(pid, entry); writeEntryCsv(pid, entry);
+        await tg(`📋 PAPER [ST/1H] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b> 🧭\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} (${slPct.toFixed(1)}%) | TP: ${fmtPrice(tp)} (${tpPct.toFixed(1)}%) | RR 1:${ST_RR}\nEquity: $${equity.toFixed(2)} | Risk: $${riskAmount.toFixed(2)} | Notional: $${tradeSize.toFixed(0)}`);
+      } else {
+        let order;
+        try {
+          order = await placeBitGetOrder(symbol, signal, tradeSize, price, sl, tp, slPct, tpPct, null);
+        } catch (e) {
+          console.log(`  ❌ LIVE NALOG PAO [ST] — ${e.message}`);
+          await tg(`❌ LIVE GREŠKA [ST] ${symbol}\n${e.message}`);
+          continue;                                         // obrat se NE označava obrađenim — retry u prozoru
+        }
+        const usedLev = order?.actualLeverage || LEVERAGE;
+        entry.orderId = order?.orderId || entry.orderId;
+        entry.margin  = tradeSize / usedLev;
+        if (order?.slFromFill) entry.sl = order.slFromFill;
+        if (order?.tpFromFill) entry.tp = order.tpFromFill;
+        if (order?.fillPrice)  entry.entryPrice = order.fillPrice;
+        if (order?.fillQty)    entry.quantity   = order.fillQty;
+        addPosition(pid, entry); writeEntryCsv(pid, entry);
+        console.log(`  ✅ LIVE NALOG [ST] — ${entry.orderId}`);
+        await tg(`🔴 LIVE [ST/1H] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b> 🧭\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} (${slPct.toFixed(1)}%) | TP: ${fmtPrice(tp)} (${tpPct.toFixed(1)}%) | RR 1:${ST_RR}\nEquity: $${equity.toFixed(2)} | Risk: $${riskAmount.toFixed(2)} | Notional: $${tradeSize.toFixed(0)} | Margin: $${entry.margin.toFixed(2)} | ${usedLev}x`);
+      }
+      scanLog.push({ symbol, signal, score: 0, blocker: "ENTERED", reason: `ST ulaz @ ${fmtPrice(price)} SL ${fmtPrice(sl)} TP ${fmtPrice(tp)}` });
+      state[symbol] = sig.flipTs; _stSaveState(state);
+      entered++;
+    } catch (err) {
+      console.log(`  ❌ [ST] ${symbol}: ${err.message}`);
+      scanLog.push({ symbol, signal: "ERROR", blocker: "ERROR", reason: `Supertrend: ${err.message}` });
+    }
+  }
+  return entered;
+}
+// ===== SUPERTREND END =====
+
 // ─── Main ───────────────────────────────────────────────────────────────────────
 
 export async function run() {
@@ -7134,6 +7417,12 @@ export async function run() {
       // ── Pyramid (DCA) logika: dopuštamo max MAX_PYRAMID adicija u ISTOM smjeru ──
       const existingPosList = openPositions.filter(p => p.symbol === symbol);
       const existingPos     = existingPosList[0];  // prva/primarna pozicija
+      // 05.10.: Supertrend pozicija (entryMode "ST") se vodi SAMO SL/TP/trailom (R:R 1:3). Običan 1H
+      // signal je ne smije pyramidirati niti flipati (suprotni signal bi je zatvorio prije cilja).
+      if (existingPos && existingPos.entryMode === "ST") {
+        console.log(`  🧭 [${pDef.name}] ${symbol} — Supertrend pozicija (${existingPos.side}) → bez pyramida/flipa, vodi je SL/TP/trail`);
+        continue;
+      }
       if (existingPos) {
         // Ako signal nije u istom smjeru — skip
         // (signal još nije poznat ovdje, provjerava se ispod nakon analize)
@@ -8326,6 +8615,17 @@ export async function run() {
         console.log(`  ❌ [${pDef.name}] ${symbol}: ${err.message}`);
         _scanLogEntries.push({ symbol, signal: "ERROR", blocker: "ERROR", reason: err.message });
       }
+    }
+
+    // ── Supertrend 1D/4H/1H (05.10.) — vidi blok "SUPERTREND" iznad. Radi unutar iste petlje portfelja,
+    // pa je već prošao drawdown/dnevni limit/equity-nepoznat/econ/pauzu koji vrijede za cijeli portfelj.
+    if (ST_ENABLED && pDef.strategy === "synapse_t") {
+      try {
+        _newEntriesThisScan += await runSupertrendEntries({
+          pid, pDef, rules, isLive: _isLive, scanLog: _scanLogEntries,
+          newEntries: _newEntriesThisScan, btcRegime1h: _btcRegime1h, btcRegime4h: _btcRegime,
+        });
+      } catch (e) { console.log(`  ❌ [ST] ${e.message}`); }
     }
 
     // Piši scan log jednom po scan ciklusu

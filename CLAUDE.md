@@ -139,6 +139,23 @@ je jedini izvor te računice; `liqDistPct(lev) = (1/lev − 0.005) × 100`.
   samo u `run()` (nalaz #23). Blokiraju se **novi ulazi**, nikad upravljanje postojećim
   pozicijama (izlazi i trail moraju raditi i kad su ulazi zabranjeni).
 
+## Candle patterns (05.10.)
+
+`detectCandlePattern(candles)` u `bot.js` je jedini izvor formacije, i čita **zatvorene** svijeće
+(n-2, n-3; n-1 se još formira). Ima dvije odvojene uloge — ne miješaj ih:
+
+- **Mjerenje:** svaki ulaz upisuje formaciju u CSV stupac `CandlePat` (indeks 22, na kraju retka).
+  Ne utječe na odluku. Nakon ~100 tradeova usporedi WR po formaciji prije bilo kakve nove odluke.
+- **Filter:** blokira samo **jak engulfing protiv smjera** (tijelo ≥ `CANDLE_ENGULF_MIN_ATR` × ATR14):
+  LONG nakon `BEAR_ENGULF`, SHORT nakon `BULL_ENGULF`. Hammer/shooting star/doji se samo bilježe.
+  Živi u `evaluateU4hGates` (4H + dashboard badge) i u `run()` iza velocity gatea (1H, s istim
+  `_stratBypass` izuzećem). Isključuje se jednom konstantom `CANDLE_FILTER_ENABLED`.
+
+Retrospektiva na 109 povijesnih ulaza (svibanj, `bitget_rebuild.csv`): filter bi blokirao 3 (1H) /
+1 (4H) — inertan, uzorak premalo velik za zaključak u bilo kojem smjeru. Nova formacija **ne ide u
+`analyzeUltra`/score** (to bi mijenjalo golden i signalnu jezgru); ako podaci kažu da vrijedi, ide
+kroz tjedni audit uz odluku vlasnika.
+
 ## Bitget auth
 
 `bitgetHeaders(method, path, body)` u `bot.js` je **jedino** mjesto koje sastavlja potpisane

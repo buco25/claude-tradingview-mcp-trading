@@ -1240,6 +1240,50 @@ function checkVelocity(candles, window = VEL_WINDOW) {
   };
 }
 
+// ─── Candle patterns (05.10., na zahtjev) ────────────────────────────────────
+// Dvije odvojene uloge, namjerno razdvojene:
+//  1) MJERENJE — svaki ulaz u CSV zapisuje formaciju zadnje zatvorene svijeće (stupac
+//     CandlePat), da se nakon ~100 tradeova vidi korelira li s ishodom. Ne utječe na odluku.
+//  2) FILTER — jedini dio koji mijenja koji se tradeovi uzimaju, i to samo u jednom uskom
+//     slučaju: JAK engulfing PROTIV smjera ulaza (LONG nakon bearish, SHORT nakon bullish
+//     engulfinga). Hammer / shooting star / doji se samo bilježe, nikad ne blokiraju.
+// Jedini izvor istine; zovu ga run() (1H), evaluateU4hGates (4H + dashboard badge) i CSV.
+// Čita ZATVORENE svijeće (n-2 i n-3) — n-1 se još formira, ista konvencija kao
+// checkVelocity / checkVolumeAnomaly.
+export const CANDLE_FILTER_ENABLED  = true;
+export const CANDLE_ENGULF_MIN_ATR  = 0.8;   // tijelo engulfinga mora biti >= 0.8 ATR(14) da bi bio "jak"
+export function detectCandlePattern(candles) {
+  const none = { name: "", bias: 0, strong: false };
+  if (!Array.isArray(candles) || candles.length < 18) return none;
+  const n  = candles.length;
+  const c1 = candles[n - 2], c0 = candles[n - 3];
+  if (!c1 || !c0) return none;
+  const body  = c => Math.abs(c.close - c.open);
+  const range = c => c.high - c.low;
+  const b1 = body(c1), b0 = body(c0), r1 = range(c1);
+  if (!(r1 > 0)) return none;
+  const atr = calcATR(candles.slice(0, -1), 14);
+
+  // Engulfing — tijelo c1 u cijelosti guta tijelo c0, suprotne boje
+  if (c0.close > c0.open && c1.close < c1.open && c1.open >= c0.close && c1.close <= c0.open && b1 > b0)
+    return { name: "BEAR_ENGULF", bias: -1, strong: !!atr && b1 >= CANDLE_ENGULF_MIN_ATR * atr };
+  if (c0.close < c0.open && c1.close > c1.open && c1.open <= c0.close && c1.close >= c0.open && b1 > b0)
+    return { name: "BULL_ENGULF", bias: 1, strong: !!atr && b1 >= CANDLE_ENGULF_MIN_ATR * atr };
+
+  const upper = c1.high - Math.max(c1.open, c1.close);
+  const lower = Math.min(c1.open, c1.close) - c1.low;
+  if (b1 > 0 && lower >= 2 * b1 && upper <= 0.3 * r1) return { name: "HAMMER",        bias:  1, strong: false };
+  if (b1 > 0 && upper >= 2 * b1 && lower <= 0.3 * r1) return { name: "SHOOTING_STAR", bias: -1, strong: false };
+  if (b1 <= 0.1 * r1)                                 return { name: "DOJI",          bias:  0, strong: false };
+  return none;
+}
+
+// true kad je formacija JAK engulfing protiv smjera ulaza (jedini slučaj koji blokira)
+export function candleAgainst(dir, pat) {
+  if (!CANDLE_FILTER_ENABLED || !pat?.strong) return false;
+  return (dir === "LONG" && pat.name === "BEAR_ENGULF") || (dir === "SHORT" && pat.name === "BULL_ENGULF");
+}
+
 // ─── Deribit Put/Call Ratio ───────────────────────────────────────────────────
 // P/C > 1.5 = tržište kupuje zaštitu od pada (strah) = potencijalni bottom
 // P/C < 0.5 = previše calls = euforija = potencijalni vrh
@@ -4810,7 +4854,9 @@ function csvFilePath(pid) { return `${DATA_DIR}/trades_${pid}.csv`; }
 // NA KRAJ retka: SigMask/EntryMode strukturirano (bilo samo u slobodnom Notes tekstu),
 // BTCRegime1H/4H i Night/Weekend kao kontekst ulazne odluke. Postojeći stupci nisu
 // pomaknuti — sav kod koji čita po fiksnom indeksu (cols[9], cols[12]...) ostaje ispravan.
-const CSV_HEADERS = "Date,Time (UTC),Exchange,Symbol,Side,Quantity,Price,Total USD,Fee (est.),Net P&L,SL,TP,Order ID,Mode,Portfolio,Notes,SigMask,EntryMode,BTCRegime1H,BTCRegime4H,Night,Weekend";
+// 05.10.: CandlePat dodan na kraj (formacija zadnje zatvorene svijeće u trenutku ulaza,
+// vidi detectCandlePattern) — samo na entry retku, kao regime/night/weekend.
+const CSV_HEADERS = "Date,Time (UTC),Exchange,Symbol,Side,Quantity,Price,Total USD,Fee (est.),Net P&L,SL,TP,Order ID,Mode,Portfolio,Notes,SigMask,EntryMode,BTCRegime1H,BTCRegime4H,Night,Weekend,CandlePat";
 
 const _csvHeaderChecked = new Set();  // izbjegni ponovnu migraciju svakih 60s (ultra_4h zove initCsv po ciklusu)
 function initCsv(pid) {
@@ -4848,7 +4894,7 @@ function writeCsv(pid, r) {
     r.sl, r.tp,
     r.orderId || "", r.mode, pid,
     `"${r.notes}"`,
-    "", "", "", "", "", "",
+    "", "", "", "", "", "", r.candlePat ?? "",
   ].join(",");
   appendFileSync(csvFilePath(pid), row + "\n");
 }
@@ -4882,6 +4928,7 @@ function writeEntryCsv(pid, entry) {
     entry.orderId || "", mode, pid,
     `"${entry.strategy} | ${entryMode} | Sig ${sigCount}/${SIG_NAMES.length} | SL ${entry.slPct??SL_PCT}% TP ${entry.tpPct??TP_PCT}%"`,
     entry.sigMask ?? "", entryMode, entry.btcRegime1h ?? "", entry.btcRegime4h ?? "", night, weekend,
+    entry.candlePat ?? "",
   ].join(",");
 
   appendFileSync(csvFilePath(pid), row + "\n");
@@ -5030,7 +5077,7 @@ export function writeExitCsv(pid, pos, exitPrice, reason, pnl) {
     // 21.09.: SigMask/EntryMode ponovljeni iz pozicije (nema potrebe spajati entry+exit
     // redove po Order ID-u za osnovnu analizu) — regime/night/weekend su smisleni SAMO
     // u trenutku ulazne odluke, ostaju prazni na exit retku.
-    pos.sigMask ?? "", pos.entryMode || "PBK", "", "", "", "",
+    pos.sigMask ?? "", pos.entryMode || "PBK", "", "", "", "", "",
   ].join(",");
 
   appendFileSync(csvFilePath(pid), row + "\n");
@@ -6350,7 +6397,8 @@ async function evaluateU4hGates({ symbol, candles, sig, btcRegime, liqScore = nu
   let vipSlot = false, dayRangeSizeMult = 1.0;
   const dir = sig.signal;
   const block = (text, log) => { blockers.push({ text, log }); return shortCircuit; };
-  const done  = () => ({ ok: blockers.length === 0, blockers, notes, vipSlot, dayRangeSizeMult });
+  const candlePat = detectCandlePattern(candles);
+  const done  = () => ({ ok: blockers.length === 0, blockers, notes, vipSlot, dayRangeSizeMult, candlePat: candlePat.name });
 
   const capReason = u4hAbsoluteCapReason();
   if (capReason && block(capReason)) return done();
@@ -6389,6 +6437,12 @@ async function evaluateU4hGates({ symbol, candles, sig, btcRegime, liqScore = nu
   const velocity = checkVelocity(candles);
   if (velocity.sig !== 0 && ((dir === "LONG" && velocity.sig === -1) || (dir === "SHORT" && velocity.sig === 1))) {
     if (block("velocity")) return done();
+  }
+
+  // Jak engulfing PROTIV smjera ulaza (05.10., vidi detectCandlePattern) — LONG nakon bearish,
+  // SHORT nakon bullish engulfinga na zadnjoj zatvorenoj 4H svijeći.
+  if (candleAgainst(dir, candlePat)) {
+    if (block("svijeća protiv", `  🕯️🔒 [ULTRA-4H][CANDLE] ${symbol} ${dir} — ${candlePat.name} (jak, tijelo ≥ ${CANDLE_ENGULF_MIN_ATR} ATR) na zadnjoj zatvorenoj svijeći → preskačem`)) return done();
   }
 
   // 4H trend filter — close vs EMA20 na VLASTITOM 4H TF-u (19.09., ne posuđuje 1H sliku).
@@ -6585,6 +6639,7 @@ export async function runUltra4hStrategy() {
       }
       if (gates.vipSlot) sig._vipSlot = true;
       const _dayRangeSizeMult4 = gates.dayRangeSizeMult;
+      const _candlePat4 = gates.candlePat;
 
       // Odluka #3 (04.10.): 4H SL je atr*1.5/price — nema clampa kao tierSlMax na 1H,
       // pa na siroko-ATR simbolu moze proci stop sirok preko 19.5%. Tad je likvidacija
@@ -6653,7 +6708,7 @@ export async function runUltra4hStrategy() {
         strategy: ULTRA4H_PID, timeframe: ULTRA4H_TF, slPct: sig.slPct, tpPct: sig.tpPct,
         mode: "LIVE", entryMode: sig._strategy ?? (sig.isMomentum ? "MOM" : "PBK"),
         sigMask: sig.sigMask ?? null, btcRegime1h: _btcRegime1hLog, btcRegime4h: _btcRegime4,
-        vipSlot: sig._vipSlot === true,
+        vipSlot: sig._vipSlot === true, candlePat: _candlePat4,
       };
       addPosition(ULTRA4H_PID, entry);
       writeEntryCsv(ULTRA4H_PID, entry);
@@ -7124,6 +7179,7 @@ export async function run() {
 
         // ── Velocity (log-only od 03.08., gate dodan 07.09. — vidi VELOCITY_COUNTER niže) ──
         const velocity = checkVelocity(candles);
+        const _candlePat1 = detectCandlePattern(candles);   // 05.10.: mjerenje (CSV) + uski filter, vidi detectCandlePattern
         if (velocity.sig !== 0) {
           console.log(`  ⚡ [VELOCITY] ${symbol} — ${velocity.sig > 0 ? "BULL" : "BEAR"} obrat! prior ROC ${velocity.rocPrior}% → recent ROC ${velocity.rocRecent}% (accel ${velocity.accel > 0 ? "+" : ""}${velocity.accel}%)`);
         }
@@ -7560,6 +7616,14 @@ export async function run() {
               _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: "VELOCITY_COUNTER", reason: `Velocity BULL obrat (accel ${velocity.accel}%) → SHORT blokiran, protiv momentuma` });
               continue;
             }
+          }
+
+          // Jak engulfing PROTIV smjera ulaza (05.10., na zahtjev) — jedini candle-pattern
+          // slučaj koji blokira; ostale formacije se samo bilježe u CSV (CandlePat).
+          if (candleAgainst(signal, _candlePat1) && !_stratBypass) {
+            console.log(`  🕯️🔒 [CANDLE] ${symbol} ${signal} — ${_candlePat1.name} (jak, tijelo ≥ ${CANDLE_ENGULF_MIN_ATR} ATR) na zadnjoj zatvorenoj svijeći → preskačem`);
+            _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: "CANDLE_AGAINST", reason: `${_candlePat1.name} protiv ${signal} smjera` });
+            continue;
           }
 
           // Day range filter — LONG blokiran >80% dana (hard), size ×0.6 iznad 65%; SHORT
@@ -8092,6 +8156,7 @@ export async function run() {
               notes: `PYRAMID +${(existingPos.pyramidCount || 1) + 1} | avg entry ${fmtPrice(pyramidResult.avgEntry)} | SL ${slPct.toFixed(1)}% TP ${tpPct.toFixed(1)}%`,
               orderId: `${_isLive?"LIVE":"PAPER"}-PYR-${Date.now()}`,
               mode: _isLive ? (BITGET_DEMO ? "DEMO" : "LIVE") : "PAPER",
+              candlePat: _candlePat1.name,
             });
           }
           continue;  // Ne prolazimo kroz normalni entry flow
@@ -8101,7 +8166,7 @@ export async function run() {
         const timestamp = new Date().toISOString();
         const orderId   = `${_isLive ? "LIVE" : "PAPER"}-${Date.now()}`;
         const mode      = _isLive ? (BITGET_DEMO ? "DEMO" : "LIVE") : "PAPER";
-        const entry = { symbol, signal, price, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode, sigMask: result.sigMask ?? null, entryMode: result._strategy ?? ((result.isMomentum ? "MOM" : "PBK") + (result._halfSize ? "-SOFT" : "")), signalStrength, vipSlot: result._vipSlot === true, btcRegime1h: _btcRegime1h, btcRegime4h: _btcRegime };
+        const entry = { symbol, signal, price, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode, sigMask: result.sigMask ?? null, entryMode: result._strategy ?? ((result.isMomentum ? "MOM" : "PBK") + (result._halfSize ? "-SOFT" : "")), signalStrength, vipSlot: result._vipSlot === true, btcRegime1h: _btcRegime1h, btcRegime4h: _btcRegime, candlePat: _candlePat1.name };
 
         const _strengthEmoji = signalStrength === "strong" ? "💪" : "📊";
         const _rrLabel = `RR 1:${(tpPct/slPct).toFixed(1)}`;

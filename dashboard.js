@@ -21,7 +21,7 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   DEFAULT_COMBO, DEFAULT_MIN_SIG,
   RISK_PCT, RISK_PCT_MIN, RISK_PCT_MAX,
   ADX_MIN, ADX_SOFT_BAND, ADX_SOFT_FLOOR, MOM_SOFT_BAND, MOM_ADX_MIN,
-  MAX_OPEN_CRYPTO, MAX_OPEN_STOCKS, getCapSnapshot, bitgetHeaders, ACCOUNT_START_CAPITAL } from "./bot.js";
+  MAX_OPEN_CRYPTO, MAX_OPEN_STOCKS, getCapSnapshot, bitgetHeaders, ACCOUNT_START_CAPITAL, getSupertrendOverview } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -2202,6 +2202,12 @@ window.toggleScanFilter = function(btn) {
        glavni ULTRA prikaz gore (vidi buildPortfolioStats poziv), ne ovdje. -->
   ${renderUltra4hSection(ultra4hPositions)}
 
+  <!-- Supertrend 1D/4H/1H (05.10.) — praćenje: stanje po simbolu, otvorene ST pozicije, povijest. Puni se
+       klijentski iz /api/supertrend (loadSupertrend niže), da render stranice ne čeka Bitget. -->
+  <div id="st-section" class="scan-card" style="margin-top:14px">
+    <div class="section-label" style="color:#22d3ee;margin:0 0 8px 0">🧭 SUPERTREND 1D/4H/1H <span style="font-weight:400;color:#94a3b8;font-size:11px">— učitavam…</span></div>
+  </div>
+
   <!-- 18.09.: zasebna "1H vs 4H usporedba" kartica uklonjena — 4H stupac je sad
        ugradjen direktno u glavni Scanner ispod (na zahtjev "stavi sve pod jedan"). -->
   <div class="scan-card">
@@ -3421,6 +3427,69 @@ async function loadBitgetBalance() {
 loadBitgetBalance();
 setInterval(loadBitgetBalance, 30000);
 
+// Supertrend praćenje (05.10.) — punjenje odjeljka iz /api/supertrend. Bez backtickova i dolar-vitica:
+// ovaj kod živi unutar server-side template literala pa bi ih server interpolirao.
+function stEsc(x) { var t = String(x === null || x === undefined ? "" : x); return t.split("&").join("&amp;").split("<").join("&lt;").split(">").join("&gt;").split(String.fromCharCode(34)).join("&quot;").split(String.fromCharCode(39)).join("&#39;"); }
+function stNum(v, dec) { return (v === null || v === undefined || isNaN(v)) ? '—' : Number(v).toFixed(dec); }
+function stDirHtml(s) {
+  if (!s) return '<span style="color:#64748b">—</span>';
+  return s.bull ? '<span style="color:#059669;font-weight:700">▲ uzl.</span>' : '<span style="color:#dc2626;font-weight:700">▼ sil.</span>';
+}
+function stStatusHtml(s) {
+  if (s.error) return '<span style="color:#dc2626">greška: ' + s.error + '</span>';
+  if (s.signal) return '<span style="color:#059669;font-weight:700">🟢 SIGNAL ' + s.signal + ' (obrat prije ' + (s.h1 ? s.h1.ageMin : '?') + ' min)</span>';
+  if (s.aligned && s.h1 && !s.h1.flipped) return '<span style="color:#94a3b8">čeka obrat 1H (1D+4H ' + (s.d1 && s.d1.bull ? '▲' : '▼') + ')</span>';
+  return '<span style="color:#94a3b8">' + stEsc(s.reason || '—') + '</span>';
+}
+async function loadSupertrend() {
+  var el = document.getElementById('st-section');
+  if (!el) return;
+  try {
+    var r = await fetch('/api/supertrend');
+    var d = await r.json();
+    if (d.error) { el.innerHTML = '<div class="section-label" style="color:#dc2626;margin:0">🧭 SUPERTREND — greška: ' + stEsc(d.error) + '</div>'; return; }
+    var h = '<div class="section-label" style="color:#22d3ee;margin:0 0 8px 0">🧭 SUPERTREND 1D/4H/1H '
+      + '<span style="font-weight:400;color:#94a3b8;font-size:11px">— ' + (d.enabled ? 'uključen' : 'ISKLJUČEN') + ' · otvoreno ' + d.open.length + '/' + d.maxOpen
+      + ' · rizik ' + d.riskPct + '% · R:R 1:' + d.rr + ' · SL linija ' + d.slMin + '–' + d.slMax + '%</span></div>';
+    h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:#64748b;text-align:left">'
+      + '<th style="padding:4px 6px">Simbol</th><th>Cijena</th><th>1D</th><th>4H</th><th>1H</th><th>Linija 1H (udalj.)</th><th>Status</th></tr></thead><tbody>';
+    d.symbols.forEach(function(s) {
+      h += '<tr style="border-top:1px solid rgba(148,163,184,0.15)"><td style="padding:5px 6px;font-weight:700">' + stEsc(s.symbol.replace('USDT','')) + '</td>';
+      if (s.error) { h += '<td colspan="5"></td><td>' + stStatusHtml(s) + '</td></tr>'; return; }
+      h += '<td>' + stNum(s.price, s.price >= 100 ? 1 : 4) + '</td><td>' + stDirHtml(s.d1) + '</td><td>' + stDirHtml(s.h4) + '</td><td>' + stDirHtml(s.h1) + '</td>'
+        + '<td>' + (s.h1 ? stNum(s.h1.line, s.price >= 100 ? 1 : 4) + ' <span style="color:#64748b">(' + stNum(s.distPct, 2) + '%)</span>' : '—') + '</td>'
+        + '<td>' + stStatusHtml(s) + '</td></tr>';
+    });
+    h += '</tbody></table>';
+    if (d.open.length) {
+      h += '<div style="margin-top:10px;font-size:12px"><b style="color:#22d3ee">Otvorene ST pozicije</b>';
+      d.open.forEach(function(p) {
+        h += '<div style="margin-top:3px">' + stEsc(p.symbol.replace('USDT','')) + ' <b style="color:' + (p.side === 'LONG' ? '#059669' : '#dc2626') + '">' + p.side + '</b>'
+          + ' · ulaz ' + stNum(p.entryPrice, 2) + ' · SL ' + stNum(p.sl, 2) + ' · TP ' + stNum(p.tp, 2) + ' · $' + stNum(p.totalUSD, 0) + '</div>';
+      });
+      h += '</div>';
+    }
+    var st = d.stats;
+    h += '<div style="margin-top:10px;font-size:12px;color:#94a3b8"><b style="color:#22d3ee">Zatvoreno ST tradeova:</b> ' + st.n
+      + (st.n ? ' · WR ' + stNum(st.winRate, 0) + '% · neto <b style="color:' + (st.net >= 0 ? '#059669' : '#dc2626') + '">' + (st.net >= 0 ? '+' : '') + '$' + stNum(st.net, 2) + '</b> · prosj. ' + (st.avg >= 0 ? '+' : '') + '$' + stNum(st.avg, 2) + ' po tradeu' : ' (još nijedan — strategija tek počinje)') + '</div>';
+    if (d.recent.length) {
+      h += '<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:6px"><thead><tr style="color:#64748b;text-align:left"><th style="padding:3px 6px">Zatvoreno</th><th>Simbol</th><th>Smjer</th><th>Ulaz → izlaz</th><th>Neto</th><th>Razlog</th></tr></thead><tbody>';
+      d.recent.forEach(function(t) {
+        h += '<tr style="border-top:1px solid rgba(148,163,184,0.12)"><td style="padding:3px 6px">' + stEsc(t.date + ' ' + String(t.time).slice(0,5)) + '</td><td>' + stEsc(t.symbol.replace('USDT','')) + '</td>'
+          + '<td style="color:' + (t.side === 'LONG' ? '#059669' : '#dc2626') + '">' + t.side + '</td><td>' + stNum(t.entry, 2) + ' → ' + stNum(t.exit, 2) + '</td>'
+          + '<td style="color:' + (t.net >= 0 ? '#059669' : '#dc2626') + ';font-weight:700">' + (t.net >= 0 ? '+' : '') + stNum(t.net, 2) + '</td><td style="color:#94a3b8">' + stEsc(t.reason || '') + '</td></tr>';
+      });
+      h += '</tbody></table>';
+    }
+    h += '<div style="margin-top:8px;font-size:10px;color:#64748b">1D i 4H se čitaju sa zadnje ZATVORENE svijeće. Ulaz samo unutar 25 min od zatvaranja 1H svijeće obrata, noću (20–06 UTC) ne. Osvježava se svake minute.</div>';
+    el.innerHTML = h;
+  } catch(e) {
+    el.innerHTML = '<div class="section-label" style="color:#dc2626;margin:0">🧭 SUPERTREND — greška učitavanja: ' + stEsc(e.message) + '</div>';
+  }
+}
+loadSupertrend();
+setInterval(loadSupertrend, 60000);
+
 // Bitget live Win Rate (zadnjih 100 zatvorenih pozicija)
 async function loadBitgetWR() {
   const el  = document.getElementById('bitget-wr');
@@ -4235,6 +4304,19 @@ const server = http.createServer(async (req, res) => {
     } catch (e) {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ success: false, error: e.message }));
+    }
+    return;
+  }
+
+  // Supertrend praćenje (05.10.) — samo čita (javne svijeće + vlastiti CSV/pozicije), keširano u bot.js
+  if (url.pathname === "/api/supertrend") {
+    try {
+      const data = await getSupertrendOverview();
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(data));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: e.message }));
     }
     return;
   }

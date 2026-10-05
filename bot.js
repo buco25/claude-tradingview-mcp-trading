@@ -7110,6 +7110,81 @@ async function runSupertrendEntries(ctx) {
 }
 // ===== SUPERTREND END =====
 
+// ===== SUPERTREND OVERVIEW BEGIN =====
+// Podaci za dashboard odjeljak "🧭 SUPERTREND" (05.10., na zahtjev "da pratimo"). Samo ČITA: javne svijece
+// i vlastiti CSV/pozicije — nikad ne trguje. Keširano da dashboard ne troši Bitget rate limit.
+function _stSplitCsv(line) {
+  const out = []; let cur = "", q = false;
+  for (const ch of line) { if (ch === '"') q = !q; else if (ch === "," && !q) { out.push(cur); cur = ""; } else cur += ch; }
+  out.push(cur); return out;
+}
+
+// Zatvoreni ST tradeovi iz trades_synapse_t.csv: grupirano po Order ID-u (djelomična zatvaranja = JEDAN trade),
+// Net P&L je zbroj izlaznih redaka. Samo tradeovi s barem jednim izlazom i EntryMode "ST".
+export function stClosedTrades(csvText) {
+  const lines = (csvText ?? "").replace(/\r/g, "").trim().split("\n").slice(1).filter(Boolean);
+  const by = new Map();
+  for (const l of lines) {
+    const c = _stSplitCsv(l);
+    if (c.length < 13 || (c[17] || "").trim() !== "ST") continue;
+    const id = (c[12] || "").trim(); if (!id) continue;
+    if (!by.has(id)) by.set(id, []);
+    by.get(id).push(c);
+  }
+  const trades = [];
+  for (const [id, rows] of by) {
+    const open = rows.find(c => c[4] === "LONG" || c[4] === "SHORT");
+    const closes = rows.filter(c => (c[4] || "").startsWith("CLOSE"));
+    if (!open || !closes.length) continue;
+    const last = closes[closes.length - 1];
+    const reason = ((last[15] || "").match(/^(?:WIN|LOSS|CLOSED):\s*([^|]+)/) || [])[1]?.trim() ?? "";
+    trades.push({
+      id, symbol: open[3], side: open[4], date: last[0], time: last[1],
+      entry: parseFloat(open[6]), exit: parseFloat(last[6]),
+      net: closes.reduce((s, c) => s + (parseFloat(c[9]) || 0), 0), reason,
+    });
+  }
+  return trades.sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+}
+
+let _stOverviewCache = { ts: 0, data: null };
+export async function getSupertrendOverview(nowMs = Date.now()) {
+  if (_stOverviewCache.data && nowMs - _stOverviewCache.ts < 120_000) return _stOverviewCache.data;
+  const symbols = [];
+  for (const symbol of ST_SYMBOLS) {
+    try {
+      const [d1, h4, h1] = await Promise.all([fetchCandles(symbol, "1Dutc", 250), fetchCandles(symbol, "4H", 250), fetchCandles(symbol, "1H", 250)]);
+      const s1d = supertrendState(_stClosed(d1, 86400e3, nowMs));
+      const s4h = supertrendState(_stClosed(h4, 4 * 3600e3, nowMs));
+      const s1h = supertrendState(_stClosed(h1, 3600e3, nowMs));
+      const dec = supertrendDecision(s1d, s4h, s1h, nowMs);
+      const price = h1[h1.length - 1].close;
+      const pick = s => s && { bull: s.bull, line: s.line };
+      symbols.push({
+        symbol, price, d1: pick(s1d), h4: pick(s4h),
+        h1: s1h && { bull: s1h.bull, line: s1h.line, flipped: s1h.flipped, ageMin: Math.round((nowMs - (s1h.time + 3600e3)) / 60e3) },
+        aligned: !!(s1d && s4h && s1d.bull === s4h.bull),
+        signal: dec.signal, reason: dec.reason ?? null,
+        distPct: s1h ? Math.abs(price - s1h.line) / price * 100 : null,
+      });
+    } catch (e) { symbols.push({ symbol, error: e.message }); }
+  }
+  let csv = ""; try { const f = csvFilePath("synapse_t"); if (existsSync(f)) csv = readFileSync(f, "utf8"); } catch { /* bez CSV-a */ }
+  const closed = stClosedTrades(csv);
+  const wins = closed.filter(t => t.net > 0).length, net = closed.reduce((s, t) => s + t.net, 0);
+  const data = {
+    ts: nowMs, enabled: ST_ENABLED, maxOpen: ST_MAX_OPEN, riskPct: ST_RISK_PCT, rr: ST_RR, slMin: ST_SL_MIN_PCT, slMax: ST_SL_MAX_PCT,
+    symbols,
+    open: loadPositions("synapse_t").filter(p => p.entryMode === "ST")
+      .map(p => ({ symbol: p.symbol, side: p.side, entryPrice: p.entryPrice, sl: p.sl, tp: p.tp, totalUSD: p.totalUSD, openedAt: p.openedAt })),
+    stats: { n: closed.length, wins, winRate: closed.length ? wins / closed.length * 100 : null, net, avg: closed.length ? net / closed.length : null },
+    recent: closed.slice(-8).reverse(),
+  };
+  _stOverviewCache = { ts: nowMs, data };
+  return data;
+}
+// ===== SUPERTREND OVERVIEW END =====
+
 // ─── Main ───────────────────────────────────────────────────────────────────────
 
 export async function run() {

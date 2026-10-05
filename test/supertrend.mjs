@@ -7,7 +7,7 @@ import { fileURLToPath } from "url";
 process.env.DATA_DIR = mkdtempSync(join(tmpdir(), "st-test-"));
 
 const { calcSupertrend, supertrendState, supertrendDecision, stBuildOrder,
-        ST_RR, ST_SL_MIN_PCT, ST_SL_MAX_PCT, ST_RISK_PCT } = await import("../bot.js");
+        ST_RR, ST_SL_MIN_PCT, ST_SL_MAX_PCT, ST_RISK_PCT, stClosedTrades } = await import("../bot.js");
 
 let fail = 0;
 const ok = (c, m) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -94,6 +94,26 @@ ok(!stBuildOrder({ signal: "LONG", price: 100, line: 99.1, equity: 570 }).skip, 
 o = stBuildOrder({ signal: "LONG", price: 100, line: 98, equity: 50, minNotional: 40 });
 ok(o.floored && o.tradeSize === 40, "premala pozicija → podignuta na minimum (floored=true)");
 ok(stBuildOrder({ signal: "LONG", price: 0, line: 98, equity: 570 }).skip && stBuildOrder({ signal: "LONG", price: 100, line: 0, equity: 570 }).skip, "nevažeća cijena/linija → preskoči");
+
+// ── 7) stClosedTrades: samo ST, grupirano po Order ID-u (djelomično zatvaranje = JEDAN trade) ──
+const HDR = "Date,Time (UTC),Exchange,Symbol,Side,Quantity,Price,Total USD,Fee (est.),Net P&L,SL,TP,Order ID,Mode,Portfolio,Notes,SigMask,EntryMode,BTCRegime1H,BTCRegime4H,Night,Weekend,CandlePat";
+const csvRow = (date, time, sym, side, price, net, id, notes, mode) =>
+  [date, time, "BitGet", sym, side, 1, price, 100, 0.1, net, 0, 0, id, "LIVE", "synapse_t", '"' + notes + '"', "", mode, "", "", "", "", ""].join(",");
+const csv = [HDR,
+  csvRow("2026-10-04", "10:00:00", "BTCUSDT", "LONG", 85228.6, "OPEN", "A1", "ST open", "ST"),
+  csvRow("2026-10-04", "22:00:00", "BTCUSDT", "CLOSE_LONG", 86584.4, 4.2, "A1", "WIN: Soft TP — bot izlaz | ST | Ulaz 85228.6 → Izlaz 86584.4", "ST"),
+  csvRow("2026-10-05", "09:00:00", "ETHUSDT", "SHORT", 3000, "OPEN", "B1", "ST open", "ST"),
+  csvRow("2026-10-05", "12:00:00", "ETHUSDT", "CLOSE_SHORT", 2950, 2.0, "B1", "WIN: Partial TP | ST | x", "ST"),
+  csvRow("2026-10-05", "15:00:00", "ETHUSDT", "CLOSE_SHORT", 3040, -3.5, "B1", "LOSS: Soft SL — bot izlaz | ST | y", "ST"),
+  csvRow("2026-10-05", "09:30:00", "SOLUSDT", "LONG", 150, "OPEN", "C1", "ST open", "ST"),
+  csvRow("2026-10-05", "10:00:00", "XRPUSDT", "LONG", 2, "OPEN", "D1", "PBK open", "PBK"),
+  csvRow("2026-10-05", "11:00:00", "XRPUSDT", "CLOSE_LONG", 2.1, 9.9, "D1", "WIN: TP | PBK | z", "PBK")].join("\n");
+const tr = stClosedTrades(csv);
+ok(tr.length === 2, "samo zatvoreni ST tradeovi (PBK ignoriran, otvoreni SOL ignoriran): " + tr.length);
+ok(tr[0].symbol === "BTCUSDT" && tr[0].side === "LONG" && near(tr[0].net, 4.2) && tr[0].reason === "Soft TP — bot izlaz", "BTC: neto +4.2, razlog izvučen iz Notes");
+ok(tr[1].symbol === "ETHUSDT" && near(tr[1].net, -1.5), "ETH: djelomično zatvaranje (+2.0) i ostatak (-3.5) = JEDAN trade, neto -1.5 (" + tr[1].net + ")");
+ok(tr[1].exit === 3040 && tr[1].entry === 3000, "ETH: ulaz 3000, izlaz = zadnja noga 3040");
+ok(stClosedTrades("").length === 0 && stClosedTrades(HDR).length === 0 && stClosedTrades(undefined).length === 0, "prazan/nepostojeći CSV → prazno, bez greške");
 
 console.log(fail ? `\n${fail} PALO` : "\nSVE PROSLO");
 process.exit(fail ? 1 : 0);

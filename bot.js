@@ -6839,6 +6839,7 @@ export async function runUltra4hStrategy() {
 // vodi je samo SL/TP/trail.
 export const ST_ENABLED          = true;
 export const ST_SYMBOLS          = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
+export const ST_MAX_OPEN         = 2;      // max istovremenih Supertrend pozicija (na zahtjev vlasnika), povrh svih 1H/4H capova
 export const ST_RISK_PCT         = 1.0;    // % računa do SL-a (nova, nedokazana strategija — ispod 1.5% koliko ima 4H)
 export const ST_ATR_LEN          = 10;     // TradingView default: ta.supertrend(3, 10)
 export const ST_FACTOR           = 3;
@@ -6941,11 +6942,17 @@ function _stSaveState(s) { try { writeFileSync(ST_STATE_FILE, JSON.stringify(s))
 // portfelja — pa nasljeđuje sve zaštite na razini portfelja. Vraća broj otvorenih ulaza.
 async function runSupertrendEntries(ctx) {
   const { pid, pDef, rules, isLive, scanLog, btcRegime1h, btcRegime4h } = ctx;
-  let entered = 0;
+  let entered = 0, stCapLogged = false;
   const BTC = "BTCUSDT";
   for (const symbol of ST_SYMBOLS) {
     try {
       if (!pDef.symbols.includes(symbol)) continue;           // watchlist/suspenzija se poštuje
+      // ── Vlastiti strop: max ST_MAX_OPEN istovremenih Supertrend pozicija (prije dohvata svijeća) ──
+      const stOpen = loadPositions(pid).filter(p => p.entryMode === "ST").length;
+      if (stOpen >= ST_MAX_OPEN) {
+        if (!stCapLogged) { console.log(`  🔒 [ST] max ${ST_MAX_OPEN} Supertrend pozicija dostignut (${stOpen}) → preskačem skeniranje`); stCapLogged = true; }
+        continue;
+      }
       if (isBlacklisted(symbol) || PROBLEM_1H_SYMBOLS.has(symbol)) continue;
 
       // ── Kolizija: isti simbol ne smije držati više strategija (Bitget ih spaja u jednu poziciju) ──

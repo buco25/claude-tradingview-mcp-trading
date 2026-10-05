@@ -4644,6 +4644,7 @@ async function checkPortfolioPositions(pid) {
             // Otkaži plan naloge PRIJE close-a (ne nakon 22002) — sprječava blokadu
             await cancelAllPlanOrders(pos.symbol, pos.side).catch(() => {});
             let softClosed  = false;
+            const _softSentAt = Date.now();   // za reconcileSoftExit — samo fillovi nakon ovog trenutka
             for (let attempt = 1; attempt <= 3 && !softClosed; attempt++) {
               try {
                 const closeR = await bitgetPost("/api/v2/mix/order/place-order", {
@@ -4688,10 +4689,15 @@ async function checkPortfolioPositions(pid) {
             // Ako je pozicija bila externally closed (22002 + ne postoji) — samo ukloni tracking bez CSV
             if (pos._remove) { continue; }
             const softQtyN = parseFloat(closeQty);
-            const pnl = pos.side === "LONG"
+            const _softEstPnl = pos.side === "LONG"
               ? (liveP - pos.entryPrice) * softQtyN
               : (pos.entryPrice - liveP) * softQtyN;
-            writeExitCsv(pid, pos, liveP, _timeStop ? "Time-stop 12h" : "Soft SL — bot izlaz", pnl);
+            // 05.10.: stvarni fill s Bitgeta; procjena samo ako dohvat zakaže
+            const _softRec = await reconcileSoftExit(pos, _softSentAt, closeQty, liveP, _softEstPnl);
+            const pnl = _softRec.pnl;
+            const _softLabel = _timeStop ? "Time-stop 12h" : "Soft SL — bot izlaz";
+            writeExitCsv(pid, pos, _softRec.exitPrice, _softRec.real ? _softLabel : _softLabel + " (est.)", pnl,
+              _softRec.real ? _softRec.closeFee + pos.totalUSD * 0.0006 : null);
             await tg(`🛑 [SOFT SL] ${pos.symbol} ${pos.side}\nBot zatvorio na SL ${fmtPrice(pos.sl)}\nEgzekucija: ${fmtPrice(liveP)} | P&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}`);
             symbolSlCooldown.set(pos.symbol, Date.now());
             saveSlCooldown();
@@ -5070,15 +5076,60 @@ async function equityForSizing(pid, startCapital = ACCOUNT_START_CAPITAL) {
   return { equity: null, src: r.src, live: false };
 }
 
-export function writeExitCsv(pid, pos, exitPrice, reason, pnl) {
+// ─── Soft-izlaz: stvarni fill s Bitgeta umjesto procjene (05.10.) ─────────────────
+// Soft SL/TP je do sada u CSV pisao PROCJENU: cijenu koju je monitor vidio (ne stvarnu cijenu
+// izvršenja), lokalnu količinu i fiksnih 0.12% naknada. Na malim iznosima to lako okrene predznak
+// (BTC 28.09. i 29.09. su po Bitgetu bili +$0.18, a bot je mogao upisati minus), a CSV hrani
+// brojač suspenzije, circuit breaker i sve analize. Ovdje se povlače STVARNI close fillovi
+// (fill-history), ali SAMO oni nakon trenutka slanja naloga (djelomična zatvaranja ranije su već
+// zasebni retci) i samo ako se ukupna količina poklapa s poslanom (±5%) — inače se vraća procjena.
+// `pnl` je BRUTO profit po fillu (kao i kod ostalih izlaza); writeExitCsv oduzima naknade.
+async function reconcileSoftExit(pos, sentAtMs, qtyStr, liveP, estPnl) {
+  const est = { exitPrice: liveP, pnl: estPnl, closeFee: null, real: false };
+  if (PAPER_TRADING) return est;
+  const expQty = parseFloat(qtyStr);
+  if (!(expQty > 0)) return est;
+  const expSide = pos.side === "LONG" ? "close_long" : "close_short";
+  const path = `/api/v2/mix/order/fill-history?symbol=${pos.symbol}&productType=USDT-FUTURES&limit=50`;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    await new Promise(r => setTimeout(r, attempt === 1 ? 1500 : 2000));   // fillovi se slegnu s malim zakašnjenjem
+    try {
+      const r = await fetch(`${BITGET.baseUrl}${path}`, { headers: bitgetHeaders("GET", path), signal: AbortSignal.timeout(4000) });
+      const d = await r.json();
+      const list = d?.code === "00000" ? d.data?.fillList : null;
+      if (!list?.length) continue;
+      const fills = list.filter(f => {
+        const ts = parseInt(f.cTime || f.uTime || f.time || 0);
+        const isClose = f.side === expSide || f.tradeSide === "close" || f.tradeSide === "burst_close" || f.tradeSide === "forced_close";
+        return isClose && ts >= sentAtMs - 3000;
+      });
+      if (!fills.length) continue;
+      const qty = fills.reduce((s, f) => s + parseFloat(f.size || 0), 0);
+      if (!(Math.abs(qty - expQty) <= expQty * 0.05)) continue;              // količina se ne poklapa → ne vjeruj
+      if (!fills.some(f => f.profit != null || f.realizedProfits != null)) continue;
+      const avgPx = fills.reduce((s, f) => s + parseFloat(f.price || 0) * parseFloat(f.size || 0), 0) / qty;
+      if (!(avgPx > 0)) continue;
+      const gross = fills.reduce((s, f) => s + parseFloat(f.profit ?? f.realizedProfits ?? 0), 0);
+      const fee   = fills.reduce((s, f) => s + Math.abs(parseFloat(f.fee || 0)), 0);
+      if (!Number.isFinite(gross)) continue;
+      return { exitPrice: avgPx, pnl: gross, closeFee: fee, real: true };
+    } catch { /* pokušaj ponovno / padni na procjenu */ }
+  }
+  console.log(`  ⚠️  [RECONCILE] ${pos.symbol} — stvarni fill nije dohvaćen/poklopljen → CSV dobiva PROCJENU`);
+  return est;
+}
+
+// feeOverride (opcionalno): stvarna UKUPNA naknada u $ (izlaz po Bitgetu + procjena ulaza)
+export function writeExitCsv(pid, pos, exitPrice, reason, pnl, feeOverride = null) {
   const now     = new Date();
   const date    = now.toISOString().slice(0, 10);
   const time    = now.toISOString().slice(11, 19);
   const exitSide = pos.side === "LONG" ? "CLOSE_LONG" : "CLOSE_SHORT";
   const feeExit  = pos.totalUSD * 0.0006;              // Bitget taker 0.06% — izlaz
   const feeEntry = pos.totalUSD * 0.0006;              // Bitget taker 0.06% — ulaz
-  const feeTotal = (feeExit + feeEntry).toFixed(4);    // roundtrip provizija
-  const netPnl   = (pnl - feeExit - feeEntry).toFixed(4);
+  const feeSum   = Number.isFinite(feeOverride) ? feeOverride : (feeExit + feeEntry);
+  const feeTotal = feeSum.toFixed(4);                  // roundtrip provizija
+  const netPnl   = (pnl - feeSum).toFixed(4);
   const icon    = pnl > 0 ? "WIN" : pnl < 0 ? "LOSS" : "CLOSED";
 
   const row = [
@@ -5417,6 +5468,7 @@ export async function softExitMonitor() {
         // 3 pokušaja s 2s pauzom između
         let closed = false;
         let _extClosed = false; // true ako je 22002 + pozicija ne postoji
+        const _closeSentAt = Date.now();   // za reconcileSoftExit — samo fillovi nakon ovog trenutka
         for (let attempt = 1; attempt <= 3 && !closed; attempt++) {
           try {
             const closeRes = await bitgetPost("/api/v2/mix/order/place-order", {
@@ -5476,15 +5528,19 @@ export async function softExitMonitor() {
           continue;
         }
 
-        const pnl = pos.side === "LONG"
+        const _estPnl = pos.side === "LONG"
           ? (liveP - pos.entryPrice) * parseFloat(qty)
           : (pos.entryPrice - liveP) * parseFloat(qty);
+        // 05.10.: stvarni fill s Bitgeta (cijena, bruto profit, naknada); procjena samo ako dohvat zakaže
+        const _rec = await reconcileSoftExit(pos, _closeSentAt, qty, liveP, _estPnl);
+        const pnl  = _rec.pnl;
 
         // Ukloni poziciju iz trackinga i zapisuj u CSV
         const allPos = loadPositions(pid);
         savePositions(pid, allPos.filter(p => !(p.symbol === pos.symbol && p.side === pos.side)));
         const exitLabel = slHit ? "Soft SL — bot izlaz" : "Soft TP — bot izlaz";
-        writeExitCsv(pid, pos, liveP, exitLabel, pnl);
+        writeExitCsv(pid, pos, _rec.exitPrice, _rec.real ? exitLabel : exitLabel + " (est.)", pnl,
+          _rec.real ? _rec.closeFee + pos.totalUSD * 0.0006 : null);
 
         if (slHit) {
           await tg(`🛑 <b>SOFT SL [ULTRA]</b> ${pos.symbol} ${pos.side}\nCijena: ${fmtPrice(liveP)} | SL: ${fmtPrice(pos.sl)}\nP&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}`);

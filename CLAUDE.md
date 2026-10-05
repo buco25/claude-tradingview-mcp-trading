@@ -162,6 +162,15 @@ Retrospektiva na 109 povijesnih ulaza (svibanj, `bitget_rebuild.csv`): filter bi
 `analyzeUltra`/score** (to bi mijenjalo golden i signalnu jezgru); ako podaci kažu da vrijedi, ide
 kroz tjedni audit uz odluku vlasnika.
 
+## Soft-izlaz piše STVARNI fill, ne procjenu (05.10.)
+
+`reconcileSoftExit` (bot.js) povlači stvarne close fillove s Bitgeta nakon slanja soft SL/TP naloga
+i upisuje stvarnu izlaznu cijenu, bruto profit i naknadu izlaza u CSV. Procjena (cijena koju je
+monitor vidio, lokalna količina, fiksnih 0.12%) ostaje samo kao rezerva kad dohvat zakaže ili se
+količina ne poklapa (±5%) — takav redak ima sufiks `(est.)` u razlogu. Razlog: na iznosima od par
+centi procjena okreće predznak (BTC 28.09./29.09. po Bitgetu +$0.18), a CSV hrani brojač suspenzije,
+circuit breaker i analize. Novi izlazni put koji piše `writeExitCsv` treba koristiti isto.
+
 ## Bitget auth
 
 `bitgetHeaders(method, path, body)` u `bot.js` je **jedino** mjesto koje sastavlja potpisane

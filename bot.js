@@ -6160,14 +6160,30 @@ async function checkAndRemoveSymbol(pid, symbol) {
     // Filtriraj samo exitove tog simbola
     // 21.09. fix (audit nalaz #3): bio col[2] (Exchange, uvijek "BitGet") umjesto col[3]
     // (Symbol) — auto-suspend NIKAD nije okidao jer je filter uvijek vraćao prazan niz.
+    // 05.10.: BTC se NIKAD ne suspendira automatski — cijeli sustav je okrenut prema njemu
+    // (vlasnik, nakon suspenzije 05.10.). Sve ostalo i dalje podliježe pravilu.
+    if (symbol === "BTCUSDT") return;
+
     const symExits = lines.slice(1)
       .filter(l => l.includes("CLOSE_LONG") || l.includes("CLOSE_SHORT"))
       .filter(l => l.split(",")[3] === symbol);  // col 3 = Symbol
 
-    if (symExits.length < SYM_CONSEC_LOSSES) return;
+    // 05.10.: broji se TRADE, ne redak. Jedan trade može imati više izlaznih redaka (djelomično
+    // zatvaranje + ostatak, pyramid noge), pa je stari brojač "5 redaka s Net P&L < 0" mogao
+    // nabrojati petoricu gubitaka i kad je ukupni ishod tih trade-ova bio pozitivan. Retci se
+    // grupiraju po Order ID-u (stupac 12) i zbraja se Net P&L; bez Order ID-a redak je svoj trade.
+    const trades = new Map();
+    symExits.forEach((l, i) => {
+      const c = l.split(",");
+      const key = c[12]?.trim() || `row${i}`;
+      trades.set(key, (trades.get(key) ?? 0) + (parseFloat(c[9]) || 0));
+    });
+    const tradePnls = [...trades.values()];
 
-    const lastN = symExits.slice(-SYM_CONSEC_LOSSES);
-    const allLoss = lastN.every(l => parseFloat(l.split(",")[9] || 0) < 0);
+    if (tradePnls.length < SYM_CONSEC_LOSSES) return;
+
+    const lastN = tradePnls.slice(-SYM_CONSEC_LOSSES);
+    const allLoss = lastN.every(p => p < 0);
     if (!allLoss) return;
 
     // Makni iz rules.json

@@ -77,7 +77,9 @@ const MAX_OPEN_PER_PORTFOLIO = 11;
 // podbacuje, njegova ukupna izlozenost je ostro ogranicena, a 4H (dokazano bolji) dobiva
 // vecinu prostora. Provjerava se PO STRATEGIJI (loadPositions(pid).length), odvojeno od
 // kombiniranih crypto/stock capova iznad.
-export const MAX_OPEN_1H = 3;
+// 06.10., na zahtjev vlasnika: 3 -> 5 (uz strop MAX_NEW_ENTRIES_PER_1H_CANDLE po svijeći). Kripto cap (8, zajednički s 4H),
+// istosmjerni (4), sektor i ukupni rizik (20%) ostaju — oni i dalje vežu prije ovog broja kad je 4H pun.
+export const MAX_OPEN_1H = 5;
 export const MAX_OPEN_4H = 8;
 // 01.10., na zahtjev — kirurški rez umjesto blanket 1H kazne (vidi RISK_MULT_1H povijest
 // iznad): ovi simboli trguju SAMO na 1H i dosljedno su gubili cijeli rujan (TSLA 14% WR,
@@ -6490,25 +6492,33 @@ export async function _buildUltra4hCfg(cryptoSymbols) {
 // 03.10., na zahtjev: koriste ih i runUltra4hStrategy (stvarni ulaz) i previewU4hGates
 // (dashboard prikaz "bi li 4H stvarno usao"), pa se ne mogu razici. Mijenjaj filtere OVDJE.
 
-// 06.10., na zahtjev — strop NOVIH 4H ulaza PO SVIJEĆI (ne po prolazu skenera). MAX_NEW_ENTRIES_PER_SCAN se broji unutar
-// jednog prolaza, a prolaz se ponavlja svake minute, pa unutar iste 4H svijeće nije ograničavao ništa (23.9. u 08:00 ušlo je 8
-// pozicija; FET+ATOM u jednom prolazu, VIRTUAL minutu kasnije). Povijest ultra_4h.csv: svijeće s >=3 ulaza −34 $, s 1-2 ulaza +73 $
-// (isti smjer + isti signal = jedna oklada ×N). Brojač je u memoriji; nakon restarta unutar iste svijeće kreće od broja
-// još otvorenih pozicija otvorenih u toj svijeći (već zatvorene se ne vide — strop je tad blaži, ne stroži).
+// 06.10., na zahtjev — strop NOVIH ulaza PO SVIJEĆI (ne po prolazu skenera), 4H i 1H. MAX_NEW_ENTRIES_PER_SCAN se broji unutar
+// jednog prolaza, a prolaz se ponavlja (4H svake minute, 1H svakih 15 min), pa unutar iste svijeće nije ograničavao ništa
+// (23.9. u 08:00 ušlo je 8 4H pozicija; FET+ATOM u jednom prolazu, VIRTUAL minutu kasnije). Povijest ultra_4h.csv: svijeće s >=3
+// ulaza −34 $, s 1-2 ulaza +73 $ (isti smjer + isti signal = jedna oklada ×N). Brojač je u memoriji; nakon restarta unutar iste
+// svijeće kreće od broja još otvorenih pozicija otvorenih u toj svijeći (već zatvorene se ne vide — strop je tad blaži, ne stroži).
 export const MAX_NEW_ENTRIES_PER_4H_CANDLE = 2;
-const U4H_CANDLE_MS = 4 * 3600e3;
-let _u4hCandle = { bucket: -1, n: 0, logged: false };
-export function u4hCandleEntries(nowMs, positions) {
-  const bucket = Math.floor(nowMs / U4H_CANDLE_MS);
-  if (_u4hCandle.bucket !== bucket) {
-    const start = bucket * U4H_CANDLE_MS;
-    const n = (positions ?? []).filter(p => { const t = typeof p.openedAt === "number" ? p.openedAt : Date.parse(p.openedAt); return Number.isFinite(t) && t >= start; }).length;
-    _u4hCandle = { bucket, n, logged: false };
-  }
-  return _u4hCandle.n;
+export const MAX_NEW_ENTRIES_PER_1H_CANDLE = 2;   // 06.10., uz podizanje MAX_OPEN_1H 3 -> 5 (odluka vlasnika)
+function makeCandleCounter(periodMs) {
+  let st = { bucket: -1, n: 0, logged: false };
+  const count = (nowMs, positions) => {
+    const bucket = Math.floor(nowMs / periodMs);
+    if (st.bucket !== bucket) {
+      const start = bucket * periodMs;
+      const n = (positions ?? []).filter(p => { const t = typeof p.openedAt === "number" ? p.openedAt : Date.parse(p.openedAt); return Number.isFinite(t) && t >= start; }).length;
+      st = { bucket, n, logged: false };
+    }
+    return st.n;
+  };
+  return {
+    count,
+    add: (nowMs, positions) => { count(nowMs, positions); st.n++; },
+    logOnce: () => { if (st.logged) return false; st.logged = true; return true; },
+  };
 }
-export function u4hCandleEntryAdded(nowMs, positions) { u4hCandleEntries(nowMs, positions); _u4hCandle.n++; }
-export function u4hCandleCapLogOnce() { if (_u4hCandle.logged) return false; _u4hCandle.logged = true; return true; }
+const _u4hCounter = makeCandleCounter(4 * 3600e3), _h1Counter = makeCandleCounter(3600e3);
+export const u4hCandleEntries = _u4hCounter.count, u4hCandleEntryAdded = _u4hCounter.add, u4hCandleCapLogOnce = _u4hCounter.logOnce;
+export const h1CandleEntries = _h1Counter.count, h1CandleEntryAdded = _h1Counter.add, h1CandleCapLogOnce = _h1Counter.logOnce;
 
 // Apsolutni capovi (cijela strategija stoji kad su puni).
 function u4hAbsoluteCapReason() {
@@ -7099,6 +7109,10 @@ async function runSupertrendEntries(ctx) {
           console.log(`  🚦 [ST] ${symbol} — max ${MAX_NEW_ENTRIES_PER_SCAN} novih ulaza ovaj scan → preskačem`);
           continue;
         }
+        if (h1CandleEntries(Date.now(), loadPositions(pid)) >= MAX_NEW_ENTRIES_PER_1H_CANDLE) {
+          console.log(`  🚦 [ST] ${symbol} — max ${MAX_NEW_ENTRIES_PER_1H_CANDLE} novih 1H ulaza po svijeći → preskačem`);
+          continue;
+        }
       }
 
       // ── Vrijeme: noćna zona (tvrdi blok) i vikend (veličina ×0.5) ──
@@ -7196,6 +7210,7 @@ async function runSupertrendEntries(ctx) {
       scanLog.push({ symbol, signal, score: 0, blocker: "ENTERED", reason: `ST ulaz @ ${fmtPrice(price)} SL ${fmtPrice(sl)} TP ${fmtPrice(tp)}` });
       state[symbol] = sig.flipTs; _stSaveState(state);
       entered++;
+      h1CandleEntryAdded(Date.now(), loadPositions(pid));
     } catch (err) {
       console.log(`  ❌ [ST] ${symbol}: ${err.message}`);
       scanLog.push({ symbol, signal: "ERROR", blocker: "ERROR", reason: `Supertrend: ${err.message}` });
@@ -7721,6 +7736,11 @@ export async function run() {
       // Sprječava 8 simultanih LONG/SHORT ulaza kad svi simboli signaliziraju odjednom
       if (_newEntriesThisScan >= MAX_NEW_ENTRIES_PER_SCAN && symbol !== BTC_EXCEPTION) {
         console.log(`  🚦 [${pDef.name}] Max ${MAX_NEW_ENTRIES_PER_SCAN} novih ulaza ovaj scan — preskačem ${symbol}`);
+        continue;
+      }
+      // Strop po 1H SVIJEĆI (06.10.): scan se ponavlja svakih 15 min unutar iste svijeće, pa per-scan strop sam ne ograničava ništa. BTC iznimka kao gore.
+      if (pDef.strategy === "synapse_t" && symbol !== BTC_EXCEPTION && h1CandleEntries(Date.now(), loadPositions(pid)) >= MAX_NEW_ENTRIES_PER_1H_CANDLE) {
+        if (h1CandleCapLogOnce()) console.log(`  🚦 [${pDef.name}] Max ${MAX_NEW_ENTRIES_PER_1H_CANDLE} novih ulaza po 1H svijeći dostignut — ostali signali čekaju iduću svijeću`);
         continue;
       }
 
@@ -8814,6 +8834,7 @@ export async function run() {
           addPosition(pid, entry);
           writeEntryCsv(pid, entry);
           _newEntriesThisScan++;
+          h1CandleEntryAdded(Date.now(), loadPositions(pid));
           _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: "ENTERED", reason: `${result.isMomentum?"MOM":"PBK"} ulaz @ ${fmtPrice(price)} SL ${fmtPrice(sl)} TP ${fmtPrice(tp)}${result._halfSize?" [POLA RIZIKA]":""}`, vwapDist: result.vwap ? ((price-result.vwap)/result.vwap*100).toFixed(2) : null });
           // Dinamički leverage: zone-based SL → getSafeLeverage izračunava; tier SL → fiksni
           const _dynLev = slMethod === "tier" ? (symSltp.leverage ?? null) : null;
@@ -8837,6 +8858,7 @@ export async function run() {
             addPosition(pid, entry);
             writeEntryCsv(pid, entry);
             _newEntriesThisScan++;
+            h1CandleEntryAdded(Date.now(), loadPositions(pid));
             console.log(`  ✅ LIVE NALOG [${pDef.name}] — ${entry.orderId}`);
             await tg(`🔴 LIVE [${pDef.name}/${pDef.timeframe}] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b> ${_strengthEmoji}${_vipTag}\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} (${slPct.toFixed(1)}%) | TP: ${fmtPrice(tp)} (${tpPct.toFixed(1)}%) | ${_rrLabel}\nEquity: $${equity.toFixed(2)} | Risk: $${riskAmount.toFixed(2)} | Notional: $${tradeSize.toFixed(0)} | Margin: $${usedMargin.toFixed(2)} | ${usedLev}x`);
           } catch (err) {

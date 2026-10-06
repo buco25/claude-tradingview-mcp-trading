@@ -3,7 +3,8 @@ import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 process.env.DATA_DIR = mkdtempSync(join(tmpdir(), "u4h-cap-test-"));
-const { MAX_NEW_ENTRIES_PER_4H_CANDLE: CAP, u4hCandleEntries, u4hCandleEntryAdded, u4hCandleCapLogOnce } = await import("../bot.js");
+const { MAX_NEW_ENTRIES_PER_4H_CANDLE: CAP, u4hCandleEntries, u4hCandleEntryAdded, u4hCandleCapLogOnce,
+        MAX_NEW_ENTRIES_PER_1H_CANDLE: CAP1, h1CandleEntries, h1CandleEntryAdded, h1CandleCapLogOnce, MAX_OPEN_1H } = await import("../bot.js");
 
 let fail = 0;
 const ok = (c, m) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -32,6 +33,26 @@ u4hCandleEntries(at(8, 0), []);
 ok(u4hCandleCapLogOnce() === true && u4hCandleCapLogOnce() === false, "poruka o stropu ispisuje se jednom po svijeci");
 u4hCandleEntries(at(8, 4), []);
 ok(u4hCandleCapLogOnce() === true, "u iducoj svijeci opet moze jednom");
+
+// ── 1H (06.10., MAX_OPEN_1H 3 -> 5 + strop 2 po 1H svijeci) ──
+ok(MAX_OPEN_1H === 5 && CAP1 === 2, "1H: max 5 otvorenih, strop 2 ulaza po 1H svijeci");
+{
+  let p1 = [];
+  ok(h1CandleEntries(at(9, 10, 1), p1) === 0, "1H: nova svijeca -> 0");
+  h1CandleEntryAdded(at(9, 10, 1), p1); p1.push({ openedAt: at(9, 10, 1) });
+  ok(h1CandleEntries(at(9, 10, 16), p1) === 1, "1H: scan nakon 15 min unutar iste svijece i dalje vidi 1 ulaz (per-scan brojac bi se vratio na 0)");
+  h1CandleEntryAdded(at(9, 10, 16), p1); p1.push({ openedAt: at(9, 10, 16) });
+  ok(h1CandleEntries(at(9, 10, 46), p1) >= CAP1, "1H: drugi ulaz u 10:16 -> u 10:46 strop dostignut (treci ulaz blokiran)");
+  ok(h1CandleEntries(at(9, 11, 0), p1) === 0, "1H: nova svijeca (11:00) -> brojac na 0");
+  // 1H i 4H brojaci su NEOVISNI
+  u4hCandleEntries(at(9, 8, 5), []); u4hCandleEntryAdded(at(9, 8, 5), []); u4hCandleEntryAdded(at(9, 8, 6), []);
+  ok(u4hCandleEntries(at(9, 8, 10), []) === 2 && h1CandleEntries(at(9, 8, 10), []) === 0, "1H i 4H brojaci su neovisni (2 4H ulaza ne blokiraju 1H)");
+  // restart usred 1H svijece: otvorene pozicije iz ove svijece (broj + ISO), stara se ne broji
+  const bs = at(9, 14);
+  ok(h1CandleEntries(at(9, 14, 20), [{ openedAt: bs + 60e3 }, { openedAt: new Date(bs + 120e3).toISOString() }, { openedAt: bs - 30 * 60e3 }]) === 2, "1H nakon restarta: 2 iz ove svijece, 1 iz stare se ne broji");
+  h1CandleEntries(at(10, 3), []);
+  ok(h1CandleCapLogOnce() === true && h1CandleCapLogOnce() === false, "1H: poruka jednom po svijeci");
+}
 
 console.log(fail ? `\n${fail} PALO` : "\nSVE PROSLO");
 process.exit(fail ? 1 : 0);

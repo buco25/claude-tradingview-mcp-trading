@@ -218,15 +218,22 @@ običan `synapse_t` s `entryMode: "ST"` (CSV stupac EntryMode), pa nasljeđuju S
   server-side template literala: bez backslasheva, backtickova i dolar-vitica** (jedan `\"` je već jednom pokvario
   cijeli odjeljak — uhvaćeno testom koji izvrši izlaz template literala).
 
-## ULTRA-4H: strop ulaza PO SVIJEĆI (06.10., odluka vlasnika)
+## Strop ulaza PO SVIJEĆI (4H + 1H) i MAX_OPEN_1H = 5 (06.10., odluka vlasnika)
 
-`MAX_NEW_ENTRIES_PER_SCAN` (2) broji unutar jednog prolaza skenera, a `runUltra4hStrategy` se vrti svake minute — pa unutar iste 4H
-svijeće nije ograničavao ništa (23.9. u 08:00: 8 ulaza; 06.10. FET+ATOM u jednom prolazu, VIRTUAL u sljedećem). Zato postoji
-`MAX_NEW_ENTRIES_PER_4H_CANDLE` = 2 (`u4hCandleEntries`/`u4hCandleEntryAdded`): brojač po 4H svijeći u memoriji, nakon restarta
-kreće od pozicija otvorenih u toj svijeći. Dokaz: ultra_4h.csv, svijeće s >=3 ulaza −34 $, s 1-2 ulaza +73 $; simulacija "prva 2 po
-svijeći" +51 $ naspram +39 $ bez stropa (97 tradeova, dio P&L-a procijenjen, premalen uzorak — prati). Ne zaobilazi se per-scan strop
-niti apsolutni capovi; vrijedi samo za 4H. **1H nije mijenjan**: 1H CSV od 20.9. (99 tradeova) ne pokazuje kaznu za grupirane ulaze
-(sati s >=3 ulaza +68 $), a simulacija stropa po satu smanjuje neto; 1H već ograničava `MAX_OPEN_1H` (3).
+`MAX_NEW_ENTRIES_PER_SCAN` (2) broji unutar jednog prolaza skenera, a prolaz se ponavlja (4H svake minute, 1H svakih 15 min) — pa
+unutar iste svijeće nije ograničavao ništa (23.9. u 08:00: 8 4H ulaza; 06.10. FET+ATOM u jednom prolazu, VIRTUAL u sljedećem). Zato
+postoje `MAX_NEW_ENTRIES_PER_4H_CANDLE` = 2 i `MAX_NEW_ENTRIES_PER_1H_CANDLE` = 2 (`makeCandleCounter`; `u4hCandleEntries`/`h1CandleEntries`
++ `*EntryAdded`): brojač po svijeći u memoriji, nakon restarta kreće od pozicija otvorenih u toj svijeći (već zatvorene se ne vide —
+strop je tad blaži, ne stroži). 1H: BTC je izuzet kao i od per-scan stropa; pyramid adicije se ne broje kao novi ulazi; Supertrend ulazi
+SE broje (isti 1H brojač, BTC izuzet). Ne zaobilazi per-scan strop ni apsolutne capove.
+
+- **Dokaz za 4H:** ultra_4h.csv, svijeće s >=3 ulaza −34 $, s 1-2 ulaza +73 $; simulacija "prva 2 po svijeći" +51 $ naspram +39 $ bez
+  stropa (97 tradeova, dio P&L-a procijenjen, premalen uzorak — prati).
+- **`MAX_OPEN_1H` 3 → 5 je odluka vlasnika, ne rezultat analize.** 01.10. je 1H namjerno stegnut na 3 jer je rujan pokazao 47.5% WR / −$39.53
+  naspram 4H 77.1% / +$57.86 (vidi komentar uz konstantu). Povijest 1H od 20.9. (99 tradeova, do 2.10.) ne pokazuje kaznu za grupirane
+  ulaze (sati s >=3 ulaza +68 $), ali ukupna 1H povijest od svibnja je negativna (551 trade, WR ~47%). Kripto cap (8, zajednički s 4H),
+  istosmjerni (4), sektor (2) i ukupni rizik (20%) ostaju i vežu prije 5 kad je 4H pun — pa 5 otvorenih 1H pozicija je moguće samo kad je
+  4H popunjen manje. Prati 1H WR/neto nakon promjene; vraćanje na 3 je jedna konstanta.
 
 ## Bitget auth
 

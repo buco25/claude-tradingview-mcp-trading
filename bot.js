@@ -6490,6 +6490,26 @@ export async function _buildUltra4hCfg(cryptoSymbols) {
 // 03.10., na zahtjev: koriste ih i runUltra4hStrategy (stvarni ulaz) i previewU4hGates
 // (dashboard prikaz "bi li 4H stvarno usao"), pa se ne mogu razici. Mijenjaj filtere OVDJE.
 
+// 06.10., na zahtjev — strop NOVIH 4H ulaza PO SVIJEĆI (ne po prolazu skenera). MAX_NEW_ENTRIES_PER_SCAN se broji unutar
+// jednog prolaza, a prolaz se ponavlja svake minute, pa unutar iste 4H svijeće nije ograničavao ništa (23.9. u 08:00 ušlo je 8
+// pozicija; FET+ATOM u jednom prolazu, VIRTUAL minutu kasnije). Povijest ultra_4h.csv: svijeće s >=3 ulaza −34 $, s 1-2 ulaza +73 $
+// (isti smjer + isti signal = jedna oklada ×N). Brojač je u memoriji; nakon restarta unutar iste svijeće kreće od broja
+// još otvorenih pozicija otvorenih u toj svijeći (već zatvorene se ne vide — strop je tad blaži, ne stroži).
+export const MAX_NEW_ENTRIES_PER_4H_CANDLE = 2;
+const U4H_CANDLE_MS = 4 * 3600e3;
+let _u4hCandle = { bucket: -1, n: 0, logged: false };
+export function u4hCandleEntries(nowMs, positions) {
+  const bucket = Math.floor(nowMs / U4H_CANDLE_MS);
+  if (_u4hCandle.bucket !== bucket) {
+    const start = bucket * U4H_CANDLE_MS;
+    const n = (positions ?? []).filter(p => { const t = typeof p.openedAt === "number" ? p.openedAt : Date.parse(p.openedAt); return Number.isFinite(t) && t >= start; }).length;
+    _u4hCandle = { bucket, n, logged: false };
+  }
+  return _u4hCandle.n;
+}
+export function u4hCandleEntryAdded(nowMs, positions) { u4hCandleEntries(nowMs, positions); _u4hCandle.n++; }
+export function u4hCandleCapLogOnce() { if (_u4hCandle.logged) return false; _u4hCandle.logged = true; return true; }
+
 // Apsolutni capovi (cijela strategija stoji kad su puni).
 function u4hAbsoluteCapReason() {
   const u4h = loadPositions(ULTRA4H_PID), syn = loadPositions("synapse_t");
@@ -6752,6 +6772,10 @@ export async function runUltra4hStrategy() {
     if (u4hAbsoluteCapReason()) break;
     if (u4hPreBlock(symbol)) continue;
     if (_newEntriesThisU4hScan >= MAX_NEW_ENTRIES_PER_SCAN) continue;
+    if (u4hCandleEntries(Date.now(), loadPositions(ULTRA4H_PID)) >= MAX_NEW_ENTRIES_PER_4H_CANDLE) {
+      if (u4hCandleCapLogOnce()) console.log(`  🚦 [ULTRA-4H] Max ${MAX_NEW_ENTRIES_PER_4H_CANDLE} novih ulaza po 4H svijeći dostignut — ostali signali čekaju iduću svijeću`);
+      break;
+    }
 
     try {
       const candles = await fetchCandles(symbol, ULTRA4H_TF, 250);
@@ -6834,6 +6858,7 @@ export async function runUltra4hStrategy() {
       console.log(`  🎯 [ULTRA-4H] ${symbol} ${sig.signal} @ ${fmtPrice(sig.price)} | SL ${fmtPrice(sig.sl)} TP ${fmtPrice(sig.tp)} | score ${score}/8 | rizik $${riskAmount.toFixed(2)} (${RISK_PCT}% od $${equity.toFixed(2)} [${_eq4.src}]) → margin $${margin.toFixed(2)} × ${lev}x`);
       const result = await placeBitGetOrder(symbol, sig.signal, notional, sig.price, sig.sl, sig.tp, sig.slPct, sig.tpPct, lev);
       _newEntriesThisU4hScan++;
+      u4hCandleEntryAdded(Date.now(), loadPositions(ULTRA4H_PID));
       const entry = {
         symbol, signal: sig.signal, price: result.fillPrice, sl: result.slFromFill, tp: result.tpFromFill,
         tradeSize: notional, margin, orderId: result.orderId, timestamp: Date.now(),

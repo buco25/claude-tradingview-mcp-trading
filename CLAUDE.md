@@ -218,6 +218,16 @@ običan `synapse_t` s `entryMode: "ST"` (CSV stupac EntryMode), pa nasljeđuju S
   server-side template literala: bez backslasheva, backtickova i dolar-vitica** (jedan `\"` je već jednom pokvario
   cijeli odjeljak — uhvaćeno testom koji izvrši izlaz template literala).
 
+## ULTRA-4H: strop ulaza PO SVIJEĆI (06.10., odluka vlasnika)
+
+`MAX_NEW_ENTRIES_PER_SCAN` (2) broji unutar jednog prolaza skenera, a `runUltra4hStrategy` se vrti svake minute — pa unutar iste 4H
+svijeće nije ograničavao ništa (23.9. u 08:00: 8 ulaza; 06.10. FET+ATOM u jednom prolazu, VIRTUAL u sljedećem). Zato postoji
+`MAX_NEW_ENTRIES_PER_4H_CANDLE` = 2 (`u4hCandleEntries`/`u4hCandleEntryAdded`): brojač po 4H svijeći u memoriji, nakon restarta
+kreće od pozicija otvorenih u toj svijeći. Dokaz: ultra_4h.csv, svijeće s >=3 ulaza −34 $, s 1-2 ulaza +73 $; simulacija "prva 2 po
+svijeći" +51 $ naspram +39 $ bez stropa (97 tradeova, dio P&L-a procijenjen, premalen uzorak — prati). Ne zaobilazi se per-scan strop
+niti apsolutni capovi; vrijedi samo za 4H. **1H nije mijenjan**: 1H CSV od 20.9. (99 tradeova) ne pokazuje kaznu za grupirane ulaze
+(sati s >=3 ulaza +68 $), a simulacija stropa po satu smanjuje neto; 1H već ograničava `MAX_OPEN_1H` (3).
+
 ## Bitget auth
 
 `bitgetHeaders(method, path, body)` u `bot.js` je **jedino** mjesto koje sastavlja potpisane

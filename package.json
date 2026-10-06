@@ -8,7 +8,7 @@
     "start": "node dashboard.js",
     "dev": "node dashboard.js",
     "bot": "node bot.js",
-    "test": "node test/signal-regression.mjs && node test/candle-pattern.mjs && node test/supertrend.mjs",
+    "test": "node test/signal-regression.mjs && node test/candle-pattern.mjs && node test/supertrend.mjs && node test/u4h-candle-cap.mjs",
     "test:update": "node test/signal-regression.mjs --update"
   },
   "dependencies": {

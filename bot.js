@@ -6906,10 +6906,37 @@ export function supertrendDecision(s1d, s4h, s1h, nowMs, windowMin = ST_ENTRY_WI
   return { signal: s1h.bull ? "LONG" : "SHORT", line: s1h.line, flipTs: s1h.time, ageMin };
 }
 
+// Dohvat svijeća za Supertrend: ponovni pokušaj na 429/mrežne greške + keš PO PERIODU svijeće (06.10.).
+// Prva verzija je tražila 3 simbola × 3 TF paralelno (9 istovremenih zahtjeva povrh skeniranja bota) pa je
+// Bitget vraćao 429 i dashboard je pokazivao grešku — a isti dohvat hrani i stvarni ulaz. Keš vrijedi samo
+// unutar ISTE svijeće (bucket = floor(now/period)): zadnja (formirajuća) svijeća se ionako odbacuje u
+// _stClosed, a zatvorene su konačne — pa 1D/4H ne zahtijevaju dohvat svake minute, a 1H se na početku
+// novog sata uvijek dohvaća iznova (inače bi se propustila upravo zatvorena svijeća obrata).
+const _stCandleCache = new Map();
+async function _stCandles(symbol, gran, periodMs, ttlMs) {
+  const key = symbol + ":" + gran, now = Date.now(), bucket = Math.floor(now / periodMs);
+  const hit = _stCandleCache.get(key);
+  if (hit && hit.bucket === bucket && now - hit.ts < ttlMs) return hit.data;
+  let lastErr;
+  for (let a = 0; a < 3; a++) {
+    try {
+      const data = await fetchCandles(symbol, gran, 250);
+      _stCandleCache.set(key, { bucket, ts: Date.now(), data });
+      return data;
+    } catch (e) {
+      lastErr = e;
+      if (a < 2) await new Promise(r => setTimeout(r, 700 * (a + 1)));
+    }
+  }
+  if (hit && hit.bucket === bucket) return hit.data;      // zadnja dobra kopija iz iste svijeće bolja je od greške
+  throw lastErr;
+}
+
 async function supertrendSignal(symbol, nowMs = Date.now()) {
-  const [d1, h4, h1] = await Promise.all([
-    fetchCandles(symbol, "1Dutc", 250), fetchCandles(symbol, "4H", 250), fetchCandles(symbol, "1H", 250),
-  ]);
+  // sekvencijalno (ne Promise.all) — blaže prema rate limitu
+  const d1 = await _stCandles(symbol, "1Dutc", 86400e3, 30 * 60e3);
+  const h4 = await _stCandles(symbol, "4H", 4 * 3600e3, 15 * 60e3);
+  const h1 = await _stCandles(symbol, "1H", 3600e3, 90e3);
   const dec = supertrendDecision(
     supertrendState(_stClosed(d1, 86400e3, nowMs)),
     supertrendState(_stClosed(h4, 4 * 3600e3, nowMs)),
@@ -7148,26 +7175,36 @@ export function stClosedTrades(csvText) {
 }
 
 let _stOverviewCache = { ts: 0, data: null };
+const _stLastGood = {};   // zadnji uspješan redak po simbolu — prikazuje se (s oznakom starosti) kad dohvat privremeno padne
 export async function getSupertrendOverview(nowMs = Date.now()) {
   if (_stOverviewCache.data && nowMs - _stOverviewCache.ts < 120_000) return _stOverviewCache.data;
   const symbols = [];
   for (const symbol of ST_SYMBOLS) {
     try {
-      const [d1, h4, h1] = await Promise.all([fetchCandles(symbol, "1Dutc", 250), fetchCandles(symbol, "4H", 250), fetchCandles(symbol, "1H", 250)]);
+      const d1 = await _stCandles(symbol, "1Dutc", 86400e3, 30 * 60e3);
+      const h4 = await _stCandles(symbol, "4H", 4 * 3600e3, 15 * 60e3);
+      const h1 = await _stCandles(symbol, "1H", 3600e3, 90e3);
       const s1d = supertrendState(_stClosed(d1, 86400e3, nowMs));
       const s4h = supertrendState(_stClosed(h4, 4 * 3600e3, nowMs));
       const s1h = supertrendState(_stClosed(h1, 3600e3, nowMs));
       const dec = supertrendDecision(s1d, s4h, s1h, nowMs);
       const price = h1[h1.length - 1].close;
       const pick = s => s && { bull: s.bull, line: s.line };
-      symbols.push({
+      const row = {
         symbol, price, d1: pick(s1d), h4: pick(s4h),
         h1: s1h && { bull: s1h.bull, line: s1h.line, flipped: s1h.flipped, ageMin: Math.round((nowMs - (s1h.time + 3600e3)) / 60e3) },
         aligned: !!(s1d && s4h && s1d.bull === s4h.bull),
         signal: dec.signal, reason: dec.reason ?? null,
         distPct: s1h ? Math.abs(price - s1h.line) / price * 100 : null,
-      });
-    } catch (e) { symbols.push({ symbol, error: e.message }); }
+      };
+      _stLastGood[symbol] = { row, ts: nowMs };
+      symbols.push(row);
+    } catch (e) {
+      const g = _stLastGood[symbol];
+      // zadnji dobar redak (ne starije od 30 min) je korisniji od crvene greške; signal se u tom slučaju ne prikazuje
+      if (g && nowMs - g.ts < 30 * 60e3) symbols.push({ ...g.row, signal: null, reason: "podaci privremeno nedostupni", staleMin: Math.round((nowMs - g.ts) / 60e3) });
+      else symbols.push({ symbol, error: e.message });
+    }
   }
   let csv = ""; try { const f = csvFilePath("synapse_t"); if (existsSync(f)) csv = readFileSync(f, "utf8"); } catch { /* bez CSV-a */ }
   const closed = stClosedTrades(csv);

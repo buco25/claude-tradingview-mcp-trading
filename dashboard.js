@@ -3436,8 +3436,9 @@ function stDirHtml(s) {
   return s.bull ? '<span style="color:#059669;font-weight:700">▲ uzl.</span>' : '<span style="color:#dc2626;font-weight:700">▼ sil.</span>';
 }
 function stStatusHtml(s) {
-  if (s.error) return '<span style="color:#dc2626">greška: ' + s.error + '</span>';
-  if (s.signal) return '<span style="color:#059669;font-weight:700">🟢 SIGNAL ' + s.signal + ' (obrat prije ' + (s.h1 ? s.h1.ageMin : '?') + ' min)</span>';
+  if (s.error) return '<span style="color:#dc2626">greška: ' + stEsc(s.error) + '</span>';
+  if (s.staleMin !== undefined) return '<span style="color:#d97706">⏳ Bitget privremeno nedostupan — podaci stari ' + stEsc(s.staleMin) + ' min</span>';
+  if (s.signal) return '<span style="color:#059669;font-weight:700">🟢 SIGNAL ' + stEsc(s.signal) + ' (obrat prije ' + stEsc(s.h1 ? s.h1.ageMin : '?') + ' min)</span>';
   if (s.aligned && s.h1 && !s.h1.flipped) return '<span style="color:#94a3b8">čeka obrat 1H (1D+4H ' + (s.d1 && s.d1.bull ? '▲' : '▼') + ')</span>';
   return '<span style="color:#94a3b8">' + stEsc(s.reason || '—') + '</span>';
 }
@@ -3464,7 +3465,7 @@ async function loadSupertrend() {
     if (d.open.length) {
       h += '<div style="margin-top:10px;font-size:12px"><b style="color:#22d3ee">Otvorene ST pozicije</b>';
       d.open.forEach(function(p) {
-        h += '<div style="margin-top:3px">' + stEsc(p.symbol.replace('USDT','')) + ' <b style="color:' + (p.side === 'LONG' ? '#059669' : '#dc2626') + '">' + p.side + '</b>'
+        h += '<div style="margin-top:3px">' + stEsc(p.symbol.replace('USDT','')) + ' <b style="color:' + (p.side === 'LONG' ? '#059669' : '#dc2626') + '">' + stEsc(p.side) + '</b>'
           + ' · ulaz ' + stNum(p.entryPrice, 2) + ' · SL ' + stNum(p.sl, 2) + ' · TP ' + stNum(p.tp, 2) + ' · $' + stNum(p.totalUSD, 0) + '</div>';
       });
       h += '</div>';
@@ -3476,7 +3477,7 @@ async function loadSupertrend() {
       h += '<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:6px"><thead><tr style="color:#64748b;text-align:left"><th style="padding:3px 6px">Zatvoreno</th><th>Simbol</th><th>Smjer</th><th>Ulaz → izlaz</th><th>Neto</th><th>Razlog</th></tr></thead><tbody>';
       d.recent.forEach(function(t) {
         h += '<tr style="border-top:1px solid rgba(148,163,184,0.12)"><td style="padding:3px 6px">' + stEsc(t.date + ' ' + String(t.time).slice(0,5)) + '</td><td>' + stEsc(t.symbol.replace('USDT','')) + '</td>'
-          + '<td style="color:' + (t.side === 'LONG' ? '#059669' : '#dc2626') + '">' + t.side + '</td><td>' + stNum(t.entry, 2) + ' → ' + stNum(t.exit, 2) + '</td>'
+          + '<td style="color:' + (t.side === 'LONG' ? '#059669' : '#dc2626') + '">' + stEsc(t.side) + '</td><td>' + stNum(t.entry, 2) + ' → ' + stNum(t.exit, 2) + '</td>'
           + '<td style="color:' + (t.net >= 0 ? '#059669' : '#dc2626') + ';font-weight:700">' + (t.net >= 0 ? '+' : '') + stNum(t.net, 2) + '</td><td style="color:#94a3b8">' + stEsc(t.reason || '') + '</td></tr>';
       });
       h += '</tbody></table>';

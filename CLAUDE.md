@@ -193,6 +193,10 @@ običan `synapse_t` s `entryMode: "ST"` (CSV stupac EntryMode), pa nasljeđuju S
   dosljedno negativan (−0.1…−0.2R), SHORT pozitivan (+0.2…+0.5R). Statistički neznačajno; uz stari min 0.5%
   bilo je +0.06…+0.21R (jedan dobitni BTC trade od 04.10. s SL 0.53% otpao). Prati `EntryMode=ST` u CSV-u.
 
+- **Dohvat svijeća (`_stCandles`) je sekvencijalan, s ponovnim pokušajem i kešom po periodu svijeće** (06.10.): prva verzija
+  je slala 9 paralelnih zahtjeva pa je Bitget vraćao 429 i dashboard je pokazivao grešku (isti dohvat hrani i stvarni ulaz).
+  Keš vrijedi samo unutar ISTE svijeće (zadnja formirajuća se ionako odbacuje), na prelasku u novu se UVIJEK dohvaća iznova —
+  inače bi se propustila upravo zatvorena svijeća obrata. Ne vraćaj `Promise.all` i ne produljuj keš preko granice svijeće.
 - **Dashboard praćenje** (`🧭 SUPERTREND`, ispod ULTRA-4H): `getSupertrendOverview()` u `bot.js` (blok `SUPERTREND OVERVIEW`) vraća
   stanje 1D/4H/1H po simbolu, otvorene ST pozicije i zatvorene ST tradeove iz CSV-a (grupirano po Order ID-u). Ruta
   `/api/supertrend` (iza auth-a), keš 120 s, klijent osvježava svake minute. **Klijentski kod u `dashboard.js` živi unutar

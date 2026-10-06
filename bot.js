@@ -6962,6 +6962,7 @@ export function stBuildOrder({ signal, price, line, equity, riskPct = ST_RISK_PC
   return { slPct, tpPct, sl, tp, riskAmount, tradeSize, floored };
 }
 
+const _stChecked = new Map();   // simbol → sat (floor(now/1h)) u kojem je provjera uspjela bez signala
 function _stLoadState() { try { return JSON.parse(readFileSync(ST_STATE_FILE, "utf8")); } catch { return {}; } }
 function _stSaveState(s) { try { writeFileSync(ST_STATE_FILE, JSON.stringify(s)); } catch { /* nije kritično */ } }
 
@@ -6987,8 +6988,14 @@ async function runSupertrendEntries(ctx) {
       if (open1h.some(p => p.symbol === symbol)) continue;    // vlastita/1H pozicija: nema pyramida ni flipa
       if ([...loadPositions(EMA_RSI_PID), ...open4h].some(p => p.symbol === symbol)) continue;
 
+      // Jedna USPJEŠNA provjera po simbolu po satu (06.10., na zahtjev "dovoljno je svakih sat vremena"): strategija
+      // reagira na ZATVARANJE 1H svijeće, pa nema smisla pitati burzu svakih 15 min. Ponavlja se samo (a) ako je
+      // dohvat pao (greška → nije označeno) i (b) dok postoji signal koji još nije ušao (cap/cooldown se može otpustiti
+      // unutar prozora od 25 min). Reset pri restartu je namjeran — najviše jedna dodatna provjera.
+      const hourBucket = Math.floor(Date.now() / 3600e3);
+      if (_stChecked.get(symbol) === hourBucket) continue;
       const sig = await supertrendSignal(symbol);
-      if (!sig.signal) continue;                              // tihi korak — uobičajeno stanje
+      if (!sig.signal) { _stChecked.set(symbol, hourBucket); continue; }   // provjereno, nema signala → mirno do idućeg sata
       const state = _stLoadState();
       if (state[symbol] === sig.flipTs) continue;             // ovaj obrat je već obrađen
       const signal = sig.signal;
@@ -7174,11 +7181,16 @@ export function stClosedTrades(csvText) {
   return trades.sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
 }
 
-let _stOverviewCache = { ts: 0, data: null };
+// Redci izvedeni iz SVIJEĆA (1D/4H/1H) računaju se JEDNOM PO SATU (06.10., na zahtjev "dovoljno je svakih sat vremena"):
+// ništa se u njima ne mijenja unutar sata osim svijeće koja se formira, a nju ionako odbacujemo. Ako je dohvat bio
+// problematičan (greška / stari podaci), ponavlja se tek nakon 2 min. Cijena i starost obrata se osvježavaju jeftino
+// (jedan ticker po simbolu, najviše svake minute); otvorene pozicije i statistika čitaju se lokalno pri svakom zahtjevu.
+let _stRows = { bucket: -1, builtAt: 0, problem: false, rows: [] };
+let _stPriceCache = { ts: 0, prices: {} };
 const _stLastGood = {};   // zadnji uspješan redak po simbolu — prikazuje se (s oznakom starosti) kad dohvat privremeno padne
-export async function getSupertrendOverview(nowMs = Date.now()) {
-  if (_stOverviewCache.data && nowMs - _stOverviewCache.ts < 120_000) return _stOverviewCache.data;
-  const symbols = [];
+
+async function _stBuildRows(nowMs) {
+  const rows = []; let problem = false;
   for (const symbol of ST_SYMBOLS) {
     try {
       const d1 = await _stCandles(symbol, "1Dutc", 86400e3, 30 * 60e3);
@@ -7187,29 +7199,57 @@ export async function getSupertrendOverview(nowMs = Date.now()) {
       const s1d = supertrendState(_stClosed(d1, 86400e3, nowMs));
       const s4h = supertrendState(_stClosed(h4, 4 * 3600e3, nowMs));
       const s1h = supertrendState(_stClosed(h1, 3600e3, nowMs));
-      const dec = supertrendDecision(s1d, s4h, s1h, nowMs);
-      const price = h1[h1.length - 1].close;
+      const dec = supertrendDecision(s1d, s4h, s1h, nowMs, Infinity);     // smjer obrata neovisno o prozoru; prozor se računa pri svakom prikazu
       const pick = s => s && { bull: s.bull, line: s.line };
       const row = {
-        symbol, price, d1: pick(s1d), h4: pick(s4h),
-        h1: s1h && { bull: s1h.bull, line: s1h.line, flipped: s1h.flipped, ageMin: Math.round((nowMs - (s1h.time + 3600e3)) / 60e3) },
+        symbol, price: h1[h1.length - 1].close, d1: pick(s1d), h4: pick(s4h),
+        h1: s1h && { bull: s1h.bull, line: s1h.line, flipped: s1h.flipped, time: s1h.time },
         aligned: !!(s1d && s4h && s1d.bull === s4h.bull),
-        signal: dec.signal, reason: dec.reason ?? null,
-        distPct: s1h ? Math.abs(price - s1h.line) / price * 100 : null,
+        flipSignal: dec.signal, reason: dec.reason ?? null,
       };
       _stLastGood[symbol] = { row, ts: nowMs };
-      symbols.push(row);
+      rows.push(row);
     } catch (e) {
+      problem = true;
       const g = _stLastGood[symbol];
       // zadnji dobar redak (ne starije od 30 min) je korisniji od crvene greške; signal se u tom slučaju ne prikazuje
-      if (g && nowMs - g.ts < 30 * 60e3) symbols.push({ ...g.row, signal: null, reason: "podaci privremeno nedostupni", staleMin: Math.round((nowMs - g.ts) / 60e3) });
-      else symbols.push({ symbol, error: e.message });
+      if (g && nowMs - g.ts < 30 * 60e3) rows.push({ ...g.row, flipSignal: null, reason: "podaci privremeno nedostupni", staleMin: Math.round((nowMs - g.ts) / 60e3) });
+      else rows.push({ symbol, error: e.message });
     }
   }
+  return { rows, problem };
+}
+
+// Cijena i starost obrata su žive vrijednosti: računaju se pri prikazu iz spremljenog retka, ne iz sata starog dohvata.
+function _stView(row, nowMs, prices) {
+  if (row.error) return row;
+  const live = prices[row.symbol] > 0 ? prices[row.symbol] : row.price;
+  const ageMin = row.h1 ? Math.round((nowMs - (row.h1.time + 3600e3)) / 60e3) : null;
+  const inWindow = row.flipSignal && ageMin !== null && ageMin <= ST_ENTRY_WINDOW_MIN;
+  return {
+    ...row, price: live,
+    h1: row.h1 && { bull: row.h1.bull, line: row.h1.line, flipped: row.h1.flipped, ageMin },
+    distPct: row.h1 ? Math.abs(live - row.h1.line) / live * 100 : null,
+    signal: inWindow ? row.flipSignal : null,
+    reason: inWindow ? null : (row.flipSignal ? `obrat prije ${ageMin} min (izvan prozora od ${ST_ENTRY_WINDOW_MIN} min)` : row.reason),
+  };
+}
+
+export async function getSupertrendOverview(nowMs = Date.now()) {
+  const bucket = Math.floor(nowMs / 3600e3);
+  const stale = _stRows.bucket !== bucket || (_stRows.problem && nowMs - _stRows.builtAt > 120e3);
+  if (stale) {
+    const b = await _stBuildRows(nowMs);
+    _stRows = { bucket, builtAt: nowMs, problem: b.problem, rows: b.rows };
+  }
+  if (nowMs - _stPriceCache.ts > 60e3) {
+    try { _stPriceCache = { ts: nowMs, prices: await fetchLivePrices(ST_SYMBOLS) }; } catch { /* ostaju spremljene cijene */ }
+  }
+  const symbols = _stRows.rows.map(r => _stView(r, nowMs, _stPriceCache.prices));
   let csv = ""; try { const f = csvFilePath("synapse_t"); if (existsSync(f)) csv = readFileSync(f, "utf8"); } catch { /* bez CSV-a */ }
   const closed = stClosedTrades(csv);
   const wins = closed.filter(t => t.net > 0).length, net = closed.reduce((s, t) => s + t.net, 0);
-  const data = {
+  return {
     ts: nowMs, enabled: ST_ENABLED, maxOpen: ST_MAX_OPEN, riskPct: ST_RISK_PCT, rr: ST_RR, slMin: ST_SL_MIN_PCT, slMax: ST_SL_MAX_PCT,
     symbols,
     open: loadPositions("synapse_t").filter(p => p.entryMode === "ST")
@@ -7217,8 +7257,6 @@ export async function getSupertrendOverview(nowMs = Date.now()) {
     stats: { n: closed.length, wins, winRate: closed.length ? wins / closed.length * 100 : null, net, avg: closed.length ? net / closed.length : null },
     recent: closed.slice(-8).reverse(),
   };
-  _stOverviewCache = { ts: nowMs, data };
-  return data;
 }
 // ===== SUPERTREND OVERVIEW END =====
 

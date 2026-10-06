@@ -3482,14 +3482,14 @@ async function loadSupertrend() {
       });
       h += '</tbody></table>';
     }
-    h += '<div style="margin-top:8px;font-size:10px;color:#64748b">1D i 4H se čitaju sa zadnje ZATVORENE svijeće. Ulaz samo unutar 25 min od zatvaranja 1H svijeće obrata, noću (20–06 UTC) ne. Osvježava se svake minute.</div>';
+    h += '<div style="margin-top:8px;font-size:10px;color:#64748b">1D i 4H se čitaju sa zadnje ZATVORENE svijeće. Ulaz samo unutar 25 min od zatvaranja 1H svijeće obrata, noću (20–06 UTC) ne. Smjerovi se računaju jednom po satu, cijena se osvježava svakih 5 min.</div>';
     el.innerHTML = h;
   } catch(e) {
     el.innerHTML = '<div class="section-label" style="color:#dc2626;margin:0">🧭 SUPERTREND — greška učitavanja: ' + stEsc(e.message) + '</div>';
   }
 }
 loadSupertrend();
-setInterval(loadSupertrend, 60000);
+setInterval(loadSupertrend, 300000);
 
 // Bitget live Win Rate (zadnjih 100 zatvorenih pozicija)
 async function loadBitgetWR() {

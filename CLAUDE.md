@@ -197,6 +197,10 @@ običan `synapse_t` s `entryMode: "ST"` (CSV stupac EntryMode), pa nasljeđuju S
   je slala 9 paralelnih zahtjeva pa je Bitget vraćao 429 i dashboard je pokazivao grešku (isti dohvat hrani i stvarni ulaz).
   Keš vrijedi samo unutar ISTE svijeće (zadnja formirajuća se ionako odbacuje), na prelasku u novu se UVIJEK dohvaća iznova —
   inače bi se propustila upravo zatvorena svijeća obrata. Ne vraćaj `Promise.all` i ne produljuj keš preko granice svijeće.
+- **Provjera je jednom po satu po simbolu** (06.10., odluka vlasnika): strategija reagira na zatvaranje 1H svijeće, pa bot ne pita
+  burzu svakih 15 min. `_stChecked` označava sat u kojem je provjera USPJELA bez signala; ponavlja se samo ako je dohvat pao ili
+  ako signal čeka (cap/cooldown unutar prozora od 25 min). Dashboard računa smjerove jednom po satu (`_stBuildRows`), cijenu i
+  starost obrata žive (`_stView`), klijent osvježava svakih 5 min.
 - **Dashboard praćenje** (`🧭 SUPERTREND`, ispod ULTRA-4H): `getSupertrendOverview()` u `bot.js` (blok `SUPERTREND OVERVIEW`) vraća
   stanje 1D/4H/1H po simbolu, otvorene ST pozicije i zatvorene ST tradeove iz CSV-a (grupirano po Order ID-u). Ruta
   `/api/supertrend` (iza auth-a), keš 120 s, klijent osvježava svake minute. **Klijentski kod u `dashboard.js` živi unutar

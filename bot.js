@@ -5203,6 +5203,16 @@ async function fetchLivePrices(symbols) {
   return prices;
 }
 
+// Cijene SVIH simbola jednim zahtjevom (06.10.) — fetchLivePrices šalje N paralelnih, što je s 23+ simbola
+// opet izazivalo 429. Koristi ga dashboard pregled Supertrenda.
+async function fetchAllTickerPrices() {
+  const url = `${BITGET.baseUrl}/api/v2/mix/market/tickers?productType=USDT-FUTURES`;
+  const j = await fetch(url).then(r => r.json());
+  const out = {};
+  for (const t of (j?.data ?? [])) { const p = parseFloat(t.lastPr ?? t.close); if (p > 0) out[t.symbol] = p; }
+  return out;
+}
+
 // ─── Break-Even Stop — pomakni SL na entry+buffer kad je X% TP dostignuto ─────
 // 06.08.: analiza 34 tradea (14 dana, MFE iz stvarnog OHLCV-a) — samo 12% je ikad
 // dotaklo puni TP, dok je 59% dotaklo barem 40% TP puta (stari trigger) pa se BE-stop
@@ -6838,7 +6848,9 @@ export async function runUltra4hStrategy() {
 // Supertrend poziciju običan 1H put NE smije pyramidirati ni flipati (vidi guard u run()) —
 // vodi je samo SL/TP/trail.
 export const ST_ENABLED          = true;
-export const ST_SYMBOLS          = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
+// Univerzum: SVE kripto s watchliste (06.10., odluka vlasnika; prije samo BTC/ETH/SOL). Dionice i metali su isključeni
+// (vlastita pravila: US sesija, gap rizik). Isključeni/suspendirani simboli ispadaju sami jer su izvan watchliste.
+export function stUniverse(watchlist) { return (watchlist ?? []).filter(s => !isStockSym(s) && !isMetalSym(s)); }
 export const ST_MAX_OPEN         = 2;      // max istovremenih Supertrend pozicija (na zahtjev vlasnika), povrh svih 1H/4H capova
 export const ST_RISK_PCT         = 1.0;    // % računa do SL-a (nova, nedokazana strategija — ispod 1.5% koliko ima 4H)
 export const ST_ATR_LEN          = 10;     // TradingView default: ta.supertrend(3, 10)
@@ -6922,6 +6934,7 @@ async function _stCandles(symbol, gran, periodMs, ttlMs) {
     try {
       const data = await fetchCandles(symbol, gran, 250);
       _stCandleCache.set(key, { bucket, ts: Date.now(), data });
+      await new Promise(r => setTimeout(r, 120));          // razmak između STVARNIH dohvata (23 simbola × 3 TF) — blaže prema rate limitu
       return data;
     } catch (e) {
       lastErr = e;
@@ -6966,15 +6979,14 @@ const _stChecked = new Map();   // simbol → sat (floor(now/1h)) u kojem je pro
 function _stLoadState() { try { return JSON.parse(readFileSync(ST_STATE_FILE, "utf8")); } catch { return {}; } }
 function _stSaveState(s) { try { writeFileSync(ST_STATE_FILE, JSON.stringify(s)); } catch { /* nije kritično */ } }
 
-// Skenira ST_SYMBOLS i otvara ulaze. Zove se iz run() NAKON glavne petlje, unutar iste petlje
+// Skenira stUniverse(watchlist) i otvara ulaze. Zove se iz run() NAKON glavne petlje, unutar iste petlje
 // portfelja — pa nasljeđuje sve zaštite na razini portfelja. Vraća broj otvorenih ulaza.
 async function runSupertrendEntries(ctx) {
   const { pid, pDef, rules, isLive, scanLog, btcRegime1h, btcRegime4h } = ctx;
   let entered = 0, stCapLogged = false;
   const BTC = "BTCUSDT";
-  for (const symbol of ST_SYMBOLS) {
+  for (const symbol of stUniverse(pDef.symbols)) {            // watchlist/suspenzija se poštuje (suspendirani nisu na watchlisti)
     try {
-      if (!pDef.symbols.includes(symbol)) continue;           // watchlist/suspenzija se poštuje
       // ── Vlastiti strop: max ST_MAX_OPEN istovremenih Supertrend pozicija (prije dohvata svijeća) ──
       const stOpen = loadPositions(pid).filter(p => p.entryMode === "ST").length;
       if (stOpen >= ST_MAX_OPEN) {
@@ -7182,20 +7194,28 @@ export function stClosedTrades(csvText) {
 }
 
 // Redci izvedeni iz SVIJEĆA (1D/4H/1H) računaju se JEDNOM PO SATU (06.10., na zahtjev "dovoljno je svakih sat vremena"):
-// ništa se u njima ne mijenja unutar sata osim svijeće koja se formira, a nju ionako odbacujemo. Ako je dohvat bio
-// problematičan (greška / stari podaci), ponavlja se tek nakon 2 min. Cijena i starost obrata se osvježavaju jeftino
-// (jedan ticker po simbolu, najviše svake minute); otvorene pozicije i statistika čitaju se lokalno pri svakom zahtjevu.
-let _stRows = { bucket: -1, builtAt: 0, problem: false, rows: [] };
+// ništa se u njima ne mijenja unutar sata osim svijeće koja se formira, a nju ionako odbacujemo. Univerzum je SVA kripto s
+// watchliste (stUniverse). Keš svijeća je zajednički s ulaznom provjerom (isti ključevi), pa pregled obično ne troši
+// nijedan dodatni zahtjev. Ako je dohvat bio problematičan (greška / stari podaci), ponavlja se tek nakon 2 min.
+// Cijena i starost obrata su žive (JEDAN zahtjev za sve tickere, najviše svake minute); otvorene pozicije i statistika
+// čitaju se lokalno pri svakom zahtjevu. Istovremeni zahtjevi dijele jednu izgradnju (single-flight).
+let _stRows = { bucket: -1, key: "", builtAt: 0, problem: false, rows: [] };
+let _stBuildPromise = null;
 let _stPriceCache = { ts: 0, prices: {} };
 const _stLastGood = {};   // zadnji uspješan redak po simbolu — prikazuje se (s oznakom starosti) kad dohvat privremeno padne
 
-async function _stBuildRows(nowMs) {
+function _stReadWatchlist() {
+  try { return JSON.parse(readFileSync("rules.json", "utf8")).watchlist_synapse_t ?? []; } catch { return []; }
+}
+
+async function _stBuildRows(nowMs, symbols) {
   const rows = []; let problem = false;
-  for (const symbol of ST_SYMBOLS) {
+  for (const symbol of symbols) {
     try {
-      const d1 = await _stCandles(symbol, "1Dutc", 86400e3, 30 * 60e3);
-      const h4 = await _stCandles(symbol, "4H", 4 * 3600e3, 15 * 60e3);
-      const h1 = await _stCandles(symbol, "1H", 3600e3, 90e3);
+      // TTL-ovi su ovdje vezani uz granicu svijeće (dan / 4 h / sat) — dovoljno je jer se zatvorene svijeće ne mijenjaju
+      const d1 = await _stCandles(symbol, "1Dutc", 86400e3, 86400e3);
+      const h4 = await _stCandles(symbol, "4H", 4 * 3600e3, 4 * 3600e3);
+      const h1 = await _stCandles(symbol, "1H", 3600e3, 3600e3);
       const s1d = supertrendState(_stClosed(d1, 86400e3, nowMs));
       const s4h = supertrendState(_stClosed(h4, 4 * 3600e3, nowMs));
       const s1h = supertrendState(_stClosed(h1, 3600e3, nowMs));
@@ -7235,15 +7255,23 @@ function _stView(row, nowMs, prices) {
   };
 }
 
-export async function getSupertrendOverview(nowMs = Date.now()) {
-  const bucket = Math.floor(nowMs / 3600e3);
-  const stale = _stRows.bucket !== bucket || (_stRows.problem && nowMs - _stRows.builtAt > 120e3);
+export async function getSupertrendOverview(nowMs = Date.now(), watchlist = _stReadWatchlist()) {
+  const universe = stUniverse(watchlist);
+  const bucket = Math.floor(nowMs / 3600e3), key = universe.join(",");
+  const stale = _stRows.bucket !== bucket || _stRows.key !== key || (_stRows.problem && nowMs - _stRows.builtAt > 120e3);
   if (stale) {
-    const b = await _stBuildRows(nowMs);
-    _stRows = { bucket, builtAt: nowMs, problem: b.problem, rows: b.rows };
+    if (!_stBuildPromise) {
+      _stBuildPromise = (async () => {
+        try {
+          const b = await _stBuildRows(nowMs, universe);
+          _stRows = { bucket, key, builtAt: nowMs, problem: b.problem, rows: b.rows };
+        } finally { _stBuildPromise = null; }
+      })();
+    }
+    await _stBuildPromise;
   }
   if (nowMs - _stPriceCache.ts > 60e3) {
-    try { _stPriceCache = { ts: nowMs, prices: await fetchLivePrices(ST_SYMBOLS) }; } catch { /* ostaju spremljene cijene */ }
+    try { _stPriceCache = { ts: nowMs, prices: await fetchAllTickerPrices() }; } catch { /* ostaju spremljene cijene */ }
   }
   const symbols = _stRows.rows.map(r => _stView(r, nowMs, _stPriceCache.prices));
   let csv = ""; try { const f = csvFilePath("synapse_t"); if (existsSync(f)) csv = readFileSync(f, "utf8"); } catch { /* bez CSV-a */ }

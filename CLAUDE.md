@@ -185,7 +185,10 @@ običan `synapse_t` s `entryMode: "ST"` (CSV stupac EntryMode), pa nasljeđuju S
   (capovi, cooldowni, noć, vikend ×0.5, kolizija, strop rizika, liq, dnevni limit, equity nepoznat).
   Novi 1H uvjet je "zaštita" samo ako ograničava izloženost; ako filtrira kvalitetu signala, ST ga NE gleda.
 - **Običan 1H put ne smije pyramidirati ni flipati ST poziciju** (guard `entryMode === "ST"` u `run()`).
-- Konstante: `ST_SYMBOLS` (BTC/ETH/SOL), `ST_MAX_OPEN` 2 (istovremenih ST pozicija), `ST_RISK_PCT` 1.0, `ST_RR` 3, SL raspon 0.8–4.5% (izvan → preskoči).
+- Univerzum: `stUniverse(watchlist)` = SVA kripto s `watchlist_synapse_t` (06.10., odluka vlasnika; dionice i metali isključeni,
+  suspendirani simboli ispadaju jer nisu na watchlisti). Širi univerzum ne zaobilazi stropove: `ST_MAX_OPEN` 2 vrijedi za sve.
+  Cijene za dashboard idu jednim zahtjevom za sve tickere (`fetchAllTickerPrices`), ne N paralelnih.
+- Konstante: `ST_MAX_OPEN` 2 (istovremenih ST pozicija), `ST_RISK_PCT` 1.0, `ST_RR` 3, SL raspon 0.8–4.5% (izvan → preskoči).
 - Testovi: `test/supertrend.mjs` (izračun, odluka, gradnja naloga). Runner nema repo-test jer ovisi o
   desetak globala iz `bot.js`; provjeren je izvršavanjem izvučenog bloka (scratchpad, 34 provjere).
 - Backtest 04–10/2026 (BTC/ETH/SOL, 1H povijest, naknade 0.12%, SL min 0.8%): 25–42 tradea; čisti 1:3 s noćnim

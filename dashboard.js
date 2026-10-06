@@ -3450,11 +3450,13 @@ async function loadSupertrend() {
     var d = await r.json();
     if (d.error) { el.innerHTML = '<div class="section-label" style="color:#dc2626;margin:0">🧭 SUPERTREND — greška: ' + stEsc(d.error) + '</div>'; return; }
     var h = '<div class="section-label" style="color:#22d3ee;margin:0 0 8px 0">🧭 SUPERTREND 1D/4H/1H '
-      + '<span style="font-weight:400;color:#94a3b8;font-size:11px">— ' + (d.enabled ? 'uključen' : 'ISKLJUČEN') + ' · otvoreno ' + d.open.length + '/' + d.maxOpen
+      + '<span style="font-weight:400;color:#94a3b8;font-size:11px">— ' + (d.enabled ? 'uključen' : 'ISKLJUČEN') + ' · ' + d.symbols.length + ' simbola · otvoreno ' + d.open.length + '/' + d.maxOpen
       + ' · rizik ' + d.riskPct + '% · R:R 1:' + d.rr + ' · SL linija ' + d.slMin + '–' + d.slMax + '%</span></div>';
     h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:#64748b;text-align:left">'
       + '<th style="padding:4px 6px">Simbol</th><th>Cijena</th><th>1D</th><th>4H</th><th>1H</th><th>Linija 1H (udalj.)</th><th>Status</th></tr></thead><tbody>';
-    d.symbols.forEach(function(s) {
+    // 23 simbola: prvo SIGNAL, zatim usklađeni 1D+4H (čekaju obrat 1H), na kraju ostali (stabilan sort)
+    var stRank = function(s) { return s.signal ? 0 : (!s.error && s.aligned ? 1 : 2); };
+    d.symbols.slice().sort(function(a, b) { return stRank(a) - stRank(b); }).forEach(function(s) {
       h += '<tr style="border-top:1px solid rgba(148,163,184,0.15)"><td style="padding:5px 6px;font-weight:700">' + stEsc(s.symbol.replace('USDT','')) + '</td>';
       if (s.error) { h += '<td colspan="5"></td><td>' + stStatusHtml(s) + '</td></tr>'; return; }
       h += '<td>' + stNum(s.price, s.price >= 100 ? 1 : 4) + '</td><td>' + stDirHtml(s.d1) + '</td><td>' + stDirHtml(s.h4) + '</td><td>' + stDirHtml(s.h1) + '</td>'

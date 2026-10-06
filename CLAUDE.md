@@ -231,9 +231,11 @@ SE broje (isti 1H brojač, BTC izuzet). Ne zaobilazi per-scan strop ni apsolutne
   stropa (97 tradeova, dio P&L-a procijenjen, premalen uzorak — prati).
 - **`MAX_OPEN_1H` 3 → 5 je odluka vlasnika, ne rezultat analize.** 01.10. je 1H namjerno stegnut na 3 jer je rujan pokazao 47.5% WR / −$39.53
   naspram 4H 77.1% / +$57.86 (vidi komentar uz konstantu). Povijest 1H od 20.9. (99 tradeova, do 2.10.) ne pokazuje kaznu za grupirane
-  ulaze (sati s >=3 ulaza +68 $), ali ukupna 1H povijest od svibnja je negativna (551 trade, WR ~47%). Kripto cap (8, zajednički s 4H),
-  istosmjerni (4), sektor (2) i ukupni rizik (20%) ostaju i vežu prije 5 kad je 4H pun — pa 5 otvorenih 1H pozicija je moguće samo kad je
-  4H popunjen manje. Prati 1H WR/neto nakon promjene; vraćanje na 3 je jedna konstanta.
+  ulaze (sati s >=3 ulaza +68 $), ali ukupna 1H povijest od svibnja je negativna (551 trade, WR ~47%).
+- **Ukupni capovi (06.10., vlasnik: "8 i 5 znači 13"):** `MAX_OPEN_PER_PORTFOLIO` 11 → 13 i `MAX_OPEN_CRYPTO`/`MAX_OPEN_CRYPTO_VIP` 8 → 13, da
+  1H (5) + 4H (8) stvarno stanu zajedno. Vikend ostaje `WEEKEND_MAX_OPEN` = 5. **I dalje vežu:** istosmjerni kripto cap
+  (`MAX_SAME_DIR_CRYPTO` 4), sektor (2) i ukupni rizik `MAX_PORTFOLIO_RISK_PCT` 20% — pri ~1.5% rizika po tradeu 13 pozicija je već oko
+  tog praga, pa će u praksi češće vezati rizik/smjer nego broj. Prati 1H WR/neto; vraćanje je promjena konstanti.
 
 ## Bitget auth
 

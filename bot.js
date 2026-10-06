@@ -59,19 +59,21 @@ const STRONG_SIGNAL_SCORE = 9;    // nekorišten za TP (zadržan za eventualne f
 const STRONG_TP_MULT      = 3.0;  // jako tržište → TP = SL × 3 (1:3 R:R)
 const NORMAL_TP_MULT      = 2.0;  // konsolidacija / neutralno → TP = SL × 2.0 (1:2 R:R min, TraderaEdge standard)
 const MAX_TRADES_PER_DAY = 100;
-export const MAX_OPEN_CRYPTO = 8;  // max otvorenih kripto pozicija preko OBJE strategije (01.10.: 7->8, na zahtjev)
+// max otvorenih kripto pozicija preko OBJE strategije (01.10.: 7->8, na zahtjev; 06.10.: 8->13 = MAX_OPEN_1H 5 + MAX_OPEN_4H 8, na zahtjev vlasnika)
+export const MAX_OPEN_CRYPTO = 13;
 // 01.10., na zahtjev: VIP produžetak ukinut (jednak bazi) — nakon analize rujna koja je
 // pokazala da 1H strukturno podbacuje, caps su sad strogi brojevi, bez iznimke za jake
 // signale dok se ne razjasni 1H problem. Kod VIP grane ostaje netaknut (inertan je kad su
 // ova dva broja jednaka), lako se vraća ako se poslije odluci da VIP treba headroom.
-export const MAX_OPEN_CRYPTO_VIP = 8;
+export const MAX_OPEN_CRYPTO_VIP = 13;   // 06.10.: 8 -> 13, ostaje jednak bazi (VIP grana inertna)
 export const MAX_OPEN_STOCKS = 4;  // (01.10.: 2->4, na zahtjev)
 // 01.10., na zahtjev: strogo po strategiji, NE derivirano iz crypto+stocks (8+4=12 bi bilo
 // previse) — stvarni ukupni strop je 3(1H)+8(4H)=11, jer 1H MAX_OPEN_1H (3) i 4H MAX_OPEN_4H
 // (8) vezu zajedno strozi od klasnih (crypto/stock) capova. Vidi MAX_OPEN_1H/MAX_OPEN_4H niže
 // i provjere u run()/runUltra4hStrategy() koje ih primjenjuju PO STRATEGIJI, odvojeno od
 // ovog ukupnog broja koji ostaje kao vanjska sigurnosna granica.
-const MAX_OPEN_PER_PORTFOLIO = 11;
+// 06.10., na zahtjev vlasnika: 11 -> 13 (= MAX_OPEN_1H 5 + MAX_OPEN_4H 8). Vikend ostaje WEEKEND_MAX_OPEN (5).
+const MAX_OPEN_PER_PORTFOLIO = 13;
 // 01.10., na zahtjev — nakon analize rujna (47.5% WR / -$39.53 na 1H vs 77.1% WR / +$57.86
 // na 4H, cijeli mjesec, na svim score razinama): dok se ne razjasni ZAŠTO 1H strukturno
 // podbacuje, njegova ukupna izlozenost je ostro ogranicena, a 4H (dokazano bolji) dobiva

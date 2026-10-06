@@ -5,7 +5,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 process.env.DATA_DIR = mkdtempSync(join(tmpdir(), "candle-test-"));
 
-const { detectCandlePattern, candleAgainst, CANDLE_ENGULF_MIN_ATR } = await import("../bot.js");
+const { detectCandlePattern, candleAgainst, candleContext, CANDLE_ENGULF_MIN_ATR } = await import("../bot.js");
 
 let fail = 0;
 const ok = (c, m) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -58,6 +58,30 @@ ok(p.name !== "BEAR_ENGULF", `engulfing na AKTIVNOJ svijeci (n-1) se ne gleda ($
 const flat = Array.from({ length: 25 }, () => ({ open: 1, close: 1, high: 1, low: 1, volume: 0 }));
 ok(detectCandlePattern(flat).name === "", "ravne svijece (range 0) -> bez formacije, bez greske");
 ok(CANDLE_ENGULF_MIN_ATR === 0.8, "prag 0.8 ATR");
+
+// ── candleContext (06.10., samo mjerenje): boja/jacina zadnje ZATVORENE svijece + pomak ulaza u ATR, u smjeru tradea ──
+{
+  const redStrong = mk(C(100, 102), C(102.5, 96));            // zadnja zatvorena: crvena, tijelo 6.5 >> 0.8 ATR
+  let k = candleContext(redStrong, "LONG", 97);               // ulaz 1 iznad zatvaranja (96), ATR ~3
+  ok(k.ctx === "RED_STRONG", "crvena jaka svijeca -> RED_STRONG (" + k.ctx + ")");
+  ok(k.distAtr > 0.2 && k.distAtr < 0.5, "LONG iznad zadnjeg zatvaranja -> pozitivan pomak ~0.33 ATR (" + k.distAtr + ")");
+  k = candleContext(redStrong, "LONG", 95);
+  ok(k.distAtr < 0, "LONG ispod zadnjeg zatvaranja (jeftinije) -> negativan pomak (" + k.distAtr + ")");
+  k = candleContext(redStrong, "SHORT", 95);
+  ok(k.distAtr > 0, "SHORT ispod zadnjeg zatvaranja (jurimo pad) -> pozitivan pomak, predznak u smjeru tradea (" + k.distAtr + ")");
+  k = candleContext(mk(C(100, 100.3), C(100, 100.4)), "LONG", 100.4);
+  ok(k.ctx === "GREEN_WEAK" && k.distAtr === 0, "zelena slaba, ulaz na zatvaranju -> GREEN_WEAK, 0 (" + k.ctx + "," + k.distAtr + ")");
+  ok(candleContext(mk(C(100, 100.4), C(100.4, 100.4, 101, 99.8)), "LONG", 100.4).ctx === "FLAT_WEAK", "doji (open=close) -> FLAT_WEAK");
+  // aktivna svijeca (n-1) se ne gleda: zelena n-2, golema crvena n-1
+  const f2 = [...calm, C(100, 101), C(101, 102), C(102, 90)];
+  ok(candleContext(f2, "LONG", 102).ctx.startsWith("GREEN"), "aktivna svijeca (n-1) se ne gleda");
+  // degenerirani ulazi: prazan zapis, nikad iznimka
+  const none = k => k.ctx === "" && k.distAtr === "";
+  ok(none(candleContext(null, "LONG", 1)) && none(candleContext([], "LONG", 1)) && none(candleContext(flat, "LONG", 1)), "null/prazno/ravne svijece -> prazno, bez greske");
+  k = candleContext(redStrong, "LONG", undefined);
+  ok(k.ctx === "RED_STRONG" && k.distAtr === "", "nepoznata ulazna cijena -> boja ostaje, pomak prazan");
+  ok(candleContext(redStrong, "NEUTRAL", 97).distAtr === "", "nepoznat smjer -> pomak prazan");
+}
 
 console.log(fail ? `\n${fail} PALO` : "\nSVE PROSLO");
 process.exit(fail ? 1 : 0);

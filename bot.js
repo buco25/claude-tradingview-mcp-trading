@@ -1284,6 +1284,27 @@ export function candleAgainst(dir, pat) {
   return (dir === "LONG" && pat.name === "BEAR_ENGULF") || (dir === "SHORT" && pat.name === "BULL_ENGULF");
 }
 
+// 06.10., na zahtjev — SAMO MJERENJE (ne utječe na odluku): kontekst zadnje zatvorene svijeće u trenutku ulaza,
+// da se nakon ~100 tradeova vidi ima li "prava cijena ulaza" ikakvu težinu. Dva stupca u CSV-u:
+//  - CandleCtx: boja + jačina zadnje zatvorene svijeće (RED/GREEN/FLAT × STRONG/WEAK; STRONG = tijelo >= CANDLE_ENGULF_MIN_ATR × ATR14)
+//  - EntryDistATR: pomak ulazne cijene od zatvaranja te svijeće u ATR-ovima, PREDZNAK U SMJERU TRADEA
+//    (+ = ulazimo iznad zadnjeg zatvaranja kod LONG-a / ispod kod SHORT-a, tj. jurimo; − = ulazimo jeftinije).
+// Povijesni test (12 coina, 250 dana) nije našao razliku po boji svijeće, pa ovo ostaje mjerenje dok stvarni ulazi ne kažu drugo.
+export function candleContext(candles, dir, entryPrice) {
+  const none = { ctx: "", distAtr: "" };
+  if (!Array.isArray(candles) || candles.length < 18) return none;
+  const c = candles[candles.length - 2];
+  if (!c || !(c.high > c.low)) return none;
+  const atr = calcATR(candles.slice(0, -1), 14);
+  if (!atr) return none;
+  const body = Math.abs(c.close - c.open);
+  const colour = c.close > c.open ? "GREEN" : c.close < c.open ? "RED" : "FLAT";
+  const ctx = colour + "_" + (body >= CANDLE_ENGULF_MIN_ATR * atr ? "STRONG" : "WEAK");
+  const sgn = dir === "SHORT" ? -1 : 1;
+  const d = (entryPrice > 0 && (dir === "LONG" || dir === "SHORT")) ? sgn * (entryPrice - c.close) / atr : NaN;
+  return { ctx, distAtr: Number.isFinite(d) ? +d.toFixed(2) : "" };
+}
+
 // ─── Deribit Put/Call Ratio ───────────────────────────────────────────────────
 // P/C > 1.5 = tržište kupuje zaštitu od pada (strah) = potencijalni bottom
 // P/C < 0.5 = previše calls = euforija = potencijalni vrh
@@ -4862,7 +4883,8 @@ function csvFilePath(pid) { return `${DATA_DIR}/trades_${pid}.csv`; }
 // pomaknuti — sav kod koji čita po fiksnom indeksu (cols[9], cols[12]...) ostaje ispravan.
 // 05.10.: CandlePat dodan na kraj (formacija zadnje zatvorene svijeće u trenutku ulaza,
 // vidi detectCandlePattern) — samo na entry retku, kao regime/night/weekend.
-const CSV_HEADERS = "Date,Time (UTC),Exchange,Symbol,Side,Quantity,Price,Total USD,Fee (est.),Net P&L,SL,TP,Order ID,Mode,Portfolio,Notes,SigMask,EntryMode,BTCRegime1H,BTCRegime4H,Night,Weekend,CandlePat";
+// 06.10.: CandleCtx + EntryDistATR dodani na kraj (vidi candleContext) — samo mjerenje.
+const CSV_HEADERS = "Date,Time (UTC),Exchange,Symbol,Side,Quantity,Price,Total USD,Fee (est.),Net P&L,SL,TP,Order ID,Mode,Portfolio,Notes,SigMask,EntryMode,BTCRegime1H,BTCRegime4H,Night,Weekend,CandlePat,CandleCtx,EntryDistATR";
 
 const _csvHeaderChecked = new Set();  // izbjegni ponovnu migraciju svakih 60s (ultra_4h zove initCsv po ciklusu)
 function initCsv(pid) {
@@ -4900,7 +4922,7 @@ function writeCsv(pid, r) {
     r.sl, r.tp,
     r.orderId || "", r.mode, pid,
     `"${r.notes}"`,
-    "", "", "", "", "", "", r.candlePat ?? "",
+    "", "", "", "", "", "", r.candlePat ?? "", "", "",
   ].join(",");
   appendFileSync(csvFilePath(pid), row + "\n");
 }
@@ -4934,7 +4956,7 @@ function writeEntryCsv(pid, entry) {
     entry.orderId || "", mode, pid,
     `"${entry.strategy} | ${entryMode} | Sig ${sigCount}/${SIG_NAMES.length} | SL ${entry.slPct??SL_PCT}% TP ${entry.tpPct??TP_PCT}%"`,
     entry.sigMask ?? "", entryMode, entry.btcRegime1h ?? "", entry.btcRegime4h ?? "", night, weekend,
-    entry.candlePat ?? "",
+    entry.candlePat ?? "", entry.candleCtx ?? "", entry.entryDistAtr ?? "",
   ].join(",");
 
   appendFileSync(csvFilePath(pid), row + "\n");
@@ -6820,6 +6842,7 @@ export async function runUltra4hStrategy() {
         mode: "LIVE", entryMode: sig._strategy ?? (sig.isMomentum ? "MOM" : "PBK"),
         sigMask: sig.sigMask ?? null, btcRegime1h: _btcRegime1hLog, btcRegime4h: _btcRegime4,
         vipSlot: sig._vipSlot === true, candlePat: _candlePat4,
+        ...(() => { const k = candleContext(candles, sig.signal, result.fillPrice ?? sig.price); return { candleCtx: k.ctx, entryDistAtr: k.distAtr }; })(),
       };
       addPosition(ULTRA4H_PID, entry);
       writeEntryCsv(ULTRA4H_PID, entry);
@@ -7119,6 +7142,7 @@ async function runSupertrendEntries(ctx) {
         mode: isLive ? (BITGET_DEMO ? "DEMO" : "LIVE") : "PAPER",
         sigMask: null, entryMode: "ST", signalStrength: "normal", vipSlot: false,
         btcRegime1h, btcRegime4h, candlePat: detectCandlePattern(sig.candles1h).name,
+        ...(() => { const k = candleContext(sig.candles1h, signal, price); return { candleCtx: k.ctx, entryDistAtr: k.distAtr }; })(),
       };
       console.log(`🎯 [${pDef.name}] NEW ${signal} ${symbol} @ ${fmtPrice(price)} | SL ${fmtPrice(sl)} | TP ${fmtPrice(tp)} | $${tradeSize.toFixed(0)} [SUPERTREND]`);
       if (!isLive) {
@@ -8755,7 +8779,7 @@ export async function run() {
         const timestamp = new Date().toISOString();
         const orderId   = `${_isLive ? "LIVE" : "PAPER"}-${Date.now()}`;
         const mode      = _isLive ? (BITGET_DEMO ? "DEMO" : "LIVE") : "PAPER";
-        const entry = { symbol, signal, price, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode, sigMask: result.sigMask ?? null, entryMode: result._strategy ?? ((result.isMomentum ? "MOM" : "PBK") + (result._halfSize ? "-SOFT" : "")), signalStrength, vipSlot: result._vipSlot === true, btcRegime1h: _btcRegime1h, btcRegime4h: _btcRegime, candlePat: _candlePat1.name };
+        const entry = { symbol, signal, price, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode, sigMask: result.sigMask ?? null, entryMode: result._strategy ?? ((result.isMomentum ? "MOM" : "PBK") + (result._halfSize ? "-SOFT" : "")), signalStrength, vipSlot: result._vipSlot === true, btcRegime1h: _btcRegime1h, btcRegime4h: _btcRegime, candlePat: _candlePat1.name, ...(() => { const k = candleContext(candles, signal, price); return { candleCtx: k.ctx, entryDistAtr: k.distAtr }; })() };
 
         const _strengthEmoji = signalStrength === "strong" ? "💪" : "📊";
         const _rrLabel = `RR 1:${(tpPct/slPct).toFixed(1)}`;

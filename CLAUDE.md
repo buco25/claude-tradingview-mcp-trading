@@ -157,6 +157,14 @@ je jedini izvor te računice; `liqDistPct(lev) = (1/lev − 0.005) × 100`.
   Živi u `evaluateU4hGates` (4H + dashboard badge) i u `run()` iza velocity gatea (1H, s istim
   `_stratBypass` izuzećem). Isključuje se jednom konstantom `CANDLE_FILTER_ENABLED`.
 
+- **Kontekst ulaza (06.10., samo mjerenje):** `candleContext(candles, dir, entryPrice)` upisuje u CSV dva stupca iza
+  `CandlePat`: `CandleCtx` (indeks 23; boja + jačina zadnje zatvorene svijeće, npr. `RED_STRONG`/`GREEN_WEAK`) i
+  `EntryDistATR` (indeks 24; pomak ulazne cijene od zatvaranja te svijeće u ATR-ovima, predznak u smjeru tradea:
+  + = jurimo, − = ulaz jeftinije). Povijesni test (12 coina, ~250 dana, 1H/4H) NIJE našao razliku po boji svijeće ni
+  korist od limit ulaza ispod cijene (dobitak je samo manje trgovanja = manje naknada), pa ovo ne smije mijenjati odluke
+  dok ~100 stvarnih ulaza ne pokaže suprotno. Ista test-nuspojava: na 4H su bearish formacije češće slijedile rast, pa bi
+  4H filter "jak engulfing protiv smjera" mogao škoditi — ponovo procijeni na stvarnim podacima.
+
 Retrospektiva na 109 povijesnih ulaza (svibanj, `bitget_rebuild.csv`): filter bi blokirao 3 (1H) /
 1 (4H) — inertan, uzorak premalo velik za zaključak u bilo kojem smjeru. Nova formacija **ne ide u
 `analyzeUltra`/score** (to bi mijenjalo golden i signalnu jezgru); ako podaci kažu da vrijedi, ide

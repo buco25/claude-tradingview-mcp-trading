@@ -21,7 +21,7 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   DEFAULT_COMBO, DEFAULT_MIN_SIG,
   RISK_PCT, RISK_PCT_MIN, RISK_PCT_MAX,
   ADX_MIN, ADX_SOFT_BAND, ADX_SOFT_FLOOR, MOM_SOFT_BAND, MOM_ADX_MIN,
-  MAX_OPEN_CRYPTO, MAX_OPEN_STOCKS, getCapSnapshot, bitgetHeaders, ACCOUNT_START_CAPITAL, getSupertrendOverview } from "./bot.js";
+  MAX_OPEN_CRYPTO, MAX_OPEN_STOCKS, MAX_OPEN_NONCRYPTO, getCapSnapshot, bitgetHeaders, ACCOUNT_START_CAPITAL, getSupertrendOverview } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -1820,7 +1820,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}, ultra4hPositions = [
       <div class="logo">⚡</div>
       <div>
         <div class="title">ULTRA · Future Bot</div>
-        <div class="subtitle"><span class="live-dot"></span>${ALL_SYMBOLS.length} simbola (kripto + dionice) · rizik ${RISK_PCT_MIN}-${RISK_PCT_MAX}% (baza ${RISK_PCT}%) · combo 5/8 signala · RR 1:2 (JAKO 1:3) · break-even @ +1R · max ${MAX_OPEN_CRYPTO} kripto + ${MAX_OPEN_STOCKS} dionice</div>
+        <div class="subtitle"><span class="live-dot"></span>${ALL_SYMBOLS.length} simbola (kripto + dionice) · rizik ${RISK_PCT_MIN}-${RISK_PCT_MAX}% (baza ${RISK_PCT}%) · combo 5/8 signala · RR 1:2 (JAKO 1:3) · break-even @ +1R · max ${MAX_OPEN_CRYPTO} kripto + ${MAX_OPEN_NONCRYPTO} dionica/metal</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">

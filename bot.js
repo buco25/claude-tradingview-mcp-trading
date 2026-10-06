@@ -108,12 +108,23 @@ export function getCapSnapshot() {
     h4:        u4h.length,                h4Max:     MAX_OPEN_4H,
     crypto:    syn.filter(p => !isStockSym(p.symbol)).length + u4h.length, cryptoMax: MAX_OPEN_CRYPTO,
     stocks:    syn.filter(p => isStockSym(p.symbol)).length,               stocksMax: MAX_OPEN_STOCKS,
+    nonCrypto: syn.filter(p => isStockSym(p.symbol) || isMetalSym(p.symbol)).length, nonCryptoMax: MAX_OPEN_NONCRYPTO,
   };
 }
 export const isStockSym = (s) => (SYMBOL_SECTORS[s] || "").startsWith("STOCK_");
 // Metali (PAXG/XAU/XAG, 26.08.) — zlato ne prati BTC kao altcoini, izuzeti iz
 // BTC-korelacijskih gateova (weekly key-level SHORT, BTC dEMA10 LONG, REL-STR vs BTC).
 export const isMetalSym = (s) => SYMBOL_SECTORS[s] === "METAL";
+// 06.10., na zahtjev vlasnika ("samo jedna dionica ili metal mogu biti otvorene"): ZAJEDNIČKI strop za sve što nije kripto, dionice
+// i metali ukupno. Metali su u ostalim capovima brojani kao kripto (isStockSym ih ne hvata), pa MAX_OPEN_STOCKS (4) nije pokrivao
+// ni njih ni ovaj zahtjev. Razlog: 1H dionice/metali od 1.9. gube (dionice −28 $, metali −18 $) dok kripto zarađuje (+65 $).
+// Postojeća pozicija istog simbola (pyramid) nije "novi" slot. 4H i Supertrend ionako ne trguju dionicama/metalima.
+export const MAX_OPEN_NONCRYPTO = 1;
+export function nonCryptoCapBlocks(symbol, open) {
+  if (!isStockSym(symbol) && !isMetalSym(symbol)) return false;
+  if ((open ?? []).some(p => p.symbol === symbol)) return false;
+  return (open ?? []).filter(p => isStockSym(p.symbol) || isMetalSym(p.symbol)).length >= MAX_OPEN_NONCRYPTO;
+}
 const MAX_PYRAMID           = 1;   // max 1 adicija u istom smjeru (BTC only mode)
 // 03.08.: VIP pyramid (score≥7/8) nije imao gornju granicu — jedna BTC pozicija je
 // narasla kroz 7 uzastopnih adicija ($40→$280 notional, 50x) dok margin nije postao
@@ -7727,6 +7738,11 @@ export async function run() {
       // signal smije prekoraciti bazu do ovog stropa (vidi niže, uz postojeći
       // MAX_SAME_DIR_CRYPTO/VIP blok). 01.10.: VIP strop i baza su sad isti broj (vidi
       // MAX_OPEN_CRYPTO_VIP definicija) pa je ovo trenutno hard cap, VIP grana inertna.
+      if (nonCryptoCapBlocks(symbol, _openNow)) {
+        console.log(`  🔒 [${pDef.name}] Max ${MAX_OPEN_NONCRYPTO} dionica/metal otvoreno — preskačem ${symbol}`);
+        _scanLogEntries.push({ symbol, signal: "SKIP", blocker: `MAX_NONCRYPTO(${MAX_OPEN_NONCRYPTO})`, reason: "Max 1 dionica/metal istovremeno (odluka vlasnika)" });
+        continue;
+      }
       const _classMax   = _symIsStock ? MAX_OPEN_STOCKS : MAX_OPEN_CRYPTO_VIP;
       if (_classOpen >= _classMax && symbol !== BTC_EXCEPTION && !openSymbols.includes(symbol)) {
         console.log(`  🔒 [${pDef.name}] Max ${_classMax} ${_symIsStock ? "dionica" : "kripto"} dostignut (${_classOpen}) — preskačem ${symbol}`);

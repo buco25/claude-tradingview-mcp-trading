@@ -237,6 +237,14 @@ SE broje (isti 1H brojač, BTC izuzet). Ne zaobilazi per-scan strop ni apsolutne
   (`MAX_SAME_DIR_CRYPTO` 4), sektor (2) i ukupni rizik `MAX_PORTFOLIO_RISK_PCT` 20% — pri ~1.5% rizika po tradeu 13 pozicija je već oko
   tog praga, pa će u praksi češće vezati rizik/smjer nego broj. Prati 1H WR/neto; vraćanje je promjena konstanti.
 
+## Dionice + metali: ZAJEDNIČKI strop 1 (06.10., odluka vlasnika)
+
+`MAX_OPEN_NONCRYPTO` = 1 i `nonCryptoCapBlocks(symbol, open)`: u 1H ulazu najviše JEDNA otvorena pozicija koja nije kripto (dionica ILI metal
+zajedno). Watchlista se NE mijenja — dionice/metali ostaju na njoj, samo ne mogu biti otvoreni više od jedne istovremeno. Razlog: 1H od 1.9.
+(do 2.10.) dionice −28 $ (73 tr.), metali −18 $ (23 tr.), kripto +65 $ (99 tr.). **Metali nisu `isStockSym`** (sektor METAL) pa su u ostalim
+capovima brojani kao kripto; `MAX_OPEN_STOCKS` (4) ih ne pokriva. Strop blokira samo NOVE ulaze: već otvorene dionice/metali (ako ih je više
+od 1) ostaju do izlaza. Postojeća pozicija istog simbola (pyramid) nije novi slot. 4H i Supertrend ionako ne trguju dionicama/metalima.
+
 ## Bitget auth
 
 `bitgetHeaders(method, path, body)` u `bot.js` je **jedino** mjesto koje sastavlja potpisane

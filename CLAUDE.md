@@ -218,7 +218,7 @@ običan `synapse_t` s `entryMode: "ST"` (CSV stupac EntryMode), pa nasljeđuju S
   server-side template literala: bez backslasheva, backtickova i dolar-vitica** (jedan `\"` je već jednom pokvario
   cijeli odjeljak — uhvaćeno testom koji izvrši izlaz template literala).
 
-## Strop ulaza PO SVIJEĆI (4H + 1H) i MAX_OPEN_1H = 5 (06.10., odluka vlasnika)
+## Strop ulaza PO SVIJEĆI (4H + 1H) (06.10.; MAX_OPEN_1H vraćen 5 → 3 dana 07.10.)
 
 `MAX_NEW_ENTRIES_PER_SCAN` (2) broji unutar jednog prolaza skenera, a prolaz se ponavlja (4H svake minute, 1H svakih 15 min) — pa
 unutar iste svijeće nije ograničavao ništa (23.9. u 08:00: 8 4H ulaza; 06.10. FET+ATOM u jednom prolazu, VIRTUAL u sljedećem). Zato
@@ -240,6 +240,19 @@ SE broje (isti 1H brojač, BTC izuzet). Ne zaobilazi per-scan strop ni apsolutne
   četvrtini (trend-sustav kupuje po signalima trenda). Opće tržište (12 coina, ~250 dana, 4H, SL 1.5 ATR, TP 2.5R, bez naknade): LONG u
   donjem-srednjem dijelu raspona (p 0.2-0.4) +0.16R, u gornjoj petini −0.04R, na samom dnu (p<0.2) −0.01R (noževi koji padaju) — efekt
   stvaran ali malen (~0.2R) i sam po sebi ne pretvara strategiju u profitabilnu. Nije implementirano kao filter.
+
+## WR = trade dosegnuo >= 70% PLANIRANE dobiti (07.10., odluka vlasnika)
+
+Prije se "pobjedom" brojao svaki trade s Net P&L >= 0, pa je izlaz na +0.03 $ (BE/ROE-protect scratch) držao WR na ~55-75% dok je sustav
+gubio. Sad je pobjeda samo trade koji je dosegnuo `WR_TARGET_FRAC` (0.7) × planirane dobiti: `plannedProfit(usd, price, tp)` = Total USD × |TP − ulaz| / ulaz,
+iz ORIGINALNOG TP-a na ulaznom retku (trail kasnije pomiče TP u izlaznim recima, pa se on NE koristi); noge partial closea se zbrajaju po Order ID-u
+(`tradePlanOutcomes`, `reachedPlan`). Trejdovi bez poznatog cilja (stari redci) → `null`, ne ulaze u WR (broji se "bez cilja"). Primjenjeno u
+`buildPortfolioStats` (WR, per-simbol, PBK/MOM, soft/normal, 1H/4H, phase2), `/api/bitget-wr` (spoj s CSV-om po simbol+strana+vrijeme otvaranja kao
+`/api/bitget-history`; pozicije bez CSV retka ne ulaze) i ST statistici. **Profit Factor, ukupni P&L i krivulja i dalje idu po stvarnom predznaku P&L-a.**
+Stvarni brojevi (CSV do 7.10.): 4H 6.2% (6 od 97; bilo 75.3%), 1H 7.3% (38 od 518; bilo 52.2%).
+**NAMJERNO NIJE promijenjeno** (to su petlje koje utječu na trgovanje, ne prikaz): `getDynamicAdx` (WR<35% → ADX +3, WR<25% → +5, WR<20% → 2h pauza),
+`recordSignalOutcome`, `recordSymbolOutcome` i suspenzija simbola. Kad bi one koristile ovaj WR (~7%), dinamički ADX bi stalno bio +5 a pauza stalno
+aktivna — bot bi stao. Mijenjaš li ih, to je odluka o strategiji, ne o prikazu.
 
 ## Dionice + metali: ZAJEDNIČKI strop 1 (06.10., odluka vlasnika)
 

@@ -1324,6 +1324,40 @@ export function candleContext(candles, dir, entryPrice) {
   return { ctx, distAtr: Number.isFinite(d) ? +d.toFixed(2) : "" };
 }
 
+// ─── WR = trade je "dobitan" samo ako je dosegnuo >= 70% PLANIRANE dobiti (07.10., na zahtjev vlasnika) ───
+// Dotad se "pobjedom" brojao svaki trade s Net P&L >= 0, pa je izlaz na +0.03 $ (break-even/ROE-protect scratch) dizao WR na ~70% dok je
+// sustav gubio (4H od 23.9.: 68% "pobjeda", ali samo 7% trejdova >= 1R i 0% >= 2R). Planirana dobit = Total USD × |TP − cijena ulaza| / cijena
+// ulaza, iz ORIGINALNOG TP-a na ulaznom retku (trail kasnije pomiče TP u izlaznim recima, pa ga ne koristimo). Trade s više izlaznih nogu
+// (partial close) zbraja Net P&L svih nogu. Nepoznata planirana dobit (stari redci bez TP-a / Order ID-a) → null, NE ulazi u WR.
+// SAMO prikaz/izvještaj. NAMJERNO se NE koristi u getDynamicAdx / recordSignalOutcome / recordSymbolOutcome / suspenziji simbola:
+// tamo bi WR od ~5-10% okinuo dinamički ADX +5 i 2h pauze (DYN_PAUSE_WR) i ugasio bota.
+export const WR_TARGET_FRAC = 0.7;
+export function plannedProfit(usd, price, tp) {
+  const u = Number(usd), p = Number(price), t = Number(tp);
+  if (!(u > 0 && p > 0 && t > 0)) return null;
+  return u * Math.abs(t - p) / p;
+}
+export function reachedPlan(netPnl, planned, frac = WR_TARGET_FRAC) {
+  const n = Number(netPnl);
+  if (!(planned > 0) || !Number.isFinite(n)) return null;
+  return n >= frac * planned;
+}
+// entries/exits: objekti s ključevima headera CSV-a ("Order ID","Total USD","Price","TP","Net P&L") — kao parseCsvFile u dashboardu.
+// exits treba biti već dedupliciran. Vraća Map orderId → { planned, net, hit }.
+export function tradePlanOutcomes(entries, exits) {
+  const m = new Map();
+  for (const e of entries ?? []) {
+    const id = (e["Order ID"] ?? "").trim(); if (!id) continue;
+    m.set(id, { planned: plannedProfit(e["Total USD"], e["Price"], e["TP"]), net: 0, legs: 0, hit: null });
+  }
+  for (const x of exits ?? []) {
+    const o = m.get((x["Order ID"] ?? "").trim()); if (!o) continue;
+    o.net += parseFloat(x["Net P&L"] || 0) || 0; o.legs++;
+  }
+  for (const o of m.values()) o.hit = o.legs > 0 ? reachedPlan(o.net, o.planned) : null;
+  return m;
+}
+
 // ─── Deribit Put/Call Ratio ───────────────────────────────────────────────────
 // P/C > 1.5 = tržište kupuje zaštitu od pada (strah) = potencijalni bottom
 // P/C < 0.5 = previše calls = euforija = potencijalni vrh
@@ -7269,7 +7303,9 @@ export function stClosedTrades(csvText) {
       id, symbol: open[3], side: open[4], date: last[0], time: last[1],
       entry: parseFloat(open[6]), exit: parseFloat(last[6]),
       net: closes.reduce((s, c) => s + (parseFloat(c[9]) || 0), 0), reason,
+      planned: plannedProfit(open[7], open[6], open[11]),
     });
+    const _t = trades[trades.length - 1]; _t.hit = reachedPlan(_t.net, _t.planned);
   }
   return trades.sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
 }
@@ -7357,13 +7393,14 @@ export async function getSupertrendOverview(nowMs = Date.now(), watchlist = _stR
   const symbols = _stRows.rows.map(r => _stView(r, nowMs, _stPriceCache.prices));
   let csv = ""; try { const f = csvFilePath("synapse_t"); if (existsSync(f)) csv = readFileSync(f, "utf8"); } catch { /* bez CSV-a */ }
   const closed = stClosedTrades(csv);
-  const wins = closed.filter(t => t.net > 0).length, net = closed.reduce((s, t) => s + t.net, 0);
+  // 07.10.: "pobjeda" = trade dosegnuo >= 70% planirane dobiti (WR_TARGET_FRAC); trejdovi bez poznatog cilja ne ulaze u WR
+  const wins = closed.filter(t => t.hit === true).length, wrN = closed.filter(t => t.hit !== null).length, net = closed.reduce((s, t) => s + t.net, 0);
   return {
     ts: nowMs, enabled: ST_ENABLED, maxOpen: ST_MAX_OPEN, riskPct: ST_RISK_PCT, rr: ST_RR, slMin: ST_SL_MIN_PCT, slMax: ST_SL_MAX_PCT,
     symbols,
     open: loadPositions("synapse_t").filter(p => p.entryMode === "ST")
       .map(p => ({ symbol: p.symbol, side: p.side, entryPrice: p.entryPrice, sl: p.sl, tp: p.tp, totalUSD: p.totalUSD, openedAt: p.openedAt })),
-    stats: { n: closed.length, wins, winRate: closed.length ? wins / closed.length * 100 : null, net, avg: closed.length ? net / closed.length : null },
+    stats: { n: closed.length, wins, winRate: wrN ? wins / wrN * 100 : null, wrN, net, avg: closed.length ? net / closed.length : null },
     recent: closed.slice(-8).reverse(),
   };
 }

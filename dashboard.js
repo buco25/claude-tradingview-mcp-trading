@@ -21,7 +21,7 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   DEFAULT_COMBO, DEFAULT_MIN_SIG,
   RISK_PCT, RISK_PCT_MIN, RISK_PCT_MAX,
   ADX_MIN, ADX_SOFT_BAND, ADX_SOFT_FLOOR, MOM_SOFT_BAND, MOM_ADX_MIN,
-  MAX_OPEN_CRYPTO, MAX_OPEN_STOCKS, MAX_OPEN_NONCRYPTO, getCapSnapshot, bitgetHeaders, ACCOUNT_START_CAPITAL, getSupertrendOverview } from "./bot.js";
+  MAX_OPEN_CRYPTO, MAX_OPEN_STOCKS, MAX_OPEN_NONCRYPTO, tradePlanOutcomes, reachedPlan, plannedProfit, WR_TARGET_FRAC, getCapSnapshot, bitgetHeaders, ACCOUNT_START_CAPITAL, getSupertrendOverview } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -1108,7 +1108,7 @@ function _buildCsvEntryIndex() {
       const ts = new Date(`${r.Date}T${r["Time (UTC)"]}Z`).getTime();
       if (isNaN(ts)) continue;
       const modeMatch = r.EntryMode || (r.Notes || "").match(/\|\s*([A-Z][A-Z0-9-]*)\s*\|/)?.[1] || "?";
-      entries.push({ symbol: r.Symbol, side: r.Side, ts, tf: pid === "ultra_4h" ? "4H" : "1H", mode: modeMatch, score: _scoreFromSigMask(r.SigMask) });
+      entries.push({ symbol: r.Symbol, side: r.Side, ts, tf: pid === "ultra_4h" ? "4H" : "1H", mode: modeMatch, score: _scoreFromSigMask(r.SigMask), planned: plannedProfit(r["Total USD"], r.Price, r.TP) });
     }
   }
   return entries;
@@ -1173,10 +1173,18 @@ function buildPortfolioStats(pid) {
   const exits = dedupeExitRows(rows.filter(r => r["Side"] === "CLOSE_LONG" || r["Side"] === "CLOSE_SHORT"));
   const entries= rows.filter(r => r["Side"] === "LONG" || r["Side"] === "SHORT");
 
-  const wins     = exits.filter(r => parseFloat(r["Net P&L"] || 0) >= 0);
-  const losses   = exits.filter(r => parseFloat(r["Net P&L"] || 0) < 0);
+  // 07.10., na zahtjev vlasnika: "pobjeda" = trade je dosegnuo >= 70% PLANIRANE dobiti (WR_TARGET_FRAC, vidi tradePlanOutcomes u bot.js),
+  // ne bilo koji Net P&L >= 0 (izlaz na +0.03 $ nije dobitan trade). Trejdovi bez poznatog cilja (stari redci) ne ulaze u WR.
+  // Profit Factor i ukupni P&L i dalje idu po stvarnom predznaku P&L-a.
+  const _plan    = tradePlanOutcomes(entries, exits);
+  const _hit     = r => _plan.get((r["Order ID"] || "").trim())?.hit ?? null;
+  const wins     = exits.filter(r => _hit(r) === true);
+  const losses   = exits.filter(r => _hit(r) === false);
+  const unknownPlan = exits.length - wins.length - losses.length;
+  const posPnl   = exits.filter(r => parseFloat(r["Net P&L"] || 0) >= 0);
+  const negPnl   = exits.filter(r => parseFloat(r["Net P&L"] || 0) < 0);
   const totalPnl = exits.reduce((s, r) => s + parseFloat(r["Net P&L"] || 0), 0);
-  const winRate  = exits.length > 0 ? (wins.length / exits.length * 100).toFixed(1) : null;
+  const winRate  = (wins.length + losses.length) > 0 ? (wins.length / (wins.length + losses.length) * 100).toFixed(1) : null;
   const equity   = startCap + totalPnl;
 
   // P&L curve
@@ -1222,8 +1230,9 @@ function buildPortfolioStats(pid) {
     const sym = r["Symbol"] || "?";
     if (!symbolStats[sym]) symbolStats[sym] = { wins: 0, losses: 0, pnl: 0 };
     const pnl = parseFloat(r["Net P&L"] || 0);
-    if (pnl >= 0) symbolStats[sym].wins++;
-    else          symbolStats[sym].losses++;
+    const h = _hit(r);
+    if (h === true)       symbolStats[sym].wins++;
+    else if (h === false) symbolStats[sym].losses++;
     symbolStats[sym].pnl += pnl;
   }
   // Sortiraj po ukupnom broju tradova
@@ -1234,12 +1243,12 @@ function buildPortfolioStats(pid) {
   // ── Phase 2 stats (od 2026-05-15 = stabilna strategija) ─────────────────────
   const phase2Start   = new Date("2026-07-04T12:00:00Z");  // TraderaEdge/Future rework — novi signali, combo, risk
   const phase2Exits   = exits.filter(r => new Date(`${r["Date"]}T${r["Time (UTC)"] || "00:00:00"}Z`) >= phase2Start);
-  const phase2Wins    = phase2Exits.filter(r => parseFloat(r["Net P&L"] || 0) >= 0);
-  const phase2Losses  = phase2Exits.filter(r => parseFloat(r["Net P&L"] || 0) < 0);
+  const phase2Wins    = phase2Exits.filter(r => _hit(r) === true);
+  const phase2Losses  = phase2Exits.filter(r => _hit(r) === false);
   const phase2Pnl     = phase2Exits.reduce((s, r) => s + parseFloat(r["Net P&L"] || 0), 0);
-  const phase2WR      = phase2Exits.length > 0 ? (phase2Wins.length / phase2Exits.length * 100).toFixed(1) : null;
-  const phase2GrossW  = phase2Wins.reduce((s, r) => s + parseFloat(r["Net P&L"] || 0), 0);
-  const phase2GrossL  = Math.abs(phase2Losses.reduce((s, r) => s + parseFloat(r["Net P&L"] || 0), 0));
+  const phase2WR      = (phase2Wins.length + phase2Losses.length) > 0 ? (phase2Wins.length / (phase2Wins.length + phase2Losses.length) * 100).toFixed(1) : null;
+  const phase2GrossW  = phase2Exits.filter(r => parseFloat(r["Net P&L"] || 0) >= 0).reduce((s, r) => s + parseFloat(r["Net P&L"] || 0), 0);
+  const phase2GrossL  = Math.abs(phase2Exits.filter(r => parseFloat(r["Net P&L"] || 0) < 0).reduce((s, r) => s + parseFloat(r["Net P&L"] || 0), 0));
   const phase2PF      = phase2GrossL > 0 ? (phase2GrossW / phase2GrossL).toFixed(2) : null;
 
   // ── Drawdown (peak-to-trough) ─────────────────────────────────────────────────
@@ -1282,12 +1291,12 @@ function buildPortfolioStats(pid) {
     if (!raw) raw = entryModeBySymbol[r["Symbol"]] || null;
     const isSoft = raw ? raw.endsWith("-SOFT") : false;
     const m      = raw ? (isSoft ? raw.slice(0, -5) : raw) : "UNK";
-    const pnl = parseFloat(r["Net P&L"] || 0);
-    if (pnl >= 0) modeStats[m].wins++;
-    else          modeStats[m].losses++;
+    const h = _hit(r);
+    if (h === true)       modeStats[m].wins++;
+    else if (h === false) modeStats[m].losses++;
     if (raw) {
-      if (pnl >= 0) softStats[isSoft ? "soft" : "normal"].wins++;
-      else          softStats[isSoft ? "soft" : "normal"].losses++;
+      if (h === true)       softStats[isSoft ? "soft" : "normal"].wins++;
+      else if (h === false) softStats[isSoft ? "soft" : "normal"].losses++;
     }
   }
 
@@ -1297,13 +1306,14 @@ function buildPortfolioStats(pid) {
   for (const r of exits) {
     const tf  = r["Portfolio"] === "ultra_4h" ? "4H" : "1H";
     const pnl = parseFloat(r["Net P&L"] || 0);
-    if (pnl >= 0) tfStats[tf].wins++; else tfStats[tf].losses++;
+    const h = _hit(r);
+    if (h === true) tfStats[tf].wins++; else if (h === false) tfStats[tf].losses++;
     tfStats[tf].pnl += pnl;
   }
 
   // ── Profit Factor (sve closed trades) ────────────────────────────────────────
-  const grossWins   = wins.reduce((s, r) => s + parseFloat(r["Net P&L"] || 0), 0);
-  const grossLosses = Math.abs(losses.reduce((s, r) => s + parseFloat(r["Net P&L"] || 0), 0));
+  const grossWins   = posPnl.reduce((s, r) => s + parseFloat(r["Net P&L"] || 0), 0);
+  const grossLosses = Math.abs(negPnl.reduce((s, r) => s + parseFloat(r["Net P&L"] || 0), 0));
   const profitFactor = grossLosses > 0 ? (grossWins / grossLosses).toFixed(2) : null;
 
   // ── Avg trade duration (matchiraj OPEN → CLOSE po simbolu) ───────────────────
@@ -1323,7 +1333,7 @@ function buildPortfolioStats(pid) {
   }
   const avgDurationMin = durCount > 0 ? Math.round(totalDurMs / durCount / 60000) : null;
 
-  return { pid, startCap, rows, exits, entries, wins, losses, totalPnl, winRate, equity, pnlCurve, recentExits, symbolStatsArr,
+  return { pid, startCap, rows, exits, entries, wins, losses, unknownPlan, totalPnl, winRate, equity, pnlCurve, recentExits, symbolStatsArr,
     pnlDay, pnlWeek, pnlMonth, pnlYear, tradesDay, tradesWeek, tradesMonth, tradesYear,
     phase2Exits, phase2Wins, phase2Losses, phase2Pnl, phase2WR, phase2PF,
     maxDrawdownPct, currentDrawdownPct,
@@ -1842,11 +1852,11 @@ function renderHtml(allStats, allPositions, hb, rules = {}, ultra4hPositions = [
       <div class="stat-value" style="color:${pnlCol}">${s.totalPnl >= 0 ? "+" : ""}$${s.totalPnl.toFixed(2)}</div>
     </div>
     <div class="stat-card" style="border-top:3px solid #8b5cf6">
-      <div class="stat-label">Win Rate <span style="font-size:10px;color:#9ca3af">(Bitget live)</span></div>
+      <div class="stat-label">Win Rate <span style="font-size:10px;color:#9ca3af">(Bitget live, ≥70% cilja)</span></div>
       <div class="stat-value" id="bitget-wr" style="color:#8b5cf6">…</div>
       <div class="stat-sub" id="bitget-wr-sub" style="color:#9ca3af"></div>
       <div class="stat-sub" id="bitget-wr-class" style="color:#9ca3af"></div>
-      <div class="stat-sub">CSV: ${s.winRate !== null ? s.winRate + "%" : "—"} (${s.wins.length}W/${s.losses.length}L)</div>
+      <div class="stat-sub">CSV: ${s.winRate !== null ? s.winRate + "%" : "—"} (${s.wins.length}W/${s.losses.length}L, win = ≥${Math.round(WR_TARGET_FRAC * 100)}% cilja${s.unknownPlan ? "; bez cilja: " + s.unknownPlan : ""})</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Otvoreno <span style="font-size:10px;color:#9ca3af">(+ULTRA-4H)</span></div>
@@ -3506,7 +3516,7 @@ async function loadBitgetWR() {
       const col = d.wr >= 50 ? '#059669' : d.wr >= 35 ? '#d97706' : '#dc2626';
       el.textContent = d.wr.toFixed(1) + '%';
       el.style.color = col;
-      sub.textContent = d.wins + 'W / ' + d.losses + 'L · net ' + (d.netSum >= 0 ? '+' : '') + '$' + d.netSum;
+      sub.textContent = d.wins + 'W / ' + d.losses + 'L (>=' + d.targetPct + '% cilja' + (d.unknown ? ', bez cilja: ' + d.unknown : '') + ') · net ' + (d.netSum >= 0 ? '+' : '') + '$' + d.netSum;
       if (cls) {
         const cw = d.cryptoWr, sw = d.stockWr;
         const cwTxt = cw && cw.total > 0 ? cw.wr.toFixed(0) + '% (' + cw.wins + 'W/' + cw.losses + 'L)' : '—';
@@ -4137,10 +4147,17 @@ const server = http.createServer(async (req, res) => {
       const r = await fetch(`${BITGET_BASE}${path}`, { headers: bitgetHeaders("GET", path) });
       const d = await r.json();
       const list   = d?.data?.list ?? [];
-      const rows   = list.map(p => ({ sym: p.symbol, pnl: parseFloat(p.netProfit) })).filter(r => isFinite(r.pnl));
+      // 07.10., na zahtjev vlasnika: "pobjeda" = pozicija je dosegnula >= 70% PLANIRANE dobiti (iz CSV ulaznog retka spojenog po
+      // simbol+strana+vrijeme otvaranja, isti spoj kao /api/bitget-history). Pozicije bez CSV retka (cilj nepoznat) ne ulaze u WR.
+      const _wrIdx = _buildCsvEntryIndex(), _wrUsed = new Set();
+      const rows   = list.slice().sort((a, b) => parseInt(b.utime) - parseInt(a.utime))
+        .map(p => ({ sym: p.symbol, pnl: parseFloat(p.netProfit), meta: _matchCsvMeta(_wrIdx, _wrUsed, p.symbol, p.holdSide, parseInt(p.ctime)) }))
+        .filter(r => isFinite(r.pnl))
+        .map(r => ({ sym: r.sym, pnl: r.pnl, hit: reachedPlan(r.pnl, r.meta?.planned) }));
       const pnls   = rows.map(r => r.pnl);
-      const wins   = pnls.filter(v => v >= 0).length;
-      const losses = pnls.filter(v => v < 0).length;
+      const wins   = rows.filter(r => r.hit === true).length;
+      const losses = rows.filter(r => r.hit === false).length;
+      const unknown = rows.length - wins - losses;
       const total  = wins + losses;
       const wr     = total > 0 ? wins / total * 100 : 0;
       const netSum = pnls.reduce((a, b) => a + b, 0);
@@ -4148,13 +4165,13 @@ const server = http.createServer(async (req, res) => {
       const stockRows  = rows.filter(r => isStockSym(r.sym));
       const cryptoRows = rows.filter(r => !isStockSym(r.sym));
       const _classWr = (rs) => {
-        const w = rs.filter(r => r.pnl >= 0).length, l = rs.filter(r => r.pnl < 0).length, t = w + l;
+        const w = rs.filter(r => r.hit === true).length, l = rs.filter(r => r.hit === false).length, t = w + l;
         return { wins: w, losses: l, total: t, wr: t > 0 ? w / t * 100 : 0 };
       };
       const stockWr  = _classWr(stockRows);
       const cryptoWr = _classWr(cryptoRows);
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: d.code === "00000", error: d.code !== "00000" ? `Bitget ${d.code}: ${d.msg}` : undefined, wins, losses, total, wr, netSum: parseFloat(netSum.toFixed(2)), cryptoWr, stockWr }));
+      res.end(JSON.stringify({ ok: d.code === "00000", error: d.code !== "00000" ? `Bitget ${d.code}: ${d.msg}` : undefined, wins, losses, total, unknown, targetPct: Math.round(WR_TARGET_FRAC * 100), wr, netSum: parseFloat(netSum.toFixed(2)), cryptoWr, stockWr }));
     } catch (e) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: e.message, wins:0, losses:0, total:0, wr:0 }));

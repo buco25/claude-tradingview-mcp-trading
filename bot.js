@@ -1324,37 +1324,46 @@ export function candleContext(candles, dir, entryPrice) {
   return { ctx, distAtr: Number.isFinite(d) ? +d.toFixed(2) : "" };
 }
 
-// ─── WR = trade je "dobitan" samo ako je dosegnuo >= 70% PLANIRANE dobiti (07.10., na zahtjev vlasnika) ───
-// Dotad se "pobjedom" brojao svaki trade s Net P&L >= 0, pa je izlaz na +0.03 $ (break-even/ROE-protect scratch) dizao WR na ~70% dok je
-// sustav gubio (4H od 23.9.: 68% "pobjeda", ali samo 7% trejdova >= 1R i 0% >= 2R). Planirana dobit = Total USD × |TP − cijena ulaza| / cijena
-// ulaza, iz ORIGINALNOG TP-a na ulaznom retku (trail kasnije pomiče TP u izlaznim recima, pa ga ne koristimo). Trade s više izlaznih nogu
-// (partial close) zbraja Net P&L svih nogu. Nepoznata planirana dobit (stari redci bez TP-a / Order ID-a) → null, NE ulazi u WR.
+// ─── Ishod trejda kao u nogometu: POBJEDA / NERIJEŠENO / PORAZ (07.10., na zahtjev vlasnika) ───
+// Dotad se "pobjedom" brojao svaki trade s Net P&L >= 0, pa je izlaz na +0.03 $ (break-even/ROE-protect scratch) držao WR na ~55-75% dok je
+// sustav gubio (4H od 23.9.: 68% "pobjeda", ali samo 7% trejdova >= 1R i 0% >= 2R). Prva ispravka (samo >=70% cilja = pobjeda, sve ostalo
+// poraz) bila je prestroga: trade zatvoren na blagom plusu/minusu nije ni pobjeda ni poraz. Sad:
+//   POBJEDA (W)     Net P&L >= WR_TARGET_FRAC (70%) × PLANIRANE dobiti
+//   PORAZ (L)       Net P&L <= −WR_LOSS_FRAC (70%) × PLANIRANOG gubitka (rizika do SL-a)
+//   NERIJEŠENO (D)  sve između (blagi plus ili minus) — ne računa se ni kao pobjeda ni kao poraz, ali JE u nazivniku WR-a (kao u nogometu)
+// Planirana dobit = Total USD × |TP − ulaz| / ulaz, planirani gubitak = Total USD × |ulaz − SL| / ulaz, oboje iz ORIGINALNOG TP/SL na ulaznom
+// retku (trail/BE kasnije pomiču SL/TP u izlaznim recima, pa se oni NE koriste). Trade s više izlaznih nogu (partial close) zbraja Net P&L svih
+// nogu. Nepoznat plan (stari redci bez TP/SL/Order ID-a) → null, NE ulazi u WR. WR = W / (W + D + L).
 // SAMO prikaz/izvještaj. NAMJERNO se NE koristi u getDynamicAdx / recordSignalOutcome / recordSymbolOutcome / suspenziji simbola:
 // tamo bi WR od ~5-10% okinuo dinamički ADX +5 i 2h pauze (DYN_PAUSE_WR) i ugasio bota.
 export const WR_TARGET_FRAC = 0.7;
+export const WR_LOSS_FRAC = 0.7;
 export function plannedProfit(usd, price, tp) {
   const u = Number(usd), p = Number(price), t = Number(tp);
   if (!(u > 0 && p > 0 && t > 0)) return null;
   return u * Math.abs(t - p) / p;
 }
-export function reachedPlan(netPnl, planned, frac = WR_TARGET_FRAC) {
+export const plannedLoss = plannedProfit;   // ista formula, SL umjesto TP-a
+export function classifyOutcome(netPnl, planned, risk, frac = WR_TARGET_FRAC, lossFrac = WR_LOSS_FRAC) {
   const n = Number(netPnl);
-  if (!(planned > 0) || !Number.isFinite(n)) return null;
-  return n >= frac * planned;
+  if (!Number.isFinite(n) || !(planned > 0) || !(risk > 0)) return null;
+  if (n >= frac * planned) return "W";
+  if (n <= -lossFrac * risk) return "L";
+  return "D";
 }
-// entries/exits: objekti s ključevima headera CSV-a ("Order ID","Total USD","Price","TP","Net P&L") — kao parseCsvFile u dashboardu.
-// exits treba biti već dedupliciran. Vraća Map orderId → { planned, net, hit }.
+// entries/exits: objekti s ključevima headera CSV-a ("Order ID","Total USD","Price","TP","SL","Net P&L") — kao parseCsvFile u dashboardu.
+// exits treba biti već dedupliciran. Vraća Map orderId → { planned, risk, net, legs, result: "W"|"D"|"L"|null }.
 export function tradePlanOutcomes(entries, exits) {
   const m = new Map();
   for (const e of entries ?? []) {
     const id = (e["Order ID"] ?? "").trim(); if (!id) continue;
-    m.set(id, { planned: plannedProfit(e["Total USD"], e["Price"], e["TP"]), net: 0, legs: 0, hit: null });
+    m.set(id, { planned: plannedProfit(e["Total USD"], e["Price"], e["TP"]), risk: plannedLoss(e["Total USD"], e["Price"], e["SL"]), net: 0, legs: 0, result: null });
   }
   for (const x of exits ?? []) {
     const o = m.get((x["Order ID"] ?? "").trim()); if (!o) continue;
     o.net += parseFloat(x["Net P&L"] || 0) || 0; o.legs++;
   }
-  for (const o of m.values()) o.hit = o.legs > 0 ? reachedPlan(o.net, o.planned) : null;
+  for (const o of m.values()) o.result = o.legs > 0 ? classifyOutcome(o.net, o.planned, o.risk) : null;
   return m;
 }
 
@@ -7303,9 +7312,9 @@ export function stClosedTrades(csvText) {
       id, symbol: open[3], side: open[4], date: last[0], time: last[1],
       entry: parseFloat(open[6]), exit: parseFloat(last[6]),
       net: closes.reduce((s, c) => s + (parseFloat(c[9]) || 0), 0), reason,
-      planned: plannedProfit(open[7], open[6], open[11]),
+      planned: plannedProfit(open[7], open[6], open[11]), risk: plannedLoss(open[7], open[6], open[10]),
     });
-    const _t = trades[trades.length - 1]; _t.hit = reachedPlan(_t.net, _t.planned);
+    const _t = trades[trades.length - 1]; _t.result = classifyOutcome(_t.net, _t.planned, _t.risk);
   }
   return trades.sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
 }
@@ -7393,14 +7402,15 @@ export async function getSupertrendOverview(nowMs = Date.now(), watchlist = _stR
   const symbols = _stRows.rows.map(r => _stView(r, nowMs, _stPriceCache.prices));
   let csv = ""; try { const f = csvFilePath("synapse_t"); if (existsSync(f)) csv = readFileSync(f, "utf8"); } catch { /* bez CSV-a */ }
   const closed = stClosedTrades(csv);
-  // 07.10.: "pobjeda" = trade dosegnuo >= 70% planirane dobiti (WR_TARGET_FRAC); trejdovi bez poznatog cilja ne ulaze u WR
-  const wins = closed.filter(t => t.hit === true).length, wrN = closed.filter(t => t.hit !== null).length, net = closed.reduce((s, t) => s + t.net, 0);
+  // 07.10.: pobjeda / neriješeno / poraz (classifyOutcome); trejdovi bez poznatog plana ne ulaze u WR
+  const wins = closed.filter(t => t.result === "W").length, draws = closed.filter(t => t.result === "D").length, lossN = closed.filter(t => t.result === "L").length;
+  const wrN = wins + draws + lossN, net = closed.reduce((s, t) => s + t.net, 0);
   return {
     ts: nowMs, enabled: ST_ENABLED, maxOpen: ST_MAX_OPEN, riskPct: ST_RISK_PCT, rr: ST_RR, slMin: ST_SL_MIN_PCT, slMax: ST_SL_MAX_PCT,
     symbols,
     open: loadPositions("synapse_t").filter(p => p.entryMode === "ST")
       .map(p => ({ symbol: p.symbol, side: p.side, entryPrice: p.entryPrice, sl: p.sl, tp: p.tp, totalUSD: p.totalUSD, openedAt: p.openedAt })),
-    stats: { n: closed.length, wins, winRate: wrN ? wins / wrN * 100 : null, wrN, net, avg: closed.length ? net / closed.length : null },
+    stats: { n: closed.length, wins, draws, losses: lossN, winRate: wrN ? wins / wrN * 100 : null, wrN, net, avg: closed.length ? net / closed.length : null },
     recent: closed.slice(-8).reverse(),
   };
 }

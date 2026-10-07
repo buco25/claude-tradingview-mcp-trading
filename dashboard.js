@@ -21,7 +21,7 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   DEFAULT_COMBO, DEFAULT_MIN_SIG,
   RISK_PCT, RISK_PCT_MIN, RISK_PCT_MAX,
   ADX_MIN, ADX_SOFT_BAND, ADX_SOFT_FLOOR, MOM_SOFT_BAND, MOM_ADX_MIN,
-  MAX_OPEN_CRYPTO, MAX_OPEN_STOCKS, MAX_OPEN_NONCRYPTO, tradePlanOutcomes, reachedPlan, plannedProfit, WR_TARGET_FRAC, getCapSnapshot, bitgetHeaders, ACCOUNT_START_CAPITAL, getSupertrendOverview } from "./bot.js";
+  MAX_OPEN_CRYPTO, MAX_OPEN_STOCKS, MAX_OPEN_NONCRYPTO, tradePlanOutcomes, classifyOutcome, plannedProfit, plannedLoss, WR_TARGET_FRAC, WR_LOSS_FRAC, getCapSnapshot, bitgetHeaders, ACCOUNT_START_CAPITAL, getSupertrendOverview } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -1108,7 +1108,7 @@ function _buildCsvEntryIndex() {
       const ts = new Date(`${r.Date}T${r["Time (UTC)"]}Z`).getTime();
       if (isNaN(ts)) continue;
       const modeMatch = r.EntryMode || (r.Notes || "").match(/\|\s*([A-Z][A-Z0-9-]*)\s*\|/)?.[1] || "?";
-      entries.push({ symbol: r.Symbol, side: r.Side, ts, tf: pid === "ultra_4h" ? "4H" : "1H", mode: modeMatch, score: _scoreFromSigMask(r.SigMask), planned: plannedProfit(r["Total USD"], r.Price, r.TP) });
+      entries.push({ symbol: r.Symbol, side: r.Side, ts, tf: pid === "ultra_4h" ? "4H" : "1H", mode: modeMatch, score: _scoreFromSigMask(r.SigMask), planned: plannedProfit(r["Total USD"], r.Price, r.TP), risk: plannedLoss(r["Total USD"], r.Price, r.SL) });
     }
   }
   return entries;
@@ -1173,18 +1173,20 @@ function buildPortfolioStats(pid) {
   const exits = dedupeExitRows(rows.filter(r => r["Side"] === "CLOSE_LONG" || r["Side"] === "CLOSE_SHORT"));
   const entries= rows.filter(r => r["Side"] === "LONG" || r["Side"] === "SHORT");
 
-  // 07.10., na zahtjev vlasnika: "pobjeda" = trade je dosegnuo >= 70% PLANIRANE dobiti (WR_TARGET_FRAC, vidi tradePlanOutcomes u bot.js),
-  // ne bilo koji Net P&L >= 0 (izlaz na +0.03 $ nije dobitan trade). Trejdovi bez poznatog cilja (stari redci) ne ulaze u WR.
+  // 07.10., na zahtjev vlasnika: ishod kao u nogometu — POBJEDA (>= 70% planirane dobiti), PORAZ (<= −70% planiranog gubitka), sve između je
+  // NERIJEŠENO (vidi classifyOutcome u bot.js). WR = W / (W + D + L). Trejdovi bez poznatog plana (stari redci) ne ulaze u WR.
   // Profit Factor i ukupni P&L i dalje idu po stvarnom predznaku P&L-a.
   const _plan    = tradePlanOutcomes(entries, exits);
-  const _hit     = r => _plan.get((r["Order ID"] || "").trim())?.hit ?? null;
-  const wins     = exits.filter(r => _hit(r) === true);
-  const losses   = exits.filter(r => _hit(r) === false);
-  const unknownPlan = exits.length - wins.length - losses.length;
+  const _res     = r => _plan.get((r["Order ID"] || "").trim())?.result ?? null;   // "W" | "D" | "L" | null
+  const wins     = exits.filter(r => _res(r) === "W");
+  const draws    = exits.filter(r => _res(r) === "D");
+  const losses   = exits.filter(r => _res(r) === "L");
+  const unknownPlan = exits.length - wins.length - draws.length - losses.length;
   const posPnl   = exits.filter(r => parseFloat(r["Net P&L"] || 0) >= 0);
   const negPnl   = exits.filter(r => parseFloat(r["Net P&L"] || 0) < 0);
   const totalPnl = exits.reduce((s, r) => s + parseFloat(r["Net P&L"] || 0), 0);
-  const winRate  = (wins.length + losses.length) > 0 ? (wins.length / (wins.length + losses.length) * 100).toFixed(1) : null;
+  const decided  = wins.length + draws.length + losses.length;
+  const winRate  = decided > 0 ? (wins.length / decided * 100).toFixed(1) : null;
   const equity   = startCap + totalPnl;
 
   // P&L curve
@@ -1228,25 +1230,28 @@ function buildPortfolioStats(pid) {
   const symbolStats = {};
   for (const r of exits) {
     const sym = r["Symbol"] || "?";
-    if (!symbolStats[sym]) symbolStats[sym] = { wins: 0, losses: 0, pnl: 0 };
+    if (!symbolStats[sym]) symbolStats[sym] = { wins: 0, draws: 0, losses: 0, pnl: 0 };
     const pnl = parseFloat(r["Net P&L"] || 0);
-    const h = _hit(r);
-    if (h === true)       symbolStats[sym].wins++;
-    else if (h === false) symbolStats[sym].losses++;
+    const h = _res(r);
+    if (h === "W")      symbolStats[sym].wins++;
+    else if (h === "D") symbolStats[sym].draws++;
+    else if (h === "L") symbolStats[sym].losses++;
     symbolStats[sym].pnl += pnl;
   }
   // Sortiraj po ukupnom broju tradova
   const symbolStatsArr = Object.entries(symbolStats)
-    .map(([sym, s]) => ({ sym, ...s, total: s.wins + s.losses }))
+    .map(([sym, s]) => ({ sym, ...s, total: s.wins + s.draws + s.losses }))
     .sort((a, b) => b.total - a.total);
 
   // ── Phase 2 stats (od 2026-05-15 = stabilna strategija) ─────────────────────
   const phase2Start   = new Date("2026-07-04T12:00:00Z");  // TraderaEdge/Future rework — novi signali, combo, risk
   const phase2Exits   = exits.filter(r => new Date(`${r["Date"]}T${r["Time (UTC)"] || "00:00:00"}Z`) >= phase2Start);
-  const phase2Wins    = phase2Exits.filter(r => _hit(r) === true);
-  const phase2Losses  = phase2Exits.filter(r => _hit(r) === false);
+  const phase2Wins    = phase2Exits.filter(r => _res(r) === "W");
+  const phase2Draws   = phase2Exits.filter(r => _res(r) === "D");
+  const phase2Losses  = phase2Exits.filter(r => _res(r) === "L");
   const phase2Pnl     = phase2Exits.reduce((s, r) => s + parseFloat(r["Net P&L"] || 0), 0);
-  const phase2WR      = (phase2Wins.length + phase2Losses.length) > 0 ? (phase2Wins.length / (phase2Wins.length + phase2Losses.length) * 100).toFixed(1) : null;
+  const _p2dec        = phase2Wins.length + phase2Draws.length + phase2Losses.length;
+  const phase2WR      = _p2dec > 0 ? (phase2Wins.length / _p2dec * 100).toFixed(1) : null;
   const phase2GrossW  = phase2Exits.filter(r => parseFloat(r["Net P&L"] || 0) >= 0).reduce((s, r) => s + parseFloat(r["Net P&L"] || 0), 0);
   const phase2GrossL  = Math.abs(phase2Exits.filter(r => parseFloat(r["Net P&L"] || 0) < 0).reduce((s, r) => s + parseFloat(r["Net P&L"] || 0), 0));
   const phase2PF      = phase2GrossL > 0 ? (phase2GrossW / phase2GrossL).toFixed(2) : null;
@@ -1272,8 +1277,8 @@ function buildPortfolioStats(pid) {
   // — prije su ovi tiho padali u UNK jer regex nije prepoznavao te vrijednosti. NAPOMENA:
   // "-SOFT" se strippa kao SUFIKS (slice, ne split("-")) jer "VA-REV" sam sadrži crticu —
   // split("-")[0] bi ga pogrešno skratio na "VA".
-  const modeStats = { PBK: { wins: 0, losses: 0 }, MOM: { wins: 0, losses: 0 }, SWEEP: { wins: 0, losses: 0 }, RANGE: { wins: 0, losses: 0 }, "VA-REV": { wins: 0, losses: 0 }, UNK: { wins: 0, losses: 0 } };
-  const softStats = { soft: { wins: 0, losses: 0 }, normal: { wins: 0, losses: 0 } };  // NEW 08.09.: soft-zone vs normal WR
+  const modeStats = { PBK: { wins: 0, draws: 0, losses: 0 }, MOM: { wins: 0, draws: 0, losses: 0 }, SWEEP: { wins: 0, draws: 0, losses: 0 }, RANGE: { wins: 0, draws: 0, losses: 0 }, "VA-REV": { wins: 0, draws: 0, losses: 0 }, UNK: { wins: 0, draws: 0, losses: 0 } };
+  const softStats = { soft: { wins: 0, draws: 0, losses: 0 }, normal: { wins: 0, draws: 0, losses: 0 } };  // NEW 08.09.: soft-zone vs normal WR
   const _modeRe = /\|\s*(MOM|PBK|SWEEP|RANGE|VA-REV)(-SOFT)?\s*\|/;
   // Build lookup: symbol → entryMode iz entry redova (za stari CSV bez entryMode u exit Notes)
   const entryModeBySymbol = {};
@@ -1291,23 +1296,22 @@ function buildPortfolioStats(pid) {
     if (!raw) raw = entryModeBySymbol[r["Symbol"]] || null;
     const isSoft = raw ? raw.endsWith("-SOFT") : false;
     const m      = raw ? (isSoft ? raw.slice(0, -5) : raw) : "UNK";
-    const h = _hit(r);
-    if (h === true)       modeStats[m].wins++;
-    else if (h === false) modeStats[m].losses++;
-    if (raw) {
-      if (h === true)       softStats[isSoft ? "soft" : "normal"].wins++;
-      else if (h === false) softStats[isSoft ? "soft" : "normal"].losses++;
+    const h = _res(r);
+    const _key = h === "W" ? "wins" : h === "D" ? "draws" : h === "L" ? "losses" : null;
+    if (_key) {
+      modeStats[m][_key]++;
+      if (raw) softStats[isSoft ? "soft" : "normal"][_key]++;
     }
   }
 
   // ── WR by TF (1H glavni bot / 4H ULTRA-4H) — 18.09., na zahtjev ──────────────
   // Portfolio kolona u CSV-u vec kaze odakle red dolazi (synapse_t vs ultra_4h).
-  const tfStats = { "1H": { wins: 0, losses: 0, pnl: 0 }, "4H": { wins: 0, losses: 0, pnl: 0 } };
+  const tfStats = { "1H": { wins: 0, draws: 0, losses: 0, pnl: 0 }, "4H": { wins: 0, draws: 0, losses: 0, pnl: 0 } };
   for (const r of exits) {
     const tf  = r["Portfolio"] === "ultra_4h" ? "4H" : "1H";
     const pnl = parseFloat(r["Net P&L"] || 0);
-    const h = _hit(r);
-    if (h === true) tfStats[tf].wins++; else if (h === false) tfStats[tf].losses++;
+    const h = _res(r);
+    if (h === "W") tfStats[tf].wins++; else if (h === "D") tfStats[tf].draws++; else if (h === "L") tfStats[tf].losses++;
     tfStats[tf].pnl += pnl;
   }
 
@@ -1333,9 +1337,9 @@ function buildPortfolioStats(pid) {
   }
   const avgDurationMin = durCount > 0 ? Math.round(totalDurMs / durCount / 60000) : null;
 
-  return { pid, startCap, rows, exits, entries, wins, losses, unknownPlan, totalPnl, winRate, equity, pnlCurve, recentExits, symbolStatsArr,
+  return { pid, startCap, rows, exits, entries, wins, draws, losses, unknownPlan, totalPnl, winRate, equity, pnlCurve, recentExits, symbolStatsArr,
     pnlDay, pnlWeek, pnlMonth, pnlYear, tradesDay, tradesWeek, tradesMonth, tradesYear,
-    phase2Exits, phase2Wins, phase2Losses, phase2Pnl, phase2WR, phase2PF,
+    phase2Exits, phase2Wins, phase2Draws, phase2Losses, phase2Pnl, phase2WR, phase2PF,
     maxDrawdownPct, currentDrawdownPct,
     modeStats, softStats, profitFactor, avgDurationMin, tfStats };
 }
@@ -1592,6 +1596,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}, ultra4hPositions = [
       return `<tr>
         <td style="font-weight:700;color:#f9fafb">${sym.sym.replace("USDT","")}</td>
         <td style="color:#059669;font-weight:700">${sym.wins}W</td>
+        <td style="color:#9ca3af;font-weight:700">${sym.draws}N</td>
         <td style="color:#dc2626;font-weight:700">${sym.losses}L</td>
         <td style="color:${wrCol};font-weight:700">${wr}%</td>
         <td style="width:80px">${bar}</td>
@@ -1608,7 +1613,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}, ultra4hPositions = [
       <div id="collbody-wl" style="display:none">
         <div class="table-wrap">
           <table class="trade-table">
-            <thead><tr><th>Coin</th><th>W</th><th>L</th><th>WR</th><th></th><th>P&amp;L</th></tr></thead>
+            <thead><tr><th>Coin</th><th>W</th><th>N</th><th>L</th><th>WR</th><th></th><th>P&amp;L</th></tr></thead>
             <tbody>${symRows}</tbody>
           </table>
         </div>
@@ -1852,11 +1857,11 @@ function renderHtml(allStats, allPositions, hb, rules = {}, ultra4hPositions = [
       <div class="stat-value" style="color:${pnlCol}">${s.totalPnl >= 0 ? "+" : ""}$${s.totalPnl.toFixed(2)}</div>
     </div>
     <div class="stat-card" style="border-top:3px solid #8b5cf6">
-      <div class="stat-label">Win Rate <span style="font-size:10px;color:#9ca3af">(Bitget live, ≥70% cilja)</span></div>
+      <div class="stat-label">Win Rate <span style="font-size:10px;color:#9ca3af">(Bitget live, W/N/L)</span></div>
       <div class="stat-value" id="bitget-wr" style="color:#8b5cf6">…</div>
       <div class="stat-sub" id="bitget-wr-sub" style="color:#9ca3af"></div>
       <div class="stat-sub" id="bitget-wr-class" style="color:#9ca3af"></div>
-      <div class="stat-sub">CSV: ${s.winRate !== null ? s.winRate + "%" : "—"} (${s.wins.length}W/${s.losses.length}L, win = ≥${Math.round(WR_TARGET_FRAC * 100)}% cilja${s.unknownPlan ? "; bez cilja: " + s.unknownPlan : ""})</div>
+      <div class="stat-sub">CSV: ${s.winRate !== null ? s.winRate + "%" : "—"} (${s.wins.length}W/${s.draws.length}N/${s.losses.length}L; W ≥${Math.round(WR_TARGET_FRAC * 100)}% cilja, L ≤ −${Math.round(WR_LOSS_FRAC * 100)}% rizika, N = između${s.unknownPlan ? "; bez cilja: " + s.unknownPlan : ""})</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Otvoreno <span style="font-size:10px;color:#9ca3af">(+ULTRA-4H)</span></div>
@@ -2363,15 +2368,15 @@ window.toggleScanFilter = function(btn) {
     const pfAllCol = pf === null ? "#9ca3af" : parseFloat(pf) >= 1.5 ? "#059669" : parseFloat(pf) >= 1 ? "#d97706" : "#dc2626";
     const dur    = p2.avgDurationMin;
     const durStr = dur === null ? "—" : dur >= 60 ? `${(dur/60).toFixed(1)}h` : `${dur}min`;
-    const pbkT   = p2.modeStats.PBK.wins + p2.modeStats.PBK.losses;
-    const momT   = p2.modeStats.MOM.wins + p2.modeStats.MOM.losses;
+    const pbkT   = p2.modeStats.PBK.wins + p2.modeStats.PBK.draws + p2.modeStats.PBK.losses;
+    const momT   = p2.modeStats.MOM.wins + p2.modeStats.MOM.draws + p2.modeStats.MOM.losses;
     const pbkWR  = pbkT > 0 ? Math.round(p2.modeStats.PBK.wins / pbkT * 100) : null;
     const momWR  = momT > 0 ? Math.round(p2.modeStats.MOM.wins / momT * 100) : null;
     const pbkCol = pbkWR === null ? "#9ca3af" : pbkWR >= 50 ? "#059669" : pbkWR >= 35 ? "#d97706" : "#dc2626";
     const momCol = momWR === null ? "#9ca3af" : momWR >= 50 ? "#059669" : momWR >= 35 ? "#d97706" : "#dc2626";
     // ADX/MOM soft-zone WR (08.09.) — provjera radi li omekšani gate ili samo dodaje gubitke
-    const softT   = p2.softStats.soft.wins + p2.softStats.soft.losses;
-    const normT   = p2.softStats.normal.wins + p2.softStats.normal.losses;
+    const softT   = p2.softStats.soft.wins + p2.softStats.soft.draws + p2.softStats.soft.losses;
+    const normT   = p2.softStats.normal.wins + p2.softStats.normal.draws + p2.softStats.normal.losses;
     const softWR  = softT > 0 ? Math.round(p2.softStats.soft.wins / softT * 100) : null;
     const normWR  = normT > 0 ? Math.round(p2.softStats.normal.wins / normT * 100) : null;
     const softCol = softWR === null ? "#9ca3af" : softWR >= 50 ? "#059669" : softWR >= 35 ? "#d97706" : "#dc2626";
@@ -2387,7 +2392,7 @@ window.toggleScanFilter = function(btn) {
       <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px;text-align:center">
         <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">Win Rate</div>
         <div style="font-size:24px;font-weight:800;color:${p2col}">${p2wr !== null ? p2wr + "%" : "—"}</div>
-        <div style="font-size:11px;color:#9ca3af">${p2.phase2Wins.length}W / ${p2.phase2Losses.length}L</div>
+        <div style="font-size:11px;color:#9ca3af">${p2.phase2Wins.length}W / ${p2.phase2Draws.length}N / ${p2.phase2Losses.length}L</div>
       </div>
 
       <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px;text-align:center">
@@ -2440,7 +2445,7 @@ window.toggleScanFilter = function(btn) {
 
       ${(() => {
         const t1 = p2.tfStats["1H"], t4 = p2.tfStats["4H"];
-        const t1T = t1.wins + t1.losses, t4T = t4.wins + t4.losses;
+        const t1T = t1.wins + t1.draws + t1.losses, t4T = t4.wins + t4.draws + t4.losses;
         const t1WR = t1T > 0 ? Math.round(t1.wins / t1T * 100) : null;
         const t4WR = t4T > 0 ? Math.round(t4.wins / t4T * 100) : null;
         const t1Col = t1WR === null ? "#9ca3af" : t1WR >= 50 ? "#059669" : t1WR >= 35 ? "#d97706" : "#dc2626";
@@ -3484,7 +3489,7 @@ async function loadSupertrend() {
     }
     var st = d.stats;
     h += '<div style="margin-top:10px;font-size:12px;color:#94a3b8"><b style="color:#22d3ee">Zatvoreno ST tradeova:</b> ' + st.n
-      + (st.n ? ' · WR ' + stNum(st.winRate, 0) + '% · neto <b style="color:' + (st.net >= 0 ? '#059669' : '#dc2626') + '">' + (st.net >= 0 ? '+' : '') + '$' + stNum(st.net, 2) + '</b> · prosj. ' + (st.avg >= 0 ? '+' : '') + '$' + stNum(st.avg, 2) + ' po tradeu' : ' (još nijedan — strategija tek počinje)') + '</div>';
+      + (st.n ? ' · WR ' + stNum(st.winRate, 0) + '% (' + st.wins + 'W/' + st.draws + 'N/' + st.losses + 'L) · neto <b style="color:' + (st.net >= 0 ? '#059669' : '#dc2626') + '">' + (st.net >= 0 ? '+' : '') + '$' + stNum(st.net, 2) + '</b> · prosj. ' + (st.avg >= 0 ? '+' : '') + '$' + stNum(st.avg, 2) + ' po tradeu' : ' (još nijedan — strategija tek počinje)') + '</div>';
     if (d.recent.length) {
       h += '<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:6px"><thead><tr style="color:#64748b;text-align:left"><th style="padding:3px 6px">Zatvoreno</th><th>Simbol</th><th>Smjer</th><th>Ulaz → izlaz</th><th>Neto</th><th>Razlog</th></tr></thead><tbody>';
       d.recent.forEach(function(t) {
@@ -3516,11 +3521,11 @@ async function loadBitgetWR() {
       const col = d.wr >= 50 ? '#059669' : d.wr >= 35 ? '#d97706' : '#dc2626';
       el.textContent = d.wr.toFixed(1) + '%';
       el.style.color = col;
-      sub.textContent = d.wins + 'W / ' + d.losses + 'L (>=' + d.targetPct + '% cilja' + (d.unknown ? ', bez cilja: ' + d.unknown : '') + ') · net ' + (d.netSum >= 0 ? '+' : '') + '$' + d.netSum;
+      sub.textContent = d.wins + 'W / ' + d.draws + 'N / ' + d.losses + 'L (W >=' + d.targetPct + '% cilja, L <= -' + d.lossPct + '% rizika, N = između' + (d.unknown ? '; bez cilja: ' + d.unknown : '') + ') · net ' + (d.netSum >= 0 ? '+' : '') + '$' + d.netSum;
       if (cls) {
         const cw = d.cryptoWr, sw = d.stockWr;
-        const cwTxt = cw && cw.total > 0 ? cw.wr.toFixed(0) + '% (' + cw.wins + 'W/' + cw.losses + 'L)' : '—';
-        const swTxt = sw && sw.total > 0 ? sw.wr.toFixed(0) + '% (' + sw.wins + 'W/' + sw.losses + 'L)' : '—';
+        const cwTxt = cw && cw.total > 0 ? cw.wr.toFixed(0) + '% (' + cw.wins + 'W/' + cw.draws + 'N/' + cw.losses + 'L)' : '—';
+        const swTxt = sw && sw.total > 0 ? sw.wr.toFixed(0) + '% (' + sw.wins + 'W/' + sw.draws + 'N/' + sw.losses + 'L)' : '—';
         cls.textContent = 'Kripto ' + cwTxt + ' · Dionice ' + swTxt;
       }
     } else {
@@ -4153,25 +4158,26 @@ const server = http.createServer(async (req, res) => {
       const rows   = list.slice().sort((a, b) => parseInt(b.utime) - parseInt(a.utime))
         .map(p => ({ sym: p.symbol, pnl: parseFloat(p.netProfit), meta: _matchCsvMeta(_wrIdx, _wrUsed, p.symbol, p.holdSide, parseInt(p.ctime)) }))
         .filter(r => isFinite(r.pnl))
-        .map(r => ({ sym: r.sym, pnl: r.pnl, hit: reachedPlan(r.pnl, r.meta?.planned) }));
+        .map(r => ({ sym: r.sym, pnl: r.pnl, res: classifyOutcome(r.pnl, r.meta?.planned, r.meta?.risk) }));
       const pnls   = rows.map(r => r.pnl);
-      const wins   = rows.filter(r => r.hit === true).length;
-      const losses = rows.filter(r => r.hit === false).length;
-      const unknown = rows.length - wins - losses;
-      const total  = wins + losses;
+      const wins   = rows.filter(r => r.res === "W").length;
+      const draws  = rows.filter(r => r.res === "D").length;
+      const losses = rows.filter(r => r.res === "L").length;
+      const unknown = rows.length - wins - draws - losses;
+      const total  = wins + draws + losses;
       const wr     = total > 0 ? wins / total * 100 : 0;
       const netSum = pnls.reduce((a, b) => a + b, 0);
       // Razdvoji kripto/metali vs dionice (14.09.: korisnik trazio zaseban WR po klasi)
       const stockRows  = rows.filter(r => isStockSym(r.sym));
       const cryptoRows = rows.filter(r => !isStockSym(r.sym));
       const _classWr = (rs) => {
-        const w = rs.filter(r => r.hit === true).length, l = rs.filter(r => r.hit === false).length, t = w + l;
-        return { wins: w, losses: l, total: t, wr: t > 0 ? w / t * 100 : 0 };
+        const w = rs.filter(r => r.res === "W").length, dr = rs.filter(r => r.res === "D").length, l = rs.filter(r => r.res === "L").length, t = w + dr + l;
+        return { wins: w, draws: dr, losses: l, total: t, wr: t > 0 ? w / t * 100 : 0 };
       };
       const stockWr  = _classWr(stockRows);
       const cryptoWr = _classWr(cryptoRows);
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: d.code === "00000", error: d.code !== "00000" ? `Bitget ${d.code}: ${d.msg}` : undefined, wins, losses, total, unknown, targetPct: Math.round(WR_TARGET_FRAC * 100), wr, netSum: parseFloat(netSum.toFixed(2)), cryptoWr, stockWr }));
+      res.end(JSON.stringify({ ok: d.code === "00000", error: d.code !== "00000" ? `Bitget ${d.code}: ${d.msg}` : undefined, wins, draws, losses, total, unknown, targetPct: Math.round(WR_TARGET_FRAC * 100), lossPct: Math.round(WR_LOSS_FRAC * 100), wr, netSum: parseFloat(netSum.toFixed(2)), cryptoWr, stockWr }));
     } catch (e) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: e.message, wins:0, losses:0, total:0, wr:0 }));

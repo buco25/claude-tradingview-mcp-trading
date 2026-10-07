@@ -241,15 +241,21 @@ SE broje (isti 1H brojač, BTC izuzet). Ne zaobilazi per-scan strop ni apsolutne
   donjem-srednjem dijelu raspona (p 0.2-0.4) +0.16R, u gornjoj petini −0.04R, na samom dnu (p<0.2) −0.01R (noževi koji padaju) — efekt
   stvaran ali malen (~0.2R) i sam po sebi ne pretvara strategiju u profitabilnu. Nije implementirano kao filter.
 
-## WR = trade dosegnuo >= 70% PLANIRANE dobiti (07.10., odluka vlasnika)
+## Ishod trejda kao u nogometu: POBJEDA / NERIJEŠENO / PORAZ (07.10., odluka vlasnika)
 
-Prije se "pobjedom" brojao svaki trade s Net P&L >= 0, pa je izlaz na +0.03 $ (BE/ROE-protect scratch) držao WR na ~55-75% dok je sustav
-gubio. Sad je pobjeda samo trade koji je dosegnuo `WR_TARGET_FRAC` (0.7) × planirane dobiti: `plannedProfit(usd, price, tp)` = Total USD × |TP − ulaz| / ulaz,
-iz ORIGINALNOG TP-a na ulaznom retku (trail kasnije pomiče TP u izlaznim recima, pa se on NE koristi); noge partial closea se zbrajaju po Order ID-u
-(`tradePlanOutcomes`, `reachedPlan`). Trejdovi bez poznatog cilja (stari redci) → `null`, ne ulaze u WR (broji se "bez cilja"). Primjenjeno u
-`buildPortfolioStats` (WR, per-simbol, PBK/MOM, soft/normal, 1H/4H, phase2), `/api/bitget-wr` (spoj s CSV-om po simbol+strana+vrijeme otvaranja kao
-`/api/bitget-history`; pozicije bez CSV retka ne ulaze) i ST statistici. **Profit Factor, ukupni P&L i krivulja i dalje idu po stvarnom predznaku P&L-a.**
-Stvarni brojevi (CSV do 7.10.): 4H 6.2% (6 od 97; bilo 75.3%), 1H 7.3% (38 od 518; bilo 52.2%).
+Prije se "pobjedom" brojao svaki trade s Net P&L >= 0, pa je izlaz na +0.03 $ (BE/ROE-protect scratch) držao WR na ~55-75% dok je sustav gubio.
+Prva ispravka (samo >=70% cilja = pobjeda, sve ostalo poraz) bila je prestroga. Sad (`classifyOutcome` u bot.js):
+- **POBJEDA (W):** Net P&L >= `WR_TARGET_FRAC` (0.7) × PLANIRANE dobiti
+- **PORAZ (L):** Net P&L <= −`WR_LOSS_FRAC` (0.7) × PLANIRANOG gubitka (rizik do SL-a)
+- **NERIJEŠENO (D, na dashboardu "N"):** sve između — blagi plus ili minus; nije ni pobjeda ni poraz, ALI je u nazivniku: **WR = W / (W + N + L)**.
+
+Planirana dobit = Total USD × |TP − ulaz| / ulaz, planirani gubitak = Total USD × |ulaz − SL| / ulaz, iz ORIGINALNOG TP/SL na ulaznom retku
+(trail/BE pomiču SL/TP u izlaznim recima, pa se oni NE koriste); noge partial closea se zbrajaju po Order ID-u (`tradePlanOutcomes`). Trejdovi
+bez poznatog plana (stari redci bez TP/SL) → `null`, ne ulaze u WR (dashboard piše "bez cilja: N"). Primjenjeno u `buildPortfolioStats` (WR,
+per-simbol, PBK/MOM, soft/normal, 1H/4H, phase2), `/api/bitget-wr` (spoj s CSV-om po simbol+strana+vrijeme otvaranja kao `/api/bitget-history`) i ST
+statistici. **Profit Factor, ukupni P&L i krivulja i dalje idu po stvarnom predznaku P&L-a.** Praga su dvije konstante; promjena praga = promjena
+brojeva na dashboardu, ne ponašanja bota.
+Stvarni brojevi (CSV do 7.10.): 4H 6W / 68N / 23L (WR 6.2%, "bez poraza" 76%); 1H 38W / 290N / 190L (+109 bez plana; WR 7.3%, "bez poraza" 63%).
 **NAMJERNO NIJE promijenjeno** (to su petlje koje utječu na trgovanje, ne prikaz): `getDynamicAdx` (WR<35% → ADX +3, WR<25% → +5, WR<20% → 2h pauza),
 `recordSignalOutcome`, `recordSymbolOutcome` i suspenzija simbola. Kad bi one koristile ovaj WR (~7%), dinamički ADX bi stalno bio +5 a pauza stalno
 aktivna — bot bi stao. Mijenjaš li ih, to je odluka o strategiji, ne o prikazu.

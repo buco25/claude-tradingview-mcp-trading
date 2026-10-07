@@ -34,6 +34,9 @@ export const ACCOUNT_START_CAPITAL = 296.99;
 // metodologijom): WR 78-81%, R:R ~1:1, Total P&L pozitivan 7 dana zaredom. Uvjet iz
 // starog komentara (20.07.) ispunjen → vraćeno na 1.0/1.5/2.0 kako je i planirano.
 export const RISK_PCT      = 1.5;    // bazni % banke po tradeu
+// 07.10., na zahtjev vlasnika: 4H rizik po tradeu na POLA (1.5% -> 0.75%) dok 4H ulazi ne pokažu pozitivno očekivanje (simulacija izlaza
+// na 100 stvarnih 4H ulaza: čisti SL/TP −0.26R/trade, pogoršanje kroz vrijeme). Vraćanje = vratiti na RISK_PCT.
+export const RISK_PCT_4H   = 0.75;
 export const RISK_PCT_MIN  = 1.0;    // minimalni setup
 export const RISK_PCT_MAX  = 2.0;    // jak setup (score ≥ comboMinSig+2)
 // 01.10., VRAĆENO NA 1.0 (bilo 0.5 par sati ranije) — daljnja analiza je pokazala da 1H
@@ -59,29 +62,30 @@ const STRONG_SIGNAL_SCORE = 9;    // nekorišten za TP (zadržan za eventualne f
 const STRONG_TP_MULT      = 3.0;  // jako tržište → TP = SL × 3 (1:3 R:R)
 const NORMAL_TP_MULT      = 2.0;  // konsolidacija / neutralno → TP = SL × 2.0 (1:2 R:R min, TraderaEdge standard)
 const MAX_TRADES_PER_DAY = 100;
-// max otvorenih kripto pozicija preko OBJE strategije (01.10.: 7->8, na zahtjev; 06.10.: 8->13 = MAX_OPEN_1H 5 + MAX_OPEN_4H 8, na zahtjev vlasnika)
-export const MAX_OPEN_CRYPTO = 13;
+// max otvorenih kripto pozicija preko OBJE strategije (01.10.: 7->8, na zahtjev; 06.10. kratko 8->13, 07.10. VRAĆENO na 8: vidi MAX_OPEN_1H)
+export const MAX_OPEN_CRYPTO = 8;
 // 01.10., na zahtjev: VIP produžetak ukinut (jednak bazi) — nakon analize rujna koja je
 // pokazala da 1H strukturno podbacuje, caps su sad strogi brojevi, bez iznimke za jake
 // signale dok se ne razjasni 1H problem. Kod VIP grane ostaje netaknut (inertan je kad su
 // ova dva broja jednaka), lako se vraća ako se poslije odluci da VIP treba headroom.
-export const MAX_OPEN_CRYPTO_VIP = 13;   // 06.10.: 8 -> 13, ostaje jednak bazi (VIP grana inertna)
+export const MAX_OPEN_CRYPTO_VIP = 8;   // 07.10.: vraćeno 13 -> 8, ostaje jednak bazi (VIP grana inertna)
 export const MAX_OPEN_STOCKS = 4;  // (01.10.: 2->4, na zahtjev)
 // 01.10., na zahtjev: strogo po strategiji, NE derivirano iz crypto+stocks (8+4=12 bi bilo
 // previse) — stvarni ukupni strop je 3(1H)+8(4H)=11, jer 1H MAX_OPEN_1H (3) i 4H MAX_OPEN_4H
 // (8) vezu zajedno strozi od klasnih (crypto/stock) capova. Vidi MAX_OPEN_1H/MAX_OPEN_4H niže
 // i provjere u run()/runUltra4hStrategy() koje ih primjenjuju PO STRATEGIJI, odvojeno od
 // ovog ukupnog broja koji ostaje kao vanjska sigurnosna granica.
-// 06.10., na zahtjev vlasnika: 11 -> 13 (= MAX_OPEN_1H 5 + MAX_OPEN_4H 8). Vikend ostaje WEEKEND_MAX_OPEN (5).
-const MAX_OPEN_PER_PORTFOLIO = 13;
+// 07.10., na zahtjev vlasnika: vraćeno 13 -> 11 (= MAX_OPEN_1H 3 + MAX_OPEN_4H 8). Vikend ostaje WEEKEND_MAX_OPEN (5).
+const MAX_OPEN_PER_PORTFOLIO = 11;
 // 01.10., na zahtjev — nakon analize rujna (47.5% WR / -$39.53 na 1H vs 77.1% WR / +$57.86
 // na 4H, cijeli mjesec, na svim score razinama): dok se ne razjasni ZAŠTO 1H strukturno
 // podbacuje, njegova ukupna izlozenost je ostro ogranicena, a 4H (dokazano bolji) dobiva
 // vecinu prostora. Provjerava se PO STRATEGIJI (loadPositions(pid).length), odvojeno od
 // kombiniranih crypto/stock capova iznad.
-// 06.10., na zahtjev vlasnika: 3 -> 5 (uz strop MAX_NEW_ENTRIES_PER_1H_CANDLE po svijeći). Kripto cap (8, zajednički s 4H),
-// istosmjerni (4), sektor i ukupni rizik (20%) ostaju — oni i dalje vežu prije ovog broja kad je 4H pun.
-export const MAX_OPEN_1H = 5;
+// 06.10. podignuto 3 -> 5, 07.10. VRAĆENO na 3 (odluka vlasnika): simulacija izlaza na 100 stvarnih 4H ulaza pokazala je negativno
+// očekivanje ulaza (čisti SL/TP 2.5R: TP 15%, pun SL 66%, −0.26R/trade; 1.-7.10. TP 4%, SL 79%), pa se izloženost ne povećava
+// dok strategija ne pokaže pozitivno očekivanje. Strop po svijeći (MAX_NEW_ENTRIES_PER_1H_CANDLE) ostaje.
+export const MAX_OPEN_1H = 3;
 export const MAX_OPEN_4H = 8;
 // 01.10., na zahtjev — kirurški rez umjesto blanket 1H kazne (vidi RISK_MULT_1H povijest
 // iznad): ovi simboli trguju SAMO na 1H i dosljedno su gubili cijeli rujan (TSLA 14% WR,
@@ -6834,7 +6838,7 @@ export async function runUltra4hStrategy() {
       const _eq4       = await equityForSizing(ULTRA4H_PID);
       if (_eq4.equity == null) { console.log(`  ⚠️  [ULTRA-4H] ${symbol} — stanje računa nepoznato (${_eq4.src}) → preskačem ulaz`); continue; }
       const equity     = _eq4.equity;
-      const riskAmount = equity * (RISK_PCT / 100);
+      const riskAmount = equity * (RISK_PCT_4H / 100);
       let notional = riskAmount / (sig.slPct / 100);
 
       // Makro size multiplikatori — isto kao synapse_t, umjesto blokade smanjujemo poziciju
@@ -6878,7 +6882,7 @@ export async function runUltra4hStrategy() {
       const margin = notional / lev;
       const score = sig.signal === "LONG" ? sig.bullScore : sig.bearScore;
 
-      console.log(`  🎯 [ULTRA-4H] ${symbol} ${sig.signal} @ ${fmtPrice(sig.price)} | SL ${fmtPrice(sig.sl)} TP ${fmtPrice(sig.tp)} | score ${score}/8 | rizik $${riskAmount.toFixed(2)} (${RISK_PCT}% od $${equity.toFixed(2)} [${_eq4.src}]) → margin $${margin.toFixed(2)} × ${lev}x`);
+      console.log(`  🎯 [ULTRA-4H] ${symbol} ${sig.signal} @ ${fmtPrice(sig.price)} | SL ${fmtPrice(sig.sl)} TP ${fmtPrice(sig.tp)} | score ${score}/8 | rizik $${riskAmount.toFixed(2)} (${RISK_PCT_4H}% od $${equity.toFixed(2)} [${_eq4.src}]) → margin $${margin.toFixed(2)} × ${lev}x`);
       const result = await placeBitGetOrder(symbol, sig.signal, notional, sig.price, sig.sl, sig.tp, sig.slPct, sig.tpPct, lev);
       _newEntriesThisU4hScan++;
       u4hCandleEntryAdded(Date.now(), loadPositions(ULTRA4H_PID));

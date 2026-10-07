@@ -34,8 +34,8 @@ ok(u4hCandleCapLogOnce() === true && u4hCandleCapLogOnce() === false, "poruka o 
 u4hCandleEntries(at(8, 4), []);
 ok(u4hCandleCapLogOnce() === true, "u iducoj svijeci opet moze jednom");
 
-// ── 1H (06.10., MAX_OPEN_1H 3 -> 5 + strop 2 po 1H svijeci) ──
-ok(MAX_OPEN_1H === 5 && CAP1 === 2, "1H: max 5 otvorenih, strop 2 ulaza po 1H svijeci");
+// ── 1H (06.10. strop 2 po 1H svijeci; MAX_OPEN_1H vraćen na 3 dana 07.10.) ──
+ok(MAX_OPEN_1H === 3 && CAP1 === 2, "1H: max 3 otvorenih (vraceno s 5), strop 2 ulaza po 1H svijeci");
 {
   let p1 = [];
   ok(h1CandleEntries(at(9, 10, 1), p1) === 0, "1H: nova svijeca -> 0");

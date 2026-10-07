@@ -229,13 +229,17 @@ SE broje (isti 1H brojač, BTC izuzet). Ne zaobilazi per-scan strop ni apsolutne
 
 - **Dokaz za 4H:** ultra_4h.csv, svijeće s >=3 ulaza −34 $, s 1-2 ulaza +73 $; simulacija "prva 2 po svijeći" +51 $ naspram +39 $ bez
   stropa (97 tradeova, dio P&L-a procijenjen, premalen uzorak — prati).
-- **`MAX_OPEN_1H` 3 → 5 je odluka vlasnika, ne rezultat analize.** 01.10. je 1H namjerno stegnut na 3 jer je rujan pokazao 47.5% WR / −$39.53
-  naspram 4H 77.1% / +$57.86 (vidi komentar uz konstantu). Povijest 1H od 20.9. (99 tradeova, do 2.10.) ne pokazuje kaznu za grupirane
-  ulaze (sati s >=3 ulaza +68 $), ali ukupna 1H povijest od svibnja je negativna (551 trade, WR ~47%).
-- **Ukupni capovi (06.10., vlasnik: "8 i 5 znači 13"):** `MAX_OPEN_PER_PORTFOLIO` 11 → 13 i `MAX_OPEN_CRYPTO`/`MAX_OPEN_CRYPTO_VIP` 8 → 13, da
-  1H (5) + 4H (8) stvarno stanu zajedno. Vikend ostaje `WEEKEND_MAX_OPEN` = 5. **I dalje vežu:** istosmjerni kripto cap
-  (`MAX_SAME_DIR_CRYPTO` 4), sektor (2) i ukupni rizik `MAX_PORTFOLIO_RISK_PCT` 20% — pri ~1.5% rizika po tradeu 13 pozicija je već oko
-  tog praga, pa će u praksi češće vezati rizik/smjer nego broj. Prati 1H WR/neto; vraćanje je promjena konstanti.
+- **VRAĆENO 07.10. (odluka vlasnika): `MAX_OPEN_1H` 5 → 3, `MAX_OPEN_PER_PORTFOLIO` 13 → 11, `MAX_OPEN_CRYPTO`/`_VIP` 13 → 8.** Povećanje od
+  06.10. trajalo je jedan dan. Razlog: simulacija izlaza na 100 stvarnih 4H ulaza (5m svijeće, naknada 0.12%, SL prvi u istom baru) pokazala je
+  NEGATIVNO očekivanje ULAZA: čisti SL/TP 2.5R daje TP 15% / pun SL 66% / −0.26R po tradeu (nasumični ulaz s 1:2.5 daje ~29% TP); kroz
+  vrijeme: 17.-23.9. TP 25%, 24.-30.9. 14%, 1.-7.10. 4% (SL 79%). Upravljanje izlazom NIJE problem — "kao bot" (BE@1R + ROE-protect + trail)
+  je −18 $ naspram −83 $ bez ROE-protecta i −145 $ bez ikakvog upravljanja; ROE-protect rano zaključava sitan plus i tako gubitnike pretvara
+  u scratch. Ne mijenjaj izlaze da bi se popravio rezultat — ne radi. Strop po svijeći (2 + 2) i strop 1 za dionice/metale OSTAJU.
+- **`RISK_PCT_4H` = 0.75% (07.10., vlasnik; bilo 1.5%)** dok 4H ulazi ne pokažu pozitivno očekivanje. Vraćanje: `RISK_PCT_4H = RISK_PCT`.
+- **Lokacija ulaza (07.10.):** 83% stvarnih 4H ulaza je u gornjoj polovici 20-svijećnog raspona (41% u gornjoj četvrtini), ni jedan u donjoj
+  četvrtini (trend-sustav kupuje po signalima trenda). Opće tržište (12 coina, ~250 dana, 4H, SL 1.5 ATR, TP 2.5R, bez naknade): LONG u
+  donjem-srednjem dijelu raspona (p 0.2-0.4) +0.16R, u gornjoj petini −0.04R, na samom dnu (p<0.2) −0.01R (noževi koji padaju) — efekt
+  stvaran ali malen (~0.2R) i sam po sebi ne pretvara strategiju u profitabilnu. Nije implementirano kao filter.
 
 ## Dionice + metali: ZAJEDNIČKI strop 1 (06.10., odluka vlasnika)
 

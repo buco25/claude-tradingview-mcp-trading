@@ -276,6 +276,16 @@ kripto trejdova +1.5 $). Ranije (06.10.) uveden je zajednički strop 1 (`MAX_OPE
 watchlistu. Već otvorene pozicije na maknutim simbolima i dalje vode softExitMonitor/checkPortfolioPositions (idu po otvorenim pozicijama, ne po watchlisti), ali bot
 za njih više ne skenira nove ulaze. `test/watchlist.mjs` čuva da se dionica/metal ne vrati nehotice.
 
+## Bitget 429 (07.10.)
+
+Javni Bitget GET-ovi (svijeće, tickeri) idu kroz `bitgetPublicGet(url)` u `bot.js`: zajednički razmak ≥ 80 ms između zahtjeva u procesu i
+ponavljanje na HTTP 429 (400/800/1600 ms + jitter, najviše 3). Prije je JEDAN 429 bio konačan neuspjeh — BTC "greška: BitGet HTTP 429" u ST odjeljku,
+preskočen BTC u 1H skeniranju, preskočen 4H monitor — a zahtjevi dolaze iz više tokova odjednom (1H skener 15 min, 4H svake minute, softExit 5 s,
+BE 30 s, dashboard). `fetchLivePrices(symbols)` (softExitMonitor, BE monitor, ulazi) sad radi JEDAN `/tickers` zahtjev za sve simbole (snapshot ~1.5 s,
+single-flight; svi simboli s watchliste su u njemu; 07.10. provjereno za svih tadašnjih 45, uklj. dionice i metale) umjesto N paralelnih; pojedinačni ticker je samo REZERVA kad snapshot padne
+ili simbola nema — pa je ponašanje kod greške isto kao prije (cijena nedostaje → pozivatelj preskače tick). Novi javni GET koristi `bitgetPublicGet`, ne
+goli `fetch`. Privatni (potpisani) pozivi i dalje idu kroz `bitgetHeaders`/`bitgetPost` i nisu mijenjani.
+
 ## Bitget auth
 
 `bitgetHeaders(method, path, body)` u `bot.js` je **jedino** mjesto koje sastavlja potpisane

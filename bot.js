@@ -2515,9 +2515,31 @@ async function tg(msg) {
 
 // ─── Market Data ───────────────────────────────────────────────────────────────
 
+// 07.10.: JAVNI Bitget GET (svijeće, tickeri) s minimalnim razmakom između zahtjeva i ponavljanjem na HTTP 429. Dotad je JEDAN 429
+// bio konačan neuspjeh (BTC "greška: BitGet HTTP 429" na dashboardu, preskočen BTC u 1H skeniranju, preskočen 4H monitor) — a zahtjevi
+// idu iz više tokova odjednom (1H skener svakih 15 min, 4H svake minute, softExit 5 s, BE 30 s, dashboard). Razmak je zajednički za cijeli proces
+// (lanac obećanja), ponavljanje: 400 / 800 / 1600 ms + jitter. Nakon zadnjeg pokušaja vraća zadnji odgovor (pozivatelj baca "HTTP 429" kao prije).
+const _sleepMs = ms => new Promise(r => setTimeout(r, ms));
+const PUBLIC_GET_GAP_MS = 80;
+let _pubTail = Promise.resolve(), _pubLastAt = 0;
+export async function bitgetPublicGet(url, { retries = 3, fetchImpl = fetch, sleepImpl = _sleepMs, gapMs = PUBLIC_GET_GAP_MS } = {}) {
+  for (let attempt = 0; ; attempt++) {
+    const slot = _pubTail.then(async () => {
+      const wait = _pubLastAt + gapMs - Date.now();
+      if (wait > 0) await sleepImpl(wait);
+      _pubLastAt = Date.now();
+    });
+    _pubTail = slot.catch(() => {});
+    await slot;
+    const res = await fetchImpl(url);
+    if (res.status === 429 && attempt < retries) { await sleepImpl(400 * 2 ** attempt + Math.floor(Math.random() * 250)); continue; }
+    return res;
+  }
+}
+
 async function fetchCandles(symbol, interval = TIMEFRAME, limit = 250) {
   const url = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=${interval}&limit=${limit}`;
-  const res  = await fetch(url);
+  const res  = await bitgetPublicGet(url);
   if (!res.ok) throw new Error(`BitGet HTTP ${res.status}`);
   const json = await res.json();
   if (json.code !== "00000") throw new Error(`BitGet: ${json.msg}`);
@@ -2541,7 +2563,7 @@ async function fetchDayHL(symbol) {
     // evaluateU4hGates) mjerio je poziciju unutar DRUGAČIJE omeđenog dana od svakog drugog
     // dnevnog izračuna — uklj. dashboardovu BTC "Day Range" karticu koja već koristi 1Dutc.
     const url = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=1Dutc&limit=1`;
-    const res  = await fetch(url);
+    const res  = await bitgetPublicGet(url);
     const json = await res.json();
     if (json.code !== "00000" || !json.data?.length) return null;
     const c = json.data[0];
@@ -2554,7 +2576,7 @@ async function fetchDayHL(symbol) {
 
 async function fetchKlines(symbol, interval = TIMEFRAME, limit = 250) {
   const url = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=${interval}&limit=${limit}`;
-  const res  = await fetch(url);
+  const res  = await bitgetPublicGet(url);
   if (!res.ok) throw new Error(`BitGet HTTP ${res.status}`);
   const json = await res.json();
   if (json.code !== "00000") throw new Error(`BitGet: ${json.msg}`);
@@ -5274,28 +5296,52 @@ async function bitgetPost(path, body) {
 }
 
 // ─── Live cijene — batch dohvat za listu simbola ──────────────────────────────
-async function fetchLivePrices(symbols) {
+// 07.10.: softExitMonitor (svakih 5 s) i BE monitor (30 s) slali su N paralelnih ticker zahtjeva po prolazu (N = otvorene pozicije).
+// Sad: JEDAN zahtjev za sve tickere (snapshot vrijedi ~1.5 s, istovremeni pozivi dijele isti zahtjev); pojedinačni ticker ostaje samo kao
+// REZERVA kad snapshot padne ili simbola nema u njemu (npr. dionički perpetual) — pa je ponašanje kod greške isto kao prije.
+export async function fetchLivePrices(symbols, deps = {}) {
   const prices = {};
-  await Promise.all(symbols.map(async sym => {
-    try {
-      const url = `${BITGET.baseUrl}/api/v2/mix/market/ticker?symbol=${sym}&productType=USDT-FUTURES`;
-      const tj  = await fetch(url).then(r => r.json());
-      const raw = tj?.data?.[0]?.lastPr || tj?.data?.[0]?.close || 0;
-      prices[sym] = parseFloat(raw) || 0;
-    } catch { /* fallback na 0 — caller koristi entryPrice ako 0 */ }
-  }));
+  let snap = null;
+  try { snap = await fetchAllTickerPrices(deps); } catch { /* rezerva dolje */ }
+  const missing = [];
+  for (const sym of symbols) { const p = snap?.[sym]; if (p > 0) prices[sym] = p; else missing.push(sym); }
+  if (missing.length) {
+    const get = deps.get ?? bitgetPublicGet;
+    await Promise.all(missing.map(async sym => {
+      try {
+        const url = `${BITGET.baseUrl}/api/v2/mix/market/ticker?symbol=${sym}&productType=USDT-FUTURES`;
+        const tj  = await get(url).then(r => r.json());
+        const raw = tj?.data?.[0]?.lastPr || tj?.data?.[0]?.close || 0;
+        prices[sym] = parseFloat(raw) || 0;
+      } catch { /* fallback na 0 — caller koristi entryPrice ako 0 */ }
+    }));
+  }
   return prices;
 }
 
 // Cijene SVIH simbola jednim zahtjevom (06.10.) — fetchLivePrices šalje N paralelnih, što je s 23+ simbola
 // opet izazivalo 429. Koristi ga dashboard pregled Supertrenda.
-async function fetchAllTickerPrices() {
-  const url = `${BITGET.baseUrl}/api/v2/mix/market/tickers?productType=USDT-FUTURES`;
-  const j = await fetch(url).then(r => r.json());
-  const out = {};
-  for (const t of (j?.data ?? [])) { const p = parseFloat(t.lastPr ?? t.close); if (p > 0) out[t.symbol] = p; }
-  return out;
+let _tickSnap = { ts: 0, prices: null, inflight: null };
+export async function fetchAllTickerPrices(deps = {}) {
+  const get = deps.get ?? bitgetPublicGet, now = deps.now ?? Date.now, ttl = deps.ttl ?? 1500;
+  if (_tickSnap.prices && now() - _tickSnap.ts < ttl) return _tickSnap.prices;
+  if (_tickSnap.inflight) return _tickSnap.inflight;
+  _tickSnap.inflight = (async () => {
+    try {
+      const url = `${BITGET.baseUrl}/api/v2/mix/market/tickers?productType=USDT-FUTURES`;
+      const res = await get(url);
+      if (!res.ok) throw new Error(`BitGet HTTP ${res.status}`);
+      const j = await res.json();
+      const out = {};
+      for (const t of (j?.data ?? [])) { const p = parseFloat(t.lastPr ?? t.close); if (p > 0) out[t.symbol] = p; }
+      if (!Object.keys(out).length) throw new Error("tickers: prazan odgovor");
+      _tickSnap.prices = out; _tickSnap.ts = now();
+      return out;
+    } finally { _tickSnap.inflight = null; }
+  })();
+  return _tickSnap.inflight;
 }
+export function _resetTickerSnapshotForTest() { _tickSnap = { ts: 0, prices: null, inflight: null }; }
 
 // ─── Break-Even Stop — pomakni SL na entry+buffer kad je X% TP dostignuto ─────
 // 06.08.: analiza 34 tradea (14 dana, MFE iz stvarnog OHLCV-a) — samo 12% je ikad

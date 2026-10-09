@@ -268,6 +268,14 @@ zajedno). Watchlista se NE mijenja — dionice/metali ostaju na njoj, samo ne mo
 capovima brojani kao kripto; `MAX_OPEN_STOCKS` (4) ih ne pokriva. Strop blokira samo NOVE ulaze: već otvorene dionice/metali (ako ih je više
 od 1) ostaju do izlaza. Postojeća pozicija istog simbola (pyramid) nije novi slot. 4H i Supertrend ionako ne trguju dionicama/metalima.
 
+## Watchlista je samo KRIPTO (09.10., odluka vlasnika)
+
+`rules.json` → `watchlist_synapse_t` ima 23 kripto simbola; dionice (19) i metali (PAXG/XAU/XAG) su maknuti. Razlog: 1H dionice/metali su gubili dok je kripto
+držala (1.9.-2.10.: dionice −28 $, metali −18 $, kripto +65 $; zadnjih 20 trejdova do 9.10.: 8 dionica −28.4 $ uključujući SPY −10.30 $ i QQQ −6.10 $, 11 4H
+kripto trejdova +1.5 $). Ranije (06.10.) uveden je zajednički strop 1 (`MAX_OPEN_NONCRYPTO`); on ostaje kao mreža ako se dionica/metal ikad vrati na
+watchlistu. Već otvorene pozicije na maknutim simbolima i dalje vode softExitMonitor/checkPortfolioPositions (idu po otvorenim pozicijama, ne po watchlisti), ali bot
+za njih više ne skenira nove ulaze. `test/watchlist.mjs` čuva da se dionica/metal ne vrati nehotice.
+
 ## Bitget auth
 
 `bitgetHeaders(method, path, body)` u `bot.js` je **jedino** mjesto koje sastavlja potpisane

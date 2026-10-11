@@ -1367,6 +1367,13 @@ export function tradePlanOutcomes(entries, exits) {
   return m;
 }
 
+// ─── Bez SHORT ulaza dok je BTC 4H režim BULL (11.10., odluka vlasnika) ───
+// ULTRA-4H to već radi u evaluateU4hGates (SHORT + BTC 4H BULL → blok). 1H put je imao samo uvjetne varijante (BTC iznad 4H EMA50 / 1H BULL i simbol
+// nije bearish), pa je SHORT prolazio kad je BTC 4H BULL a 1H pullback (BEAR) — tako su 22.-25.9. prošla 4 SHORTa na metalima/dionicama
+// (XAG, XAU, SPY) uz "BTC 4H BULL". Opće tržište (12 coina, 4H, BTC dnevni EMA50): SHORT u bullu −0.20R (TP 15%) naspram LONG +0.04R (TP 26%).
+// Isto vrijedi za 1H (SVI načini uklj. RANGE/SWEEP) i Supertrend. Suprotno (LONG u BEAR) NIJE dodano: u bearu LONG i SHORT daju isto (−0.07R).
+export function shortBlockedByBtcBull(signal, btcRegime4h) { return signal === "SHORT" && btcRegime4h === "BULL"; }
+
 // ─── Deribit Put/Call Ratio ───────────────────────────────────────────────────
 // P/C > 1.5 = tržište kupuje zaštitu od pada (strah) = potencijalni bottom
 // P/C < 0.5 = previše calls = euforija = potencijalni vrh
@@ -7177,6 +7184,13 @@ async function runSupertrendEntries(ctx) {
       const signal = sig.signal;
       console.log(`  🧭 [ST] ${symbol} — ${signal}: 1D+4H usklađeni, 1H obrat prije ${Math.round(sig.ageMin)} min, linija ${fmtPrice(sig.line)}`);
 
+      // ── Bez SHORT-a dok je BTC 4H BULL (isto pravilo kao 1H i 4H) ──
+      if (shortBlockedByBtcBull(signal, btcRegime4h)) {
+        console.log(`  ☀️  [ST] ${symbol} — SHORT blokiran: BTC 4H BULL`);
+        scanLog.push({ symbol, signal, blocker: "ST_BTC_BULL_NO_SHORT", reason: "Supertrend: BTC 4H BULL → SHORT blokiran" });
+        continue;
+      }
+
       // ── Capovi (isti brojevi kao 1H put) ──
       const _maxBase = getMaxOpenPositions();
       const _isWeekendCap = _maxBase === WEEKEND_MAX_OPEN;
@@ -8204,6 +8218,13 @@ export async function run() {
               _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: `BTC_REGIME(${_effectiveRegime})`, reason: "BTC 1H BEAR → LONG blokiran", vwapDist: result.vwap ? ((result.price-result.vwap)/result.vwap*100).toFixed(2) : null });
               continue;
             }
+          }
+
+          // Bez SHORT-a dok je BTC 4H BULL — za SVE 1H načine (vidi shortBlockedByBtcBull)
+          if (shortBlockedByBtcBull(signal, _btcRegime)) {
+            console.log(`  ☀️  [BTC BULL] ${symbol} — BTC 4H BULL → SHORT blokiran (bez shortova u bull režimu)`);
+            _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: "BTC_4H_BULL_NO_SHORT", reason: "BTC 4H BULL → SHORT blokiran" });
+            continue;
           }
 
           // SHORT filter — tri razine zaštite:

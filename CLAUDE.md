@@ -276,6 +276,14 @@ kripto trejdova +1.5 $). Ranije (06.10.) uveden je zajednički strop 1 (`MAX_OPE
 watchlistu. Već otvorene pozicije na maknutim simbolima i dalje vode softExitMonitor/checkPortfolioPositions (idu po otvorenim pozicijama, ne po watchlisti), ali bot
 za njih više ne skenira nove ulaze. `test/watchlist.mjs` čuva da se dionica/metal ne vrati nehotice.
 
+## Bez SHORT ulaza dok je BTC 4H režim BULL (11.10., odluka vlasnika)
+
+`shortBlockedByBtcBull(signal, btcRegime4h)` u `bot.js`: SHORT + `getBtcRegime()` = "BULL" → blok, za **sve** 1H načine (uklj. RANGE/SWEEP, koji su prije bili izuzeti od regime gateova) i za Supertrend
+(`ST_BTC_BULL_NO_SHORT`). ULTRA-4H to već radi u `evaluateU4hGates` (BTC 4H režim). Prije je 1H put imao samo uvjetne varijante (BTC iznad 4H EMA50 / 1H BULL **i** simbol nije bearish),
+pa je SHORT prolazio kad je BTC 4H BULL a 1H pullback (BEAR) — 22.-25.9. su tako prošla 4 SHORTa na XAG/XAU/SPY (sad nisu na watchlisti). Dokaz (12 coina, 4H, siječanj-rujan 2026., BTC dnevni EMA50,
+SL 1.5 ATR, TP 2.5R, naknada 0.12%): u bullu LONG +0.04R (TP 26%) naspram SHORT −0.20R (TP 15%). **Suprotno pravilo (bez LONG-a u BEARU) NIJE dodano:** u bearu LONG i SHORT daju isto (−0.07R).
+Postojeći 1H gate za LONG u 1H BEAR (osim pullback izuzetka) ostaje kakav je bio.
+
 ## Bitget 429 (07.10.)
 
 Javni Bitget GET-ovi (svijeće, tickeri) idu kroz `bitgetPublicGet(url)` u `bot.js`: zajednički razmak ≥ 80 ms između zahtjeva u procesu i

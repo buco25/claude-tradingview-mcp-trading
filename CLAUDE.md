@@ -284,6 +284,15 @@ pa je SHORT prolazio kad je BTC 4H BULL a 1H pullback (BEAR) — 22.-25.9. su ta
 SL 1.5 ATR, TP 2.5R, naknada 0.12%): u bullu LONG +0.04R (TP 26%) naspram SHORT −0.20R (TP 15%). **Suprotno pravilo (bez LONG-a u BEARU) NIJE dodano:** u bearu LONG i SHORT daju isto (−0.07R).
 Postojeći 1H gate za LONG u 1H BEAR (osim pullback izuzetka) ostaje kakav je bio.
 
+## Tjedni Supertrend BTC-a: kontra ulazi na pola rizika (12.10., odluka vlasnika)
+
+`getBtcWeeklyBias()` u `bot.js`: BTC tjedni Supertrend(3,10) (svijeće `1Wutc`, Bitget `history-candles`, 16 stranica po ~13 tjedana, uvijek endTime = najstarija dosad — s `-1` Bitget
+izgubi tjedan na rubu stranice; keš 1 h, kod greške zadrži staro stanje i ponovi za 5 min; gleda se SAMO zadnji ZATVORENI tjedan, `weeklySupertrendBias`). Tjedni BUY + SHORT ili tjedni SELL + LONG →
+`weeklyCounterSizeMult` = **×0.5** (`WEEKLY_COUNTER_MULT`) na poziciju — za ULTRA-4H (`_macroSizeMult4`), 1H put (uz `_softSizeMult`, izvan 0.5 floora) i Supertrend (`sizeMult`). **Nije blokada.**
+UNKNOWN (nema podataka) = bez promjene. Test (10 coina, 4H, 2019.–2026., jednostavan ulaz SL 1.5 ATR/TP 2.5R bez upravljanja, naknada 0.12%): po filteru −0.005R, kontra −0.042R, bez filtera −0.024R;
+nestabilno po godinama (2020. i 2023. obrnuto) → zato samo smanjenje rizika, ne tvrda blokada. Min. notional pod ($40 / minQty) može vratiti dio smanjenja — vidi `[MIN]` log. Pozicije se u CSV-u ne
+označavaju tjednim stanjem (CSV zaglavlje je ostalo isto); vidi log `📆 [WEEKLY ST]`. `test/weekly-st-half.mjs`.
+
 ## Bitget 429 (07.10.)
 
 Javni Bitget GET-ovi (svijeće, tickeri) idu kroz `bitgetPublicGet(url)` u `bot.js`: zajednički razmak ≥ 80 ms između zahtjeva u procesu i

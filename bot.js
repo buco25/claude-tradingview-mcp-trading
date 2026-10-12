@@ -1374,6 +1374,55 @@ export function tradePlanOutcomes(entries, exits) {
 // Isto vrijedi za 1H (SVI načini uklj. RANGE/SWEEP) i Supertrend. Suprotno (LONG u BEAR) NIJE dodano: u bearu LONG i SHORT daju isto (−0.07R).
 export function shortBlockedByBtcBull(signal, btcRegime4h) { return signal === "SHORT" && btcRegime4h === "BULL"; }
 
+// ─── Tjedni Supertrend BTC-a: ulazi PROTIV tjednog smjera dobivaju pola rizika (12.10., odluka vlasnika) ───
+// Tjedni ST(3,10) na BTC-u: BUY → LONG je s trendom, SHORT je kontra; SELL → obrnuto. Kontra ulaz se NE blokira nego ide s ×0.5 rizika.
+// Test (10 coina, 4H, 2019.–2026., jednostavan ulaz bez upravljanja): po filteru −0.005R, kontra −0.042R, bez filtera −0.024R — smjer dobar, ali nestabilan
+// po godinama (2020. i 2023. obrnuto) pa tvrda blokada nije opravdana; zato samo polovica rizika. Nepoznato stanje (nema podataka) = bez promjene.
+export const WEEKLY_COUNTER_MULT = 0.5;
+const WEEK_MS = 7 * 86400e3, WK_BIAS_TTL = 60 * 60e3, WK_BIAS_RETRY = 5 * 60e3, WK_PAGES = 16, WK_MIN_WEEKS = 40;
+// weekly: svijece 1Wutc (ponedjeljak 00:00 UTC), uzlazno; vraca "BULL" | "BEAR" | "UNKNOWN" prema ZADNJEM ZATVORENOM tjednu (tjedan koji se formira se ne gleda).
+export function weeklySupertrendBias(weekly, nowMs = Date.now()) {
+  const sorted = [...new Map((weekly || []).map(c => [c.time, c])).values()].sort((a, b) => a.time - b.time).filter(c => c.time + WEEK_MS <= nowMs);
+  let from = 0; for (let i = sorted.length - 1; i > 0; i--) if (sorted[i].time - sorted[i - 1].time !== WEEK_MS) { from = i; break; }   // samo neprekinut rep
+  const tail = sorted.slice(from);
+  if (tail.length < WK_MIN_WEEKS) return "UNKNOWN";
+  const b = calcSupertrend(tail).bull[tail.length - 1];
+  return b == null ? "UNKNOWN" : (b ? "BULL" : "BEAR");
+}
+export function weeklyCounterSizeMult(signal, bias) {
+  return (signal === "LONG" && bias === "BEAR") || (signal === "SHORT" && bias === "BULL") ? WEEKLY_COUNTER_MULT : 1;
+}
+// Bitget vraca ~13 tjednih svijeca po zahtjevu → straniceni unazad (endTime = najstarija dosad; duplikat se spaja, inace izgubi tjedan na rubu stranice).
+export async function fetchBtcWeeklyCandles({ get = bitgetPublicGet, pages = WK_PAGES, now = Date.now() } = {}) {
+  let end = now; const all = [];
+  for (let p = 0; p < pages; p++) {
+    const res = await get(`https://api.bitget.com/api/v2/mix/market/history-candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1Wutc&endTime=${end}&limit=200`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const d = await res.json();
+    if (d.code !== "00000" || !Array.isArray(d.data) || !d.data.length) { if (p === 0) throw new Error(d.msg || "prazan odgovor"); break; }
+    const k = d.data.map(x => ({ time: +x[0], open: +x[1], high: +x[2], low: +x[3], close: +x[4] }));
+    all.push(...k);
+    const mn = Math.min(...k.map(x => x.time));
+    if (mn >= end) break;
+    end = mn;
+  }
+  return all;
+}
+let _wkBiasCache = { bias: "UNKNOWN", ts: 0 };
+export async function getBtcWeeklyBias() {
+  if (Date.now() - _wkBiasCache.ts < WK_BIAS_TTL) return _wkBiasCache.bias;
+  try {
+    const bias = weeklySupertrendBias(await fetchBtcWeeklyCandles());
+    if (bias === "UNKNOWN") throw new Error("premalo tjednih svijeca");
+    if (bias !== _wkBiasCache.bias) console.log(`  📆 [WEEKLY ST] BTC tjedni Supertrend: ${bias}`);
+    _wkBiasCache = { bias, ts: Date.now() };
+  } catch (e) {
+    console.log(`  ⚠️  [WEEKLY ST] dohvat nije uspio (${e.message}) — zadrzavam ${_wkBiasCache.bias}, ponovo za 5 min`);
+    _wkBiasCache = { bias: _wkBiasCache.bias, ts: Date.now() - WK_BIAS_TTL + WK_BIAS_RETRY };
+  }
+  return _wkBiasCache.bias;
+}
+
 // ─── Deribit Put/Call Ratio ───────────────────────────────────────────────────
 // P/C > 1.5 = tržište kupuje zaštitu od pada (strah) = potencijalni bottom
 // P/C < 0.5 = previše calls = euforija = potencijalni vrh
@@ -6946,6 +6995,8 @@ export async function runUltra4hStrategy() {
       if (sig.signal === "SHORT" && _fearGreed4 !== null && _fearGreed4 <= 15) { _macroSizeMult4 *= 0.5; console.log(`  😱 [ULTRA-4H][F&G] ${symbol} — Extreme Fear → SHORT size ×0.5`); }
       if (sig.signal === "LONG" && _fearGreed4 !== null && _fearGreed4 >= 85) { _macroSizeMult4 *= 0.5; console.log(`  🤑 [ULTRA-4H][F&G] ${symbol} — Extreme Greed → LONG size ×0.5`); }
       if (sig.signal === "LONG" && _dxyChange4 !== null && _dxyChange4 > 0.3) { _macroSizeMult4 *= 0.7; console.log(`  💵 [ULTRA-4H][DXY] ${symbol} — jaki dolar → LONG size ×0.7`); }
+      { const _wkM4 = weeklyCounterSizeMult(sig.signal, await getBtcWeeklyBias());
+        if (_wkM4 < 1) { _macroSizeMult4 *= _wkM4; console.log(`  📆 [ULTRA-4H][WEEKLY ST] ${symbol} — ${sig.signal} protiv tjednog Supertrenda BTC-a → size ×${_wkM4}`); } }
       notional *= _macroSizeMult4;
 
       // 04.10. (audit nalaz #14): pod minimalnog notionala se primjenjuje NAKON svih makro
@@ -7245,6 +7296,8 @@ async function runSupertrendEntries(ctx) {
       let sizeMult = 1;
       if (dow === 0 || dow === 6) sizeMult *= 0.5;
       if (pDef.params._chillMode) sizeMult *= 0.7;
+      { const _wkMS = weeklyCounterSizeMult(signal, await getBtcWeeklyBias());
+        if (_wkMS < 1) { sizeMult *= _wkMS; console.log(`  📆 [ST][WEEKLY ST] ${symbol} — ${signal} protiv tjednog Supertrenda BTC-a → size ×${_wkMS}`); } }
 
       // ── Cooldowni nakon SL-a ──
       const lastSl = symbolSlCooldown.get(symbol);
@@ -8873,7 +8926,9 @@ export async function run() {
         // dosad tvrdo pratili → pola rizika umjesto punog, primjenjuje se NAKON floora
         // gore (ne kombinira se s njim, samo halvira konačan iznos).
         const _softSizeMult = result._halfSize ? 0.5 : 1;
-        let tradeSize  = (riskAmount / (slPct / 100)) * _totalMult * _softSizeMult;
+        const _wkMult1 = weeklyCounterSizeMult(signal, await getBtcWeeklyBias());
+        if (_wkMult1 < 1) console.log(`  📆 [${pDef.name}][WEEKLY ST] ${symbol} — ${signal} protiv tjednog Supertrenda BTC-a → pozicija ×${_wkMult1}`);
+        let tradeSize  = (riskAmount / (slPct / 100)) * _totalMult * _softSizeMult * _wkMult1;
         if (_rawMult < 1) console.log(`  ⚖️  [MULT] ${symbol} — kombinirani mult ×${_rawMult.toFixed(2)}${_rawMult < 0.5 ? " → floor ×0.50" : ""}`);
         if (result._halfSize) console.log(`  🟡 [SOFT] ${symbol} — ADX/MOM soft-zone ulaz → pozicija ×0.5 (pola rizika)`);
         // Minimum: Bitget minTradeNum + $40 notional floor (margina ≥ ~$1 na 33-52x)

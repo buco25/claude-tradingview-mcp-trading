@@ -4111,7 +4111,10 @@ const TRAIL_TRIGGER    = 2.5;            // % gain koji aktivira trail
 const TRAIL_STEP       = 0.5;            // korak pomaka TP-a (%)
 const TRAIL_GIVEBACK   = 1.0;            // % ispod peaka — prostor za disanje u trendu
                                          // (06.07.: AAVE izbačen na prvi titraj jer je SL stajao na cijeni)
-const ROE_PROTECT_TRIGGER = 20;          // % ROE koji aktivira zaključavanje (11.09., na zahtjev)
+// 15.10., odluka vlasnika: 20 → 30. Pri poluzi 20-30x je 20% ROE samo ~0.7-1% pomaka cijene pa je zaključanih 8% ROE (~0.3-0.4% cijene) izbacivalo
+// pozicije na sitnom plusu ($0.03-0.13) puno prije TP-a (2.5-3R). NAPOMENA: analiza 7.10. (CLAUDE.md) je pokazala da ROE-protect uz 20% pretvara dio gubitnika
+// u sitan plus (−18$ naspram −83$ bez njega) — viši prag taj učinak djelomično vraća; ako gubici porastu, vrati na 20.
+const ROE_PROTECT_TRIGGER = 30;          // % ROE koji aktivira zaključavanje (11.09., na zahtjev; 15.10. 20 → 30)
 const ROE_PROTECT_LOCK    = 8;           // % ROE koji se zaključava kad se aktivira
 
 function applyTrail(pos, currentPrice) {

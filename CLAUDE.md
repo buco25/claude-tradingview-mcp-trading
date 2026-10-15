@@ -293,6 +293,13 @@ UNKNOWN (nema podataka) = bez promjene. Test (10 coina, 4H, 2019.–2026., jedno
 nestabilno po godinama (2020. i 2023. obrnuto) → zato samo smanjenje rizika, ne tvrda blokada. Min. notional pod ($40 / minQty) može vratiti dio smanjenja — vidi `[MIN]` log. Pozicije se u CSV-u ne
 označavaju tjednim stanjem (CSV zaglavlje je ostalo isto); vidi log `📆 [WEEKLY ST]`. `test/weekly-st-half.mjs`.
 
+## ROE-protect aktivacija 30% (15.10., odluka vlasnika)
+
+`ROE_PROTECT_TRIGGER` u `bot.js` je 20 → **30** (`ROE_PROTECT_LOCK` ostaje 8% ROE). Razlog: pri poluzi 20-30x je 20% ROE samo ~0.7-1% cijene, pa je zaključanih 8% ROE (~0.3-0.4% cijene)
+izbacivalo pozicije na +$0.03-0.13 daleko prije TP-a (log 14.-15.10.: DOGE, SOL, ALGO, XRP, ETH…). Promjena je odlučena BEZ simulacije, na zahtjev vlasnika. Rizik: analiza 7.10. (gore, "Upravljanje izlazom")
+pokazala je da ROE-protect uz 20% smanjuje gubitke (−18$ naspram −83$ bez njega) pa viši prag taj učinak djelomično vraća — provjeri nakon ~tjedan dana (udio W/N/L, prosječan R). Vraćanje = 30 → 20.
+Pozicije koje su već aktivirale zaštitu (`roeProtectApplied`) zadržavaju stari SL.
+
 ## Bitget 429 (07.10.)
 
 Javni Bitget GET-ovi (svijeće, tickeri) idu kroz `bitgetPublicGet(url)` u `bot.js`: zajednički razmak ≥ 80 ms između zahtjeva u procesu i

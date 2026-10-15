@@ -295,9 +295,9 @@ označavaju tjednim stanjem (CSV zaglavlje je ostalo isto); vidi log `📆 [WEEK
 
 ## ROE-protect aktivacija 30% (15.10., odluka vlasnika)
 
-`ROE_PROTECT_TRIGGER` u `bot.js` je 20 → **30** (`ROE_PROTECT_LOCK` ostaje 8% ROE). Razlog: pri poluzi 20-30x je 20% ROE samo ~0.7-1% cijene, pa je zaključanih 8% ROE (~0.3-0.4% cijene)
+`ROE_PROTECT_TRIGGER` u `bot.js` je 20 → **30** (`ROE_PROTECT_LOCK` isti dan podignut 8 → **12%** ROE, odluka vlasnika). Razlog: pri poluzi 20-30x je 20% ROE samo ~0.7-1% cijene, pa je zaključanih 8% ROE (~0.3-0.4% cijene)
 izbacivalo pozicije na +$0.03-0.13 daleko prije TP-a (log 14.-15.10.: DOGE, SOL, ALGO, XRP, ETH…). Promjena je odlučena BEZ simulacije, na zahtjev vlasnika. Rizik: analiza 7.10. (gore, "Upravljanje izlazom")
-pokazala je da ROE-protect uz 20% smanjuje gubitke (−18$ naspram −83$ bez njega) pa viši prag taj učinak djelomično vraća — provjeri nakon ~tjedan dana (udio W/N/L, prosječan R). Vraćanje = 30 → 20.
+pokazala je da ROE-protect uz 20% smanjuje gubitke (−18$ naspram −83$ bez njega) pa viši prag taj učinak djelomično vraća — provjeri nakon ~tjedan dana (udio W/N/L, prosječan R). Vraćanje = 30 → 20 (i lock 12 → 8).
 Pozicije koje su već aktivirale zaštitu (`roeProtectApplied`) zadržavaju stari SL.
 
 ## Bitget 429 (07.10.)

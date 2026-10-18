@@ -18,7 +18,7 @@ audit nađe nalaz
 Pravila koja to drže na mjestu:
 
 - **Nalazi žive u `docs/AUDIT-2026-10-04.md`, ne u chatu.** Numeracija je neprekinuta kroz
-  prolaze (zadnji je #18). Nikad ne počinji numeraciju od 1 i ne prijavljuj ponovno nalaz koji
+  prolaze (zadnji je #33). Nikad ne počinji numeraciju od 1 i ne prijavljuj ponovno nalaz koji
   je tamo već zapisan — ako je regresirao, reci da je regresija.
 - **Predaja drugoj sesiji je datoteka, ne poruka.** Ako posao preuzima druga sesija, uputa joj je
   "pročitaj `CLAUDE.md` i `docs/AUDIT-2026-10-04.md`, pa popravi #N" — ne zalijepljeni blok.
@@ -319,6 +319,33 @@ headere, i izvezeno je za `dashboard.js`. Nikad ne sastavljaj headere ručno:
   `bitgetPost`, pa je uz `BITGET_DEMO=true` bot **pisao na demo a čitao živi račun** — equity,
   pozicije, fillove i zatvoreni P&L (nalaz #22).
 - timestamp se izračuna i potpiše u istom pozivu, pa `ts` i `sign` ne mogu raziđeti.
+
+## Volumen, oznake i scan_log (07.10., nalazi #25–#33)
+
+- **`volSpikeRatio(candles)` u `bot.js` je jedina formula za volumenski spike** zadnje ZATVORENE
+  svijeće, i izvezena je za dashboard. Prije 07.10. su postojala tri prozora za istu mjeru;
+  `analyzeUltra` je uzimao `slice(-21,-1)`, koji **mjerenu svijeću broji u vlastiti prosjek** —
+  stvarnih 11.16× čitalo se kao 7.40×, a spike u pojasu 3.00–3.35× (default tier) nije blokirao
+  premda dashboard piše da blokira. Ne piši novi prozor; zovi helper.
+- **Regresijski test NE pokriva VOL_EXH.** Fixture generira volumen `800 + rand()*900`, pa je
+  najveći ostvarivi ratio ~1.57, a najniži prag 2.5 — gate se nikad ne okida. Zelen test oko
+  promjene VOL_EXH ne znači ništa; treba namjenski fixture.
+- **Momentum grana skenera koristi REDUCIRANI score**, kao bot: `_bullCntD + _pwhMstrBullD`, bez
+  Wyckoff/MDIV/WHALE/BMSB bonusa. Nalaz #26 je bio regresija popravka #2/#4: iz "`momSigs` je
+  identičan `sigs`" **ne slijedi** "`momBull === bullScore`". MOM soft zona se okida na točnu
+  jednakost, pa je svaka razlika u scoreu odmah vidljiva kao lažni `MOM↑`/`MOM↓`.
+- **`scan_log.csv` se parsira po FIKSNIM indeksima** (`dashboard.js`: `c[7]` blocker, `c[8]` reason,
+  `cols[3]` score, guard `c.length < 9`). Ne dodaji i ne uklanjaj stupce bez da popraviš sva tri
+  čitača — i postojeća datoteka ostaje miješanog formata. RSI/ADX se pune iz reason stringa
+  (`scanLogRsiAdx`), a ne iz povratnog objekta: `analyzeUltra` ima 21 izlaznu točku i nova polja
+  bi značila dirati signalnu jezgru koju čuva golden.
+- **Strop za dionice/metale je `MAX_OPEN_NONCRYPTO` (1), ne `MAX_OPEN_STOCKS` (4).** `MAX_OPEN_STOCKS`
+  grana u `run()` je nedostižna jer `nonCryptoCapBlocks` blokira ranije; prikazuj `nonCrypto`/
+  `nonCryptoMax` (dashboard kartica, dnevni izvještaj, Telegram sažetak).
+- **Oznake u dashboardu interpoliraj iz konstanti** (`${ADX_MIN}`, `${MAX_SAME_DIR_CRYPTO}`,
+  `${MAX_OPEN_PER_PORTFOLIO}`, `${MAX_OPEN_CRYPTO}`), ne upisuj brojeve — nalaz #29 je bio šest
+  oznaka koje su preživjele promjene konstanti, a #30 isti obrazac u komentarima. Prije commita
+  provjeri da je nova `${}` oznaka **unutar** template literala, inače izađe doslovno na stranicu.
 
 ## Dnevne svijeće
 

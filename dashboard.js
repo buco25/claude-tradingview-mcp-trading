@@ -21,7 +21,7 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   DEFAULT_COMBO, DEFAULT_MIN_SIG,
   RISK_PCT, RISK_PCT_MIN, RISK_PCT_MAX,
   ADX_MIN, ADX_SOFT_BAND, ADX_SOFT_FLOOR, MOM_SOFT_BAND, MOM_ADX_MIN,
-  MAX_OPEN_CRYPTO, MAX_OPEN_NONCRYPTO, MAX_OPEN_PER_PORTFOLIO, MAX_SAME_DIR_CRYPTO, volSpikeRatio, tradePlanOutcomes, classifyOutcome, plannedProfit, plannedLoss, WR_TARGET_FRAC, WR_LOSS_FRAC, getCapSnapshot, bitgetHeaders, ACCOUNT_START_CAPITAL, getSupertrendOverview } from "./bot.js";
+  MAX_OPEN_CRYPTO, MAX_OPEN_STOCKS, MAX_OPEN_NONCRYPTO, tradePlanOutcomes, classifyOutcome, plannedProfit, plannedLoss, WR_TARGET_FRAC, WR_LOSS_FRAC, getCapSnapshot, bitgetHeaders, ACCOUNT_START_CAPITAL, getSupertrendOverview } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -355,11 +355,19 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
   const _price   = closes[n - 1];
   const _nearRes = _ress.filter(r => r > _price * 1.001).sort((a,b) => a-b)[0] ?? null;
   const _nearSup = _sups.filter(s => s < _price * 0.999).sort((a,b) => b-a)[0] ?? null;
-  // 07.10. (nalaz #31): ovdje su bili _srZone, _rsiArr/_rsiR/_rsiF, srsBounce i srbBreak —
-  // skenerova polovica signala sig17 (bounce/rejection od S/R) i sig18 (breakout). Oni su
-  // iz bot.js uklonjeni u nalazu #10, pa su se ove vrijednosti racunale na svakom scanu i
-  // nigdje citale. Isti "napola uklonjeno" obrazac koji je nalaz #10 opisao.
-  // _nearRes/_nearSup iznad OSTAJU — koriste se za zone/confluence prikaz.
+  const _srZone  = 0.012;
+  // rsiRising/rsiFalling potrebni za sig17
+  const _rsiArr  = [_rsi(closes, 14), _rsi(closes.slice(0,-1), 14), _rsi(closes.slice(0,-2), 14)];
+  const _rsiR    = _rsiArr[0] !== null && _rsiArr[1] !== null && _rsiArr[0] > _rsiArr[1] && _rsiArr[1] > _rsiArr[2];
+  const _rsiF    = _rsiArr[0] !== null && _rsiArr[1] !== null && _rsiArr[0] < _rsiArr[1] && _rsiArr[1] < _rsiArr[2];
+  let srsBounce  = 0;
+  if (_nearSup !== null && (_price - _nearSup) / _price < _srZone && _rsiR) srsBounce =  1;
+  if (_nearRes !== null && (_nearRes - _price) / _price < _srZone && _rsiF) srsBounce = -1;
+  let srbBreak   = 0;
+  for (let k = Math.max(1, n - 3); k < n && srbBreak === 0; k++) {
+    for (const r of _ress) if (closes[k-1] < r && closes[k] > r) { srbBreak =  1; break; }
+    for (const s of _sups) if (closes[k-1] > s && closes[k] < s) { srbBreak = -1; break; }
+  }
 
   // ── RSI series (za recovery detekciju i divergenciju) ──
   const rsiSeries = _rsiFullSeries(closes, 14);
@@ -445,9 +453,7 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
     const sign = closes[i] > opens[i] ? 1 : closes[i] < opens[i] ? -1 : 0;
     cvdSum += sign * vols[i];
   }
-  // 07.10.: `volAvg20` je bio TRECI prozor za istu mjeru (slice(-20), tj. s aktivnom
-  // svijecom) i nigdje se nije citao — uklonjen uz nalaz #25, da ne bude mamac za
-  // "popravak" koji bi vratio cetvrtu varijantu. Mjeru daje volSpikeRatio iz bot.js.
+  const volAvg20 = vols.slice(-20).reduce((a,b)=>a+b,0) / 20;
 
   // ── 6-Scale EMA (shared) ──
   const scales = [[3,11],[7,15],[13,21],[19,29],[29,47],[45,55]];
@@ -802,17 +808,11 @@ function scanSymbol(symbol, candles, emaRsiCfg, megaCfg, synapse7Cfg = {}, ultra
 
       // 3. Momentum fallback — samo ako score NIJE dosegao PBK prag (isto kao bot).
       // 04.10. fix (audit nalaz #2 i #4): `momSigsD` je bio izraz-za-izraz identicna kopija
-      // `ultraSigs16`, pa je kopija SIGNALA uklonjena. Prag je sad minSigLong/minSigShort
-      // (isto kao bot.js MOM_MIN_LONG/SHORT), ne bazni minSig; momentum grana i dalje NE
-      // provjerava confluence, isto kao bot.
-      // 07.10. ISPRAVAK TOG ISPRAVKA (nalaz #26): iz "momSigs === sigs" je tada pogresno
-      // zakljuceno i "momBull === bullScore", pa je momBullD pao na `ultraBull` — a bot
-      // (bot.js, `momBull = bullCnt + _pwhMstrBonusBull`) u momentum grani NE racuna
-      // Wyckoff/MDIV/WHALE/BMSB bonuse. Posljedica: MOM soft zona se okida na TOCNU
-      // jednakost, pa je skener uz te bonuse pokazivao MOM↑/MOM↓ tamo gdje bot vraca NEUTRAL.
+      // `ultraSigs16`, pa su momBullD/momBearD uvijek bili === ultraBull/ultraBear — kopija je
+      // uklonjena. Prag je sad minSigLong/minSigShort (isto kao bot.js MOM_MIN_LONG/SHORT),
+      // ne bazni minSig; momentum grana i dalje NE provjerava confluence, isto kao bot.
       if (!_decided) {
-        const momBullD = _bullCntD + _pwhMstrBullD;
-        const momBearD = _bearCntD + _pwhMstrBearD;
+        const momBullD = ultraBull, momBearD = ultraBear;
         const _momAdxFloorD = adxSoft ? _adxSoftFloorD : MOM_ADX_MIN;
         if (_momAdxFloorD <= adxV && momBullD >= minSigLong)       { ultraSig = "MOM↑"; ultraHalfSize = adxSoft; }
         else if (_momAdxFloorD <= adxV && momBearD >= minSigShort) { ultraSig = "MOM↓"; ultraHalfSize = adxSoft; }
@@ -946,7 +946,9 @@ async function runScan(rules) {
         // Volume anomaly check (isti algoritam kao bot.js)
         let volRatio = 1, volLow = false, volHigh = false, volExhThreshold = VOL_EXH_DEFAULT_D;
         if (candles.length >= 22) {
-          volRatio         = volSpikeRatio(candles);  // nalaz #25: ista formula kao bot.js
+          const vols = candles.slice(-22, -2).map(c => c.volume);
+          const avg  = vols.reduce((a, b) => a + b, 0) / vols.length;
+          volRatio         = avg > 0 ? candles[candles.length - 2].volume / avg : 1;
           volLow           = volRatio < 0.3;
           volExhThreshold  = VOL_EXH_TIERS_D[sym] ?? VOL_EXH_DEFAULT_D;
           volHigh          = volRatio >= volExhThreshold; // VOL_EXH bi blokirao ulaz
@@ -1465,7 +1467,7 @@ function renderUltra4hSection(positions) {
       </div>`;
   }).join("");
   return `
-    <div class="section-label" style="color:#22d3ee">🚀 ULTRA-4H (eksperimentalno) — Otvorene pozicije (${positions.length}) <span style="font-weight:400;color:#94a3b8;font-size:11px">— dio zajedničkog limita ${MAX_OPEN_PER_PORTFOLIO} (${MAX_OPEN_CRYPTO} kripto) sa ULTRA</span></div>
+    <div class="section-label" style="color:#22d3ee">🚀 ULTRA-4H (eksperimentalno) — Otvorene pozicije (${positions.length}) <span style="font-weight:400;color:#94a3b8;font-size:11px">— dio zajedničkog limita 15 (9 kripto) sa ULTRA</span></div>
     <div class="pos-grid-wrap">${cards}</div>`;
 }
 
@@ -1865,7 +1867,7 @@ function renderHtml(allStats, allPositions, hb, rules = {}, ultra4hPositions = [
       <div class="stat-label">Otvoreno <span style="font-size:10px;color:#9ca3af">(+ULTRA-4H)</span></div>
       <div class="stat-value" style="color:${capSnap.total >= capSnap.totalMax ? "#ef4444" : "#d97706"}">${capSnap.total}<span style="font-size:14px;color:#6b7280">/${capSnap.totalMax}</span></div>
       <div class="stat-sub">1H ${capSnap.h1}/${capSnap.h1Max} · 4H ${capSnap.h4}/${capSnap.h4Max}</div>
-      <div class="stat-sub">kripto ${capSnap.crypto}/${capSnap.cryptoMax} · dionice+metali ${capSnap.nonCrypto}/${capSnap.nonCryptoMax}</div>
+      <div class="stat-sub">kripto ${capSnap.crypto}/${capSnap.cryptoMax} · dionice ${capSnap.stocks}/${capSnap.stocksMax}</div>
       ${capSnap.weekend ? `<div class="stat-sub" style="color:#f59e0b">VIKEND: ukupni cap ${capSnap.totalMax}${capSnap.total >= capSnap.totalMax ? " — pun, nema novih ulaza" : ""}</div>` : ""}
     </div>
     <div class="stat-card">
@@ -2277,7 +2279,7 @@ window.toggleScanFilter = function(btn) {
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px">
         <div style="background:var(--bg-secondary);border:1px solid var(--border);border-left:3px solid #34d399;border-radius:10px;padding:14px">
-          <div style="font-weight:800;margin-bottom:6px">📈 TREND (pullback) <span style="font-size:10px;color:var(--text-muted)">· ADX ≥ ${ADX_MIN}</span></div>
+          <div style="font-weight:800;margin-bottom:6px">📈 TREND (pullback) <span style="font-size:10px;color:var(--text-muted)">· ADX ≥ 22</span></div>
           <div style="font-size:12px;color:var(--text-muted);line-height:1.6">
             Ulaz u smjeru trenda na povlačenju do zone. Treba <b>min 5/8 signala</b> (E50, MACD, E145, PWHL, RDIV, MSTR, DEMA, LHUNT)
             + <b>confluence</b>: cijena unutar 1.5% potpore/otpora ("ne jurimo cijenu").
@@ -2311,8 +2313,8 @@ window.toggleScanFilter = function(btn) {
       <div style="margin-top:14px;font-size:11px;color:var(--text-muted);background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:10px 14px;line-height:1.7">
         <b>🛡️ Zaštitni slojevi (svi ulazi):</b> DEMA gate (LONG samo iznad daily EMA10) · BTC dEMA10 globalno za altove ·
         Strong/Weak vs BTC (💪 long / 🐌 short) · 60k tjedna razina (kripto short tek ispod) · 🐋 whale alignment (×1.2/×0.7) ·
-        day range (LONG blok &gt;80% dana) · max ${MAX_SAME_DIR_CRYPTO} kripto istog smjera · cooldowni (smjer 4h / simbol 24h) ·
-        noćni blok 20–06h UTC · vikend minSig+2 · CHILL mode (BTC raspon &lt;2.5% → minSig+1, size ×0.7) · dnevni loss limit 3%.
+        day range (LONG blok &gt;80% dana) · max 3 kripto istog smjera · cooldowni (smjer 4h / simbol 24h) ·
+        noćni blok 22–08h · vikend minSig+1 · CHILL mode (BTC raspon &lt;2.5% → minSig+1, size ×0.7) · dnevni loss limit 3%.
       </div>
     </div>
   </div>
@@ -2323,7 +2325,7 @@ window.toggleScanFilter = function(btn) {
       <div class="chart-title" style="margin-bottom:12px">📖 Opis signala — Future combo · gate-ovi (ADX/VOL) + 8 signala · min 5/8 za ulaz (TAO/AAVE 4/8)</div>
       <div style="margin-bottom:10px;font-size:11px;color:#f59e0b;background:#2d2000;border:1px solid #d97706;border-radius:6px;padding:8px 12px">
         ⚙️ <b>GATEVI (obvezni — blokiraju neovisno o score-u):</b>
-        &nbsp; ADX ≥ ${ADX_MIN} (trend jačina) &nbsp;·&nbsp; VOL_EXH (volumen ispod threshold-a)
+        &nbsp; ADX ≥ 22 (trend jačina) &nbsp;·&nbsp; VOL_EXH (volumen ispod threshold-a)
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:8px;font-size:12px">
         ${[
@@ -3467,7 +3469,7 @@ async function loadSupertrend() {
       + ' · rizik ' + d.riskPct + '% · R:R 1:' + d.rr + ' · SL linija ' + d.slMin + '–' + d.slMax + '%</span></div>';
     h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:#64748b;text-align:left">'
       + '<th style="padding:4px 6px">Simbol</th><th>Cijena</th><th>1D</th><th>4H</th><th>1H</th><th>Linija 1H (udalj.)</th><th>Status</th></tr></thead><tbody>';
-    // SVA kripto s watchliste (dionice i metali izuzeti) — broj se mijenja s watchlistom: prvo SIGNAL, zatim usklađeni 1D+4H (čekaju obrat 1H), na kraju ostali (stabilan sort)
+    // 23 simbola: prvo SIGNAL, zatim usklađeni 1D+4H (čekaju obrat 1H), na kraju ostali (stabilan sort)
     var stRank = function(s) { return s.signal ? 0 : (!s.error && s.aligned ? 1 : 2); };
     d.symbols.slice().sort(function(a, b) { return stRank(a) - stRank(b); }).forEach(function(s) {
       h += '<tr style="border-top:1px solid rgba(148,163,184,0.15)"><td style="padding:5px 6px;font-weight:700">' + stEsc(s.symbol.replace('USDT','')) + '</td>';

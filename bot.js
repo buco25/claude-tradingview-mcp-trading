@@ -76,7 +76,7 @@ export const MAX_OPEN_STOCKS = 4;  // (01.10.: 2->4, na zahtjev)
 // i provjere u run()/runUltra4hStrategy() koje ih primjenjuju PO STRATEGIJI, odvojeno od
 // ovog ukupnog broja koji ostaje kao vanjska sigurnosna granica.
 // 07.10., na zahtjev vlasnika: vraćeno 13 -> 11 (= MAX_OPEN_1H 3 + MAX_OPEN_4H 8). Vikend ostaje WEEKEND_MAX_OPEN (5).
-export const MAX_OPEN_PER_PORTFOLIO = 11;  // izvezen 07.10. (nalaz #29) — dashboard oznake citaju konstantu, ne upisani broj
+const MAX_OPEN_PER_PORTFOLIO = 11;
 // 01.10., na zahtjev — nakon analize rujna (47.5% WR / -$39.53 na 1H vs 77.1% WR / +$57.86
 // na 4H, cijeli mjesec, na svim score razinama): dok se ne razjasni ZAŠTO 1H strukturno
 // podbacuje, njegova ukupna izlozenost je ostro ogranicena, a 4H (dokazano bolji) dobiva
@@ -111,9 +111,7 @@ export function getCapSnapshot() {
     h1:        syn.length,                h1Max:     MAX_OPEN_1H,
     h4:        u4h.length,                h4Max:     MAX_OPEN_4H,
     crypto:    syn.filter(p => !isStockSym(p.symbol)).length + u4h.length, cryptoMax: MAX_OPEN_CRYPTO,
-    // 07.10. (nalaz #28): `stocks`/`stocksMax` su uklonjeni — `stocksMax` je bio
-    // MAX_OPEN_STOCKS (4), nedostizan strop koji je dashboard prikazivao kao "dionice x/4"
-    // dok naslov na istom ekranu pise "1 dionica/metal". Stvarni strop je nonCryptoMax.
+    stocks:    syn.filter(p => isStockSym(p.symbol)).length,               stocksMax: MAX_OPEN_STOCKS,
     nonCrypto: syn.filter(p => isStockSym(p.symbol) || isMetalSym(p.symbol)).length, nonCryptoMax: MAX_OPEN_NONCRYPTO,
   };
 }
@@ -125,10 +123,6 @@ export const isMetalSym = (s) => SYMBOL_SECTORS[s] === "METAL";
 // i metali ukupno. Metali su u ostalim capovima brojani kao kripto (isStockSym ih ne hvata), pa MAX_OPEN_STOCKS (4) nije pokrivao
 // ni njih ni ovaj zahtjev. Razlog: 1H dionice/metali od 1.9. gube (dionice −28 $, metali −18 $) dok kripto zarađuje (+65 $).
 // Postojeća pozicija istog simbola (pyramid) nije "novi" slot. 4H i Supertrend ionako ne trguju dionicama/metalima.
-// 07.10. (nalaz #33): METALNA polovica ovog stropa je trenutno NEDOSTIŽNA — jedini metal još
-// na `watchlist_synapse_t` je PAXGUSDT, a on je u PROBLEM_1H_SYMBOLS (trajno izvan 1H);
-// XAU/XAG nisu više ni na watchlisti. Efektivno je ovo strop od 1 na DIONICE. Ne zaključi iz
-// naziva da strop štiti od metala — ako se metal vrati na watchlistu, štitit će i njih.
 export const MAX_OPEN_NONCRYPTO = 1;
 export function nonCryptoCapBlocks(symbol, open) {
   if (!isStockSym(symbol) && !isMetalSym(symbol)) return false;
@@ -167,7 +161,7 @@ const MAX_PYRAMID_RISK_PCT   = 5.0;
 // spustio efektivni broj istovremenih pozicija s 11 na ~7. Mijenja se ovdje, jedan broj.
 const MAX_PORTFOLIO_RISK_PCT = 20.0;
 const MAX_NEW_ENTRIES_PER_SCAN = 2; // max NOVIH ulaza po scan ciklusu (08.07.: 4 longa u istom scanu = 1 oklada ×4)
-export const MAX_SAME_DIR_CRYPTO = 4;      // max kripto pozicija u ISTOM smjeru — svi altovi su jedan BTC-beta trade
+const MAX_SAME_DIR_CRYPTO = 4;      // max kripto pozicija u ISTOM smjeru — svi altovi su jedan BTC-beta trade
                                      // (28.08.: 3→4 na korisnikov zahtjev nakon analize 20.08. rallyja gdje je
                                      // ETH+WLD+AAVE istovremeno pogodilo stari cap od 3 i odbilo daljnje longove)
 const MAX_VIP_SAME_DIR = 2;         // 28.08.: 1→2 — koliko VIP slotova (score≥7/8) smije istovremeno
@@ -1159,27 +1153,6 @@ export async function getAllFundingRates(symbols) {
 
 // ─── Volume Anomaly gate ──────────────────────────────────────────────────────
 const VOL_LOOKBACK = 20;
-
-// ─── Volumenski spike zadnje ZATVORENE svijeće (07.10., nalaz #25) ────────────
-// Jedna formula za sva tri mjesta koja mjere istu stvar. Do 07.10. su postojala tri
-// prozora: `analyzeUltra` je uzimao `slice(-21,-1)`, što uključuje SAMU mjerenu svijeću
-// (n-2) u njezin prosjek, pa je spike razrjeđivao vlastitu osnovicu — stvarnih 11.16×
-// (AMDUSDT, slučaj zbog kojeg je prozor i mijenjan) čitalo se kao 7.40×, a spike u pojasu
-// koji dashboard prikazuje kao blokiran gate nije blokirao:
-//   BTC 5.00–6.33× | ETH/SOL/XRP 4.00–4.75× | ADA/LINK/DOGE 3.50–4.03×
-//   default/tier3 3.00–3.35× | TAO/HYPE/JUP/ENA 2.50–2.71×
-// `checkVolumeAnomaly` i dashboard badge su imali ispravan prozor (20 čistih prethodnih),
-// pa su dashboard i bot pokazivali različitu odluku za isti ulaz.
-// NAPOMENA: ovo MIJENJA koji se tradeovi uzimaju — VOL_EXH sad blokira ranije, točno na
-// pragu koji mu piše. Odluka vlasnika 07.10. ("popravi sve").
-export function volSpikeRatio(candles, lookback = VOL_LOOKBACK) {
-  if (!candles || candles.length < lookback + 3) return 1;
-  const w = candles.slice(-lookback - 2, -2).map(c => c.volume || 0);
-  if (w.length < 5) return 1;
-  const avg = w.reduce((a, b) => a + b, 0) / w.length;
-  const cur = candles[candles.length - 2].volume || 0;
-  return avg > 0 ? cur / avg : 1;
-}
 const VOL_LOW_MULT = 0.3;
 const VOL_HIGH_MULT = 2.0;
 
@@ -1237,8 +1210,11 @@ function checkVolumeAnomaly(candles) {
   // Koristimo zadnju ZATVORENU svjeću (index -2), ne posljednju koja se još formira!
   // Aktivna svjeća uvijek ima parcijalni volumen → krivo bi zaključivala "nizak volumen"
   if (candles.length < VOL_LOOKBACK + 3) return { ok: true, ratio: 1, label: 'N/A' };
-  if (candles.slice(-VOL_LOOKBACK - 2, -2).length < 5) return { ok: true, ratio: 1, label: 'N/A' };
-  const ratio = volSpikeRatio(candles);  // nalaz #25: jedna formula za sva tri mjesta
+  const vols = candles.slice(-VOL_LOOKBACK - 2, -2).map(c => c.volume);
+  if (vols.length < 5) return { ok: true, ratio: 1, label: 'N/A' };
+  const avg = vols.reduce((a, b) => a + b, 0) / vols.length;
+  const cur = candles[candles.length - 2].volume;  // zadnja zatvorena
+  const ratio = avg > 0 ? cur / avg : 1;
   return {
     ok: ratio >= VOL_LOW_MULT,
     high: ratio >= VOL_HIGH_MULT,
@@ -2499,23 +2475,6 @@ function initScanLog() {
   }
 }
 
-// ─── RSI/ADX za scan_log (07.10., nalaz #27) ─────────────────────────────────
-// Stupci `RSI` i `ADX` u headeru su do 07.10. bili TRAJNO prazni: jedino mjesto koje ih je
-// slalo imalo je `rsi: result.price != null ? null : null` (null u oba kraka ternara) i
-// `adx: null` kao literal, pa je writeScanLog uvijek pisao "—".
-// Vrijednosti se citaju iz reason stringa, a ne iz povratnog objekta `analyzeUltra`, jer
-// `analyzeUltra` ima 21 izlaznu tocku i `rsi`/`adx` nisu u scopeu na svima — dodavanje polja
-// na svaku znacilo bi dirati signalnu jezgru koju cuva golden. Reason string ih vec nosi
-// (`ADX:xx`, `RSI:xx`). Gdje ih grana ne reportira, stupac ostaje "—" kao i prije.
-function scanLogRsiAdx(reason) {
-  const t = String(reason || "");
-  // Dva ziva formata: "ADX:27" (momentum reason) i "ADX 18.4 < 20" (gate odbijanje).
-  // Trazi se broj NEPOSREDNO iza oznake, pa "ADX +3 (23)" (dinamicki prag) ne upada.
-  const adx = t.match(/ADX[:\s]+(-?\d+(?:\.\d+)?)/);
-  const rsi = t.match(/RSI[:\s]+(-?\d+(?:\.\d+)?)/);
-  return { rsi: rsi ? rsi[1] : null, adx: adx ? adx[1] : null };
-}
-
 function writeScanLog(entries) {
   initScanLog();
   const lines = entries.map(e => {
@@ -3440,8 +3399,8 @@ function analyzeUltra(candles, cfg) {
   // sustavno podcjenjivao stvarne exhaustion spike-ove (uhvaceno na AMDUSDT
   // LONG-u koji je usao odmah nakon 11.16x volumen svijece, VOL_EXH ga nije
   // blokirao jer je gledao sljedecu, tek-otvorenu svijecu s gotovo nula vol).
-  // 07.10. (nalaz #25): prozor je bio slice(-21,-1), koji mjerenu svijecu broji u
-  // vlastiti prosjek. Sad ide kroz volSpikeRatio, isti kao checkVolumeAnomaly i dashboard.
+  const volAvg20 = vols.slice(-21, -1).reduce((a,b)=>a+b,0) / 20;
+  const volLast  = vols[n-2];
 
   // Recent EMA cross — 04.10. uklonjeno (audit nalaz #10): hadCrossUp/hadCrossDn su se
   // postavljali i nikad čitali (ni score, ni gate, ni return objekt), pa su s njima
@@ -3701,7 +3660,7 @@ function analyzeUltra(candles, cfg) {
 
   // 4. VOL EXHAUSTION gate
   const VOL_EXH_THRESHOLD = VOL_EXH_TIERS[_sym] ?? VOL_EXH_DEFAULT;
-  const volRatioNow = volSpikeRatio(candles);
+  const volRatioNow = volAvg20 > 0 ? volLast / volAvg20 : 1;
   const volExhOk = volRatioNow < VOL_EXH_THRESHOLD;
   // 21.09. fix (audit nalaz #4): bio === 7, pa savršen 8/8 score NIJE bio obuhvaćen
   // (8 !== 7) i blokirao bi ga VOL_EXH gate dok je slabiji 7/8 prolazio — >= 7 hvata oboje.
@@ -3848,10 +3807,8 @@ function analyzeUltra(candles, cfg) {
   // (_comboLen, TE_COMBO=8) — bilo hardkodirano na "/9" (relikt starog seta),
   // ispravljeno 26.08. nakon što je korisnik primijetio nesklad s "Score: X/8" prikazom.
   const dirStr = scaleOkLong ? `LONG(${scaleUp}/6)` : scaleOkShort ? `SHORT(${scaleDn}/6)` : `6Sc✗`;
-  // 07.10. (nalaz #32): _rsiLongPrag/_rsiShortPrag su uklonjeni. RSI gate je ukinut
-  // (nalaz #12) i `rsiLongOk`/`rsiShortOk` su hardkodirani na `true` iznad, pa su se ove
-  // dvije vrijednosti racunale na svakom scanu samo da nahrane `!rsiLongOk ? ... : ""`
-  // krakove u whyNot stringu — krakove koji se nikad nisu mogli izvrsiti.
+  const _rsiLongPrag  = _strongTrend  ? 85 : 72;
+  const _rsiShortPrag = _strongTrendS ? 15 : 30;
   // Prikaži bullScore/bearScore (S bonusima — Wyckoff/CVD+E145/PWH+MSTR/MDIV) i STVARNI
   // prag te strane (MIN_CONFIRM_LONG za bull, MIN_CONFIRM_SHORT za bear — uključuje Wyckoff
   // SOS/SOW-pending/CHILL/vikend/invalidacija boost), ne generički MIN_CONFIRM — inače poruka
@@ -3860,8 +3817,8 @@ function analyzeUltra(candles, cfg) {
   const _isBullSide = bullScore >= bearScore;
   const _sideConfirm = _isBullSide ? MIN_CONFIRM_LONG : MIN_CONFIRM_SHORT;
   const whyNot = _isBullSide
-    ? `↑${bullScore}/${_comboLen} ${dirStr} | MOM:${momBull}/${_comboLen}`
-    : `↓${bearScore}/${_comboLen} ${dirStr} | MOM:${momBear}/${_comboLen}`;
+    ? `↑${bullScore}/${_comboLen} ${dirStr}${!rsiLongOk  ? ` RSI${rsi.toFixed(0)}≥${_rsiLongPrag}✗`  : ""} | MOM:${momBull}/${_comboLen}`
+    : `↓${bearScore}/${_comboLen} ${dirStr}${!rsiShortOk ? ` RSI${rsi.toFixed(0)}≤${_rsiShortPrag}✗` : ""} | MOM:${momBear}/${_comboLen}`;
   return { price, signal: "NEUTRAL", bullScore, bearScore,
     momBull, momBear,
     reason: `ULTRA: ${whyNot} (treba ${_sideConfirm}/${_comboLen} pullback ili ${_isBullSide ? MOM_MIN_LONG : MOM_MIN_SHORT}/${_comboLen} momentum, soft ${_isBullSide ? MOM_MIN_LONG - MOM_SOFT_BAND : MOM_MIN_SHORT - MOM_SOFT_BAND})` };
@@ -6941,11 +6898,9 @@ export async function runUltra4hStrategy() {
     }
   }
 
-  // 18.09., na zahtjev: ZAJEDNIČKI limit sa synapse_t — brojevi se ne prepisuju ovdje, vidi
-  // definicije MAX_OPEN_PER_PORTFOLIO / MAX_OPEN_1H / MAX_OPEN_4H / MAX_OPEN_CRYPTO
-  // (07.10., nalaz #30: komentar je prezivio dva kruga promjena capova i pisao stare brojeve).
-  // Klasni cap za ne-kripto je MAX_OPEN_NONCRYPTO (1), NE MAX_OPEN_STOCKS — ULTRA-4H trguje
-  // samo kriptom pa sve njene pozicije idu u kripto klasu.
+  // 18.09., na zahtjev: ZAJEDNIČKI limit sa synapse_t (01.10.: ukupno 11 = MAX_OPEN_1H(3)
+  // + MAX_OPEN_4H(8), uz klasne capove 8 kripto / 4 dionice preko OBJE strategije) —
+  // ULTRA-4H trguje samo kriptom.
   {
     const _synPos0     = loadPositions("synapse_t");
     const _u4hPos0     = loadPositions(ULTRA4H_PID);
@@ -7252,9 +7207,7 @@ function _stSaveState(s) { try { writeFileSync(ST_STATE_FILE, JSON.stringify(s))
 // Skenira stUniverse(watchlist) i otvara ulaze. Zove se iz run() NAKON glavne petlje, unutar iste petlje
 // portfelja — pa nasljeđuje sve zaštite na razini portfelja. Vraća broj otvorenih ulaza.
 async function runSupertrendEntries(ctx) {
-  // `rules` je 07.10. (nalaz #32) izbacen iz destrukturiranja — ctx ga i dalje nosi, ali
-  // runSupertrendEntries ga nije koristio (ST preskace signalne gejtove pa mu rules ne treba).
-  const { pid, pDef, isLive, scanLog, btcRegime1h, btcRegime4h } = ctx;
+  const { pid, pDef, rules, isLive, scanLog, btcRegime1h, btcRegime4h } = ctx;
   let entered = 0, stCapLogged = false;
   const BTC = "BTCUSDT";
   for (const symbol of stUniverse(pDef.symbols)) {            // watchlist/suspenzija se poštuje (suspendirani nisu na watchlisti)
@@ -7957,12 +7910,6 @@ export async function run() {
         _scanLogEntries.push({ symbol, signal: "SKIP", blocker: `MAX_NONCRYPTO(${MAX_OPEN_NONCRYPTO})`, reason: "Max 1 dionica/metal istovremeno (odluka vlasnika)" });
         continue;
       }
-      // 07.10. (nalaz #28): grana `_symIsStock → MAX_OPEN_STOCKS` (4) je NEDOSTIŽNA —
-      // `nonCryptoCapBlocks` iznad blokira svaku dionicu/metal već kad je jedna ne-kripto
-      // pozicija otvorena (MAX_OPEN_NONCRYPTO = 1), pa `_classOpen >= 4` za dionice ne
-      // može nastati. Logika se ostavlja (ne mijenja ponašanje, a vraća se u igru ako se
-      // MAX_OPEN_NONCRYPTO digne), ali dashboard više ne prikazuje MAX_OPEN_STOCKS kao
-      // strop za dionice — prikazuje stvarni `nonCryptoMax`.
       const _classMax   = _symIsStock ? MAX_OPEN_STOCKS : MAX_OPEN_CRYPTO_VIP;
       if (_classOpen >= _classMax && symbol !== BTC_EXCEPTION && !openSymbols.includes(symbol)) {
         console.log(`  🔒 [${pDef.name}] Max ${_classMax} ${_symIsStock ? "dionica" : "kripto"} dostignut (${_classOpen}) — preskačem ${symbol}`);
@@ -8116,8 +8063,8 @@ export async function run() {
           _scanLogEntries.push({
             symbol, signal: "NEUTRAL",
             score: Math.max(result.bullScore || 0, result.bearScore || 0),
-            ...scanLogRsiAdx(reason),
-            vwapDist: result.vwap ? ((result.price - result.vwap) / result.vwap * 100).toFixed(2) : null,
+            rsi: result.price != null ? null : null,  // rsi u reason stringu
+            adx: null, vwapDist: result.vwap ? ((result.price - result.vwap) / result.vwap * 100).toFixed(2) : null,
             blocker: "SIGNAL", reason,
           });
           continue;
@@ -9391,7 +9338,7 @@ function _buildReport(dateStr, stats, statsU4h, fg, news, pivots, outlook, posIn
   tgMsg += _fmtPerf("ULTRA", stats) + "\n";
   tgMsg += _fmtPerf("ULTRA-4H", statsU4h) + "\n";
 
-  tgMsg += `🎯 <b>Otvoreno sada:</b> ${posInfo.total}/${posInfo.max} ukupno (${posInfo.crypto} kripto / ${posInfo.nonCrypto} dionice+metali)\n\n`;
+  tgMsg += `🎯 <b>Otvoreno sada:</b> ${posInfo.total}/${posInfo.max} ukupno (${posInfo.crypto} kripto / ${posInfo.stocks} dionice)\n\n`;
 
   tgMsg += blActive.length
     ? `🚫 <b>Blacklist:</b> ${blActive.map(([sym,v])=>`${sym.replace("USDT","")} (još ${((v.until-Date.now())/3600000).toFixed(1)}h)`).join(", ")}\n\n`
@@ -9464,7 +9411,7 @@ function _buildReport(dateStr, stats, statsU4h, fg, news, pivots, outlook, posIn
   }
 
   md += `## 🎯 Otvorene pozicije\n\n`;
-  md += `Ukupno: ${posInfo.total}/${posInfo.max} · Kripto: ${posInfo.crypto}/${posInfo.cryptoMax} · Dionice+metali: ${posInfo.nonCrypto}/${posInfo.nonCryptoMax}\n\n`;
+  md += `Ukupno: ${posInfo.total}/${posInfo.max} · Kripto: ${posInfo.crypto}/${posInfo.cryptoMax} · Dionice: ${posInfo.stocks}/${posInfo.stocksMax}\n\n`;
 
   md += `## 🚫 Blacklist\n\n`;
   md += blActive.length
@@ -9792,10 +9739,7 @@ export async function generateDailyReport() {
   const posInfo = {
     total: _openSyn.length + _openU4h.length, max: getMaxOpenPositions(),
     crypto: _openSyn.filter(p => !isStockSym(p.symbol)).length + _openU4h.length, cryptoMax: MAX_OPEN_CRYPTO,
-    // 07.10. (nalaz #28): bio je `stocksMax: MAX_OPEN_STOCKS` (4), strop koji je nedostizan —
-    // stvarni je MAX_OPEN_NONCRYPTO (1), i vrijedi za dionice I metale zajedno.
-    nonCrypto: _openSyn.filter(p => isStockSym(p.symbol) || isMetalSym(p.symbol)).length,
-    nonCryptoMax: MAX_OPEN_NONCRYPTO,
+    stocks: _openSyn.filter(p => isStockSym(p.symbol)).length, stocksMax: MAX_OPEN_STOCKS,
   };
 
   // 2g. Blacklist status — 20.09., dodano

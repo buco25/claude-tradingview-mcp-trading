@@ -4747,7 +4747,15 @@ async function checkPortfolioPositions(pid) {
                       savePositions(pid, _allPos1R);
                     }
                   }
-                  writeExitCsv(pid, { ...pos, quantity: _closeQty }, liveP, `Partial TP +1R (${_pctClosed}%)`, _pnl1R);
+                  // 18.10. (nalaz #38): prije je ovdje isao `{ ...pos, quantity: _closeQty }` bez
+                  // feeOverridea, pa je writeExitCsv racunao naknadu iz `pos.totalUSD` — a taj je
+                  // nekoliko linija gore vec prepisan na PREOSTALI notional. Redak je time nosio
+                  // tocnu kolicinu, ali tudi notional i naknadu na njemu (rez je malen, ostatak
+                  // velik → naknada precijenjena, Net P&L te noge podcijenjen). Isti helper kao
+                  // TP-HIT parcijala (nalaz #34), pa su oba parcijalna puta sad na istoj osnovici.
+                  { const _r1Row = partialExitRow(pos, liveP, _closeQty);
+                    if (_r1Row) writeExitCsv(pid, { ...pos, quantity: _r1Row.quantity, totalUSD: _r1Row.totalUSD }, liveP, `Partial TP +1R (${_pctClosed}%)`, _r1Row.pnl, _r1Row.fee);
+                    else        writeExitCsv(pid, { ...pos, quantity: _closeQty }, liveP, `Partial TP +1R (${_pctClosed}%)`, _pnl1R); }
                   console.log(`  💰 [1R] ${pos.symbol} ${pos.side} — +1R (${_gain1R.toFixed(2)}%) → ${_pctClosed}% zatvoreno (+$${_pnl1R.toFixed(2)}), SL na BE`);
                   await tg(`💰 <b>PARTIAL +1R</b> ${pos.symbol} ${pos.side}\n${_pctClosed}% zatvoreno @ ${fmtPrice(liveP)} → +$${_pnl1R.toFixed(2)} zaključano\nOstatak: SL na break-even, trail lovi trend`);
                   if (pos.quantity <= 0) { stillOpen.push({ ...pos, _remove: true }); continue; }

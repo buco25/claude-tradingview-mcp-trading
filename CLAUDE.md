@@ -18,7 +18,7 @@ audit nađe nalaz
 Pravila koja to drže na mjestu:
 
 - **Nalazi žive u `docs/AUDIT-2026-10-04.md`, ne u chatu.** Numeracija je neprekinuta kroz
-  prolaze (zadnji je #38). Nikad ne počinji numeraciju od 1 i ne prijavljuj ponovno nalaz koji
+  prolaze (zadnji je #40). Nikad ne počinji numeraciju od 1 i ne prijavljuj ponovno nalaz koji
   je tamo već zapisan — ako je regresirao, reci da je regresija.
 - **Predaja drugoj sesiji je datoteka, ne poruka.** Ako posao preuzima druga sesija, uputa joj je
   "pročitaj `CLAUDE.md` i `docs/AUDIT-2026-10-04.md`, pa popravi #N" — ne zalijepljeni blok.
@@ -346,6 +346,24 @@ headere, i izvezeno je za `dashboard.js`. Nikad ne sastavljaj headere ručno:
   `bitgetPost`, pa je uz `BITGET_DEMO=true` bot **pisao na demo a čitao živi račun** — equity,
   pozicije, fillove i zatvoreni P&L (nalaz #22).
 - timestamp se izračuna i potpiše u istom pozivu, pa `ts` i `sign` ne mogu raziđeti.
+
+## CSV povijest je ZAŠTITA, ne samo statistika (nalaz #40, 18.10.)
+
+`trades_<pid>.csv` nije izvještaj — iz njega se napajaju tri zaštite koje zaustavljaju bota:
+
+- `getDailyPnl` → dnevni limit gubitka (3% equityja)
+- `getConsecutiveLossCount` / `checkCircuitBreaker` → 7 uzastopnih gubitaka = 8 h pauza
+- `recordSymbolSl` → suspenzija simbola nakon 5 SL-ova
+- (+ `getDynamicAdx` za dinamički ADX prag i `getPortfolioEquity` za PAPER procjenu)
+
+**Prazan ili izgubljen CSV znači da se nijedna od njih ne može okinuti** — bot ne vidi ni jedan
+gubitak, pa nastavlja trgovati kroz lošu seriju. 18.10. je upravo to nađeno: izvoz s dashboarda
+imao je samo zaglavlje, dok je 04.10. imao 1 227 + 177 redaka.
+
+`DATA_DIR` je `process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".")`. Ako volume
+nije montiran na `/app/data`, fallback je radni direktorij — koji se na Railwayu briše pri svakom
+deployu. **Provjeri da je volume montiran i `DATA_DIR` postavljen prije nego što se zaključi da je
+bot "miran".** Rekonstrukcija s Bitgeta postoji: `autoFixCsvFromBitget(pid)`.
 
 ## Granularnost svijeća: UVIJEK `utc` varijanta (nalazi #7, #37, #39)
 

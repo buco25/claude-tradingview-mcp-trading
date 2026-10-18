@@ -347,10 +347,22 @@ headere, i izvezeno je za `dashboard.js`. Nikad ne sastavljaj headere ručno:
   pozicije, fillove i zatvoreni P&L (nalaz #22).
 - timestamp se izračuna i potpiše u istom pozivu, pa `ts` i `sign` ne mogu raziđeti.
 
-## Dnevne svijeće
+## Granularnost svijeća: UVIJEK `utc` varijanta (nalazi #7, #37, #39)
 
-Koristi **`granularity=1Dutc`**, ne `1D`. Bitgetov `1D` nije poravnat na UTC i daje drugu
-dnevnu granicu. Sve u repou je na `1Dutc` od 04.10. (nalaz #7).
+Bitgetove granularnosti **bez** sufiksa `utc` poravnane su na **UTC+8**, ne UTC:
+`1D` = pon 00:00 UTC+8, `1W` = ned 16:00 UTC (izmjereno 18.10.). Zato koristi
+**`1Dutc` / `1Wutc` / `1Mutc`**, nikad gole.
+
+- #7 (04.10.) je to popravio za dnevne, #37 (18.10.) za tjedne — svih 6 tjednih dohvata.
+- #39 (18.10.): nalaz #7 je **propustio** PDH/PDL dohvat u `dashboard.js`, pa je tvrdnja
+  "sve je na 1Dutc" bila netočna tri tjedna. Nađeno tek kad je napisan test koji to provjerava.
+- **`npm test` ovo NE hvata sam od sebe:** regresijski test ne dohvaća mrežu, a PWH/PWL mu ulaze
+  kao `cfg._pwh/_pwl`. Mrežu drži `test/candle-granularity.mjs`, koji čita IZVOR i pada na svakoj
+  goloj varijanti. Dodaješ li novi dohvat svijeća, taj test je ono što te čuva.
+- Zašto je bitno: tjedni `_pwh`/`_pwl` iz `analyzeUltraPullback` ulaze u `sigs[4]`, koji je u
+  `TE_COMBO` (dakle **score**) i u `_pwhMstrBonusBull`. Izmjereno (5 simbola, ~11 tjedana, 8 420
+  uzoraka): izvan prozora ned 16:00–pon 00:00 UTC razlika je median 0.000%, unutar njega median
+  2.37% / p90 16.0% / max 63.4%. Alat za ponovno mjerenje: `tools/weekly-granularity-diff.mjs`.
 
 ## Što je neauditirano
 

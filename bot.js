@@ -512,7 +512,13 @@ export async function getBtcWeeklyVsKey() {
   try {
     const key = JSON.parse(readFileSync("rules.json", "utf8")).btc_key_level ?? null;
     if (!key) return _btcWeeklyKeyCache;
-    const d = await fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1W&limit=3`).then(r => r.json());
+    // 18.10. (nalaz #37): `1W` -> `1Wutc`. Bitgetov `1W` je poravnan na pon 00:00 UTC+8
+    // (= ned 16:00 UTC), isti obrazac kao `1D` vs `1Dutc` iz nalaza #7. Fazni pomak granica je
+    // 8 h, ali kod cita "tjedan prije onog koji se formira", pa je u prozoru ned 16:00 - pon
+    // 00:00 UTC biralo CIJELI TJEDAN razlike. Izmjereno (5 simbola, ~11 tjedana, 8420 uzoraka
+    // po satu): izvan prozora median razlike 0.000%, unutar prozora median 2.37% / p90 16.0%
+    // / max 63.4%. Vidi tools/weekly-granularity-diff.mjs.
+    const d = await fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1Wutc&limit=3`).then(r => r.json());
     if (d.code === "00000" && d.data?.length >= 2) {
       // ascending: predzadnji = zadnji DOVRŠENI tjedan
       const lastClose = parseFloat(d.data[d.data.length - 2][4]);
@@ -3864,7 +3870,14 @@ export async function analyzeUltraPullback(symbol, candles, cfg) {
   // Bitget vraća ascending: zadnji = tekući tjedan, predzadnji = prethodni (dovršeni)
   let _pwh = null, _pwl = null, _wOpen = null;
   try {
-    const wUrl = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=1W&limit=3`;
+    // 18.10. (nalaz #37): `1W` -> `1Wutc`. Bitgetov `1W` je poravnan na pon 00:00 UTC+8
+    // (= ned 16:00 UTC), isti obrazac kao `1D` vs `1Dutc` iz nalaza #7. Fazni pomak granica je
+    // 8 h, ali kod cita "tjedan prije onog koji se formira", pa je u prozoru ned 16:00 - pon
+    // 00:00 UTC biralo CIJELI TJEDAN razlike. Izmjereno (5 simbola, ~11 tjedana, 8420 uzoraka
+    // po satu): izvan prozora median razlike 0.000%, unutar prozora median 2.37% / p90 16.0%
+    // / max 63.4%. PWH/PWL odavde ulaze u sigs[4] (u TE_COMBO, dakle SCORE) i u
+    // _pwhMstrBonusBull — jedini bonus momentum grane. Vidi tools/weekly-granularity-diff.mjs.
+    const wUrl = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=1Wutc&limit=3`;
     const wd = await fetch(wUrl).then(r => r.json());
     if (wd.code === "00000" && wd.data?.length >= 2) {
       const wLast = wd.data.length - 1;

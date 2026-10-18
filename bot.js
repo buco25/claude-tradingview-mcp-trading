@@ -4886,6 +4886,32 @@ async function checkPortfolioPositions(pid) {
             console.log(`  🎯 [TP HIT] ${pos.symbol} ${pos.side} — TP dostignut @ ${fmtPrice(liveP)} (+${_pricePctP.toFixed(1)}%) → zatvaramo ${PARTIAL_CLOSE_PCT}%, ostatak na trail SL`);
             const _pClosed = await partialClosePosition(pos);
             if (_pClosed) {
+              // ── CSV zapis zatvorenog dijela (18.10., nalaz #34) ──────────────────
+              // Ovaj parcijalni izlaz do 18.10. NIJE pisao u CSV: PARTIAL_CLOSE_PCT
+              // pozicije zatvoreno točno na TP-u — najprofitabilniji dio trejda — nije
+              // postojalo u evidenciji. `partialClosePosition` sam ne piše ništa, a
+              // "Zatvoreno izvana" putevi se okidaju samo kad pozicije VIŠE NEMA na
+              // Bitgetu, ne kad je smanjena, pa to nitko nije kompenzirao. Posljedice:
+              // getDailyPnl (dnevni limit gubitka), equity krivulja, Profit Factor i
+              // ukupni P&L su podcjenjivali zaradu, a WR klasifikacija je bila
+              // sustavno pristrana PROTIV pobjeda — planirana dobit se računa na punom
+              // notionalu ulaznog retka, a izlazni redci su pokrivali samo ostatak, pa
+              // je trejd koji je stvarno dosegao TP padao ispod WR_TARGET_FRAC × planirane
+              // i postajao NERIJEŠENO. +1R parcijala ("Partial TP +1R" gore) je pisala od
+              // početka — razlika između dva parcijalna puta bila je tiha.
+              // Piše se PRIJE mutacija pos.quantity/totalUSD niže, i nosi količinu i
+              // notional ZATVORENOG dijela; fee ide kroz feeOverride na tom notionalu
+              // (writeExitCsv ga inače računa iz pos.totalUSD — vidi nalaz #38).
+              {
+                const _tpRow = partialExitRow(pos, liveP, _pClosed.closedQty);
+                if (_tpRow) {
+                  writeExitCsv(pid, { ...pos, quantity: _tpRow.quantity, totalUSD: _tpRow.totalUSD }, liveP,
+                    `Partial TP (${PARTIAL_CLOSE_PCT}%)`, _tpRow.pnl, _tpRow.fee);
+                  console.log(`  🧾 [TP HIT] ${pos.symbol} ${pos.side} — zapisano u CSV: ${_tpRow.quantity} @ ${fmtPrice(liveP)} → ${_tpRow.pnl >= 0 ? "+" : ""}$${_tpRow.pnl.toFixed(2)} bruto, fee $${_tpRow.fee.toFixed(2)}`);
+                } else {
+                  console.log(`  ⚠️  [TP HIT] ${pos.symbol} — parcijala zatvorena ali CSV redak nije izračunljiv (qty ${_pClosed.closedQty}, entry ${pos.entryPrice})`);
+                }
+              }
               // Otkaži sve Bitget plan naloge (track_stop bi inače zatvorio puni qty)
               await cancelAllPlanOrders(pos.symbol, pos.side);
               // Aktiviraj trail odmah — peak počinje od TP razine
@@ -5285,6 +5311,21 @@ async function reconcileSoftExit(pos, sentAtMs, qtyStr, liveP, estPnl) {
 }
 
 // feeOverride (opcionalno): stvarna UKUPNA naknada u $ (izlaz po Bitgetu + procjena ulaza)
+// ─── Redak za PARCIJALNI izlaz (18.10., nalaz #34) ───────────────────────────
+// Parcijalni izlaz mora u CSV ići s količinom i notionalom ZATVORENOG dijela, i s
+// naknadom na tom notionalu — `writeExitCsv` inače računa fee iz `pos.totalUSD`, koji je
+// kod parcijale puni (ili već smanjeni) notional cijele pozicije, nikad zatvoreni dio
+// (vidi nalaz #38). Izdvojeno u funkciju da predznak po strani i osnovica naknade budu
+// pokriveni testom (`test/partial-exit-row.mjs`), a ne samo inline na pozivnom mjestu.
+export function partialExitRow(pos, exitPrice, closedQty) {
+  const qty      = Number(closedQty);
+  const entry    = Number(pos?.entryPrice);
+  if (!(qty > 0) || !(entry > 0) || !Number.isFinite(Number(exitPrice))) return null;
+  const totalUSD = qty * entry;
+  const pnl      = (pos.side === "LONG" ? (exitPrice - entry) : (entry - exitPrice)) * qty;
+  return { quantity: qty, totalUSD, pnl, fee: totalUSD * 0.0006 * 2 };
+}
+
 export function writeExitCsv(pid, pos, exitPrice, reason, pnl, feeOverride = null) {
   const now     = new Date();
   const date    = now.toISOString().slice(0, 10);

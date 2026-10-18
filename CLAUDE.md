@@ -18,7 +18,7 @@ audit nađe nalaz
 Pravila koja to drže na mjestu:
 
 - **Nalazi žive u `docs/AUDIT-2026-10-04.md`, ne u chatu.** Numeracija je neprekinuta kroz
-  prolaze (zadnji je #38). Nikad ne počinji numeraciju od 1 i ne prijavljuj ponovno nalaz koji
+  prolaze (zadnji je #40). Nikad ne počinji numeraciju od 1 i ne prijavljuj ponovno nalaz koji
   je tamo već zapisan — ako je regresirao, reci da je regresija.
 - **Predaja drugoj sesiji je datoteka, ne poruka.** Ako posao preuzima druga sesija, uputa joj je
   "pročitaj `CLAUDE.md` i `docs/AUDIT-2026-10-04.md`, pa popravi #N" — ne zalijepljeni blok.
@@ -373,11 +373,47 @@ headere, i izvezeno je za `dashboard.js`. Nikad ne sastavljaj headere ručno:
   `${MAX_OPEN_PER_PORTFOLIO}`, `${MAX_OPEN_CRYPTO}`), ne upisuj brojeve — nalaz #29 je bio šest
   oznaka koje su preživjele promjene konstanti, a #30 isti obrazac u komentarima. Prije commita
   provjeri da je nova `${}` oznaka **unutar** template literala, inače izađe doslovno na stranicu.
+## DATA_DIR mora biti postavljen eksplicitno (18.10.)
 
-## Dnevne svijeće
+```js
+const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
+```
 
-Koristi **`granularity=1Dutc`**, ne `1D`. Bitgetov `1D` nije poravnat na UTC i daje drugu
-dnevnu granicu. Sve u repou je na `1Dutc` od 04.10. (nalaz #7).
+To se evaluira **pri učitavanju modula**. Ako volume u toj milisekundi nije montiran, pobijedi
+`"."` — radni direktorij, koji se na Railwayu briše pri svakom deployu. To je **utrka pri startu**
+i može opaliti na svakom restartu.
+
+**Dogodilo se 18.10.** Nakon jednog deploya dashboard nije pokazivao trejdove, a `/api/csv` je
+vraćao samo zaglavlje — jer su i prikaz i download čitali prazan fajl u `"."`, dok su pravi podaci
+mirno stajali na volumeu. Nakon sljedećeg deploya (revert) sve je bilo normalno: `trades_synapse_t.csv`
+1 277 redaka, `trades_ultra_4h.csv` 263. **Podaci nikad nisu bili izgubljeni** — prvo je zaključeno
+da jesu, i to je bila pogrešna dijagnoza (zapisana i opovrgnuta kao nalaz #40).
+
+**Rješenje je jedna postavka, bez promjene koda:** `DATA_DIR=/app/data` kao env var na Railwayu.
+Tad se `existsSync` nikad ne koristi i fallback je mrtav.
+
+Zašto je bitno više od prikaza: dok `DATA_DIR` pokazuje na efemerni direktorij, bot tamo i **piše** —
+pa novi trejdovi idu u fajl koji sljedeći deploy briše, a `getDailyPnl` (dnevni limit gubitka),
+`getConsecutiveLossCount`/`checkCircuitBreaker` (7 uzastopnih gubitaka) i `recordSymbolSl`
+(suspenzija simbola) čitaju prazno i **ne mogu opaliti**. 18.10. u prozoru 15:04–20:22 u CSV-u
+nema ni jednog retka; je li išta bilo za upisati vidi se samo u Railway logovima.
+
+## Granularnost svijeća: UVIJEK `utc` varijanta (nalazi #7, #37, #39)
+
+Bitgetove granularnosti **bez** sufiksa `utc` poravnane su na **UTC+8**, ne UTC:
+`1D` = pon 00:00 UTC+8, `1W` = ned 16:00 UTC (izmjereno 18.10.). Zato koristi
+**`1Dutc` / `1Wutc` / `1Mutc`**, nikad gole.
+
+- #7 (04.10.) je to popravio za dnevne, #37 (18.10.) za tjedne — svih 6 tjednih dohvata.
+- #39 (18.10.): nalaz #7 je **propustio** PDH/PDL dohvat u `dashboard.js`, pa je tvrdnja
+  "sve je na 1Dutc" bila netočna tri tjedna. Nađeno tek kad je napisan test koji to provjerava.
+- **`npm test` ovo NE hvata sam od sebe:** regresijski test ne dohvaća mrežu, a PWH/PWL mu ulaze
+  kao `cfg._pwh/_pwl`. Mrežu drži `test/candle-granularity.mjs`, koji čita IZVOR i pada na svakoj
+  goloj varijanti. Dodaješ li novi dohvat svijeća, taj test je ono što te čuva.
+- Zašto je bitno: tjedni `_pwh`/`_pwl` iz `analyzeUltraPullback` ulaze u `sigs[4]`, koji je u
+  `TE_COMBO` (dakle **score**) i u `_pwhMstrBonusBull`. Izmjereno (5 simbola, ~11 tjedana, 8 420
+  uzoraka): izvan prozora ned 16:00–pon 00:00 UTC razlika je median 0.000%, unutar njega median
+  2.37% / p90 16.0% / max 63.4%. Alat za ponovno mjerenje: `tools/weekly-granularity-diff.mjs`.
 
 ## Što je neauditirano
 

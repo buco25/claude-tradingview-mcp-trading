@@ -265,7 +265,7 @@ async function fetchLhZones(sym) {
   const zones = {};
   try {
     const [wd, dd, md] = await Promise.all([
-      fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=1W&limit=2`).then(r=>r.json()),
+      fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=1Wutc&limit=2`).then(r=>r.json()),
       fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=1Dutc&limit=90`).then(r=>r.json()),
       fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=1Mutc&limit=13`).then(r=>r.json())
     ]);
@@ -898,7 +898,7 @@ async function runScan(rules) {
         // Fetch weekly candles za PWHL signal
         let _pwh = null, _pwl = null;
         try {
-          const wUrl = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=1W&limit=3`;
+          const wUrl = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=1Wutc&limit=3`;
           const wd   = await fetch(wUrl).then(r2 => r2.json());
           if (wd.code === "00000" && wd.data?.length >= 2) {
             const prevWeek = wd.data[wd.data.length - 2];  // ascending: predzadnji = prethodni tjedan
@@ -4945,11 +4945,15 @@ const server = http.createServer(async (req, res) => {
           if (isL) pivotL.push({ price: c4[i].l, t: c4[i].t });
         }
 
-        // PDH/PDL (prethodni dan — zadnji zatvoreni 1D)
+        // PDH/PDL (prethodni dan — zadnji zatvoreni dan)
+        // 18.10. (nalaz #39): bio goli `granularity=1D`. Nalaz #7 je 04.10. prebacio dnevne
+        // dohvate na `1Dutc`, ali OVAJ je propustio, pa je CLAUDE.md tvrdnja "sve u repou je na
+        // 1Dutc" bila netocna tri tjedna. Bitgetov `1D` je poravnan na pon 00:00 UTC+8, pa je
+        // PDH/PDL badge mjerio prethodni dan po drugoj granici od svega ostalog.
         let pdh = null, pdl = null;
         try {
           const r1d = await fetch(
-            `https://api.bitget.com/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=1D&limit=3`,
+            `https://api.bitget.com/api/v2/mix/market/candles?symbol=${sym}&productType=USDT-FUTURES&granularity=1Dutc&limit=3`,
             { signal: AbortSignal.timeout(5000) }
           );
           const j1d = await r1d.json();
@@ -5226,7 +5230,7 @@ const server = http.createServer(async (req, res) => {
       // Liquidity Hunt zones — Bitget vraća ascending (najstarija prva)
       try {
         const [wdR, ddR, mdR] = await Promise.all([
-          fetch("https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1W&limit=3").then(r=>r.json()),
+          fetch("https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1Wutc&limit=3").then(r=>r.json()),
           fetch("https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1Dutc&limit=90").then(r=>r.json()),
           fetch("https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1Mutc&limit=13").then(r=>r.json())
         ]);

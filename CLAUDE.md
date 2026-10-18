@@ -18,7 +18,7 @@ audit nađe nalaz
 Pravila koja to drže na mjestu:
 
 - **Nalazi žive u `docs/AUDIT-2026-10-04.md`, ne u chatu.** Numeracija je neprekinuta kroz
-  prolaze (zadnji je #33). Nikad ne počinji numeraciju od 1 i ne prijavljuj ponovno nalaz koji
+  prolaze (zadnji je #38). Nikad ne počinji numeraciju od 1 i ne prijavljuj ponovno nalaz koji
   je tamo već zapisan — ako je regresirao, reci da je regresija.
 - **Predaja drugoj sesiji je datoteka, ne poruka.** Ako posao preuzima druga sesija, uputa joj je
   "pročitaj `CLAUDE.md` i `docs/AUDIT-2026-10-04.md`, pa popravi #N" — ne zalijepljeni blok.
@@ -169,6 +169,33 @@ Retrospektiva na 109 povijesnih ulaza (svibanj, `bitget_rebuild.csv`): filter bi
 1 (4H) — inertan, uzorak premalo velik za zaključak u bilo kojem smjeru. Nova formacija **ne ide u
 `analyzeUltra`/score** (to bi mijenjalo golden i signalnu jezgru); ako podaci kažu da vrijedi, ide
 kroz tjedni audit uz odluku vlasnika.
+
+## Parcijalni izlazi MORAJU u CSV (18.10., nalazi #34 i #38)
+
+Postoje **dva** parcijalna izlaza i oba moraju upisati izlazni redak:
+
+- **`+1R`** — zatvara koliko treba za ~$1 dobiti, SL na break-even.
+- **TP-HIT** — zatvara `PARTIAL_CLOSE_PCT` kad cijena dosegne TP, aktivira trail.
+
+Do 18.10. je TP-HIT put **pisao samo na Bitget i u Telegram, ne u CSV** (nalaz #34), pa dio
+pozicije zatvoren točno na TP-u nije postojao u evidenciji: `getDailyPnl` (dnevni limit gubitka),
+equity krivulja, Profit Factor i WR su podcjenjivali rezultat, a WR je bio pristran PROTIV pobjeda
+jer se planirana dobit računa na punom notionalu ulaznog retka.
+
+- **Redak gradi `partialExitRow(pos, exitPrice, closedQty)`**, ne ručno. Vraća količinu, notional,
+  bruto P&L (s predznakom po strani) i naknadu — sve na **ZATVORENOM dijelu**. Vraća `null` kad
+  izračun nije moguć; tad se redak ne piše.
+- **Naknada ide kroz `feeOverride`.** `writeExitCsv` je inače računa iz `pos.totalUSD`, a kod
+  parcijale je to notional cijele pozicije — i u `+1R` putu je, zbog redoslijeda, već **preostali**
+  notional (nalaz #38). Bez `feeOverridea` redak nosi točnu količinu ali tuđu naknadu.
+- `partialClosePosition` sam **ne piše ništa** i to je namjerno — vraća `{ closedQty, remainingQty }`
+  pa pozivatelj odlučuje. Novi parcijalni put mora sam zvati `partialExitRow` + `writeExitCsv`.
+- "Zatvoreno izvana" putevi **ne pokrivaju** parcijalu: okidaju se samo kad pozicije više NEMA na
+  Bitgetu, ne kad je smanjena.
+- `test/partial-exit-row.mjs` čuva predznak po strani i osnovicu naknade.
+
+**Napomena na brojke:** odluke od 07.10. (rezanje izloženosti, `RISK_PCT_4H` 1.5 → 0.75) donesene su
+na WR-u i P&L-u **bez** tih redaka. Ponovno ih pogledaj kad se nakupi nekoliko parcijala.
 
 ## Soft-izlaz piše STVARNI fill, ne procjenu (05.10.)
 

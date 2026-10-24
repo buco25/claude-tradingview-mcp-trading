@@ -335,6 +335,15 @@ auth gatea; odgovor je samo `{"status":"ok"|"stale"}`, 200 odnosno 503). Radi `b
 se NAMJERNO ne mijenja (Railway ga možda koristi za vlastitu provjeru — 503 bi mogao izazvati restarte). UptimeRobot besplatni plan nema Heartbeat monitor (zaključan), pa je ovo običan HTTP(s) monitor
 na `https://trading-bot-production-4f94.up.railway.app/health/bitget`. Ne uvodi tajne ni nove varijable. `test/bitget-auth-health.mjs`.
 
+## Funding u trenutku ulaza — samo mjerenje (24.10., odluka vlasnika)
+
+CSV ima novi zadnji stupac `FundingPct` (indeks 25): funding % u trenutku ulaza, prazno kad nije poznat. Piše ga `getFundingForLog(symbol)` u `bot.js` na sva tri ulazna puta (1H, ULTRA-4H, Supertrend); vraća
+`null` (prazno polje) kad dohvat ne uspije, za razliku od `getFundingRate` koja vraća 0 — stvarna nula i greška se ne smiju miješati. Dijeli keš s `getFundingRate`, timeout 1.5 s, nikad ne baca. **Ne utječe ni na jednu
+odluku.** Razlog: test (10 coina, 4H, 2020.-2026., Binance perpetuali, SL 1.5 ATR / TP 2.5R, naknada 0.12%) pre-registriranih hipoteza H1 (LONG pri top-decil fundingu je gori) i H2 (SHORT pri bottom-decil je gori) NIJE potvrdio
+ni jednu (H1 čak obrnuto, +0.089R). Post hoc (nije dokaz): SHORT pri top-decil fundingu −0.212R u obje polovice povijesti, 4 od 6 godina. Nakon ~100 stvarnih ulaza provjeri samo TU jednu stvar na novim podacima
+(SHORT ulazi po funding stupcu). Botov FR gate (LONG blokiran uz funding > 0.05%) test nije ni potvrdio ni opovrgnuo (nestabilno po godinama). Stari CSV-ovi se migriraju samo promjenom zaglavlja; stari retci imaju prazan stupac.
+`test/funding-csv.mjs`.
+
 ## Bitget 429 (07.10.)
 
 Javni Bitget GET-ovi (svijeće, tickeri) idu kroz `bitgetPublicGet(url)` u `bot.js`: zajednički razmak ≥ 80 ms između zahtjeva u procesu i

@@ -1155,6 +1155,28 @@ async function getFundingRate(symbol) {
   } catch { return 0; }
 }
 
+// ─── Funding u trenutku ulaza — SAMO MJERENJE za CSV (24.10., odluka vlasnika) ───────────────
+// Vraća funding % (kao getFundingRate) ili null kad se ne može pouzdano dobiti. Razlika od getFundingRate: ta vraća 0 i kad
+// dohvat PADNE (pa se ne vidi razlika između stvarne nule i greške), a za mjerenje je lažna nula gora od praznog polja.
+// Dijeli keš s getFundingRate (isti oblik, uspjeh se upisuje), ima kratki timeout i NIKAD ne baca — ne smije usporiti ni
+// srušiti ulaz. Test: 10 coina 2020.-2026., pre-registrirane hipoteze (LONG pri top / SHORT pri bottom decil fundingu) NISU
+// potvrđene; opisno je SHORT pri top-decil fundingu bio −0.21R u obje polovice, ali je to nađeno post hoc — zato se samo bilježi.
+export async function getFundingForLog(symbol, { fetchImpl = fetch, now = Date.now(), timeoutMs = 1500, cache = _frCache, ttl = FR_TTL } = {}) {
+  try {
+    const c = cache[symbol];
+    if (c && now - c.ts < ttl && Number.isFinite(c.rate)) return Math.round(c.rate * 1e5) / 1e5;
+    const r = await fetchImpl(`${BITGET.baseUrl}/api/v2/mix/market/current-fund-rate?symbol=${symbol}&productType=USDT-FUTURES`, { signal: AbortSignal.timeout(timeoutMs) });
+    const d = await r.json();
+    if (d?.code !== "00000") return null;
+    const raw = d?.data?.[0]?.fundingRate;
+    if (raw === undefined || raw === null || raw === "") return null;
+    const rate = parseFloat(raw) * 100;
+    if (!Number.isFinite(rate)) return null;
+    cache[symbol] = { rate, ts: now };
+    return Math.round(rate * 1e5) / 1e5;
+  } catch { return null; }
+}
+
 export async function getAllFundingRates(symbols) {
   const result = {};
   await Promise.all(symbols.map(async sym => {
@@ -5128,7 +5150,7 @@ async function checkPortfolioPositions(pid) {
 
 // ─── Portfolio CSV ──────────────────────────────────────────────────────────────
 
-function csvFilePath(pid) { return `${DATA_DIR}/trades_${pid}.csv`; }
+export function csvFilePath(pid) { return `${DATA_DIR}/trades_${pid}.csv`; }
 
 // 21.09., prošireno na zahtjev (za automatski self-audit) — 6 novih stupaca dodano
 // NA KRAJ retka: SigMask/EntryMode strukturirano (bilo samo u slobodnom Notes tekstu),
@@ -5137,10 +5159,11 @@ function csvFilePath(pid) { return `${DATA_DIR}/trades_${pid}.csv`; }
 // 05.10.: CandlePat dodan na kraj (formacija zadnje zatvorene svijeće u trenutku ulaza,
 // vidi detectCandlePattern) — samo na entry retku, kao regime/night/weekend.
 // 06.10.: CandleCtx + EntryDistATR dodani na kraj (vidi candleContext) — samo mjerenje.
-const CSV_HEADERS = "Date,Time (UTC),Exchange,Symbol,Side,Quantity,Price,Total USD,Fee (est.),Net P&L,SL,TP,Order ID,Mode,Portfolio,Notes,SigMask,EntryMode,BTCRegime1H,BTCRegime4H,Night,Weekend,CandlePat,CandleCtx,EntryDistATR";
+// 24.10.: FundingPct (indeks 25) — funding % u trenutku ulaza (getFundingForLog), prazno kad nije poznat. Samo mjerenje.
+export const CSV_HEADERS = "Date,Time (UTC),Exchange,Symbol,Side,Quantity,Price,Total USD,Fee (est.),Net P&L,SL,TP,Order ID,Mode,Portfolio,Notes,SigMask,EntryMode,BTCRegime1H,BTCRegime4H,Night,Weekend,CandlePat,CandleCtx,EntryDistATR,FundingPct";
 
 const _csvHeaderChecked = new Set();  // izbjegni ponovnu migraciju svakih 60s (ultra_4h zove initCsv po ciklusu)
-function initCsv(pid) {
+export function initCsv(pid) {
   const f = csvFilePath(pid);
   if (!existsSync(f)) { writeFileSync(f, CSV_HEADERS + "\n"); _csvHeaderChecked.add(pid); return; }
   if (_csvHeaderChecked.has(pid)) return;
@@ -5180,7 +5203,7 @@ function writeCsv(pid, r) {
   appendFileSync(csvFilePath(pid), row + "\n");
 }
 
-function writeEntryCsv(pid, entry) {
+export function writeEntryCsv(pid, entry) {
   const now  = new Date(entry.timestamp);
   const date = now.toISOString().slice(0, 10);
   const time = now.toISOString().slice(11, 19);
@@ -5209,7 +5232,7 @@ function writeEntryCsv(pid, entry) {
     entry.orderId || "", mode, pid,
     `"${entry.strategy} | ${entryMode} | Sig ${sigCount}/${SIG_NAMES.length} | SL ${entry.slPct??SL_PCT}% TP ${entry.tpPct??TP_PCT}%"`,
     entry.sigMask ?? "", entryMode, entry.btcRegime1h ?? "", entry.btcRegime4h ?? "", night, weekend,
-    entry.candlePat ?? "", entry.candleCtx ?? "", entry.entryDistAtr ?? "",
+    entry.candlePat ?? "", entry.candleCtx ?? "", entry.entryDistAtr ?? "", entry.fundingPct ?? "",
   ].join(",");
 
   appendFileSync(csvFilePath(pid), row + "\n");
@@ -7204,6 +7227,7 @@ export async function runUltra4hStrategy() {
         sigMask: sig.sigMask ?? null, btcRegime1h: _btcRegime1hLog, btcRegime4h: _btcRegime4,
         vipSlot: sig._vipSlot === true, candlePat: _candlePat4,
         ...(() => { const k = candleContext(candles, sig.signal, result.fillPrice ?? sig.price); return { candleCtx: k.ctx, entryDistAtr: k.distAtr }; })(),
+        fundingPct: await getFundingForLog(symbol),
       };
       addPosition(ULTRA4H_PID, entry);
       writeEntryCsv(ULTRA4H_PID, entry);
@@ -7519,6 +7543,7 @@ async function runSupertrendEntries(ctx) {
         sigMask: null, entryMode: "ST", signalStrength: "normal", vipSlot: false,
         btcRegime1h, btcRegime4h, candlePat: detectCandlePattern(sig.candles1h).name,
         ...(() => { const k = candleContext(sig.candles1h, signal, price); return { candleCtx: k.ctx, entryDistAtr: k.distAtr }; })(),
+        fundingPct: await getFundingForLog(symbol),
       };
       console.log(`🎯 [${pDef.name}] NEW ${signal} ${symbol} @ ${fmtPrice(price)} | SL ${fmtPrice(sl)} | TP ${fmtPrice(tp)} | $${tradeSize.toFixed(0)} [SUPERTREND]`);
       if (!isLive) {
@@ -9185,7 +9210,7 @@ export async function run() {
         const timestamp = new Date().toISOString();
         const orderId   = `${_isLive ? "LIVE" : "PAPER"}-${Date.now()}`;
         const mode      = _isLive ? (BITGET_DEMO ? "DEMO" : "LIVE") : "PAPER";
-        const entry = { symbol, signal, price, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode, sigMask: result.sigMask ?? null, entryMode: result._strategy ?? ((result.isMomentum ? "MOM" : "PBK") + (result._halfSize ? "-SOFT" : "")), signalStrength, vipSlot: result._vipSlot === true, btcRegime1h: _btcRegime1h, btcRegime4h: _btcRegime, candlePat: _candlePat1.name, ...(() => { const k = candleContext(candles, signal, price); return { candleCtx: k.ctx, entryDistAtr: k.distAtr }; })() };
+        const entry = { symbol, signal, price, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode, sigMask: result.sigMask ?? null, entryMode: result._strategy ?? ((result.isMomentum ? "MOM" : "PBK") + (result._halfSize ? "-SOFT" : "")), signalStrength, vipSlot: result._vipSlot === true, btcRegime1h: _btcRegime1h, btcRegime4h: _btcRegime, candlePat: _candlePat1.name, ...(() => { const k = candleContext(candles, signal, price); return { candleCtx: k.ctx, entryDistAtr: k.distAtr }; })(), fundingPct: await getFundingForLog(symbol) };
 
         const _strengthEmoji = signalStrength === "strong" ? "💪" : "📊";
         const _rrLabel = `RR 1:${(tpPct/slPct).toFixed(1)}`;

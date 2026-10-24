@@ -62,5 +62,61 @@ ok(st[1].result === "D", "ST: +0.1 -> N");
 ok(st[2].result === "W", "ST: +4.5 od 6 (75%) -> W");
 ok(st[3].result === "L", "ST: -1.9 uz rizik 2 $ (95%) -> L");
 
+
+// ── Nalaz #35: ishod se dodjeljuje SAMO zatvorenom trejdu ───────────────────
+// Prije se klasificiralo na `legs > 0`, pa je trejd dobio ishod vec nakon prve parcijalne
+// noge dok je pozicija jos otvorena. Zavrsenost se mjeri zbrojem zatvorene kolicine.
+{
+  const entry = (id, qty, usd, price, tp, sl) => ({
+    "Order ID": id, "Quantity": String(qty), "Total USD": String(usd),
+    "Price": String(price), "TP": String(tp), "SL": String(sl),
+  });
+  const exit = (id, qty, net) => ({ "Order ID": id, "Quantity": String(qty), "Net P&L": String(net) });
+
+  // plan: 100 USD notional, ulaz 100, TP 106 → planirana dobit 6; SL 98 → rizik 2
+  const e = entry("A", 1, 100, 100, 106, 98);
+
+  // 1) samo +1R noga (0.1 od 1 kom) uz sitnu dobit — pozicija JOS OTVORENA
+  {
+    const m = tradePlanOutcomes([e], [exit("A", 0.1, 1.0)]);
+    const o = m.get("A");
+    ok(o.result === null, `#35: parcijalno zatvoren trejd nema ishod (bio bi "D") — result=${o.result}`);
+    ok(o.open === true, `#35: oznacen kao otvoren — open=${o.open}`);
+  }
+
+  // 2) sve noge zatvorene (0.1 + 0.9) i ukupno >= 70% plana → POBJEDA
+  {
+    const m = tradePlanOutcomes([e], [exit("A", 0.1, 1.0), exit("A", 0.9, 3.5)]);
+    const o = m.get("A");
+    ok(o.result === "W", `#35: zatvoren trejd s 4.5 od 6 (75%) → W — result=${o.result}`);
+    ok(o.open === false, `#35: nije otvoren — open=${o.open}`);
+  }
+
+  // 3) zatvoren u jednoj nozi
+  {
+    const m = tradePlanOutcomes([e], [exit("A", 1, -1.8)]);
+    ok(m.get("A").result === "L", `#35: jedna noga, -1.8 od rizika 2 (90%) → L — ${m.get("A").result}`);
+  }
+
+  // 4) stari redak bez kolicine na ULAZU → ponasa se kao prije (ne ispada iz WR-a)
+  {
+    const eNoQty = { ...e, "Quantity": "" };
+    const m = tradePlanOutcomes([eNoQty], [exit("A", 0.1, 1.0)]);
+    ok(m.get("A").result === "D", `#35: ulaz bez kolicine → klasificira se kao prije — ${m.get("A").result}`);
+  }
+
+  // 5) tolerancija na zaokruzivanje: 0.995 od 1 kom se racuna kao zatvoreno
+  {
+    const m = tradePlanOutcomes([e], [exit("A", 0.995, 4.5)]);
+    ok(m.get("A").result === "W", `#35: 99.5% kolicine = zatvoreno (tolerancija) — ${m.get("A").result}`);
+  }
+
+  // 6) bez izlaza uopce → null, kao i prije
+  {
+    const m = tradePlanOutcomes([e], []);
+    ok(m.get("A").result === null, "#35: bez izlaznih redaka → null");
+  }
+}
+
 console.log(fail ? `\n${fail} PALO` : "\nSVE PROSLO");
 process.exit(fail ? 1 : 0);

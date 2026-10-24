@@ -518,7 +518,13 @@ export async function getBtcWeeklyVsKey() {
   try {
     const key = JSON.parse(readFileSync("rules.json", "utf8")).btc_key_level ?? null;
     if (!key) return _btcWeeklyKeyCache;
-    const d = await fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1W&limit=3`).then(r => r.json());
+    // 18.10. (nalaz #37): `1W` -> `1Wutc`. Bitgetov `1W` je poravnan na pon 00:00 UTC+8
+    // (= ned 16:00 UTC), isti obrazac kao `1D` vs `1Dutc` iz nalaza #7. Fazni pomak granica je
+    // 8 h, ali kod cita "tjedan prije onog koji se formira", pa je u prozoru ned 16:00 - pon
+    // 00:00 UTC biralo CIJELI TJEDAN razlike. Izmjereno (5 simbola, ~11 tjedana, 8420 uzoraka
+    // po satu): izvan prozora median razlike 0.000%, unutar prozora median 2.37% / p90 16.0%
+    // / max 63.4%. Vidi tools/weekly-granularity-diff.mjs.
+    const d = await fetch(`https://api.bitget.com/api/v2/mix/market/candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=1Wutc&limit=3`).then(r => r.json());
     if (d.code === "00000" && d.data?.length >= 2) {
       // ascending: predzadnji = zadnji DOVRŠENI tjedan
       const lastClose = parseFloat(d.data[d.data.length - 2][4]);
@@ -1377,17 +1383,37 @@ export function classifyOutcome(netPnl, planned, risk, frac = WR_TARGET_FRAC, lo
 }
 // entries/exits: objekti s ključevima headera CSV-a ("Order ID","Total USD","Price","TP","SL","Net P&L") — kao parseCsvFile u dashboardu.
 // exits treba biti već dedupliciran. Vraća Map orderId → { planned, risk, net, legs, result: "W"|"D"|"L"|null }.
+// 18.10. (nalaz #35): ishod se dodjeljuje samo trejdu koji je STVARNO zatvoren. Prije se
+// klasificiralo na `legs > 0`, pa je trejd dobio ishod vec nakon PRVE parcijalne noge dok je
+// pozicija jos otvorena: +1R rez nosi ~$1 naspram punog `planned` (npr. $6), sto je
+// 1 < 0.7 x 6 → NERIJESENO, premda trejd moze izaci kao pobjeda. Popravak #34 je to
+// pogorsao u obimu (sad postoje DVIJE vrste parcijalnih nogu prije zatvaranja).
+// Zavrsenost se mjeri zbrojem ZATVORENE kolicine naspram ulazne, ne brojem nogu.
+const TRADE_CLOSED_FRAC = 0.99;   // tolerancija na zaokruzivanje kolicine u fillovima
 export function tradePlanOutcomes(entries, exits) {
   const m = new Map();
   for (const e of entries ?? []) {
     const id = (e["Order ID"] ?? "").trim(); if (!id) continue;
-    m.set(id, { planned: plannedProfit(e["Total USD"], e["Price"], e["TP"]), risk: plannedLoss(e["Total USD"], e["Price"], e["SL"]), net: 0, legs: 0, result: null });
+    const q = parseFloat(e["Quantity"]);
+    m.set(id, {
+      planned: plannedProfit(e["Total USD"], e["Price"], e["TP"]), risk: plannedLoss(e["Total USD"], e["Price"], e["SL"]),
+      net: 0, legs: 0, qty: Number.isFinite(q) && q > 0 ? q : null, closedQty: 0, open: false, result: null,
+    });
   }
   for (const x of exits ?? []) {
     const o = m.get((x["Order ID"] ?? "").trim()); if (!o) continue;
     o.net += parseFloat(x["Net P&L"] || 0) || 0; o.legs++;
+    const q = parseFloat(x["Quantity"]);
+    if (Number.isFinite(q) && q > 0) o.closedQty += q;
   }
-  for (const o of m.values()) o.result = o.legs > 0 ? classifyOutcome(o.net, o.planned, o.risk) : null;
+  for (const o of m.values()) {
+    if (o.legs === 0) { o.result = null; continue; }          // nema izlaza — trejd je otvoren
+    // Kad ulazni redak nema upotrebljivu kolicinu (stari redci), ponasa se kao prije — inace
+    // bi cijela povijest ispala iz WR-a. Takvi se klasificiraju na prvu nogu, kao dosad.
+    const done = o.qty === null || o.closedQty >= o.qty * TRADE_CLOSED_FRAC;
+    o.open   = !done;
+    o.result = done ? classifyOutcome(o.net, o.planned, o.risk) : null;
+  }
   return m;
 }
 
@@ -3887,7 +3913,14 @@ export async function analyzeUltraPullback(symbol, candles, cfg) {
   // Bitget vraća ascending: zadnji = tekući tjedan, predzadnji = prethodni (dovršeni)
   let _pwh = null, _pwl = null, _wOpen = null;
   try {
-    const wUrl = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=1W&limit=3`;
+    // 18.10. (nalaz #37): `1W` -> `1Wutc`. Bitgetov `1W` je poravnan na pon 00:00 UTC+8
+    // (= ned 16:00 UTC), isti obrazac kao `1D` vs `1Dutc` iz nalaza #7. Fazni pomak granica je
+    // 8 h, ali kod cita "tjedan prije onog koji se formira", pa je u prozoru ned 16:00 - pon
+    // 00:00 UTC biralo CIJELI TJEDAN razlike. Izmjereno (5 simbola, ~11 tjedana, 8420 uzoraka
+    // po satu): izvan prozora median razlike 0.000%, unutar prozora median 2.37% / p90 16.0%
+    // / max 63.4%. PWH/PWL odavde ulaze u sigs[4] (u TE_COMBO, dakle SCORE) i u
+    // _pwhMstrBonusBull — jedini bonus momentum grane. Vidi tools/weekly-granularity-diff.mjs.
+    const wUrl = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=1Wutc&limit=3`;
     const wd = await fetch(wUrl).then(r => r.json());
     if (wd.code === "00000" && wd.data?.length >= 2) {
       const wLast = wd.data.length - 1;

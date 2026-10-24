@@ -35,5 +35,15 @@ let threw = false, r;
 try { r = await bitgetAuthHealth(mk({ fetchEquity: async () => { throw new Error("mreza"); }, getLastOkTs: () => T0 - 30 * MIN })); } catch { threw = true; }
 ok(!threw && r.ok === false, "izuzetak pri dohvatu ne baca, ishod odlucuje zadnji uspjeh");
 
+// single-flight: paralelni zahtjevi (javna ruta, memo jos prazan) dijele JEDAN dohvat — i kad dohvat traje i kad neuspije
+for (const failing of [false, true]) {
+  let n = 0; const memoP = { ts: 0, res: null };
+  const slow = async () => { n++; await new Promise(r => setTimeout(r, 30)); if (failing) throw new Error("Bitget pao"); };
+  const rs = await Promise.all(Array.from({ length: 25 }, () => bitgetAuthHealth(mk({ memo: memoP, fetchEquity: slow, getLastOkTs: () => failing ? T0 - 30 * MIN : T0 }))));
+  ok(n === 1, `25 istovremenih poziva -> 1 dohvat prema Bitgetu (${failing ? "neuspjeh" : "uspjeh"}), bilo ${n}`);
+  ok(rs.every(r => r === rs[0]) && rs[0].ok === !failing, "svi dobiju isti rezultat");
+  ok(memoP.pending === null, "pending se ocisti nakon zavrsetka");
+}
+
 console.log(fail ? `\n${fail} PALO` : "\nSVE PROSLO");
 process.exit(fail ? 1 : 0);

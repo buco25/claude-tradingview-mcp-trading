@@ -5333,15 +5333,21 @@ export async function bitgetAuthHealth(opts = {}) {
           memoMs = 60 * 1000, paper = PAPER_TRADING, startedAt = _processStartTs, memo = _authHealthMemo } = opts;
   if (paper) return { ok: true, reason: "paper" };
   if (memo.res && now - memo.ts < memoMs) return memo.res;
-  try { await fetchEquity(); } catch { /* ishod odlucuje zadnji uspjeh ispod */ }
-  const last = getLastOkTs();
-  const age  = last ? now - last : null;
-  let res;
-  if (age !== null && age <= maxAgeMs)                      res = { ok: true,  reason: "recent" };
-  else if (age === null && now - startedAt <= maxAgeMs)     res = { ok: true,  reason: "starting" };
-  else                                                      res = { ok: false, reason: "stale" };
-  memo.ts = now; memo.res = res;
-  return res;
+  // Single-flight: istovremeni pozivi (javna ruta) dijele JEDAN dohvat. Memo se inace upisuje tek nakon `await`, pa bi N paralelnih
+  // zahtjeva dok memo jos nije postavljen pokrenulo N poziva prema Bitgetu (neuspjeh se u fetchBitgetEquity ne kesira).
+  if (memo.pending) return memo.pending;
+  memo.pending = (async () => {
+    try { await fetchEquity(); } catch { /* ishod odlucuje zadnji uspjeh ispod */ }
+    const last = getLastOkTs();
+    const age  = last ? now - last : null;
+    let res;
+    if (age !== null && age <= maxAgeMs)                      res = { ok: true,  reason: "recent" };
+    else if (age === null && now - startedAt <= maxAgeMs)     res = { ok: true,  reason: "starting" };
+    else                                                      res = { ok: false, reason: "stale" };
+    memo.ts = now; memo.res = res;
+    return res;
+  })().finally(() => { memo.pending = null; });
+  return memo.pending;
 }
 
 // ─── Soft-izlaz: stvarni fill s Bitgeta umjesto procjene (05.10.) ─────────────────

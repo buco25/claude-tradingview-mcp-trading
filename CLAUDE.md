@@ -327,6 +327,14 @@ izbacivalo pozicije na +$0.03-0.13 daleko prije TP-a (log 14.-15.10.: DOGE, SOL,
 pokazala je da ROE-protect uz 20% smanjuje gubitke (−18$ naspram −83$ bez njega) pa viši prag taj učinak djelomično vraća — provjeri nakon ~tjedan dana (udio W/N/L, prosječan R). Vraćanje = 30 → 20 (i lock 12 → 8).
 Pozicije koje su već aktivirale zaštitu (`roeProtectApplied`) zadržavaju stari SL.
 
+## Zdravlje Bitget autentikacije za vanjski nadzor (24.10., UptimeRobot)
+
+`/health` vraća 200 i kad Bitget autentikacija pada (greška 40012, 23.10.), pa HTTP monitor na njemu ne vidi da bot ne može trgovati. Zato postoji javna ruta `/health/bitget` (`dashboard.js`, prije
+auth gatea; odgovor je samo `{"status":"ok"|"stale"}`, 200 odnosno 503). Radi `bitgetAuthHealth()` iz `bot.js`: pokuša svjež potpisani poziv (`fetchBitgetEquity`) i javlja OK ako je zadnji USPJEH
+(`_lastBitgetEquityTs`) mlađi od 10 min; rezultat se pamti 60 s (i neuspjeh), pa javna ruta ne može opteretiti Bitget; PAPER = uvijek OK; nakon restarta bez uspjeha 10 min "starting". Postojeći `/health`
+se NAMJERNO ne mijenja (Railway ga možda koristi za vlastitu provjeru — 503 bi mogao izazvati restarte). UptimeRobot besplatni plan nema Heartbeat monitor (zaključan), pa je ovo običan HTTP(s) monitor
+na `https://trading-bot-production-4f94.up.railway.app/health/bitget`. Ne uvodi tajne ni nove varijable. `test/bitget-auth-health.mjs`.
+
 ## Bitget 429 (07.10.)
 
 Javni Bitget GET-ovi (svijeće, tickeri) idu kroz `bitgetPublicGet(url)` u `bot.js`: zajednički razmak ≥ 80 ms između zahtjeva u procesu i

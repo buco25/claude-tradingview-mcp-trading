@@ -5318,6 +5318,32 @@ async function equityForSizing(pid, startCapital = ACCOUNT_START_CAPITAL) {
   return { equity: null, src: r.src, live: false };
 }
 
+// ─── Zdravlje Bitget autentikacije za vanjski nadzor (24.10.) ────────────────────────────────
+// `/health` odgovara 200 i kad Bitget autentikacija ne radi (greška 40012, 23.10.), pa obična HTTP provjera ne vidi da bot ne može
+// trgovati. `/health/bitget` (dashboard.js, javno, vraća samo "ok"/"stale") zove ovo: pokuša svjež potpisani poziv (stanje računa)
+// i javlja OK ako je zadnji USPJEŠAN poziv mlađi od 10 min — kratki zastoj Bitgeta tako ne diže lažni alarm, a trajni pad ključa se vidi.
+// Rezultat se pamti 60 s (uključujući neuspjeh), pa javna ruta ne može biti izvor opterećenja prema Bitgetu. PAPER = uvijek OK.
+// Trenutak zadnjeg uspjeha je `_lastBitgetEquityTs` (pri startu se učitava iz last_equity.json, a pri neuspjehu se NE osvježava).
+// Nakon restarta bez ijednog uspjeha rezultat je 10 min "starting", pa tek onda neuspjeh.
+const _processStartTs = Date.now();
+const BITGET_AUTH_MAX_AGE_MS = 10 * 60 * 1000;
+const _authHealthMemo = { ts: 0, res: null };
+export async function bitgetAuthHealth(opts = {}) {
+  const { now = Date.now(), fetchEquity = fetchBitgetEquity, getLastOkTs = () => _lastBitgetEquityTs, maxAgeMs = BITGET_AUTH_MAX_AGE_MS,
+          memoMs = 60 * 1000, paper = PAPER_TRADING, startedAt = _processStartTs, memo = _authHealthMemo } = opts;
+  if (paper) return { ok: true, reason: "paper" };
+  if (memo.res && now - memo.ts < memoMs) return memo.res;
+  try { await fetchEquity(); } catch { /* ishod odlucuje zadnji uspjeh ispod */ }
+  const last = getLastOkTs();
+  const age  = last ? now - last : null;
+  let res;
+  if (age !== null && age <= maxAgeMs)                      res = { ok: true,  reason: "recent" };
+  else if (age === null && now - startedAt <= maxAgeMs)     res = { ok: true,  reason: "starting" };
+  else                                                      res = { ok: false, reason: "stale" };
+  memo.ts = now; memo.res = res;
+  return res;
+}
+
 // ─── Soft-izlaz: stvarni fill s Bitgeta umjesto procjene (05.10.) ─────────────────
 // Soft SL/TP je do sada u CSV pisao PROCJENU: cijenu koju je monitor vidio (ne stvarnu cijenu
 // izvršenja), lokalnu količinu i fiksnih 0.12% naknada. Na malim iznosima to lako okrene predznak

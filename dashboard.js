@@ -21,7 +21,7 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   DEFAULT_COMBO, DEFAULT_MIN_SIG,
   RISK_PCT, RISK_PCT_MIN, RISK_PCT_MAX,
   ADX_MIN, ADX_SOFT_BAND, ADX_SOFT_FLOOR, MOM_SOFT_BAND, MOM_ADX_MIN,
-  MAX_OPEN_CRYPTO, MAX_OPEN_NONCRYPTO, MAX_OPEN_PER_PORTFOLIO, MAX_SAME_DIR_CRYPTO, volSpikeRatio, tradePlanOutcomes, classifyOutcome, plannedProfit, plannedLoss, WR_TARGET_FRAC, WR_LOSS_FRAC, getCapSnapshot, bitgetHeaders, ACCOUNT_START_CAPITAL, getSupertrendOverview } from "./bot.js";
+  MAX_OPEN_CRYPTO, MAX_OPEN_NONCRYPTO, MAX_OPEN_PER_PORTFOLIO, MAX_SAME_DIR_CRYPTO, volSpikeRatio, tradePlanOutcomes, classifyOutcome, plannedProfit, plannedLoss, WR_TARGET_FRAC, WR_LOSS_FRAC, getCapSnapshot, bitgetHeaders, ACCOUNT_START_CAPITAL, getSupertrendOverview, bitgetAuthHealth } from "./bot.js";
 
 const PORT     = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || (existsSync("/app/data") ? "/app/data" : ".");
@@ -4072,6 +4072,14 @@ const server = http.createServer(async (req, res) => {
     const ok     = ageSec !== null && ageSec < 600;
     res.writeHead(ok ? 200 : 503, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: ok ? "ok" : "stale", bot: hb, ageSec, dashboard: "ok" }));
+    return;
+  }
+
+  // Zdravlje Bitget autentikacije — bez auth, SAMO "ok"/"stale" (nadzor: UptimeRobot HTTP monitor; 503 = bot ne može trgovati).
+  if (url.pathname === "/health/bitget") {
+    const h = await bitgetAuthHealth();
+    res.writeHead(h.ok ? 200 : 503, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    res.end(JSON.stringify({ status: h.ok ? "ok" : "stale" }));
     return;
   }
 

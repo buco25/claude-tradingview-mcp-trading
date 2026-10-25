@@ -1149,8 +1149,14 @@ async function getFundingRate(symbol) {
     const url = `${BITGET.baseUrl}/api/v2/mix/market/current-fund-rate?symbol=${symbol}&productType=USDT-FUTURES`;
     const r = await fetch(url);
     const d = await r.json();
-    const rate = parseFloat(d?.data?.[0]?.fundingRate || 0) * 100;
-    _frCache[symbol] = { rate, ts: Date.now() };
+    const raw  = d?.data?.[0]?.fundingRate;
+    const rate = parseFloat(raw || 0) * 100;
+    // `ok` razlikuje STVARNU nulu od odgovora BEZ podatka (429, održavanje, nepoznat simbol):
+    // `raw || 0` oba slučaja daje 0, pa je bez ove zastavice keširana nula neraspoznatljiva, a
+    // getFundingForLog ju je čitao kao podatak i upisivao u CSV (nalaz #41).
+    // Povratna vrijednost je NEPROMIJENJENA — funding gate i dalje dobije 0, ulazi ostaju isti.
+    const ok   = raw !== undefined && raw !== null && raw !== "" && Number.isFinite(parseFloat(raw));
+    _frCache[symbol] = { rate, ts: Date.now(), ok };
     return rate;
   } catch { return 0; }
 }
@@ -1158,21 +1164,32 @@ async function getFundingRate(symbol) {
 // ─── Funding u trenutku ulaza — SAMO MJERENJE za CSV (24.10., odluka vlasnika) ───────────────
 // Vraća funding % (kao getFundingRate) ili null kad se ne može pouzdano dobiti. Razlika od getFundingRate: ta vraća 0 i kad
 // dohvat PADNE (pa se ne vidi razlika između stvarne nule i greške), a za mjerenje je lažna nula gora od praznog polja.
-// Dijeli keš s getFundingRate (isti oblik, uspjeh se upisuje), ima kratki timeout i NIKAD ne baca — ne smije usporiti ni
-// srušiti ulaz. Test: 10 coina 2020.-2026., pre-registrirane hipoteze (LONG pri top / SHORT pri bottom decil fundingu) NISU
+// Dijeli keš s getFundingRate — namjerno, da mjerenje ne dodaje mrežni poziv kad je gate vrijednost već dohvatio. Keš
+// nosi zastavicu `ok`, pa se keširana LAŽNA nula (odgovor bez podatka) vraća kao null, a ne kao podatak (nalaz #41).
+// NIKAD ne baca, timeout 1.5 s, i pozivatelj ga smije zvati SAMO nakon plasiranja naloga — `fundingPct` se dopisuje u
+// `entry` nakon `placeBitGetOrder`, nikad u literalu (nalaz #42: na ST i 1H putu je čekao PRIJE naloga).
+// Test: 10 coina 2020.-2026., pre-registrirane hipoteze (LONG pri top / SHORT pri bottom decil fundingu) NISU
 // potvrđene; opisno je SHORT pri top-decil fundingu bio −0.21R u obje polovice, ali je to nađeno post hoc — zato se samo bilježi.
-export async function getFundingForLog(symbol, { fetchImpl = fetch, now = Date.now(), timeoutMs = 1500, cache = _frCache, ttl = FR_TTL } = {}) {
+export async function getFundingForLog(symbol, { fetchImpl = fetch, now = Date.now(), timeoutMs = 1500, cache = _frCache, ttl = FR_TTL, get = bitgetPublicGet } = {}) {
   try {
     const c = cache[symbol];
-    if (c && now - c.ts < ttl && Number.isFinite(c.rate)) return Math.round(c.rate * 1e5) / 1e5;
-    const r = await fetchImpl(`${BITGET.baseUrl}/api/v2/mix/market/current-fund-rate?symbol=${symbol}&productType=USDT-FUTURES`, { signal: AbortSignal.timeout(timeoutMs) });
+    // `ok === false` je keširani odgovor bez podatka — vraća se null (prazno polje), NE nula (nalaz #41).
+    if (c && now - c.ts < ttl) {
+      if (c.ok === false) return null;
+      if (Number.isFinite(c.rate)) return Math.round(c.rate * 1e5) / 1e5;
+    }
+    // Kroz bitgetPublicGet zbog zajedničkog razmaka od 80 ms (nalaz #43), ali `retries: 0`:
+    // mjerenje ne smije odgađati bota backoffom od 400/800/1600 ms, a izostali uzorak je samo
+    // prazno polje. Timeout ide kroz omotač jer bitgetPublicGet zove fetchImpl bez init objekta.
+    const r = await get(`${BITGET.baseUrl}/api/v2/mix/market/current-fund-rate?symbol=${symbol}&productType=USDT-FUTURES`,
+      { retries: 0, fetchImpl: u => fetchImpl(u, { signal: AbortSignal.timeout(timeoutMs) }) });
     const d = await r.json();
     if (d?.code !== "00000") return null;
     const raw = d?.data?.[0]?.fundingRate;
     if (raw === undefined || raw === null || raw === "") return null;
     const rate = parseFloat(raw) * 100;
     if (!Number.isFinite(rate)) return null;
-    cache[symbol] = { rate, ts: now };
+    cache[symbol] = { rate, ts: now, ok: true };
     return Math.round(rate * 1e5) / 1e5;
   } catch { return null; }
 }
@@ -7227,8 +7244,9 @@ export async function runUltra4hStrategy() {
         sigMask: sig.sigMask ?? null, btcRegime1h: _btcRegime1hLog, btcRegime4h: _btcRegime4,
         vipSlot: sig._vipSlot === true, candlePat: _candlePat4,
         ...(() => { const k = candleContext(candles, sig.signal, result.fillPrice ?? sig.price); return { candleCtx: k.ctx, entryDistAtr: k.distAtr }; })(),
-        fundingPct: await getFundingForLog(symbol),
       };
+      // nalaz #42: funding se dopisuje NAKON naloga (ovdje je i prije bio), nikad u literalu
+      entry.fundingPct = await getFundingForLog(symbol);
       addPosition(ULTRA4H_PID, entry);
       writeEntryCsv(ULTRA4H_PID, entry);
       await tg(`🎯 <b>ULTRA-4H NOVI ULAZ</b> ${symbol} ${sig.signal}\nUlaz: ${fmtPrice(result.fillPrice)} | SL: ${fmtPrice(result.slFromFill)} | TP: ${fmtPrice(result.tpFromFill)}\nScore: ${score}/8 | Margin: $${margin.toFixed(2)} @ ${lev}x`);
@@ -7543,10 +7561,10 @@ async function runSupertrendEntries(ctx) {
         sigMask: null, entryMode: "ST", signalStrength: "normal", vipSlot: false,
         btcRegime1h, btcRegime4h, candlePat: detectCandlePattern(sig.candles1h).name,
         ...(() => { const k = candleContext(sig.candles1h, signal, price); return { candleCtx: k.ctx, entryDistAtr: k.distAtr }; })(),
-        fundingPct: await getFundingForLog(symbol),
       };
       console.log(`🎯 [${pDef.name}] NEW ${signal} ${symbol} @ ${fmtPrice(price)} | SL ${fmtPrice(sl)} | TP ${fmtPrice(tp)} | $${tradeSize.toFixed(0)} [SUPERTREND]`);
       if (!isLive) {
+        entry.fundingPct = await getFundingForLog(symbol);   // nalaz #42: mjerenje NIKAD prije naloga
         addPosition(pid, entry); writeEntryCsv(pid, entry);
         await tg(`📋 PAPER [ST/1H] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b> 🧭\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} (${slPct.toFixed(1)}%) | TP: ${fmtPrice(tp)} (${tpPct.toFixed(1)}%) | RR 1:${ST_RR}\nEquity: $${equity.toFixed(2)} | Risk: $${riskAmount.toFixed(2)} | Notional: $${tradeSize.toFixed(0)}`);
       } else {
@@ -7565,6 +7583,7 @@ async function runSupertrendEntries(ctx) {
         if (order?.tpFromFill) entry.tp = order.tpFromFill;
         if (order?.fillPrice)  entry.entryPrice = order.fillPrice;
         if (order?.fillQty)    entry.quantity   = order.fillQty;
+        entry.fundingPct = await getFundingForLog(symbol);   // nalaz #42: tek nakon naloga
         addPosition(pid, entry); writeEntryCsv(pid, entry);
         console.log(`  ✅ LIVE NALOG [ST] — ${entry.orderId}`);
         await tg(`🔴 LIVE [ST/1H] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b> 🧭\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} (${slPct.toFixed(1)}%) | TP: ${fmtPrice(tp)} (${tpPct.toFixed(1)}%) | RR 1:${ST_RR}\nEquity: $${equity.toFixed(2)} | Risk: $${riskAmount.toFixed(2)} | Notional: $${tradeSize.toFixed(0)} | Margin: $${entry.margin.toFixed(2)} | ${usedLev}x`);
@@ -9210,13 +9229,14 @@ export async function run() {
         const timestamp = new Date().toISOString();
         const orderId   = `${_isLive ? "LIVE" : "PAPER"}-${Date.now()}`;
         const mode      = _isLive ? (BITGET_DEMO ? "DEMO" : "LIVE") : "PAPER";
-        const entry = { symbol, signal, price, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode, sigMask: result.sigMask ?? null, entryMode: result._strategy ?? ((result.isMomentum ? "MOM" : "PBK") + (result._halfSize ? "-SOFT" : "")), signalStrength, vipSlot: result._vipSlot === true, btcRegime1h: _btcRegime1h, btcRegime4h: _btcRegime, candlePat: _candlePat1.name, ...(() => { const k = candleContext(candles, signal, price); return { candleCtx: k.ctx, entryDistAtr: k.distAtr }; })(), fundingPct: await getFundingForLog(symbol) };
+        const entry = { symbol, signal, price, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode, sigMask: result.sigMask ?? null, entryMode: result._strategy ?? ((result.isMomentum ? "MOM" : "PBK") + (result._halfSize ? "-SOFT" : "")), signalStrength, vipSlot: result._vipSlot === true, btcRegime1h: _btcRegime1h, btcRegime4h: _btcRegime, candlePat: _candlePat1.name, ...(() => { const k = candleContext(candles, signal, price); return { candleCtx: k.ctx, entryDistAtr: k.distAtr }; })() };
 
         const _strengthEmoji = signalStrength === "strong" ? "💪" : "📊";
         const _rrLabel = `RR 1:${(tpPct/slPct).toFixed(1)}`;
         const _vipTag = entry.vipSlot ? " ⭐VIP" : "";
 
         if (!_isLive) {
+          entry.fundingPct = await getFundingForLog(symbol);   // nalaz #42: mjerenje NIKAD prije naloga
           addPosition(pid, entry);
           writeEntryCsv(pid, entry);
           _newEntriesThisScan++;
@@ -9241,6 +9261,7 @@ export async function run() {
             if (order?.tpFromFill) entry.tp = order.tpFromFill;
             if (order?.fillPrice)  entry.entryPrice = order.fillPrice;
             if (order?.fillQty)    entry.quantity   = order.fillQty;
+            entry.fundingPct = await getFundingForLog(symbol);   // nalaz #42: tek nakon naloga
             addPosition(pid, entry);
             writeEntryCsv(pid, entry);
             _newEntriesThisScan++;

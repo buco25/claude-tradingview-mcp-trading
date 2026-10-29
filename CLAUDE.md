@@ -494,3 +494,8 @@ procijeni nakon ~30 zatvorenih tradeova. Povrat: `TRAIL_ARM_TP_PCT = 0`, `BE_STO
 `RISK_MULT_1H` 1.0 → **1/3** (cijela 1H ljestvica: slab 1.0 → 0.33%, baza 1.5 → 0.5%, jak 2.0 → 0.67%, BTC bonus proporcionalno) i `ST_RISK_PCT` 1.0 → **0.35**. `RISK_PCT_4H` ostaje 0.75.
 Namjerno NE `RISK_PCT` 1.5 → 0.5: slab 1.0% i jak 2.0% ostali bi iznad baze, a dashboard bi to pokazao kao "survival" (`RISK_PCT <= 1.0`). Minimalni notional ($40/minQty) može
 vratiti dio smanjenja na sitnim računima. Vraćanje: `RISK_MULT_1H = 1.0`, `ST_RISK_PCT = 1.0`.
+
+**Noćni signali (29.10., odluka vlasnika "da vidimo i noćne"):** noćni blok (20–06 UTC) vraća prije analize, pa je noću `signal_log` bio prazan. `nightShadowLog(pDef, symbols)` (`bot.js`) nakon petlje skenera,
+ODVOJENO i bez čekanja, izračuna 1H pullback signal za noćom blokirane kripto simbole i zapiše LONG/SHORT s `blockers=['NIGHT_BLOCK']`, `blocked=true`, `gates.night/shadow/hourUtc`. Ne ulazi se, ne
+mijenja se CSV/scan_log ni jedna odluka. Radi samo kad je Supabase bilježenje uključeno (inače nula dodatnih dohvata), jedan prolaz odjednom, timeout 15/20 s po simbolu. Bez 15m MOM/VA-REV rezerve.
+`analyzeUltraPullback` radi ~5 golih `fetch` poziva po simbolu (bez 429 zaštite) — noću to isto opterećenje kao danju; ako se pojave 429, prvo ovdje smanji učestalost.

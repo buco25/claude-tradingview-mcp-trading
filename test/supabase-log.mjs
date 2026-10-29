@@ -114,6 +114,23 @@ writeEntryCsv("synapse_t", { symbol: "BTCUSDT", signal: "LONG", price: 70000, sl
 writeExitCsv("synapse_t", { symbol: "BTCUSDT", side: "LONG", quantity: 0.001, totalUSD: 100, sl: 69000, tp: 72000, orderId: "o1", mode: "LIVE", entryPrice: 70000 }, 71000, "TP", 1.0);
 ok(readFileSync(csvFilePath("synapse_t"), "utf8").trim().split("\n").length === 3, "writeEntryCsv/writeExitCsv i dalje pisu CSV (bez Supabase varijabli)");
 
+// --- noćni signali (nightShadowLog): samo bilježenje, ne ruši skener ---
+{ const { nightShadowLog } = await import("../bot.js");
+  const emitted = []; const candles = [{ close: 100 }, { close: 101 }];
+  const analyze = async (s) => s === "SIGUSDT" ? { signal: "LONG", bullScore: 6, bearScore: 1, isMomentum: false, reason: "PBK" }
+    : s === "BADUSDT" ? (() => { throw new Error("mreža"); })() : { signal: "NEUTRAL", reason: "nema" };
+  const deps = { enabled: () => true, fetchCandles: async () => candles, analyze, logSignal: r => emitted.push(r), timeoutMs: 200 };
+  const n = await nightShadowLog({ params: {} }, ["NEUUSDT", "SIGUSDT", "BADUSDT", "SHORTUSDT"], deps);
+  ok(n === 1 && emitted.length === 1 && emitted[0].symbol === "SIGUSDT", "bilježi samo LONG/SHORT; NEUTRAL i greška jednog simbola ne prekidaju ostale");
+  ok(emitted[0].blocked === true && emitted[0].entered === false && emitted[0].blockers[0] === "NIGHT_BLOCK" && emitted[0].gates.night === true && emitted[0].gates.shadow === true && emitted[0].price === 101,
+     "noćni redak: blocked, NIGHT_BLOCK, gates.night/shadow, cijena zadnje svijeće");
+  ok(await nightShadowLog({ params: {} }, ["SIGUSDT"], { ...deps, enabled: () => false, logSignal: () => { throw new Error("ne smije"); } }) === 0, "bez Supabase bilježenja: nula dohvata i nula redaka");
+  let calls = 0; const slow = { ...deps, fetchCandles: async () => { calls++; await new Promise(r => setTimeout(r, 30)); return candles; }, logSignal: () => {} };
+  const p1 = nightShadowLog({ params: {} }, ["SIGUSDT", "SIGUSDT"], slow); const p2 = nightShadowLog({ params: {} }, ["SIGUSDT"], slow);
+  await Promise.all([p1, p2]); ok(calls === 2, "jedan prolaz odjednom: drugi poziv tijekom prvog se preskače");
+  const t0 = Date.now(); await nightShadowLog({ params: {} }, ["SIGUSDT"], { ...deps, fetchCandles: () => new Promise(() => {}), timeoutMs: 50 });
+  ok(Date.now() - t0 < 1000, "dohvat koji visi prekida se timeoutom"); }
+
 if (fail) { console.log(`\n${fail} FAIL`); process.exit(1); }
 console.log("\nSve OK");
 process.exit(0);

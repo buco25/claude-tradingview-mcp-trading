@@ -16,7 +16,7 @@ import "dotenv/config";
 import { readFileSync, writeFileSync, existsSync, appendFileSync, mkdirSync } from "fs";
 import crypto from "crypto";
 import { fileURLToPath } from "url";
-import { logSignal, logTrade, scanEntryToSignalRow, u4hSignalRow, entryTradeRow, exitTradeRow } from "./supabase-log.js";
+import { logSignal, logTrade, supabaseLogStatus, scanEntryToSignalRow, u4hSignalRow, entryTradeRow, exitTradeRow } from "./supabase-log.js";
 
 // ─── Config ────────────────────────────────────────────────────────────────────
 
@@ -2600,6 +2600,37 @@ function writeScanLog(entries) {
   appendFileSync(SCAN_LOG_FILE, lines + "\n");
   // Supabase (29.10.): samo LONG/SHORT signali (blokirani i ušli); u pozadini, nikad ne baca ni ne čeka.
   try { const _ts = new Date().toISOString(); for (const e of entries) logSignal(scanEntryToSignalRow(e, _ts)); } catch (_) {}
+}
+
+// ─── Noćni signali u Supabase (29.10., odluka vlasnika: "da vidimo i noćne") ─────────────────────────────────
+// Noćni blok (20–06 UTC) vraća prije analize, pa se noću ne vidi što bi signal bio. Ovdje se signal SAMO IZRAČUNA i zapiše u signal_log
+// (blocker NIGHT_BLOCK, blocked=true, gates.night/shadow) — ne ulazi se, ne mijenja se nijedna odluka niti CSV/scan_log.
+// Radi ODVOJENO od skenera (pozivatelj ne čeka): jedan prolaz odjednom, simbol po simbol, uz timeout, pa kasni skener ne trpi.
+// Samo 1H pullback analiza (bez 15m MOM/VA-REV rezerve) i samo kad je Supabase bilježenje uključeno (inače nula dodatnih dohvata).
+let _nightShadowBusy = false;
+const _withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]);
+export async function nightShadowLog(pDef, symbols, deps = {}) {
+  const enabled = deps.enabled ?? (() => supabaseLogStatus().enabled);
+  const getCandles = deps.fetchCandles ?? fetchCandles, analyze = deps.analyze ?? analyzeUltraPullback, emit = deps.logSignal ?? logSignal;
+  if (_nightShadowBusy || !symbols?.length || !enabled()) return 0;
+  _nightShadowBusy = true; let logged = 0;
+  try {
+    const hour = new Date().getUTCHours();
+    for (const symbol of symbols) {
+      try {
+        const candles = await _withTimeout(getCandles(symbol, "1H", 250), deps.timeoutMs ?? 15000);
+        const r = await _withTimeout(analyze(symbol, candles, pDef.params), deps.timeoutMs ?? 20000);
+        if (r?.signal !== "LONG" && r?.signal !== "SHORT") continue;
+        const row = scanEntryToSignalRow({
+          symbol, signal: r.signal, score: Math.max(r.bullScore || 0, r.bearScore || 0), bullScore: r.bullScore, bearScore: r.bearScore,
+          isMomentum: r.isMomentum === true, price: candles[candles.length - 1]?.close, blocker: "NIGHT_BLOCK",
+          reason: `Noćni blok ${hour}:00 UTC — signal samo bilježen: ${r.reason ?? ""}`, extraGates: { night: true, shadow: true, hourUtc: hour },
+        });
+        if (row) { emit(row); logged++; }
+      } catch (_) { /* jedan simbol ne smije prekinuti ostale */ }
+    }
+  } finally { _nightShadowBusy = false; }
+  return logged;
 }
 
 // Čisti stare scan log retke (drži samo zadnjih 7 dana)
@@ -8075,6 +8106,7 @@ export async function run() {
 
     let _newEntriesThisScan = 0;  // Reset po portfoliju, ne dopuštamo simultano previše ulaza
     const _scanLogEntries = [];  // skuplja log entries za ovaj scan ciklus
+    const _nightShadow = [];     // simboli blokirani noćnim blokom — signal se samo bilježi u Supabase (nightShadowLog)
 
     // ── Dohvati stvarno otvorene pozicije na Bitgetu (jednom po scan ciklusu) ──
     // Ako Bitget već ima poziciju za neki simbol (ručno ili izvana), ne ulazimo
@@ -8209,6 +8241,7 @@ export async function run() {
         if ((_nightH >= 20 || _nightH < 6) && !isStockSym(symbol)) {
           console.log(`  🌙 [NOĆ] ${symbol} — ${_nightH}:00 UTC (WR 24% noću povijesno) → blokiran ulaz`);
           _scanLogEntries.push({ symbol, signal: "NEUTRAL", blocker: "NIGHT_BLOCK", reason: `Nocna zona ${_nightH}:00 UTC — blokirano` });
+          _nightShadow.push(symbol);
           continue;
         }
 
@@ -9326,6 +9359,9 @@ export async function run() {
         });
       } catch (e) { console.log(`  ❌ [ST] ${e.message}`); }
     }
+
+    // Noćni signali → Supabase (samo bilježenje, ne čeka se, ne utječe na trgovanje)
+    if (_nightShadow.length > 0) nightShadowLog(pDef, _nightShadow).catch(() => {});
 
     // Piši scan log jednom po scan ciklusu
     if (_scanLogEntries.length > 0) {

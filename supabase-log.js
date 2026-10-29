@@ -64,7 +64,7 @@ export function scanEntryToSignalRow(e, scanTs = new Date().toISOString()) {
     price: num(e.price),
     blocked: !entered && e.blocker !== "SIGNAL",
     blockers: entered || e.blocker === "SIGNAL" || !e.blocker ? [] : [txt(e.blocker, 120)],
-    gates: jsonSafe({ score, rsi: num(e.rsi), adx: num(e.adx), vwapDist: num(e.vwapDist) }),
+    gates: jsonSafe({ score, rsi: num(e.rsi), adx: num(e.adx), vwapDist: num(e.vwapDist), ...(e.extraGates || {}) }),
     entered,
     reason: txt(e.reason),
   };

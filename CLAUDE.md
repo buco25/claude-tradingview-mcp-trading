@@ -456,3 +456,9 @@ Vidi `docs/AUDIT-2026-10-04.md` za nalaze i otvorene odluke.
   Takve idu kroz tjedni audit i uz eksplicitnu odluku vlasnika — ne tiho uz popravak.
 - Pri brisanju mrtvog koda ostavi komentar **zašto** je bio mrtav; nekoliko nalaza iz audita
   su bili "napola uklonjeni" od prije, pa je trag bio presudan.
+
+## Trail tek blizu TP-a (29.10., odluka vlasnika)
+Ništa ne pomiče SL/TP dok cijena nije prešla `TRAIL_ARM_TP_PCT` = **95%** puta do TP-a (`trailArmed` u `bot.js`). Prije toga je SL stajao na početnoj razini; BE @ +1R, ROE-protect (30/12) i trail
+sad rade tek nakon armiranja. `BE_STOP_ENABLED` (BE-stop @ 70% TP) i `PARTIAL_1R_ENABLED` (djelomično zatvaranje @ +1R) su `false`. Pozicije koje su već imale `trailPeak` ostaju armirane.
+UPOZORENJE: analiza 7.10. (gore) je pokazala da je rano upravljanje (BE/ROE-protect) smanjilo gubitak (−18 $ naspram −83 $ bez ROE-protecta). Očekuj više punih SL-ova (−1R) i manje sitnih plusova;
+procijeni nakon ~30 zatvorenih tradeova. Povrat: `TRAIL_ARM_TP_PCT = 0`, `BE_STOP_ENABLED = true`, `PARTIAL_1R_ENABLED = true`. Test: `test/trail-arm.mjs`.

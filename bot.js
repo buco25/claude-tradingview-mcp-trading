@@ -4215,9 +4215,35 @@ const TRAIL_GIVEBACK   = 1.0;            // % ispod peaka — prostor za disanje
 const ROE_PROTECT_TRIGGER = 30;          // % ROE koji aktivira zaključavanje (11.09., na zahtjev; 15.10. 20 → 30)
 const ROE_PROTECT_LOCK    = 12;          // % ROE koji se zaključava kad se aktivira (15.10., odluka vlasnika: 8 → 12, uz aktivaciju na 30%)
 
+// 29.10., odluka vlasnika: NIŠTA ne pomiče SL/TP dok cijena nije prešla TRAIL_ARM_TP_PCT % puta do TP-a. Prije toga je SL (BE @ +1R, ROE-protect,
+// trail, BE-stop @ 70% TP, partial +1R) stezao poziciju na sitan plus/BE i izbacivao je prije TP-a. Sad: SL stoji gdje je postavljen sve dok
+// cijena ne bude unutar (100 − TRAIL_ARM_TP_PCT)% puta od TP-a, tek tada se aktivira trail (SL prati peak, TP se produžuje). Vrati: 95 → 0 isključuje gate.
+const TRAIL_ARM_TP_PCT = 95;
+const BE_STOP_ENABLED    = false;        // 29.10.: BE-stop @ 70% TP isključen (trail ga nadomješta kad se aktivira)
+const PARTIAL_1R_ENABLED = false;        // 29.10.: partial +1R (zatvori ~$1, SL na BE) isključen — pomicao je SL prije TP-a
+
+function trailArmed(pos, price) {
+  // pozicije koje su već u trail modu (stari kod ih je pomaknuo prije ove promjene) ostaju armirane
+  if (pos.trailArmed || pos.trailPeak != null) return true;
+  const entry = pos.entryPrice;
+  const tpPct = pos.origTpPct ?? Math.abs(pos.tp - entry) / entry * 100;
+  if (!(tpPct > 0)) return false;
+  const gainPct = pos.side === "LONG" ? (price - entry) / entry * 100 : (entry - price) / entry * 100;
+  if (gainPct / tpPct * 100 < TRAIL_ARM_TP_PCT) return false;
+  pos.trailArmed = true;
+  console.log(`  🎯 [TRAIL-ARM] ${pos.symbol} ${pos.side} — ${(gainPct / tpPct * 100).toFixed(0)}% puta do TP-a (≥ ${TRAIL_ARM_TP_PCT}%) → trail aktivan`);
+  return true;
+}
+
 function applyTrail(pos, currentPrice) {
   if (!TRAIL_STRATEGIES.includes(pos.strategy)) return false;
+  const wasArmed = !!(pos.trailArmed || pos.trailPeak != null);
+  if (!trailArmed(pos, currentPrice)) return false;
+  const moved = _applyTrailCore(pos, currentPrice);
+  return moved || !wasArmed;   // prvo armiranje se mora spremiti i kad SL još nije pomaknut
+}
 
+function _applyTrailCore(pos, currentPrice) {
   const entry = pos.entryPrice;
   const gainPct = pos.side === "LONG"
     ? (currentPrice - entry) / entry * 100
@@ -4776,7 +4802,7 @@ async function checkPortfolioPositions(pid) {
         // TraderaEdge "manualno zatvaranje u plusu" automatizirano: trade koji ode
         // +1R pa se vrati postaje mali WIN umjesto punog LOSS-a (analiza 07.07.: WR 28%,
         // prosjek WIN $0.48 vs LOSS $0.57 — dobici su bježali nenaplaćeni)
-        if (isLivePortfolio && !pos.partial1R && !pos.partialClosed && !pos.trailActive && pos.sl) {
+        if (PARTIAL_1R_ENABLED && isLivePortfolio && !pos.partial1R && !pos.partialClosed && !pos.trailActive && pos.sl) {
           const _gain1R = pos.side === "LONG"
             ? (liveP - pos.entryPrice) / pos.entryPrice * 100
             : (pos.entryPrice - liveP) / pos.entryPrice * 100;
@@ -5055,7 +5081,7 @@ async function checkPortfolioPositions(pid) {
         }
 
         // ── BE-STOP: ako je 50%+ TP dostignut → pomakni SL na entry+buffer ──
-        if (!pos.beMoved && isLivePortfolio) {
+        if (BE_STOP_ENABLED && !pos.beMoved && isLivePortfolio) {
           const tpPct   = pos.tpPct ?? 4.0;
           const pricePct = pos.side === "LONG"
             ? (liveP - pos.entryPrice) / pos.entryPrice * 100
@@ -5682,7 +5708,7 @@ async function partialClosePosition(pos, closePct = PARTIAL_CLOSE_PCT) {
 // pomakni SL na break-even čim pozicija pređe 50% od TP-a.
 // Ne čeka 5-min run() ciklus — reagira unutar 30 sekundi.
 export async function checkBeStopAll() {
-  if (PAPER_TRADING) return;
+  if (PAPER_TRADING || !BE_STOP_ENABLED) return;
   // 19.09.: ULTRA-4H dodan (na zahtjev — isti 70%-TP-progress BE-stop kao synapse_t).
   // Nema pDef u rules.json, pa se pDef.live gate preskače baš za nju (isti obrazac
   // kao softExitMonitor).
@@ -9977,6 +10003,7 @@ export async function generateDailyReport() {
 
 // Samo za test/signal-regression.mjs (bogati način: bullScore/bearScore i za NEUTRAL, cfg varijante).
 export { analyzeUltra as analyzeUltraForTest };
+export { applyTrail as applyTrailForTest, TRAIL_ARM_TP_PCT, BE_STOP_ENABLED, PARTIAL_1R_ENABLED };
 
 // ─── Entry point ───────────────────────────────────────────────────────────────
 

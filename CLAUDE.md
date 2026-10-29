@@ -479,3 +479,18 @@ Ništa ne pomiče SL/TP dok cijena nije prešla `TRAIL_ARM_TP_PCT` = **95%** put
 sad rade tek nakon armiranja. `BE_STOP_ENABLED` (BE-stop @ 70% TP) i `PARTIAL_1R_ENABLED` (djelomično zatvaranje @ +1R) su `false`. Pozicije koje su već imale `trailPeak` ostaju armirane.
 UPOZORENJE: analiza 7.10. (gore) je pokazala da je rano upravljanje (BE/ROE-protect) smanjilo gubitak (−18 $ naspram −83 $ bez ROE-protecta). Očekuj više punih SL-ova (−1R) i manje sitnih plusova;
 procijeni nakon ~30 zatvorenih tradeova. Povrat: `TRAIL_ARM_TP_PCT = 0`, `BE_STOP_ENABLED = true`, `PARTIAL_1R_ENABLED = true`. Test: `test/trail-arm.mjs`.
+
+## Supabase bilježenje signala i tradeova (29.10., odluka vlasnika)
+
+`supabase-log.js` šalje u projekt `bot-signali` (FREE) tablice `signal_log` i `trade_log`. **Mjerenje, ne utječe ni na jednu odluku.**
+- Env (samo Railway): `SUPABASE_URL`, `SUPABASE_ANON_KEY` (publishable/anon ključ). Bez njih je modul potpuni no-op. `SUPABASE_LOG_ENABLED=false` ga gasi bez brisanja ključeva.
+- `logSignal`/`logTrade` su sinkroni (samo red u memoriji), slanje je u pozadini svakih 15 s, timeout 4 s, red max 500 po tablici, backoff do 5 min. Nikad `await` na trgovačkom putu i nikad ne bacaju.
+- **`Prefer: return=minimal` je obavezan:** `anon` ima samo INSERT (RLS politika `bot_insert_only`), pa `return=representation`/upsert/čitanje padaju. Ne dodaji SELECT/UPDATE za anon — za čitanje koristi SQL editor ili konektor.
+- Kuke: `writeScanLog` (1H + Supertrend, samo LONG/SHORT; NEUTRAL/SKIP/ERROR ne), `runUltra4hStrategy` iza `evaluateU4hGates` (4H; kasniji blokeri liq/equity/strop po svijeći nisu u retku), kraj `writeEntryCsv`/`writeExitCsv` (`trade_log`, event ENTRY/EXIT). `forming`, `candle_age_s`, `funding_pct` su NULL u v1.
+- `trade_log.data` je whitelist u `entryTradeRow`/`exitTradeRow` — nova polja se dodaju tamo, a ne spreadom pozicije (tajne/nepotrebno ne smiju u bazu).
+- `test/supabase-log.mjs` čuva no-op, `return=minimal`, backoff, timeout i da CSV ne ovisi o bazi.
+
+## 1H/ST rizik na trećinu (29.10., odluka vlasnika; ULTRA-4H NIJE isključen)
+`RISK_MULT_1H` 1.0 → **1/3** (cijela 1H ljestvica: slab 1.0 → 0.33%, baza 1.5 → 0.5%, jak 2.0 → 0.67%, BTC bonus proporcionalno) i `ST_RISK_PCT` 1.0 → **0.35**. `RISK_PCT_4H` ostaje 0.75.
+Namjerno NE `RISK_PCT` 1.5 → 0.5: slab 1.0% i jak 2.0% ostali bi iznad baze, a dashboard bi to pokazao kao "survival" (`RISK_PCT <= 1.0`). Minimalni notional ($40/minQty) može
+vratiti dio smanjenja na sitnim računima. Vraćanje: `RISK_MULT_1H = 1.0`, `ST_RISK_PCT = 1.0`.

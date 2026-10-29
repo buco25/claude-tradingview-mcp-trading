@@ -16,6 +16,7 @@ import "dotenv/config";
 import { readFileSync, writeFileSync, existsSync, appendFileSync, mkdirSync } from "fs";
 import crypto from "crypto";
 import { fileURLToPath } from "url";
+import { logSignal, logTrade, scanEntryToSignalRow, u4hSignalRow, entryTradeRow, exitTradeRow } from "./supabase-log.js";
 
 // ─── Config ────────────────────────────────────────────────────────────────────
 
@@ -44,7 +45,11 @@ export const RISK_PCT_MAX  = 2.0;    // jak setup (score ≥ comboMinSig+2)
 // specifičnih dionica/metala (vidi PROBLEM_1H_SYMBOLS niže) koji se sad umjesto toga
 // isključuju direktno. Blanket pola-rizika na CIJELI 1H bi nepotrebno kaznio profitabilnu
 // 1H kripto stranu — kirurški rez na stvarnog krivca je točniji popravak.
-export const RISK_MULT_1H  = 1.0;
+// 29.10., odluka vlasnika: 1H rizik na TREĆINU (testovi 29.10.: goli signal nema prednost koja pokriva naknade). Ide kroz ovaj množitelj,
+// ne kroz RISK_PCT, da se cijela ljestvica (min 1.0 / baza 1.5 / max 2.0 + BTC bonus) smanji proporcionalno — baza 1.5 → 0.5%, slab 1.0 → 0.33%,
+// jak 2.0 → 0.67%. Samo RISK_PCT 1.5 → 0.5 bi ostavio slab 1.0% i jak 2.0% IZNAD baze, a dashboard bi ga prikazao kao "survival" (RISK_PCT <= 1.0).
+// 4H (RISK_PCT_4H) ostaje 0.75, ULTRA-4H se NE isključuje. Pod minimalnim notionalom ($40/minQty) stvarni rizik ostaje veći. Vraćanje = 1.0.
+export const RISK_MULT_1H  = 1 / 3;
 const SL_PCT        = 2.0;    // fallback SL % (Tier 1) — override per-simbol u symbol_sltp
 const TP_PCT        = 3.0;    // fallback TP % (Tier 1, 1.5×SL) — override per-simbol u symbol_sltp
 
@@ -2593,6 +2598,8 @@ function writeScanLog(entries) {
     return `${ts},${e.symbol},${e.signal || "NEUTRAL"},${score},${rsi},${adx},${vwap},${e.blocker || "—"},"${reason}"`;
   }).join("\n");
   appendFileSync(SCAN_LOG_FILE, lines + "\n");
+  // Supabase (29.10.): samo LONG/SHORT signali (blokirani i ušli); u pozadini, nikad ne baca ni ne čeka.
+  try { const _ts = new Date().toISOString(); for (const e of entries) logSignal(scanEntryToSignalRow(e, _ts)); } catch (_) {}
 }
 
 // Čisti stare scan log retke (drži samo zadnjih 7 dana)
@@ -5279,6 +5286,7 @@ export function writeEntryCsv(pid, entry) {
   ].join(",");
 
   appendFileSync(csvFilePath(pid), row + "\n");
+  try { logTrade(entryTradeRow(pid, entry)); } catch (_) {}   // Supabase (29.10.), pozadinski
 }
 
 // ─── Portfolio Equity ────────────────────────────────────────────────────────────
@@ -5537,6 +5545,7 @@ export function writeExitCsv(pid, pos, exitPrice, reason, pnl, feeOverride = nul
   ].join(",");
 
   appendFileSync(csvFilePath(pid), row + "\n");
+  try { logTrade(exitTradeRow(pid, pos, exitPrice, reason, pnl, feeSum)); } catch (_) {}   // Supabase (29.10.), pozadinski
 }
 
 // ─── BitGet Execution ────────────────────────────────────────────────────────────
@@ -7188,6 +7197,7 @@ export async function runUltra4hStrategy() {
       if (sig.signal === "NEUTRAL") continue;
 
       const gates = await evaluateU4hGates({ symbol, candles, sig, btcRegime: _btcRegime4, liqScore: _liqScore4, shortCircuit: true });
+      try { logSignal(u4hSignalRow(symbol, sig, gates)); } catch (_) {}   // Supabase (29.10.), pozadinski
       for (const n of gates.notes) console.log(n);
       if (!gates.ok) {
         if (gates.blockers[0]?.log) console.log(gates.blockers[0].log);
@@ -7304,7 +7314,7 @@ export const ST_ENABLED          = true;
 // (vlastita pravila: US sesija, gap rizik). Isključeni/suspendirani simboli ispadaju sami jer su izvan watchliste.
 export function stUniverse(watchlist) { return (watchlist ?? []).filter(s => !isStockSym(s) && !isMetalSym(s)); }
 export const ST_MAX_OPEN         = 2;      // max istovremenih Supertrend pozicija (na zahtjev vlasnika), povrh svih 1H/4H capova
-export const ST_RISK_PCT         = 1.0;    // % računa do SL-a (nova, nedokazana strategija — ispod 1.5% koliko ima 4H)
+export const ST_RISK_PCT         = 0.35;   // % računa do SL-a (29.10., odluka vlasnika: 1.0 → 0.35, trećina; vraćanje = 1.0)
 export const ST_ATR_LEN          = 10;     // TradingView default: ta.supertrend(3, 10)
 export const ST_FACTOR           = 3;
 export const ST_RR               = 3;      // TP = 3 × SL
@@ -9267,7 +9277,7 @@ export async function run() {
           writeEntryCsv(pid, entry);
           _newEntriesThisScan++;
           h1CandleEntryAdded(Date.now(), loadPositions(pid));
-          _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), blocker: "ENTERED", reason: `${result.isMomentum?"MOM":"PBK"} ulaz @ ${fmtPrice(price)} SL ${fmtPrice(sl)} TP ${fmtPrice(tp)}${result._halfSize?" [POLA RIZIKA]":""}`, vwapDist: result.vwap ? ((price-result.vwap)/result.vwap*100).toFixed(2) : null });
+          _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), bullScore: result.bullScore, bearScore: result.bearScore, isMomentum: result.isMomentum === true, halfSize: result._halfSize === true, price, blocker: "ENTERED", reason: `${result.isMomentum?"MOM":"PBK"} ulaz @ ${fmtPrice(price)} SL ${fmtPrice(sl)} TP ${fmtPrice(tp)}${result._halfSize?" [POLA RIZIKA]":""}`, vwapDist: result.vwap ? ((price-result.vwap)/result.vwap*100).toFixed(2) : null });
           // Dinamički leverage: zone-based SL → getSafeLeverage izračunava; tier SL → fiksni
           const _dynLev = slMethod === "tier" ? (symSltp.leverage ?? null) : null;
           // odluka #3: ista kapica kao u setupSymbol, da paper poruka ne pokazuje leverage

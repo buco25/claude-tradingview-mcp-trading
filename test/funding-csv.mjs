@@ -47,5 +47,56 @@ initCsv(pid2);
 const l2 = readFileSync(csvFilePath(pid2), "utf8").trim().split("\n");
 ok(l2[0] === CSV_HEADERS && l2[1].startsWith("2026-10-01,10:00:00,BitGet,ETHUSDT"), "stari 25-stupcani CSV se migrira: zaglavlje novo, stari redak netaknut");
 
+// --- nalaz #41: DIJELJENI kes s getFundingRate ne smije podmetnuti laznu nulu ---
+// Testovi gore svjesno koriste `cache: {}`; upravo ta izolacija je 24.10. propustila nalaz #41,
+// jer produkcija dijeli _frCache s getFundingRate, koja na odgovor BEZ podatka kesira 0.
+ok(await getFundingForLog("CCCUSDT", { cache: { CCCUSDT: { rate: 0, ts: T, ok: false } }, now: T,
+    fetchImpl: () => { throw new Error("ne smije dohvacati"); } }) === null,
+  "kesirana LAZNA nula (ok:false) -> null, bez novog dohvata");
+ok(await getFundingForLog("CCCUSDT", { cache: { CCCUSDT: { rate: 0, ts: T, ok: true } }, now: T,
+    fetchImpl: () => { throw new Error("ne smije dohvacati"); } }) === 0,
+  "kesirana STVARNA nula (ok:true) -> 0");
+ok(await getFundingForLog("CCCUSDT", { cache: { CCCUSDT: { rate: 0.05, ts: T - 16 * 60000, ok: false } }, now: T,
+    fetchImpl: resp({ code: "00000", data: [{ fundingRate: "0.0002" }] }) }) === 0.02,
+  "istekao ok:false unos se ne pamti -> svjez dohvat");
+
+// Integracija na STVARNOM modulu: gate otrovan 429-om, pa zapis u CSV bez ikakvih opcija.
+// Ovo je tocno scenarij iz nalaza #41 — getFundingForLog mora vratiti null, ne 0.
+{
+  const pravi = globalThis.fetch;
+  globalThis.fetch = async () => ({ status: 429, json: async () => ({ code: "429", msg: "Too many requests" }) });
+  try {
+    const { getAllFundingRates } = await import("../bot.js");
+    const gate = (await getAllFundingRates(["ZZZUSDT"]))["ZZZUSDT"];
+    const csv  = await getFundingForLog("ZZZUSDT");          // BEZ opcija -> stvarni _frCache
+    ok(gate === 0, `gate i dalje dobije 0 (ponasanje NEPROMIJENJENO) — ${gate}`);
+    ok(csv === null, `CSV dobije null, ne laznu nulu iz dijeljenog kesa — ${JSON.stringify(csv)}`);
+  } finally { globalThis.fetch = pravi; }
+}
+
+// --- nalaz #43: poziv ide kroz bitgetPublicGet, i to bez ponavljanja ---
+{
+  let opts = null;
+  const fakeGet = async (u, o) => { opts = o; return { status: 200, json: async () => ({ code: "00000", data: [{ fundingRate: "0.0001" }] }) }; };
+  const v = await getFundingForLog("DDDUSDT", { cache: {}, now: T, get: fakeGet });
+  ok(v === 0.01, "ide kroz predani get (bitgetPublicGet u produkciji)");
+  ok(opts?.retries === 0, `retries: 0 — mjerenje ne odgada bota backoffom (${opts?.retries})`);
+  ok(typeof opts?.fetchImpl === "function", "timeout ide kroz fetchImpl omotac");
+}
+
+// --- nalaz #42: funding se NIKAD ne cita unutar entry literala (cita se IZVOR) ---
+// Regresijski test ne moze uhvatiti redoslijed prema placeBitGetOrder, pa ga cuva ovo:
+// `fundingPct: await` u literalu je tocno oblik koji je na ST i 1H putu cekao PRIJE naloga.
+{
+  const bot = readFileSync(new URL("../bot.js", import.meta.url), "utf8");
+  const uLiteralu = bot.split("\n")
+    .map((l, i) => ({ n: i + 1, l }))
+    .filter(x => /fundingPct:\s*await/.test(x.l) && !/^\s*(\/\/|\*)/.test(x.l));
+  ok(uLiteralu.length === 0,
+    `nijedan \`fundingPct: await\` u literalu${uLiteralu.length ? " — nadeno na " + uLiteralu.map(x => "bot.js:" + x.n).join(", ") : ""}`);
+  const dopisa = (bot.match(/entry\.fundingPct = await getFundingForLog/g) || []).length;
+  ok(dopisa === 5, `funding se dopisuje nakon naloga na svih 5 mjesta (1H paper/live, ST paper/live, 4H) — ${dopisa}`);
+}
+
 console.log(fail ? `\n${fail} PALO` : "\nSVE PROSLO");
 process.exit(fail ? 1 : 0);

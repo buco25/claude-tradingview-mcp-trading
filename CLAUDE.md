@@ -18,7 +18,7 @@ audit nađe nalaz
 Pravila koja to drže na mjestu:
 
 - **Nalazi žive u `docs/AUDIT-2026-10-04.md`, ne u chatu.** Numeracija je neprekinuta kroz
-  prolaze (zadnji je #40). Nikad ne počinji numeraciju od 1 i ne prijavljuj ponovno nalaz koji
+  prolaze (zadnji je #43). Nikad ne počinji numeraciju od 1 i ne prijavljuj ponovno nalaz koji
   je tamo već zapisan — ako je regresirao, reci da je regresija.
 - **Predaja drugoj sesiji je datoteka, ne poruka.** Ako posao preuzima druga sesija, uputa joj je
   "pročitaj `CLAUDE.md` i `docs/AUDIT-2026-10-04.md`, pa popravi #N" — ne zalijepljeni blok.
@@ -338,8 +338,25 @@ na `https://trading-bot-production-4f94.up.railway.app/health/bitget`. Ne uvodi 
 ## Funding u trenutku ulaza — samo mjerenje (24.10., odluka vlasnika)
 
 CSV ima novi zadnji stupac `FundingPct` (indeks 25): funding % u trenutku ulaza, prazno kad nije poznat. Piše ga `getFundingForLog(symbol)` u `bot.js` na sva tri ulazna puta (1H, ULTRA-4H, Supertrend); vraća
-`null` (prazno polje) kad dohvat ne uspije, za razliku od `getFundingRate` koja vraća 0 — stvarna nula i greška se ne smiju miješati. Dijeli keš s `getFundingRate`, timeout 1.5 s, nikad ne baca. **Ne utječe ni na jednu
-odluku.** Razlog: test (10 coina, 4H, 2020.-2026., Binance perpetuali, SL 1.5 ATR / TP 2.5R, naknada 0.12%) pre-registriranih hipoteza H1 (LONG pri top-decil fundingu je gori) i H2 (SHORT pri bottom-decil je gori) NIJE potvrdio
+`null` (prazno polje) kad dohvat ne uspije, za razliku od `getFundingRate` koja vraća 0 — stvarna nula i greška se ne smiju miješati. Timeout 1.5 s, nikad ne baca. **Ne utječe ni na jednu
+odluku.**
+
+**Dva pravila koja to drže (nalazi #41–#43, popravljeni 25.10.):**
+
+1. **Keš nosi zastavicu `ok`.** `getFundingForLog` dijeli `_frCache` s `getFundingRate` — namjerno, da mjerenje ne dodaje mrežni poziv kad je gate vrijednost već dohvatio. Ali `getFundingRate` radi
+   `parseFloat(raw || 0)`, pa odgovor BEZ podatka (429, održavanje, nepoznat simbol) daje 0 i keširao se 15 min kao da je stvarna nula; loger ju je čitao i upisivao u CSV (**nalaz #41**, dokazan
+   izvršavanjem). Sad `getFundingRate` uz `rate` upisuje i `ok`, a loger na `ok === false` vraća `null`. **Povratna vrijednost `getFundingRate` je nepromijenjena** — gate i dalje dobije 0, pa ulazi
+   ostaju isti. Ne uvodi drugi keš: vlastiti keš za logera natjerao bi ga da dohvaća sam, što pogoršava #42 i #43.
+2. **`fundingPct` se dopisuje NAKON `placeBitGetOrder`, nikad u `entry` literalu.** `await` u literalu je na ST (`bot.js`) i 1H putu čekao do 1500 ms IZMEĐU uhvaćene cijene i naloga, dok 4H put to
+   nikad nije radio — mjerenje je tako moglo pomaknuti cijenu ulaza, suprotno vlastitom komentaru (**nalaz #42**). Sva četiri puta sad imaju `entry.fundingPct = await getFundingForLog(symbol)`
+   neposredno prije `addPosition`/`writeEntryCsv`. Čeka se samo upis u evidenciju, nikad nalog.
+
+Poziv ide kroz `bitgetPublicGet` (razmak 80 ms, **nalaz #43**) ali s `retries: 0`: mjerenje ne smije odgađati bota backoffom od 400/800/1600 ms, a izostali uzorak je samo prazno polje. Timeout ide
+kroz omotač `fetchImpl` jer `bitgetPublicGet` zove `fetchImpl(url)` bez init objekta. **`getFundingRate` je i dalje goli `fetch`** — mijenjanje toga dodaje gateu 429 ponavljanja, što mijenja koje
+LONG-ove blokira, pa je odvojena odluka (vidi "Otvoreno" u `docs/AUDIT-2026-10-04.md`).
+
+`test/funding-csv.mjs` čuva sve tri stvari: lažnu nulu iz **dijeljenog** keša (prvi testovi su radili s `cache: {}` i zato propustili #41), `retries: 0`, i izvornu provjeru da `fundingPct: await`
+ne postoji u nijednom literalu. Razlog: test (10 coina, 4H, 2020.-2026., Binance perpetuali, SL 1.5 ATR / TP 2.5R, naknada 0.12%) pre-registriranih hipoteza H1 (LONG pri top-decil fundingu je gori) i H2 (SHORT pri bottom-decil je gori) NIJE potvrdio
 ni jednu (H1 čak obrnuto, +0.089R). Post hoc (nije dokaz): SHORT pri top-decil fundingu −0.212R u obje polovice povijesti, 4 od 6 godina. Nakon ~100 stvarnih ulaza provjeri samo TU jednu stvar na novim podacima
 (SHORT ulazi po funding stupcu). Botov FR gate (LONG blokiran uz funding > 0.05%) test nije ni potvrdio ni opovrgnuo (nestabilno po godinama). Stari CSV-ovi se migriraju samo promjenom zaglavlja; stari retci imaju prazan stupac.
 `test/funding-csv.mjs`.

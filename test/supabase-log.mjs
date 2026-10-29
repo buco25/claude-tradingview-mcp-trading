@@ -18,13 +18,13 @@ const sig = { scan_ts: "2026-10-29T10:00:00Z", strategy: "1H", symbol: "BTCUSDT"
 // --- no-op bez ključeva ---
 { let called = 0, timers = 0;
   const l = createSupabaseLogger({ env: {}, fetchImpl: async () => { called++; return { ok: true }; }, setTimer: () => { timers++; return {}; } });
-  l.logSignal(sig); l.logTrade({ event: "ENTRY", symbol: "X" }); await l.flush();
+  l.logSignal(sig); l.logTrade({ event: "entry", symbol: "X" }); await l.flush();
   ok(called === 0 && timers === 0 && l.status().enabled === false && l.status().queued === 0, "bez SUPABASE_URL/KEY: nula poziva, nula timera, nista u redu"); }
 { const l = createSupabaseLogger({ env: { ...env, SUPABASE_LOG_ENABLED: "false" }, fetchImpl: async () => { throw new Error("ne smije"); }, setTimer: () => ({}) });
   l.logSignal(sig); ok(l.status().enabled === false, "SUPABASE_LOG_ENABLED=false gasi bilježenje"); }
 
 // --- uspješan flush: URL, headeri, tijelo ---
-{ const { l, calls } = mk(); l.logSignal(sig); l.logSignal({ ...sig, symbol: "ETHUSDT", nepoznato: "x" }); l.logTrade({ event: "ENTRY", symbol: "BTCUSDT", data: { a: 1 } });
+{ const { l, calls } = mk(); l.logSignal(sig); l.logSignal({ ...sig, symbol: "ETHUSDT", nepoznato: "x" }); l.logTrade({ event: "entry", symbol: "BTCUSDT", data: { a: 1 } });
   ok(l.status().queued === 3, "logSignal/logTrade samo stavljaju u red (sinkrono, bez poziva)");
   ok(calls.length === 0, "nijedan mrezni poziv prije flusha");
   await l.flush();
@@ -80,12 +80,32 @@ ok(scanStrategyOf({ blocker: "ENTERED", reason: "ST ulaz @ 1 SL 2 TP 3" }) === "
   ok(r.strategy === "4H" && r.blocked === true && r.blockers[0] === "max kripto" && r.bull_score === 6 && r.gates.candlePat === "NONE", "4H red: blokeri iz evaluateU4hGates"); }
 ok(u4hSignalRow("X", { signal: "NEUTRAL" }, null) === null, "4H NEUTRAL se ne bilježi");
 { const e = entryTradeRow("synapse_t", { symbol: "BTCUSDT", signal: "LONG", price: 70000, sl: 69000, tp: 72000, tradeSize: 100, sigMask: 255, timestamp: 1e12, fundingPct: null, apiKey: "TAJNA" });
-  ok(e.event === "ENTRY" && e.side === "LONG" && e.data.price === 70000 && !("fundingPct" in e.data), "trade ENTRY: data, null izostavljen");
+  ok(e.event === "entry" && e.side === "LONG" && e.data.price === 70000 && !("fundingPct" in e.data), "trade ENTRY: data, null izostavljen");
   ok(!JSON.stringify(e).includes("TAJNA"), "trade data je whitelist — nepoznata polja (npr. tajne) ne ulaze"); }
 { const x = exitTradeRow("ultra_4h", { symbol: "ETHUSDT", side: "SHORT", entryPrice: 3000, sl: 3100, tp: 2800, quantity: 1, totalUSD: 3000 }, 2900, "TP", 100, 3.6);
-  ok(x.event === "EXIT" && x.data.net === 96.4 && x.data.exitPrice === 2900, "trade EXIT: net = pnl - fee"); }
+  ok(x.event === "exit" && x.data.net === 96.4 && x.data.exitPrice === 2900, "trade EXIT: net = pnl - fee"); }
 { const x = exitTradeRow("p", { symbol: "A", side: "LONG" }, NaN, "r", Infinity, undefined);
   ok(!("exitPrice" in x.data) && !("pnl" in x.data) && !("net" in x.data), "NaN/Infinity ne ulaze u jsonb"); }
+
+// --- ograničenja baze (CHECK) + loš redak ne odnosi cijeli batch ---
+{ const rows = [
+    entryTradeRow("synapse_t_s_dugacak_naziv_portfelja_preko_30", { symbol: "X".repeat(40), signal: "BOTH", price: 1, timestamp: 1 }),
+    exitTradeRow("p", { symbol: "A", side: "CLOSE_LONG", notes: "x" }, 1, "r", 1, 0.1),
+    scanEntryToSignalRow({ symbol: "Y".repeat(40), signal: "LONG", strategy: "S".repeat(40), blocker: "B", reason: "r".repeat(1000) }),
+    u4hSignalRow("Z", { signal: "SHORT" }, { ok: false, blockers: Array.from({ length: 30 }, (_, i) => ({ text: "b" + i })), notes: [] }) ];
+  ok(rows[0].event === "entry" && rows[1].event === "exit", "event je malim slovima (CHECK trade_log_event_check)");
+  ok(rows[0].portfolio.length <= 30 && rows[0].symbol.length <= 24, "portfolio ≤30 i symbol ≤24 znakova");
+  ok(rows[0].side === null && rows[1].side === null, "side samo LONG/SHORT, inače null (CHECK trade_log_side_check)");
+  ok(rows[2].symbol.length <= 24 && rows[2].strategy.length <= 20 && rows[2].reason.length <= 400, "signal_log: symbol ≤24, strategy ≤20, reason ≤400");
+  ok(rows[3].blockers.length <= 20, "signal_log: blockers ≤20 elemenata");
+  const big = entryTradeRow("p", { symbol: "A", signal: "LONG", price: 1, orderId: "o".repeat(500), btcRegime1h: "x".repeat(500), btcRegime4h: "y".repeat(500), candlePat: "z".repeat(500), strategy: "s".repeat(500), timestamp: 1 });
+  ok(JSON.stringify(big.data).length <= 3000, "data ≤3000 znakova (CHECK pg_column_size ≤4000)"); }
+{ const seen = []; const l = createSupabaseLogger({ env, setTimer: () => ({}), now: () => 1e12, log: () => {},
+    fetchImpl: async (u, i) => { const b = JSON.parse(i.body); seen.push(b.length); return b.some(r => r.symbol === "LOS") ? { ok: false, status: 400, text: async () => "violates check constraint" } : { ok: true, status: 201 }; } });
+  for (const s of ["A", "B", "LOS", "C", "D"]) l.logSignal({ ...sig, symbol: s });
+  await l.flush();
+  ok(l.status().sent === 4 && l.status().dropped === 1, "400: loš redak se odbacuje, ostala 4 su poslana pojedinačno");
+  ok(String(l.status().lastError).includes("check constraint"), "poruka greške iz baze ulazi u status (bez ključa)"); }
 
 // --- bot.js: pisanje CSV-a ne ovisi o Supabaseu i ne baca ---
 const { initCsv, writeEntryCsv, writeExitCsv, csvFilePath } = await import("../bot.js");

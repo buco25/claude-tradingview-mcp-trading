@@ -54,8 +54,8 @@ export function scanEntryToSignalRow(e, scanTs = new Date().toISOString()) {
   const score = num(e.score);
   return {
     scan_ts: scanTs,
-    strategy: scanStrategyOf(e),
-    symbol: String(e.symbol),
+    strategy: String(scanStrategyOf(e)).slice(0, 20),
+    symbol: String(e.symbol).slice(0, 24),
     signal: e.signal,
     bull_score: num(e.bullScore) ?? (e.signal === "LONG" ? score : null),
     bear_score: num(e.bearScore) ?? (e.signal === "SHORT" ? score : null),
@@ -74,11 +74,11 @@ export function scanEntryToSignalRow(e, scanTs = new Date().toISOString()) {
 // nisu ovdje — stvarni ulaz se vidi u trade_log.
 export function u4hSignalRow(symbol, sig, gates, scanTs = new Date().toISOString()) {
   if (!sig || (sig.signal !== "LONG" && sig.signal !== "SHORT")) return null;
-  const blockers = (gates?.blockers ?? []).map(b => txt(b?.text ?? b, 120));
+  const blockers = (gates?.blockers ?? []).slice(0, 20).map(b => txt(b?.text ?? b, 120));
   return {
     scan_ts: scanTs,
     strategy: "4H",
-    symbol: String(symbol),
+    symbol: String(symbol).slice(0, 24),
     signal: sig.signal,
     bull_score: num(sig.bullScore),
     bear_score: num(sig.bearScore),
@@ -93,27 +93,32 @@ export function u4hSignalRow(symbol, sig, gates, scanTs = new Date().toISOString
   };
 }
 
-// trade_log: event ENTRY/EXIT, `data` nosi samo trgovačke podatke (nikad ključeve).
+// Ograničenja baze (CHECK, provjereno 29.10.): event samo 'entry'/'exit' (MALA slova), side samo LONG/SHORT, portfolio ≤30, symbol ≤24,
+// strategy ≤20, blockers ≤20 elemenata, reason ≤400, pg_column_size(data) ≤4000. Redak koji ih krši odbija CIJELI POST, pa se ovdje pazi na sve.
+const sideOf = v => (v === "LONG" || v === "SHORT" ? v : null);
+const capData = d => (JSON.stringify(d ?? {}).length > 3000 ? { truncated: true } : d);
+
+// trade_log: event entry/exit (mala slova), `data` nosi samo trgovačke podatke (nikad ključeve).
 export function entryTradeRow(pid, entry) {
   return {
-    event: "ENTRY", portfolio: txt(pid, 60), symbol: String(entry.symbol), side: txt(entry.signal, 10),
-    data: jsonSafe({
+    event: "entry", portfolio: txt(pid, 30), symbol: String(entry.symbol).slice(0, 24), side: sideOf(entry.signal),
+    data: capData(jsonSafe({
       price: num(entry.price), sl: num(entry.sl), tp: num(entry.tp), slPct: num(entry.slPct), tpPct: num(entry.tpPct),
       tradeSize: num(entry.tradeSize), strategy: entry.strategy, entryMode: entry.entryMode || "PBK", sigMask: num(entry.sigMask),
       orderId: entry.orderId, btcRegime1h: entry.btcRegime1h, btcRegime4h: entry.btcRegime4h, candlePat: entry.candlePat,
       fundingPct: num(entry.fundingPct), ts: entry.timestamp,
-    }),
+    })),
   };
 }
 
 export function exitTradeRow(pid, pos, exitPrice, reason, pnl, fee) {
   return {
-    event: "EXIT", portfolio: txt(pid, 60), symbol: String(pos.symbol), side: txt(pos.side, 10),
-    data: jsonSafe({
+    event: "exit", portfolio: txt(pid, 30), symbol: String(pos.symbol).slice(0, 24), side: sideOf(pos.side),
+    data: capData(jsonSafe({
       entryPrice: num(pos.entryPrice), exitPrice: num(exitPrice), sl: num(pos.sl), tp: num(pos.tp), quantity: num(pos.quantity),
       totalUSD: num(pos.totalUSD), pnl: num(pnl), fee: num(fee), net: num(pnl) != null && num(fee) != null ? num(pnl) - num(fee) : null,
       reason: txt(reason, 200), entryMode: pos.entryMode || "PBK", sigMask: num(pos.sigMask), orderId: pos.orderId,
-    }),
+    })),
   };
 }
 
@@ -178,8 +183,22 @@ export function createSupabaseLogger({
             if (!firstOkLogged) { firstOkLogged = true; try { log(`📡 [SUPABASE] prvi upis OK (${table}, ${rows.length} redaka)`); } catch { /* */ } }
             continue;
           }
+          let bodyMsg = ""; try { bodyMsg = String(await res.text?.() ?? "").replace(/\s+/g, " ").slice(0, 200); } catch { /* */ }
+          // 400/422 (npr. CHECK ograničenje): jedan loš redak ne smije odnijeti cijeli batch — šalje se redak po redak, odustaje se nakon 5 uzastopnih grešaka.
+          if ((res.status === 400 || res.status === 422) && rows.length > 1) {
+            let consecutive = 0;
+            for (let k = 0; k < rows.length; k++) {
+              let r1; try { r1 = await post(table, [rows[k]]); } catch { r1 = { ok: false, status: 0 }; }
+              if (r1.ok) { stats.sent++; consecutive = 0; continue; }
+              stats.failed++; stats.dropped++; consecutive++;
+              if (r1.status === 0 || r1.status >= 500 || consecutive >= 5) { stats.dropped += rows.length - k - 1; break; }
+            }
+            stats.lastError = `HTTP ${res.status} ${bodyMsg}`.trim();
+            throttledLog(`⚠️  [SUPABASE] batch odbijen (${stats.lastError}) — redci poslani pojedinačno — trgovanje nije pogođeno`);
+            continue;
+          }
           stats.failed += rows.length;
-          stats.lastError = res._err || `HTTP ${res.status}`;
+          stats.lastError = (res._err || `HTTP ${res.status}`) + (bodyMsg ? ` ${bodyMsg}` : "");
           // 4xx (shema, ključ, RLS): ponavljanje ne pomaže, batch se odbacuje. Timeout/mreža/5xx/429: vraća se na početak reda.
           const permanent = res.status >= 400 && res.status < 500 && res.status !== 429 && res.status !== 408;
           if (permanent) stats.dropped += rows.length;

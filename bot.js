@@ -8607,7 +8607,7 @@ export async function run() {
             const _dirStreak = getDirLossStreak(pid, signal);
             if (_dirStreak.blocked) {
               console.log(`  🧊 [DIR-CD] ${symbol} — ${_dirStreak.count} uzastopna ${signal} SL-a → ${signal} blokiran 4h`);
-              _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "DIR_COOLDOWN", reason: `${_dirStreak.count}× ${signal} SL zaredom` });
+              _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: "DIR_COOLDOWN", reason: `${_dirStreak.count}× ${signal} SL zaredom` });
               continue;
             }
           }
@@ -8617,7 +8617,7 @@ export async function run() {
             const _ssStreak = getSymbolSideLossStreak(pid, symbol, signal);
             if (_ssStreak.blocked) {
               console.log(`  🧊 [SYM-CD] ${symbol} — ${_ssStreak.count}× ${signal} SL zaredom na ovom simbolu → blokiran 24h`);
-              _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "SYM_COOLDOWN", reason: `${_ssStreak.count}× ${signal} SL na ${symbol} — 24h pauza` });
+              _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: "SYM_COOLDOWN", reason: `${_ssStreak.count}× ${signal} SL na ${symbol} — 24h pauza` });
               continue;
             }
           }
@@ -8641,7 +8641,7 @@ export async function run() {
                 console.log(`  ⭐ [VIP-CAP] ${symbol} — score ${_corrScore}/${_corrComboLen} ≥ 7 → dozvoljen preko baze (${_cryptoTotal}/${MAX_OPEN_CRYPTO}, VIP strop ${MAX_OPEN_CRYPTO_VIP})`);
               } else {
                 console.log(`  🔒 [MAX-CRYPTO] ${symbol} — ${_cryptoTotal}/${MAX_OPEN_CRYPTO} kripto ukupno (VIP strop ${MAX_OPEN_CRYPTO_VIP}) → preskačem`);
-                _scanLogEntries.push({ symbol, signal: "SKIP", blocker: `MAX_CRYPTO(${_cryptoTotal}/${MAX_OPEN_CRYPTO})`, reason: `Previše kripto pozicija ukupno (nije VIP-kvalitete signal)` });
+                _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: `MAX_CRYPTO(${_cryptoTotal}/${MAX_OPEN_CRYPTO})`, reason: `Previše kripto pozicija ukupno (nije VIP-kvalitete signal)` });
                 continue;
               }
             }
@@ -8667,7 +8667,7 @@ export async function run() {
                 result._vipSlot = true;
               } else {
                 console.log(`  🔗 [SAME-DIR] ${symbol} — već ${_sameDir} kripto ${signal} pozicija (max ${MAX_SAME_DIR_CRYPTO}, zajednički sa ULTRA-4H) → preskačem`);
-                _scanLogEntries.push({ symbol, signal: "SKIP", blocker: `SAME_DIR(${_sameDir}/${MAX_SAME_DIR_CRYPTO})`, reason: `Previše kripto ${signal} pozicija — korelacija` });
+                _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: `SAME_DIR(${_sameDir}/${MAX_SAME_DIR_CRYPTO})`, reason: `Previše kripto ${signal} pozicija — korelacija` });
                 continue;
               }
             }
@@ -8680,7 +8680,7 @@ export async function run() {
             const _wk = await getBtcWeeklyVsKey();
             if (_wk.belowKey === false) {
               console.log(`  🏛️  [KEY-LVL] ${symbol} — BTC tjedni close $${_wk.lastClose?.toFixed(0)} ≥ $${_wk.key} → kripto trend SHORT blokiran (akumulacija)`);
-              _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "KEY_LEVEL", reason: `BTC tjedni close iznad $${_wk.key} — ne shortamo akumulaciju` });
+              _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: "KEY_LEVEL", reason: `BTC tjedni close iznad $${_wk.key} — ne shortamo akumulaciju` });
               continue;
             }
             if (_wk.belowKey === true) console.log(`  ⚠️  [KEY-LVL] ${symbol} — BTC tjedni close < $${_wk.key} → SHORT režim potvrđen`);
@@ -8692,7 +8692,7 @@ export async function run() {
             const _btcDema = await getBtcDailyEma10();
             if (_btcDema.above === false) {
               console.log(`  🌐 [BTC-dEMA10] ${symbol} — BTC ispod svog daily EMA10 ($${_btcDema.ema10?.toFixed(0)}) → alt LONG blokiran`);
-              _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "BTC_DEMA10", reason: "BTC ispod daily EMA10 — altovi prate BTC" });
+              _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: "BTC_DEMA10", reason: "BTC ispod daily EMA10 — altovi prate BTC" });
               continue;
             }
           }
@@ -8703,12 +8703,12 @@ export async function run() {
             const _relStr = await getRelStrengthVsBtc(symbol);
             if (_relStr === "WEAK" && signal === "LONG") {
               console.log(`  🐌 [REL-STR] ${symbol} — WEAK vs BTC → LONG blokiran (long samo strong altove)`);
-              _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "REL_STR_WEAK", reason: "Slab vs BTC — LONG samo na strong altovima" });
+              _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: "REL_STR_WEAK", reason: "Slab vs BTC — LONG samo na strong altovima" });
               continue;
             }
             if (_relStr === "STRONG" && signal === "SHORT") {
               console.log(`  💪 [REL-STR] ${symbol} — STRONG vs BTC → SHORT blokiran (ne shortaj lidere)`);
-              _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "REL_STR_STRONG", reason: "Jak vs BTC — ne shortamo lidere" });
+              _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: "REL_STR_STRONG", reason: "Jak vs BTC — ne shortamo lidere" });
               continue;
             }
             if (_relStr) console.log(`  ${_relStr === "STRONG" ? "💪" : "🐌"} [REL-STR] ${symbol} — ${_relStr} vs BTC → ${signal} usklađen`);
@@ -8770,12 +8770,12 @@ export async function run() {
                 // >80% dana = kupovanje vrha — HARD BLOCK (post-mortem 05.07.: AVAX 81%, LINK 97% → likvidacije)
                 if (signal === "LONG" && _posInRange > 80) {
                   console.log(`  📊 [DAY RANGE] ${symbol} — cijena na ${_posInRange.toFixed(0)}% dana → LONG BLOKIRAN (vrh dana)`);
-                  _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "DAY_RANGE", reason: `LONG na ${_posInRange.toFixed(0)}% dana` });
+                  _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: "DAY_RANGE", reason: `LONG na ${_posInRange.toFixed(0)}% dana` });
                   continue;
                 }
                 if (signal === "SHORT" && _posInRange < 20) {
                   console.log(`  📊 [DAY RANGE] ${symbol} — cijena na ${_posInRange.toFixed(0)}% dana → SHORT BLOKIRAN (dno dana)`);
-                  _scanLogEntries.push({ symbol, signal: "SKIP", blocker: "DAY_RANGE", reason: `SHORT na ${_posInRange.toFixed(0)}% dana` });
+                  _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: "DAY_RANGE", reason: `SHORT na ${_posInRange.toFixed(0)}% dana` });
                   continue;
                 }
                 // 65-80% (LONG) / 20-35% (SHORT) = oprezna zona — size penal

@@ -67,7 +67,10 @@ const sig = { scan_ts: "2026-10-29T10:00:00Z", strategy: "1H", symbol: "BTCUSDT"
 
 // --- pretvorbe ---
 ok(scanEntryToSignalRow({ symbol: "A", signal: "NEUTRAL", blocker: "SIGNAL" }) === null, "NEUTRAL se ne bilježi");
-ok(scanEntryToSignalRow({ symbol: "A", signal: "SKIP", blocker: "MAX_POS" }) === null, "SKIP se ne bilježi");
+ok(scanEntryToSignalRow({ symbol: "A", signal: "SKIP", blocker: "MAX_POS" }) === null, "SKIP bez smjera se ne bilježi");
+{ const r = scanEntryToSignalRow({ symbol: "ETHUSDT", signal: "SKIP", dir: "SHORT", blocker: "KEY_LEVEL", reason: "BTC tjedni close iznad $57392" }, "T");
+  ok(r && r.signal === "SHORT" && r.blocked === true && r.entered === false && r.blockers[0] === "KEY_LEVEL" && r.bear_score === null, "SKIP s dir=SHORT -> SHORT, blokiran, KEY_LEVEL"); }
+ok(scanEntryToSignalRow({ symbol: "A", signal: "SKIP", dir: "NEUTRAL", blocker: "X" }) === null, "SKIP s nevaljanim smjerom se ne bilježi");
 ok(scanEntryToSignalRow({ symbol: "A", signal: "ERROR", blocker: "ERROR" }) === null, "ERROR se ne bilježi");
 { const r = scanEntryToSignalRow({ symbol: "ETHUSDT", signal: "SHORT", score: 6, blocker: "BTC_4H_BULL_NO_SHORT", reason: "BTC 4H BULL → SHORT blokiran", rsi: "41.2", adx: null }, "T");
   ok(r.strategy === "1H" && r.blocked === true && r.entered === false && r.blockers[0] === "BTC_4H_BULL_NO_SHORT", "blokirani 1H signal: blocked/blockers");

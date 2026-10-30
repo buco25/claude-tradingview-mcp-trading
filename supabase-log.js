@@ -47,9 +47,13 @@ export function scanStrategyOf(e) {
   return /^ST_/.test(b) || /^(Supertrend|ST ulaz)/.test(r) ? "ST" : "1H";
 }
 
-// Unos iz writeScanLog -> redak signal_log, ili null ako se ne bilježi (samo LONG/SHORT; NEUTRAL/SKIP/ERROR ne).
+// Unos iz writeScanLog -> redak signal_log, ili null ako se ne bilježi (samo LONG/SHORT; NEUTRAL/ERROR ne).
+// SKIP s poljem `dir` (30.10.) je signal koji je blokirao kasniji gate (KEY_LEVEL, SAME_DIR, BTC_DEMA10, REL_STR, DAY_RANGE, cooldowni...):
+// bilježi se kao taj smjer, blokiran. SKIP bez `dir` (strop pozicija prije analize, nema signala) i dalje ne.
 export function scanEntryToSignalRow(e, scanTs = new Date().toISOString()) {
-  if (!e || (e.signal !== "LONG" && e.signal !== "SHORT")) return null;
+  const sig = e && e.signal === "SKIP" ? e.dir : e?.signal;
+  if (!e || (sig !== "LONG" && sig !== "SHORT")) return null;
+  e = { ...e, signal: sig };
   const entered = e.blocker === "ENTERED";
   const score = num(e.score);
   return {

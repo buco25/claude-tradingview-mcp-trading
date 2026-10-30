@@ -217,7 +217,7 @@
     "Rebalans 07.06.2026 (backtest 42 dana, 8sig min6/8): OUT=NEARUSDT(WR43.9%), APTUSDT(WR42%), ENAUSDT(WR38.9%), DOGEUSDT(WR34.1%), INJUSDT(WR30.8%) | IN=FETUSDT(WR55.6% PF1.88), AAVEUSDT(WR50% PF1.5), BNBUSDT(WR50% PF1.5), WLDUSDT(WR48.5% PF1.41), PEPEUSDT(WR50% PF1.5)",
     "Metali dodani 26.08.2026 (PAXGUSDT, XAUUSDT, XAGUSDT vraćeni) — na korisnikov zahtjev nakon TraderaEdge primjera (PAXG +1004% ROI). XAU/XAG su 16.06. maknuti zbog 0% WR, ali ta analiza je iz PRIJE cijelog TraderaEdge reworka (04.07.) — korisnik smatra staru strategiju krivo postavljenom, ne metale lošima. Sektor METAL izuzet iz BTC-korelacijskih gateova (weekly key-level SHORT, BTC dEMA10 LONG, REL-STR vs BTC) jer zlato ne prati BTC — vidi isMetalSym() u bot.js."
   ],
-  "btc_key_level": 57392,
+  "btc_key_level": null,
   "btc_invalidation_level": 57392,
   "btc_target_note": "TraderaEdge 17.09. video (post-FED): dvije nesweepane likvidnosne zone iznad — $83,500 i ~$86,xxx (nije precizirao drugu do kraja) — i dalje vjeruje da će se posjetiti prije korekcije, u skladu s ranijom 28.08. $83,780 procjenom (ista zona, blago precizirana dva puta). Ključni retest koji čeka: 21-tjedni SMA (trenutno ~$70,196, raste s vremenom) — Wyckoff Vaikov struktura dopušta 1-2 springa, ne isključuje ih, ali čeka strpljivo. Ako do springa ne dođe, ostatak kapitala planira alocirati u druge altcoine (ne forsira BTC ulaz). Support/invalidacija i dalje 57,392 (nepromijenjeno). Whale/top-trader divergencija i dalje bullish-podržavajuća (implementirano kao WHALE bonus signal); on sam navodi da se whale aktivnost sad povlači (opadajući ratio)."
 }

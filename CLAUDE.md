@@ -490,6 +490,13 @@ procijeni nakon ~30 zatvorenih tradeova. Povrat: `TRAIL_ARM_TP_PCT = 0`, `BE_STO
 - `trade_log.data` je whitelist u `entryTradeRow`/`exitTradeRow` — nova polja se dodaju tamo, a ne spreadom pozicije (tajne/nepotrebno ne smiju u bazu).
 - `test/supabase-log.mjs` čuva no-op, `return=minimal`, backoff, timeout i da CSV ne ovisi o bazi.
 
+## KEY-LVL gate ugašen (30.10., odluka vlasnika)
+`rules.json` → `btc_key_level` 57 392 → **`null`**. Gate u `run()` (1H trend SHORT blokiran dok je BTC tjedni close iznad razine; uveden 10.07., proširen na sve kripto 20.07. na uzorku od tri tjedna, nikad testiran) pri `null`
+ne okida (`getBtcWeeklyVsKey` vraća `belowKey: null`, uvjet traži `=== false`). Razina je bila 28% ispod cijene, pa je gate efektivno značio "nema 1H trend SHORT-ova". Razlog gašenja: nije potvrđen podacima
+(CSV 07.05.–29.10.: prije 20.07. kripto SHORT −0.33 $/trade naspram LONG −1.10 $; moj test 29.10. "samo LONG" nije potvrđen) i većinu posla već rade `shortBlockedByBtcBull` (BTC 4H BULL, 11.10.) i tjedni
+Supertrend ×0.5. ULTRA-4H gate nikad nije koristio. `btc_invalidation_level` (dnevni close, pooštrava LONG) NIJE dirnut. Vraćanje: `"btc_key_level": 57392` (ili druga razina; čita se pri svakom pozivu, keš 30 min).
+Dashboard/izvještaji pišu "ključna razina nije postavljena". Procjena: kad `signal_log` nakupi blokade, KEY_LEVEL više ne postoji — usporedi SHORT-ove po `BTC_4H_BULL_NO_SHORT`/ishodu u tradeovima od 30.10.
+
 ## 1H/ST rizik na trećinu (29.10., odluka vlasnika; ULTRA-4H NIJE isključen)
 `RISK_MULT_1H` 1.0 → **1/3** (cijela 1H ljestvica: slab 1.0 → 0.33%, baza 1.5 → 0.5%, jak 2.0 → 0.67%, BTC bonus proporcionalno) i `ST_RISK_PCT` 1.0 → **0.35**. `RISK_PCT_4H` ostaje 0.75.
 Namjerno NE `RISK_PCT` 1.5 → 0.5: slab 1.0% i jak 2.0% ostali bi iznad baze, a dashboard bi to pokazao kao "survival" (`RISK_PCT <= 1.0`). Minimalni notional ($40/minQty) može

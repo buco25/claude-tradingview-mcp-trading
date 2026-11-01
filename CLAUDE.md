@@ -18,7 +18,7 @@ audit nađe nalaz
 Pravila koja to drže na mjestu:
 
 - **Nalazi žive u `docs/AUDIT-2026-10-04.md`, ne u chatu.** Numeracija je neprekinuta kroz
-  prolaze (zadnji je #43). Nikad ne počinji numeraciju od 1 i ne prijavljuj ponovno nalaz koji
+  prolaze (zadnji je #46). Nikad ne počinji numeraciju od 1 i ne prijavljuj ponovno nalaz koji
   je tamo već zapisan — ako je regresirao, reci da je regresija.
 - **Predaja drugoj sesiji je datoteka, ne poruka.** Ako posao preuzima druga sesija, uputa joj je
   "pročitaj `CLAUDE.md` i `docs/AUDIT-2026-10-04.md`, pa popravi #N" — ne zalijepljeni blok.
@@ -486,7 +486,7 @@ procijeni nakon ~30 zatvorenih tradeova. Povrat: `TRAIL_ARM_TP_PCT = 0`, `BE_STO
 - Env (samo Railway): `SUPABASE_URL`, `SUPABASE_ANON_KEY` (publishable/anon ključ). Bez njih je modul potpuni no-op. `SUPABASE_LOG_ENABLED=false` ga gasi bez brisanja ključeva.
 - `logSignal`/`logTrade` su sinkroni (samo red u memoriji), slanje je u pozadini svakih 15 s, timeout 4 s, red max 500 po tablici, backoff do 5 min. Nikad `await` na trgovačkom putu i nikad ne bacaju.
 - **`Prefer: return=minimal` je obavezan:** `anon` ima samo INSERT (RLS politika `bot_insert_only`), pa `return=representation`/upsert/čitanje padaju. Ne dodaji SELECT/UPDATE za anon — za čitanje koristi SQL editor ili konektor.
-- Kuke: `writeScanLog` (1H + Supertrend, LONG/SHORT; NEUTRAL/ERROR ne; SKIP samo ako nosi `dir` = smjer signala kojeg je blokirao kasniji gate — KEY_LEVEL, SAME_DIR, BTC_DEMA10, REL_STR_*, DAY_RANGE, cooldowni, MAX_CRYPTO; SKIP-ovi prije analize bez smjera ne, pa novi gate poslije signala u `run()` mora dodati `dir: signal`), `runUltra4hStrategy` iza `evaluateU4hGates` (4H; kasniji blokeri liq/equity/strop po svijeći nisu u retku), kraj `writeEntryCsv`/`writeExitCsv` (`trade_log`, event entry/exit (mala slova — CHECK u bazi)). `forming`, `candle_age_s`, `funding_pct` su NULL u v1.
+- Kuke: `writeScanLog` (1H + Supertrend, LONG/SHORT; NEUTRAL/ERROR ne; SKIP samo ako nosi `dir` = smjer signala kojeg je blokirao kasniji gate — KEY_LEVEL, SAME_DIR, BTC_DEMA10, REL_STR_*, DAY_RANGE, cooldowni, MAX_CRYPTO; SKIP-ovi prije analize bez smjera ne, pa novi gate poslije signala u `run()` mora dodati `dir: signal`. **Nalaz #45 (01.11.): 16 gateova je blokiralo poznati signal BEZ ikakvog zapisa** — funding (FR, FR-TREND), 1H trend, BTC ALIGN, BTC.D, SEKTOR, LIQ, cooldown, pyramid stropovi, flip/kontra. U tablici su izgledali kao da nikad nista ne blokiraju. Popravljeno; **`test/audit-44-46.mjs` cita IZVOR i pada ako ijedan `continue` nakon `let { signal, reason } = result;` ne ostavi zapis**, pa novi gate ne moze nastati bez njega), `runUltra4hStrategy` iza `evaluateU4hGates` (4H; kasniji blokeri liq/equity/strop po svijeći nisu u retku), kraj `writeEntryCsv`/`writeExitCsv` (`trade_log`, event entry/exit (mala slova — CHECK u bazi)). `forming`, `candle_age_s`, `funding_pct` su NULL u v1.
 - `trade_log.data` je whitelist u `entryTradeRow`/`exitTradeRow` — nova polja se dodaju tamo, a ne spreadom pozicije (tajne/nepotrebno ne smiju u bazu).
 - `test/supabase-log.mjs` čuva no-op, `return=minimal`, backoff, timeout i da CSV ne ovisi o bazi.
 
@@ -505,4 +505,20 @@ vratiti dio smanjenja na sitnim računima. Vraćanje: `RISK_MULT_1H = 1.0`, `ST_
 **Noćni signali (29.10., odluka vlasnika "da vidimo i noćne"):** noćni blok (20–06 UTC) vraća prije analize, pa je noću `signal_log` bio prazan. `nightShadowLog(pDef, symbols)` (`bot.js`) nakon petlje skenera,
 ODVOJENO i bez čekanja, izračuna 1H pullback signal za noćom blokirane kripto simbole i zapiše LONG/SHORT s `blockers=['NIGHT_BLOCK']`, `blocked=true`, `gates.night/shadow/hourUtc`. Ne ulazi se, ne
 mijenja se CSV/scan_log ni jedna odluka. Radi samo kad je Supabase bilježenje uključeno (inače nula dodatnih dohvata), jedan prolaz odjednom, timeout 15/20 s po simbolu. Bez 15m MOM/VA-REV rezerve.
-`analyzeUltraPullback` radi ~5 golih `fetch` poziva po simbolu (bez 429 zaštite) — noću to isto opterećenje kao danju; ako se pojave 429, prvo ovdje smanji učestalost.
+
+**Nalazi #44 i #46 (01.11.), popravljeni — tri pravila:**
+
+1. **Jednom po 1H svijeći, ne svakih 15 min.** Signal reagira na zatvaranje 1H svijeće, pa su četiri prolaza po satu davala isti zapis uz četverostruko opterećenje. Sat se označava **tek nakon
+   USPJEŠNOG prolaza** (`_nightShadowHour`), pa neuspjeli prolaz ima ponovni pokušaj u sljedećem skeniranju, a `_nightShadowBusy` ostaje dostižan za prolaz koji prelazi granicu sata.
+2. **`analyzeUltraPullback` radi 4 GET-a po simbolu** (izmjereno, ne procijenjeno: `1H` + `1Wutc` + `1Dutc` + `1Mutc`), a **tri su bila gola `fetch`** — ne ~5, kako je prije pisalo. Sad sva tri idu
+   kroz `bitgetPublicGet` uz `retries: 0` (razmak 80 ms; ponašanje na 429 identično, pa ulazi ostaju isti), a tjedni i mjesečni imaju keš po UTC danu (`_cachedDwmJson`). Rezultat: **4 → 2 GET-a po
+   simbolu** nakon prvog prolaza u danu, noć **3 680 → 506** GET-ova (7.3× manje). Noćni blok radi `continue` PRIJE dohvata svijeća, pa je noć prije ovoga imala **nula** analitičkih dohvata — cijeli
+   iznos je bio novi promet.
+3. **Isti prag kao stvarni put.** Noćno bilježenje je računalo signal s `pDef.params`, a skener s `_bounceParams` (`_minSigOverride: 3` kad je BTC 1H RSI < 30 ili drawdown < −8%) — pa je noćna
+   tablica podbacivala LONG signale upravo kad bi bot bio najagresivniji. Sad oba zovu `bounceParams(params, bounceMode)`, **jedini izvor tog praga**; test pada ako se `_minSigOverride: 3` pojavi
+   izvan helpera. Noćni broj je i dalje **donja granica** jer nema 15m MOM/VA-REV rezerve — to je namjerno (dodavanje bi udvostručilo dohvate).
+
+**Keš D/W/M svijeća (`_cachedDwmJson`) — dnevni se NE SMIJE keširati.** Ključ nosi UTC dan, a granice tjedne i mjesečne svijeće UVIJEK padaju na granicu UTC dana, pa keš po danu ne može preskočiti
+granicu svijeće; iz njih se čitaju samo vrijednosti konstantne unutar dana (tekući tjedan OPEN, prethodni DOVRŠENI tjedan high/low, siječanjski open). **Dnevni dohvat je namjerno izvan keša**: iz njega
+se računa `dailyEma10/20` preko niza zatvaranja koji uključuje svijeću dana **koji se još formira** (isto `monthlyHigh/Low`), a DEMA je i score (TE_COMBO indeks 9) i obavezni gate — keš bi ga zamrznuo
+i mijenjao KOJE se tradeove uzima. Dodaješ li novi dohvat ovdje, prvo provjeri čita li vrijednost iz svijeće u formiranju.

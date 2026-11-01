@@ -2607,19 +2607,33 @@ function writeScanLog(entries) {
 // (blocker NIGHT_BLOCK, blocked=true, gates.night/shadow) — ne ulazi se, ne mijenja se nijedna odluka niti CSV/scan_log.
 // Radi ODVOJENO od skenera (pozivatelj ne čeka): jedan prolaz odjednom, simbol po simbol, uz timeout, pa kasni skener ne trpi.
 // Samo 1H pullback analiza (bez 15m MOM/VA-REV rezerve) i samo kad je Supabase bilježenje uključeno (inače nula dodatnih dohvata).
-let _nightShadowBusy = false;
+// Jedan izvor bounce praga — 1H ulazni put I nocno biljezenje MORAJU koristiti isti (nalaz #46).
+// Prije je skener koristio _minSigOverride: 3 u bounce modu, a nocno biljezenje bazni prag, pa je
+// nocna tablica podbacivala LONG signale upravo kad bi bot bio najagresivniji.
+export function bounceParams(params, bounceMode) {
+  return bounceMode ? { ...params, _minSigOverride: 3 } : params;
+}
+
+let _nightShadowBusy = false, _nightShadowHour = null;
 const _withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]);
 export async function nightShadowLog(pDef, symbols, deps = {}) {
   const enabled = deps.enabled ?? (() => supabaseLogStatus().enabled);
   const getCandles = deps.fetchCandles ?? fetchCandles, analyze = deps.analyze ?? analyzeUltraPullback, emit = deps.logSignal ?? logSignal;
+  const nowMs = deps.now ?? Date.now();
+  // nalaz #46: isti parametri kao stvarni put (bounce prag), inace mjerenje nije uporedivo s botom
+  const params = deps.params ?? pDef.params;
   if (_nightShadowBusy || !symbols?.length || !enabled()) return 0;
+  // nalaz #44: JEDNOM po 1H svijeci, ne svakih 15 min. Signal reagira na zatvaranje 1H svijece, pa
+  // cetiri prolaza po satu daju isti zapis uz cetverostruko opterecenje prema Bitgetu.
+  const hourKey = Math.floor(nowMs / 3600000);
+  if (_nightShadowHour === hourKey) return 0;
   _nightShadowBusy = true; let logged = 0;
   try {
-    const hour = new Date().getUTCHours();
+    const hour = new Date(nowMs).getUTCHours();
     for (const symbol of symbols) {
       try {
         const candles = await _withTimeout(getCandles(symbol, "1H", 250), deps.timeoutMs ?? 15000);
-        const r = await _withTimeout(analyze(symbol, candles, pDef.params), deps.timeoutMs ?? 20000);
+        const r = await _withTimeout(analyze(symbol, candles, params), deps.timeoutMs ?? 20000);
         if (r?.signal !== "LONG" && r?.signal !== "SHORT") continue;
         const row = scanEntryToSignalRow({
           symbol, signal: r.signal, score: Math.max(r.bullScore || 0, r.bearScore || 0), bullScore: r.bullScore, bearScore: r.bearScore,
@@ -2629,6 +2643,7 @@ export async function nightShadowLog(pDef, symbols, deps = {}) {
         if (row) { emit(row); logged++; }
       } catch (_) { /* jedan simbol ne smije prekinuti ostale */ }
     }
+    _nightShadowHour = hourKey;   // tek nakon USPJESNOG prolaza (neuspjeh se ponavlja u sljedecem skeniranju)
   } finally { _nightShadowBusy = false; }
   return logged;
 }
@@ -3976,6 +3991,31 @@ function analyzeUltra(candles, cfg) {
 
 // check5mSRTest — uklonjeno 06.06.2026 (bio samo logging, nije blokirao trade)
 
+// ─── Kes tjednih/mjesecnih svijeca za analyzeUltraPullback (01.11., nalaz #44) ────────
+// Kljuc nosi UTC DAN. Granice tjedne I mjesecne svijece UVIJEK padaju na granicu UTC dana, pa kes
+// po danu NE MOZE preskociti granicu svijece — a iz tih dohvata se citaju samo vrijednosti koje su
+// unutar dana konstantne (tekuci tjedan OPEN, prethodni DOVRSENI tjedan high/low, sijecanjski open).
+//
+// DNEVNI dohvat se NAMJERNO NE kesira: iz njega se racuna dailyEma10/20 preko niza zatvaranja koji
+// UKLJUCUJE svijecu dana koji se jos formira (i monthlyHigh/Low), pa bi kes zamrznuo DEMA — a DEMA
+// je i score (TE_COMBO indeks 9) i obavezni gate. To bi mijenjalo KOJE se tradeove uzima.
+//
+// Sva tri dohvata idu kroz bitgetPublicGet uz retries: 0 — dobiju zajednicki razmak od 80 ms, a
+// ponasanje na 429 ostaje identicno danasnjem (code !== 00000 -> vrijednosti ostaju null), pa ni
+// ovo ne mijenja ulaze.
+const _dwmCache = new Map();
+export const utcDayBucket = (now = Date.now()) => Math.floor(now / 86400000);
+async function _cachedDwmJson(key, url, deps = {}) {
+  const now = deps.now ?? Date.now(), get = deps.get ?? bitgetPublicGet, cache = deps.cache ?? _dwmCache;
+  const day = utcDayBucket(now);
+  const hit = cache.get(key);
+  if (hit && hit.day === day) return hit.json;
+  const json = await get(url, { retries: 0 }).then(r => r.json());
+  if (json?.code === "00000") cache.set(key, { day, json });   // gresku NE pamti — sljedeci poziv pokusava ponovno
+  if (cache.size > 400) for (const k of [...cache.keys()]) if (cache.get(k).day !== day) cache.delete(k);
+  return json;
+}
+
 export async function analyzeUltraPullback(symbol, candles, cfg) {
   const last  = candles[candles.length - 1];
   const price = last.close;
@@ -3998,7 +4038,7 @@ export async function analyzeUltraPullback(symbol, candles, cfg) {
     // / max 63.4%. PWH/PWL odavde ulaze u sigs[4] (u TE_COMBO, dakle SCORE) i u
     // _pwhMstrBonusBull — jedini bonus momentum grane. Vidi tools/weekly-granularity-diff.mjs.
     const wUrl = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=1Wutc&limit=3`;
-    const wd = await fetch(wUrl).then(r => r.json());
+    const wd = await _cachedDwmJson(`w:${symbol}`, wUrl);
     if (wd.code === "00000" && wd.data?.length >= 2) {
       const wLast = wd.data.length - 1;
       _wOpen = parseFloat(wd.data[wLast][1]);      // tekući tjedan open
@@ -4018,7 +4058,8 @@ export async function analyzeUltraPullback(symbol, candles, cfg) {
   try {
     // Daily candles — ascending, history max ~90 dana
     const dUrl = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=1Dutc&limit=90`;
-    const dd = await fetch(dUrl).then(r => r.json());
+    // BEZ kesa — vidi napomenu kod _cachedDwmJson (dailyEma ukljucuje svijecu u formiranju)
+    const dd = await bitgetPublicGet(dUrl, { retries: 0 }).then(r => r.json());
     if (dd.code === "00000" && dd.data?.length >= 21) {
       const dC = dd.data.map(k => ({
         ts: parseInt(k[0]), open: parseFloat(k[1]),
@@ -4049,7 +4090,7 @@ export async function analyzeUltraPullback(symbol, candles, cfg) {
     }
     // Yearly Open — mjesečne svijeće (daily history preplitka)
     const mUrl = `https://api.bitget.com/api/v2/mix/market/candles?symbol=${symbol}&productType=USDT-FUTURES&granularity=1Mutc&limit=13`;
-    const md = await fetch(mUrl).then(r => r.json());
+    const md = await _cachedDwmJson(`m:${symbol}`, mUrl);
     if (md.code === "00000" && md.data?.length >= 1) {
       const yearStart = Date.UTC(new Date().getUTCFullYear(), 0, 1);
       const janCandle = md.data.find(k => parseInt(k[0]) >= yearStart);
@@ -8310,9 +8351,7 @@ export async function run() {
         // 21.09. fix (audit nalaz #5): "minSig" u cfg-u je bio no-op (vidi _comboBase
         // komentar) — sad koristi _minSigOverride koji analyzeUltra stvarno provjerava prije
         // per-simbol SYMBOL_COMBOS vrijednosti.
-        const _bounceParams = _bounceMode
-          ? { ...pDef.params, _minSigOverride: 3 }
-          : pDef.params;
+        const _bounceParams = bounceParams(pDef.params, _bounceMode);
 
         let result;
         switch (pDef.strategy) {
@@ -8358,6 +8397,7 @@ export async function run() {
           // 02.10., na zahtjev: blokiraj i ISTI smjer — spojena pozicija je zatvorila tudji lot (SOL 1H/4H).
           if (_otherPos) {
             console.log(`  🔒 [${pDef.name}] ${symbol} — ${_otherPos.portfolio || "druga strategija"} drži ${_otherPos.side}, mi ${signal} → isti simbol dvije strategije, skip`);
+            _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: "OTHER_STRATEGY", reason: `${_otherPos.portfolio || "druga strategija"} drzi ${_otherPos.side}` });
             continue;
           }
         }
@@ -8410,6 +8450,7 @@ export async function run() {
               const _scoreNow = Math.max(result.bullScore ?? 0, result.bearScore ?? 0);
               if (_scoreNow < 6) {
                 console.log(`  ${_icon} [LIQ] ${symbol} — CAUTION (${_liqStatus.minDist.toFixed(1)}%), score ${_scoreNow}/8 < 6 → preskačem`);
+                _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: `LIQ_CAUTION(${_liqStatus.minDist.toFixed(1)}%)`, reason: `CAUTION zona, score ${_scoreNow}/8 < 6` });
                 continue;
               }
               console.log(`  ${_icon} [LIQ] ${symbol} — CAUTION ali score ${_scoreNow}/8 ≥ 6 → dopuštam`);
@@ -8474,6 +8515,7 @@ export async function run() {
                 // Nastavi s otvaranjem nove pozicije u suprotnom smjeru
               } else {
                 console.log(`  ❌ [FLIP] Close fail: ${_flipCloseRes.code} ${_flipCloseRes.msg} → skip`);
+                _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: "FLIP_CLOSE_FAIL", reason: `Zatvaranje za flip nije uspjelo: ${_flipCloseRes.code}` });
                 continue;
               }
             } else {
@@ -8483,6 +8525,7 @@ export async function run() {
             }
           } else {
             console.log(`  ⏭️  [${pDef.name}] ${symbol} — pozicija ${existingPos.side}, kontra signal ${signal} (score=${_flipScore} < ${FLIP_MIN_SCORE}) → skip`);
+            _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: `FLIP_SCORE(${_flipScore}<${FLIP_MIN_SCORE})`, reason: `Kontra signal na ${existingPos.side} poziciji, score prenizak za flip` });
             continue;
           }
         }
@@ -8498,9 +8541,11 @@ export async function run() {
               result._vipSlot = true;
             } else if (symbol === BTC_EXCEPTION && _pyScore >= 7 && _pyComboLen >= 8) {
               console.log(`  ⏭️  [${pDef.name}] ${symbol} — VIP pyramid strop (${_pyramidDepth}/${MAX_VIP_PYRAMID}) dostignut, preskačem`);
+              _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: `VIP_PYRAMID(${_pyramidDepth}/${MAX_VIP_PYRAMID})`, reason: "VIP pyramid strop dostignut" });
               continue;
             } else {
               console.log(`  ⏭️  [${pDef.name}] ${symbol} — max pyramid (${_pyramidDepth}/${MAX_PYRAMID}) dostignut, preskačem`);
+              _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: `MAX_PYRAMID(${_pyramidDepth}/${MAX_PYRAMID})`, reason: "Pyramid strop dostignut" });
               continue;
             }
           } else {
@@ -8720,10 +8765,12 @@ export async function run() {
           if (_needsBtcAlign && !_stratBypass) {
             if (signal === "LONG" && _effectiveRegime !== "BULL") {
               console.log(`  🔒 [BTC ALIGN] ${symbol} — LONG zahtijeva BTC BULL, trenutno ${_effectiveRegime} → blokiram`);
+              _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: `BTC_ALIGN(${_effectiveRegime})`, reason: `LONG zahtijeva BTC BULL, rezim je ${_effectiveRegime}` });
               continue;
             }
             if (signal === "SHORT" && _effectiveRegime !== "BEAR") {
               console.log(`  🔒 [BTC ALIGN] ${symbol} — SHORT zahtijeva BTC BEAR, trenutno ${_effectiveRegime} → blokiram`);
+              _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: `BTC_ALIGN(${_effectiveRegime})`, reason: `SHORT zahtijeva BTC BEAR, rezim je ${_effectiveRegime}` });
               continue;
             }
           }
@@ -8814,15 +8861,18 @@ export async function run() {
           // Liquidation Risk: visok rizik (>75) → blokira LONG (kaskadni padovi mogući)
           if (signal === "LONG" && _liqScore !== null && _liqScore > 75) {
             console.log(`  💥 [LIQ] ${symbol} — rizik ${_liqScore}/100 → LONG blokiran`);
+            _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: `LIQ_RISK(${_liqScore})`, reason: `Rizik likvidacije ${_liqScore}/100 > 75` });
             continue;
           }
           // 1H trend nepoklapa → filtriraj
           if (signal === "LONG" && trend1h.trend === "BEAR") {
             console.log(`  📉 [1H] ${symbol} — 1H trend BEAR → LONG blokiran (close ${fmtPrice(trend1h.last)} < EMA20 ${fmtPrice(trend1h.ema20)})`);
+            _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: "TREND_1H", reason: "1H trend BEAR — LONG blokiran" });
             continue;
           }
           if (signal === "SHORT" && trend1h.trend === "BULL") {
             console.log(`  📈 [1H] ${symbol} — 1H trend BULL → SHORT blokiran (close ${fmtPrice(trend1h.last)} > EMA20 ${fmtPrice(trend1h.ema20)})`);
+            _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: "TREND_1H", reason: "1H trend BULL — SHORT blokiran" });
             continue;
           }
         }
@@ -8834,6 +8884,7 @@ export async function run() {
             const sectorOpen = openPositions.filter(p => SYMBOL_SECTORS[p.symbol] === sector).length;
             if (sectorOpen >= MAX_PER_SECTOR) {
               console.log(`  🔗 [SEKTOR] ${symbol} — sektor "${sector}" pun (${sectorOpen}/${MAX_PER_SECTOR}) → preskačem`);
+              _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: `SECTOR(${sectorOpen}/${MAX_PER_SECTOR})`, reason: `Sektor ${sector} pun` });
               continue;
             }
           }
@@ -8852,6 +8903,7 @@ export async function run() {
         if (pDef.strategy === "synapse_t" && signal === "LONG" && symbol !== "BTCUSDT") {
           if (_altSeason?.season === "BTC SEASON") {
             console.log(`  🌊 [BTC.D] ${symbol} — BTC_SEASON (${_altSeason.btcDom}%) → altcoin LONG blokiran`);
+            _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: `BTC_SEASON(${_altSeason.btcDom}%)`, reason: "BTC_SEASON — altcoin LONG blokiran" });
             continue;
           }
         }
@@ -8863,10 +8915,12 @@ export async function run() {
           if (signal === "LONG") {
             if (isFundingTrendRising(symbol)) {
               console.log(`  📈 [FR-TREND] ${symbol} — funding RASTE (${frHist.map(v=>v.toFixed(3)).join('→')}%) → LONG blokiran (trap)`);
+              _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: "FR_TREND_RISING", reason: `Funding raste ${frHist.map(v=>v.toFixed(3)).join('→')}%` });
               continue;
             }
             if (fr > FR_LONG_BLOCK) {
               console.log(`  🚫 [FR] ${symbol} — funding ${fr.toFixed(4)}% > ${FR_LONG_BLOCK}% → LONG blokiran`);
+              _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: `FR(${fr.toFixed(4)}%>${FR_LONG_BLOCK}%)`, reason: "Funding previsok za LONG" });
               continue;
             }
             if (fr > FR_WARN) console.log(`  ⚠️  [FR] ${symbol} — funding ${fr.toFixed(4)}% (upozorenje)`);
@@ -8993,6 +9047,7 @@ export async function run() {
         if (lastSl && (Date.now() - lastSl) < SL_COOLDOWN_MS) {
           const remainMin = Math.ceil((SL_COOLDOWN_MS - (Date.now() - lastSl)) / 60000);
           console.log(`  🕐 [${pDef.name}] ${symbol} — cooldown aktivan, još ${remainMin}min (SL bio ${Math.round((Date.now()-lastSl)/60000)}min nazad)`);
+          _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: "SL_COOLDOWN", reason: `Cooldown aktivan, jos ${remainMin}min` });
           continue;
         }
 
@@ -9361,7 +9416,7 @@ export async function run() {
     }
 
     // Noćni signali → Supabase (samo bilježenje, ne čeka se, ne utječe na trgovanje)
-    if (_nightShadow.length > 0) nightShadowLog(pDef, _nightShadow).catch(() => {});
+    if (_nightShadow.length > 0) nightShadowLog(pDef, _nightShadow, { params: bounceParams(pDef.params, _bounceMode) }).catch(() => {});
 
     // Piši scan log jednom po scan ciklusu
     if (_scanLogEntries.length > 0) {

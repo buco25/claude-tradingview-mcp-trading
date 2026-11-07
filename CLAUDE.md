@@ -490,7 +490,9 @@ procijeni nakon ~30 zatvorenih tradeova. Povrat: `TRAIL_ARM_TP_PCT = 0`, `BE_STO
 - `trade_log.data` je whitelist u `entryTradeRow`/`exitTradeRow` — nova polja se dodaju tamo, a ne spreadom pozicije (tajne/nepotrebno ne smiju u bazu).
 - `test/supabase-log.mjs` čuva no-op, `return=minimal`, backoff, timeout i da CSV ne ovisi o bazi.
 
-## KEY-LVL gate ugašen (30.10., odluka vlasnika)
+## KEY-LVL gate: ugašen 30.10., VRAĆEN 07.11. (odluka vlasnika)
+**Stanje od 07.11.: `btc_key_level` = 57 392 (gate UKLJUČEN) do pre-registriranog testa nad `signal_log` (~09.11.).** Ugašen je bio 30.10.–07.11.: u tom razdoblju 3 1H trend SHORT-a koje bi gate blokirao (INJ −0.76, BTC PBK −1.68,
+SOL −0.76 = −3.20 $, 3 tradea, ne dokazuje ništa u smjeru). Ugasiti ga ponovo tek na temelju testa, ne na neutralnom dokazu. Opis ispod je iz razdoblja kad je bio ugašen.
 `rules.json` → `btc_key_level` 57 392 → **`null`**. Gate u `run()` (1H trend SHORT blokiran dok je BTC tjedni close iznad razine; uveden 10.07., proširen na sve kripto 20.07. na uzorku od tri tjedna, nikad testiran) pri `null`
 ne okida (`getBtcWeeklyVsKey` vraća `belowKey: null`, uvjet traži `=== false`). Razina je bila 28% ispod cijene, pa je gate efektivno značio "nema 1H trend SHORT-ova". Razlog gašenja: nije potvrđen podacima
 (CSV 07.05.–29.10.: prije 20.07. kripto SHORT −0.33 $/trade naspram LONG −1.10 $; moj test 29.10. "samo LONG" nije potvrđen) i većinu posla već rade `shortBlockedByBtcBull` (BTC 4H BULL, 11.10.) i tjedni

@@ -4317,6 +4317,31 @@ const ROE_PROTECT_LOCK    = 12;          // % ROE koji se zaključava kad se akt
 const TRAIL_ARM_TP_PCT = 95;
 const BE_STOP_ENABLED    = false;        // 29.10.: BE-stop @ 70% TP isključen (trail ga nadomješta kad se aktivira)
 const PARTIAL_1R_ENABLED = false;        // 29.10.: partial +1R (zatvori ~$1, SL na BE) isključen — pomicao je SL prije TP-a
+// 08.11. (nalaz #47 + odluka vlasnika "uključi parcijalu"): parcijala od 25% na TP-u NIKAD se nije
+// izvršila — `partialClosePosition` je koristila goli `symbol`, kojeg u njenom opsegu nema, pa je
+// bacala ReferenceError koji je catch pojeo i vraćala false na SVAKOM pozivu (uvedeno u d0ae688,
+// popravak audita #16, živjelo tri tjedna). Referenca je popravljena (`pos.symbol`) i vlasnik je
+// 08.11. odlučio parcijalu UKLJUČITI — prvi put da stvarno radi.
+//
+// ŠTO TO ZNAČI U PRAKSI (dvije stvari koje nisu očite iz imena konstante):
+//  1) Pogađa SAMO `synapse_t` (1H + Supertrend). `checkPortfolioPositions` se zove jedino za
+//     `PORTFOLIO_IDS = ["synapse_t"]`, pa ULTRA-4H pozicije i dalje izlaze U CIJELOSTI preko
+//     `softExitMonitor`. Želi li se i za 4H, to je odvojena promjena (4H nije u PORTFOLIO_IDS).
+//  2) NE izvršava se točno na TP-u. Trail se armira na 95% puta i produži `pos.tp` za >= TRAIL_STEP,
+//     pa soft `tpHit` ne opali na originalnom TP-u; TP-HIT blok mjeri prema `pos.tpPct` (koji se
+//     NIKAD ne prepisuje) i radi u `botRun()`, svakih 5 min. Zatvara se dakle po cijeni 0-5 min
+//     NAKON prelaska originalnog TP-a — može biti iznad ili ispod njega, i CSV redak nosi tu
+//     cijenu (`liveP`), ne TP.
+//
+// RIZIK, zapisan jer je odlučeno bez simulacije: analiza 07.10. je pokazala da rano zaključavanje
+// profita (BE/ROE-protect) gubitnike pretvara u scratch i da "upravljanje izlazom NIJE problem".
+// Parcijala radi suprotno od odluke 29.10., koja je ugasila +1R parcijalu jer je dirala poziciju
+// prije TP-a. Očekuj manje punih trail pobjeda i više djelomično zaključanih. Provjeri nakon ~30
+// zatvorenih tradeova (udio W/N/L, prosječan R), uz napomenu da WR brojke sad imaju DVA retka po
+// trejdu (`tradePlanOutcomes` ih zbraja po Order ID-u, vidi nalaz #35).
+//
+// Vraćanje: `PARTIAL_TP_ENABLED = false` — ponašanje se vrati na puni izlaz, bez druge promjene.
+const PARTIAL_TP_ENABLED = true;
 
 function trailArmed(pos, price) {
   // pozicije koje su već u trail modu (stari kod ih je pomaknuo prije ove promjene) ostaju armirane
@@ -5104,7 +5129,7 @@ async function checkPortfolioPositions(pid) {
         // ── TP HIT: zatvori PARTIAL_CLOSE_PCT% na TP razini, aktiviraj trail za ostatak ──
         // Pali se kad cijena dosegne TP (100% TP puta). Otkazuje Bitget plan naloge
         // da track_stop ne zatvori cijelu poziciju, pa trail preuzima ostatak.
-        if (!pos.partialClosed && !pos.trailActive && isLivePortfolio) {
+        if (PARTIAL_TP_ENABLED && !pos.partialClosed && !pos.trailActive && isLivePortfolio) {
           const _tpPctP    = pos.tpPct ?? 4.0;
           const _pricePctP = pos.side === "LONG"
             ? (liveP - pos.entryPrice) / pos.entryPrice * 100
@@ -5778,7 +5803,7 @@ async function partialClosePosition(pos, closePct = PARTIAL_CLOSE_PCT) {
       side: closeSide, tradeSide: "close", marginMode: "isolated",
       holdSide: pos.side === "LONG" ? "long" : "short",
       orderType: "market",
-      size: fmtQty(symbol, qty),   // audit #16
+      size: fmtQty(pos.symbol, qty),   // audit #16 (nalaz #47: bio goli `symbol`, kojeg tu nema)
     });
     if (res.code === "00000") {
       console.log(`  📦 [PARTIAL-TP] ${pos.symbol} ${pos.side} — zatvoreno ${closePct}% (qty: ${qty.toFixed(4)}) | ostatak čeka TP`);
@@ -10125,7 +10150,7 @@ export async function generateDailyReport() {
 
 // Samo za test/signal-regression.mjs (bogati način: bullScore/bearScore i za NEUTRAL, cfg varijante).
 export { analyzeUltra as analyzeUltraForTest };
-export { applyTrail as applyTrailForTest, TRAIL_ARM_TP_PCT, BE_STOP_ENABLED, PARTIAL_1R_ENABLED };
+export { applyTrail as applyTrailForTest, TRAIL_ARM_TP_PCT, BE_STOP_ENABLED, PARTIAL_1R_ENABLED, PARTIAL_TP_ENABLED };
 
 // ─── Entry point ───────────────────────────────────────────────────────────────
 

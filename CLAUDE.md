@@ -18,7 +18,7 @@ audit nađe nalaz
 Pravila koja to drže na mjestu:
 
 - **Nalazi žive u `docs/AUDIT-2026-10-04.md`, ne u chatu.** Numeracija je neprekinuta kroz
-  prolaze (zadnji je #46). Nikad ne počinji numeraciju od 1 i ne prijavljuj ponovno nalaz koji
+  prolaze (zadnji je #47). Nikad ne počinji numeraciju od 1 i ne prijavljuj ponovno nalaz koji
   je tamo već zapisan — ako je regresirao, reci da je regresija.
 - **Predaja drugoj sesiji je datoteka, ne poruka.** Ako posao preuzima druga sesija, uputa joj je
   "pročitaj `CLAUDE.md` i `docs/AUDIT-2026-10-04.md`, pa popravi #N" — ne zalijepljeni blok.
@@ -172,7 +172,38 @@ kroz tjedni audit uz odluku vlasnika.
 
 ## Parcijalni izlazi MORAJU u CSV (18.10., nalazi #34 i #38)
 
-Postoje **dva** parcijalna izlaza i oba moraju upisati izlazni redak:
+> **STANJE: `+1R` parcijala UGAŠENA (`PARTIAL_1R_ENABLED = false`, 29.10.), TP-HIT parcijala
+> UKLJUČENA (`PARTIAL_TP_ENABLED = true`, 08.11., odluka vlasnika "uključi parcijalu").**
+>
+> **Nalaz #47 (08.11.):** TP-HIT parcijala se **nikad nije izvršila**, od `d0ae688` do 08.11.
+> `partialClosePosition` je koristila goli `symbol`, kojeg u njenom opsegu nema — ReferenceError je
+> pojeo `catch` oko naloga i funkcija je na SVAKOM pozivu vraćala `false`. Referenca je popravljena
+> (`pos.symbol`) i vlasnik je odlučio parcijalu uključiti, pa od 08.11. **prvi put stvarno radi**.
+> Zato **nalaz #34 treba čitati s ispravkom**: bio je točan da CSV zapisa nije bilo, ali pogrešan da
+> se dio pozicije tamo zatvarao — nije se, sve do 08.11.
+>
+> **Dvije stvari koje nisu očite iz imena konstante:**
+> 1. **Pogađa samo `synapse_t` (1H + Supertrend).** `checkPortfolioPositions` se zove jedino za
+>    `PORTFOLIO_IDS = ["synapse_t"]`, pa **ULTRA-4H i dalje izlazi u cijelosti** preko
+>    `softExitMonitor`. Za 4H bi trebala odvojena promjena.
+> 2. **Ne izvršava se točno na TP-u.** Trail se armira na 95% i produži `pos.tp` za ≥ `TRAIL_STEP`,
+>    pa soft `tpHit` ne opali na originalnom TP-u; TP-HIT blok mjeri prema `pos.tpPct` (nikad se ne
+>    prepisuje) i radi u `botRun()`, **svakih 5 min**. Zatvara se po cijeni 0–5 min NAKON prelaska
+>    originalnog TP-a — može biti iznad ili ispod njega, i CSV redak nosi tu cijenu, ne TP.
+>
+> **Posljedica na brojke:** od 08.11. trejd koji prijeđe TP ima **DVA izlazna retka** (parcijala +
+> ostatak). `tradePlanOutcomes` ih zbraja po Order ID-u (nalaz #35), ali svaka analiza koja broji
+> redke, a ne trejdove, od sad dvostruko broji te trejdove. Rizik je zapisan u `bot.js` uz
+> zastavicu: odlučeno je bez simulacije, a analiza 07.10. je pokazala da rano zaključavanje profita
+> gubitnike pretvara u scratch. Provjeri nakon ~30 zatvorenih tradeova. Vraćanje:
+> `PARTIAL_TP_ENABLED = false`.
+>
+> **`node --check` ovu klasu greške ne hvata** (piše i gore). Mrežu drži
+> `test/unbound-identifiers.mjs`: čita IZVOR, traži identifikator koji se koristi a nije vezan ni u
+> funkciji ni na modul levelu, i ima pozitivnu kontrolu koja vraća #47 u kopiju izvora i provjerava
+> da ga test uhvati. Dodaješ li funkciju s čestim nazivom parametra, taj test je ono što te čuva.
+
+Postoje **dva** parcijalna izlaza i oba moraju upisati izlazni redak (kad su uključena; vidi stanje gore):
 
 - **`+1R`** — zatvara koliko treba za ~$1 dobiti, SL na break-even.
 - **TP-HIT** — zatvara `PARTIAL_CLOSE_PCT` kad cijena dosegne TP, aktivira trail.

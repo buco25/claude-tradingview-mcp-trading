@@ -18,7 +18,7 @@ audit nađe nalaz
 Pravila koja to drže na mjestu:
 
 - **Nalazi žive u `docs/AUDIT-2026-10-04.md`, ne u chatu.** Numeracija je neprekinuta kroz
-  prolaze (zadnji je #47). Nikad ne počinji numeraciju od 1 i ne prijavljuj ponovno nalaz koji
+  prolaze (zadnji je #48). Nikad ne počinji numeraciju od 1 i ne prijavljuj ponovno nalaz koji
   je tamo već zapisan — ako je regresirao, reci da je regresija.
 - **Predaja drugoj sesiji je datoteka, ne poruka.** Ako posao preuzima druga sesija, uputa joj je
   "pročitaj `CLAUDE.md` i `docs/AUDIT-2026-10-04.md`, pa popravi #N" — ne zalijepljeni blok.
@@ -520,6 +520,10 @@ procijeni nakon ~30 zatvorenih tradeova. Povrat: `TRAIL_ARM_TP_PCT = 0`, `BE_STO
 - Kuke: `writeScanLog` (1H + Supertrend, LONG/SHORT; NEUTRAL/ERROR ne; SKIP samo ako nosi `dir` = smjer signala kojeg je blokirao kasniji gate — KEY_LEVEL, SAME_DIR, BTC_DEMA10, REL_STR_*, DAY_RANGE, cooldowni, MAX_CRYPTO; SKIP-ovi prije analize bez smjera ne, pa novi gate poslije signala u `run()` mora dodati `dir: signal`. **Nalaz #45 (01.11.): 16 gateova je blokiralo poznati signal BEZ ikakvog zapisa** — funding (FR, FR-TREND), 1H trend, BTC ALIGN, BTC.D, SEKTOR, LIQ, cooldown, pyramid stropovi, flip/kontra. U tablici su izgledali kao da nikad nista ne blokiraju. Popravljeno; **`test/audit-44-46.mjs` cita IZVOR i pada ako ijedan `continue` nakon `let { signal, reason } = result;` ne ostavi zapis**, pa novi gate ne moze nastati bez njega), `runUltra4hStrategy` iza `evaluateU4hGates` (4H; kasniji blokeri liq/equity/strop po svijeći nisu u retku), kraj `writeEntryCsv`/`writeExitCsv` (`trade_log`, event entry/exit (mala slova — CHECK u bazi)). `forming`, `candle_age_s`, `funding_pct` su NULL u v1.
 - `trade_log.data` je whitelist u `entryTradeRow`/`exitTradeRow` — nova polja se dodaju tamo, a ne spreadom pozicije (tajne/nepotrebno ne smiju u bazu).
 - `test/supabase-log.mjs` čuva no-op, `return=minimal`, backoff, timeout i da CSV ne ovisi o bazi.
+- **Nalaz #48 (10.11.): stvarni 1H ulazi u LIVE modu nisu imali zapis `ENTERED`** — `push` je postojao samo u PAPER grani, pa je `signal_log.entered` za 1H bio uvijek `false` (i tjedni Signal/Gate audit je
+  brojao 0 ulaza). Popravljeno: jedan redak `_enteredScanRow` za obje grane, `ENTRY_ERROR` kad nalog padne, pyramid adicija `ENTERED` s `PYRAMID` u razlogu (neuspjela `PYRAMID_FAILED`). **1H retci s
+  `entered = true` postoje tek od tog deploya; za ranije razdoblje ulaze uzmi iz `trade_log`.** ULTRA-4H i dalje nema `entered` po dizajnu. Dodaješ li novi ulazni put, mora upisati `ENTERED` u OBJE grane
+  (PAPER i LIVE) — `test/audit-48.mjs` čita izvor i ima pozitivnu kontrolu.
 
 ## KEY-LVL gate: ugašen 30.10., VRAĆEN 07.11. (odluka vlasnika)
 **Stanje od 07.11.: `btc_key_level` = 57 392 (gate UKLJUČEN) do pre-registriranog testa nad `signal_log` (~09.11.).** Ugašen je bio 30.10.–07.11.: u tom razdoblju 3 1H trend SHORT-a koje bi gate blokirao (INJ −0.76, BTC PBK −1.68,

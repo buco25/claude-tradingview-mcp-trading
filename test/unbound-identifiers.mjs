@@ -14,7 +14,9 @@
  */
 import { readFileSync } from "fs";
 
-const SRC = readFileSync(new URL("../bot.js", import.meta.url), "utf8");
+// 10.11.: CRLF -> LF. Na Windows checkoutu (core.autocrlf=true) bot.js ima CRLF, a parser opsega funkcija racuna na LF,
+// pa je test padao s desecima laznih nalaza (i kontrola #47 s njim) iako je izvor ispravan.
+const SRC = readFileSync(new URL("../bot.js", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 let fail = 0;
 const ok = (c, m) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
 

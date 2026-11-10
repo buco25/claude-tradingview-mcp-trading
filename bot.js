@@ -9370,6 +9370,10 @@ export async function run() {
               mode: _isLive ? (BITGET_DEMO ? "DEMO" : "LIVE") : "PAPER",
               candlePat: _candlePat1.name,
             });
+            // Nalaz #48 (10.11.): pyramid adicija je stvarni ulaz, a nije ostavljala nikakav zapis u scan_log/signal_log.
+            _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), bullScore: result.bullScore, bearScore: result.bearScore, isMomentum: result.isMomentum === true, halfSize: result._halfSize === true, price, blocker: "ENTERED", reason: `PYRAMID +${(existingPos.pyramidCount || 1) + 1} adicija @ ${fmtPrice(price)} | avg ${fmtPrice(pyramidResult.avgEntry)}` });
+          } else {
+            _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), price, blocker: "PYRAMID_FAILED", reason: "Pyramid adicija nije izvrsena (addToPyramid vratio prazno)" });
           }
           continue;  // Ne prolazimo kroz normalni entry flow
         }
@@ -9384,13 +9388,19 @@ export async function run() {
         const _rrLabel = `RR 1:${(tpPct/slPct).toFixed(1)}`;
         const _vipTag = entry.vipSlot ? " ⭐VIP" : "";
 
+        // Nalaz #48 (10.11.): zapis "ENTERED" se gradio i upisivao SAMO u PAPER grani, pa u LIVE modu stvarni 1H ulazi
+        // nisu postojali ni u scan_log.csv ni u Supabase signal_log (entered je uvijek bio false; tjedni audit je brojao 0 ulaza).
+        // Jedan redak, isti za obje grane; upisuje se tek NAKON što je ulaz stvarno evidentiran. Samo mjerenje.
+        const _enteredScanRow = { symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), bullScore: result.bullScore, bearScore: result.bearScore, isMomentum: result.isMomentum === true, halfSize: result._halfSize === true, price, blocker: "ENTERED", reason: `${result._strategy ?? (result.isMomentum?"MOM":"PBK")} ulaz @ ${fmtPrice(price)} SL ${fmtPrice(sl)} TP ${fmtPrice(tp)}${result._halfSize?" [POLA RIZIKA]":""}`, vwapDist: result.vwap ? ((price-result.vwap)/result.vwap*100).toFixed(2) : null };
+        let _enteredLogged = false;
+
         if (!_isLive) {
           entry.fundingPct = await getFundingForLog(symbol);   // nalaz #42: mjerenje NIKAD prije naloga
           addPosition(pid, entry);
           writeEntryCsv(pid, entry);
           _newEntriesThisScan++;
           h1CandleEntryAdded(Date.now(), loadPositions(pid));
-          _scanLogEntries.push({ symbol, signal, score: Math.max(result.bullScore||0,result.bearScore||0), bullScore: result.bullScore, bearScore: result.bearScore, isMomentum: result.isMomentum === true, halfSize: result._halfSize === true, price, blocker: "ENTERED", reason: `${result.isMomentum?"MOM":"PBK"} ulaz @ ${fmtPrice(price)} SL ${fmtPrice(sl)} TP ${fmtPrice(tp)}${result._halfSize?" [POLA RIZIKA]":""}`, vwapDist: result.vwap ? ((price-result.vwap)/result.vwap*100).toFixed(2) : null });
+          _scanLogEntries.push(_enteredScanRow); _enteredLogged = true;
           // Dinamički leverage: zone-based SL → getSafeLeverage izračunava; tier SL → fiksni
           const _dynLev = slMethod === "tier" ? (symSltp.leverage ?? null) : null;
           // odluka #3: ista kapica kao u setupSymbol, da paper poruka ne pokazuje leverage
@@ -9415,10 +9425,13 @@ export async function run() {
             writeEntryCsv(pid, entry);
             _newEntriesThisScan++;
             h1CandleEntryAdded(Date.now(), loadPositions(pid));
+            _scanLogEntries.push(_enteredScanRow); _enteredLogged = true;   // nalaz #48: prije Telegrama, da pad poruke ne pojede zapis
             console.log(`  ✅ LIVE NALOG [${pDef.name}] — ${entry.orderId}`);
             await tg(`🔴 LIVE [${pDef.name}/${pDef.timeframe}] ${signal === "LONG" ? "📈" : "📉"} <b>${signal} ${symbol}</b> ${_strengthEmoji}${_vipTag}\nUlaz: ${fmtPrice(price)} | SL: ${fmtPrice(sl)} (${slPct.toFixed(1)}%) | TP: ${fmtPrice(tp)} (${tpPct.toFixed(1)}%) | ${_rrLabel}\nEquity: $${equity.toFixed(2)} | Risk: $${riskAmount.toFixed(2)} | Notional: $${tradeSize.toFixed(0)} | Margin: $${usedMargin.toFixed(2)} | ${usedLev}x`);
           } catch (err) {
             console.log(`  ❌ LIVE NALOG PAO — ${err.message}`);
+            // nalaz #48: signal koji je prošao sve gateove a nalog je pao također nije ostavljao zapis
+            if (!_enteredLogged) _scanLogEntries.push({ symbol, signal, score: _enteredScanRow.score, price, blocker: "ENTRY_ERROR", reason: String(err.message).replace(/[\r\n"]+/g, " ").slice(0, 200) });   // bez novih redaka/navodnika: scan_log.csv se parsira po fiksnim indeksima
             await tg(`❌ LIVE GREŠKA [${pDef.name}] ${symbol}\n${err.message}`);
           }
         }

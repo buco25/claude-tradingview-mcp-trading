@@ -585,6 +585,11 @@ vektorske 89 % do pola u 26 tjedana, obične 94 %). Uvedeno jer je vlasnik tako 
 tjedna svijeća od 17.08.2026. (otvaranje oko 62 900) je oko 4 % ispod cijene, pa gate **trenutno blokira LONG-ove** dok se ne popuni ili cijena ne ode
 više od 10 % iznad nje.
 
+**Dashboard kartica „Vektorska svijeća (tjedna)"** (uz „Tjedna makro-faza"): pokazuje što gate trenutno blokira (⛔ LONG / ⛔ SHORT / ✅ slobodno) i dvije
+najbliže nepopunjene tjedne razine s udaljenošću. Podatke daje `getBtcWeeklyVectorOverview()` → `weeklyVectorOverview`, koji za blokadu zove isti
+`weeklyVectorBlock` kao gate, pa se prikaz i odluka ne mogu razići. Klijentski kod je između oznaka `VEC-CARD BEGIN/END` u `dashboard.js` i živi u
+template literalu (bez backticka, backslasha i dolar-vitice); test ga izvršava s lažnim `document`-om.
+
 **Procjena:** nakon ~30 blokada u `signal_log` (`'VEC_WEEKLY' = any(blockers)`) i ~100 ulaza s poljima `vec*` u `trade_log`. Vraćanje gatea:
 `VEC_WEEKLY_GATE_ENABLED = false` (mjerenje ostaje). `test/vector-candle.mjs` čuva definiciju, popunjenje, prag, ponašanje bez podataka i to da
 Supertrend ne zove gate.

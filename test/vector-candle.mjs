@@ -121,5 +121,31 @@ ok(VEC_WEEKLY_GATE_ENABLED === true, "gate je ukljucen (vracanje: VEC_WEEKLY_GAT
   ok(/volume: \+x\[5\]/.test(src), "tjedni BTC dohvat cuva volumen");
   ok((src.match(/\.\.\.vectorContext\(/g) || []).length === 3, "vectorContext se upisuje na sva tri ulazna puta (1H, 4H, ST)"); }
 
+// --- weeklyVectorOverview (dashboard kartica) ---
+{ const { weeklyVectorOverview } = await import("../bot.js");
+  const o = weeklyVectorOverview(weekly, 65500, NOW);
+  ok(o.enabled === true && o.price === 65500 && o.maxDistPct === VEC_WEEKLY_MAX_DIST_PCT, "pregled: nosi stanje gatea, cijenu i prag");
+  ok(o.levels.length === 1 && o.levels[0].level === 62900 && o.levels[0].bull === true && o.levels[0].distPct === -3.97, `pregled: nepopunjena razina s predznakom (${o.levels[0] && o.levels[0].distPct})`);
+  ok(o.blockLong && o.blockLong.level === 62900 && o.blockShort === null, "pregled: blokada je ista kao u gateu (LONG da, SHORT ne)");
+  const e = weeklyVectorOverview([], 65500, NOW);
+  ok(e.levels.length === 0 && e.blockLong === null && e.blockShort === null && e.price === null, "pregled bez podataka: prazno, ne baca"); }
+
+// --- dashboard.js: kartica postoji, a klijentski kod se izvrsava (NIKAD ne importati dashboard.js — cita se samo izvor) ---
+{ const dsrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "dashboard.js"), "utf8").replace(/\r/g, "");
+  ok(/getBtcWeeklyVectorOverview,/.test(dsrc) && /result\.vecWeekly = await getBtcWeeklyVectorOverview\(\)/.test(dsrc), "dashboard: uvozi pregled i salje ga u odgovoru (vecWeekly)");
+  ok(/id="btc-vec-val"/.test(dsrc) && /id="btc-vec-sub"/.test(dsrc), "dashboard: kartica ima oba elementa");
+  const a = dsrc.indexOf("// VEC-CARD BEGIN"), b = dsrc.indexOf("// VEC-CARD END");
+  const snip = a > 0 && b > a ? dsrc.slice(a, b) : "";
+  ok(snip.length > 200 && !/[`\\]|\$\{/.test(snip), "dashboard: klijentski kod kartice nema backtick, backslash ni dolar-viticu (zivi u template literalu)");
+  const run = (d) => { const els = { "btc-vec-val": { style: {} }, "btc-vec-sub": {} }; new Function("d", "document", snip)(d, { getElementById: id => els[id] || null }); return els; };
+  let els = run({ vecWeekly: { enabled: true, maxDistPct: 10, levels: [{ level: 62900, bull: true, distPct: -3.97 }], blockLong: { level: 62900, distPct: 3.97 }, blockShort: null } });
+  ok(els["btc-vec-val"].textContent === "⛔ LONG" && /62[.,\s]?900/.test(els["btc-vec-sub"].textContent) && /-3\.97%/.test(els["btc-vec-sub"].textContent), `kartica: blokiran LONG, razina i udaljenost (${els["btc-vec-val"].textContent} | ${els["btc-vec-sub"].textContent})`);
+  els = run({ vecWeekly: { enabled: true, maxDistPct: 10, levels: [], blockLong: null, blockShort: null } });
+  ok(els["btc-vec-val"].textContent === "✅ slobodno" && /nema nepopunjenih/.test(els["btc-vec-sub"].textContent), "kartica: nista ne blokira");
+  els = run({ vecWeekly: { enabled: false, maxDistPct: 10, levels: [], blockLong: null, blockShort: null } });
+  ok(els["btc-vec-val"].textContent === "isključen", "kartica: gate iskljucen");
+  let threw = false; try { run({}); run({ vecWeekly: null }); } catch { threw = true; }
+  ok(!threw, "kartica: bez podataka ne baca (ostaje crtica)"); }
+
 console.log(fail ? `\n${fail} PALO` : "\nSVE PROSLO");
 process.exit(fail ? 1 : 0);

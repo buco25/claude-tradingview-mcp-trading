@@ -1641,6 +1641,31 @@ export async function getBtcWeeklyVectorBlock(signal, btcPrice) {
     return weeklyVectorBlock(signal, btcPrice, _wkCandlesCache);
   } catch { return null; }
 }
+// Dashboard kartica (15.11.): sve nepopunjene tjedne BTC vektorske svijeće (najbliže prve; distPct s predznakom, + = iznad cijene)
+// i što gate u ovom trenutku blokira. Samo prikaz — odluku donosi weeklyVectorBlock, koji se ovdje i zove, pa se ne mogu razići.
+export function weeklyVectorOverview(weekly, btcPrice, nowMs = Date.now()) {
+  const out = { enabled: VEC_WEEKLY_GATE_ENABLED, maxDistPct: VEC_WEEKLY_MAX_DIST_PCT, price: null, levels: [], blockLong: null, blockShort: null };
+  const sorted = [...new Map((weekly || []).map(c => [c.time, c])).values()].sort((a, b) => a.time - b.time);
+  let from = 0; for (let i = sorted.length - 1; i > 0; i--) if (sorted[i].time - sorted[i - 1].time !== WEEK_MS) { from = i; break; }
+  const tail = sorted.slice(from);
+  let lastClosed = -1; for (let i = tail.length - 1; i >= 0; i--) if (tail[i].time + WEEK_MS <= nowMs) { lastClosed = i; break; }
+  if (lastClosed < VEC_LOOKBACK) return out;
+  const px = btcPrice > 0 ? btcPrice : tail[tail.length - 1].close;
+  if (!(px > 0)) return out;
+  out.price = px;
+  out.levels = unfilledVectors(tail, lastClosed, VEC_WEEKLY_SCAN)
+    .map(u => ({ level: u.open, bull: u.bull, type: u.type, time: u.time, distPct: +((u.open - px) / px * 100).toFixed(2) }))
+    .sort((a, b) => Math.abs(a.distPct) - Math.abs(b.distPct));
+  out.blockLong  = weeklyVectorBlock("LONG",  px, weekly, nowMs);
+  out.blockShort = weeklyVectorBlock("SHORT", px, weekly, nowMs);
+  return out;
+}
+export async function getBtcWeeklyVectorOverview(btcPrice) {
+  try {
+    await getBtcWeeklyBias();
+    return weeklyVectorOverview(_wkCandlesCache, btcPrice);
+  } catch { return weeklyVectorOverview([], btcPrice); }
+}
 
 // ─── Deribit Put/Call Ratio ───────────────────────────────────────────────────
 // P/C > 1.5 = tržište kupuje zaštitu od pada (strah) = potencijalni bottom

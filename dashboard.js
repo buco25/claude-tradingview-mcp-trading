@@ -15,7 +15,7 @@ import { run as botRun, checkBreakouts, syncPositionsFromBitget, checkBeStopAll,
   getDeribitPutCall, getLiquidationRisk, getEconEvents, isEconBlocked,
   getLongShortRatio, getStablecoinInflow, getBtcPerpBasis, getAltcoinSeason,
   generateDailyReport, autoFixCsvFromBitget, SYMBOL_COMBOS, getBtcDailyPivots, getAccountTransfers, calcLiqZones,
-  getBtcWeeklyVsKey, getRelStrengthVsBtc, isStockSym, isMetalSym, getBtcChillMode, getBtcDailyVsInvalidation, getBtcWeeklyEmaPhase,
+  getBtcWeeklyVsKey, getRelStrengthVsBtc, isStockSym, isMetalSym, getBtcChillMode, getBtcDailyVsInvalidation, getBtcWeeklyEmaPhase, getBtcWeeklyVectorOverview,
   getBtcWyckoffSignal, getWhaleDivergence, getBullMarketSupportBand,
   getBtcRegime1HExport, getBtcRegimeExport, getBtcDrawdownPctExport, recordOiSnapshot, getOiChangeMap, getDynamicAdx, PULLBACK_TTL,
   DEFAULT_COMBO, DEFAULT_MIN_SIG,
@@ -1929,6 +1929,11 @@ function renderHtml(allStats, allPositions, hb, rules = {}, ultra4hPositions = [
         <div style="font-size:10px;color:#9ca3af;margin-top:2px" id="btc-wema-sub">W-EMA10 vs W-EMA21</div>
       </div>
       <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px;text-align:center">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">Vektorska svijeća (tjedna)</div>
+        <div style="font-size:22px;font-weight:800" id="btc-vec-val">—</div>
+        <div style="font-size:10px;color:#9ca3af;margin-top:2px" id="btc-vec-sub">nepopunjene tjedne BTC svijeće</div>
+      </div>
+      <div style="background:#111827;border:1px solid #374151;border-radius:8px;padding:12px;text-align:center">
         <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;text-transform:uppercase">Wyckoff (60d TR)</div>
         <div style="font-size:22px;font-weight:800" id="btc-wyckoff-val">—</div>
         <div style="font-size:10px;color:#9ca3af;margin-top:2px" id="btc-wyckoff-sub">Spring/SOS/LPS bonus</div>
@@ -2060,6 +2065,22 @@ window.toggleScanFilter = function(btn) {
         document.getElementById('btc-wema-sub').textContent =
           'E10 $' + Math.round(we.ema10).toLocaleString() + (we.bullPhase ? ' > ' : ' < ') + 'E21 $' + Math.round(we.ema21).toLocaleString();
       }
+
+      // VEC-CARD BEGIN — vektorska svijeća (15.11.): što gate blokira + najbliže nepopunjene tjedne BTC svijeće
+      const vw = d.vecWeekly;
+      const vwEl = document.getElementById('btc-vec-val');
+      if (vw && vwEl) {
+        const vbl = vw.blockLong, vbs = vw.blockShort;
+        vwEl.textContent = !vw.enabled ? 'isključen' : (vbl && vbs) ? '⛔ LONG i SHORT' : vbl ? '⛔ LONG' : vbs ? '⛔ SHORT' : '✅ slobodno';
+        vwEl.style.color = !vw.enabled ? '#9ca3af' : (vbl || vbs) ? '#d97706' : '#059669';
+        const vnear = (vw.levels || []).slice(0, 2).map(function (x) {
+          return (x.bull ? '🐂 $' : '🐻 $') + Math.round(x.level).toLocaleString() + ' (' + (x.distPct > 0 ? '+' : '') + x.distPct + '%)';
+        });
+        document.getElementById('btc-vec-sub').textContent = vnear.length
+          ? 'nepopunjene: ' + vnear.join(' · ') + ' · blokira unutar ' + vw.maxDistPct + '%'
+          : 'nema nepopunjenih tjednih svijeća';
+      }
+      // VEC-CARD END
 
       // Wyckoff Spring/SOS/LPS (bull) + UTAD/SOW/LPSY (bear) — samo BTC, bonus signal
       const wy = d.wyckoff;
@@ -5203,6 +5224,11 @@ const server = http.createServer(async (req, res) => {
       // Tjedna makro-faza (automatski EMA10/EMA21 cross)
       try {
         result.weeklyEma = await getBtcWeeklyEmaPhase();
+      } catch {}
+
+      // Vektorska svijeća (15.11.): nepopunjene tjedne BTC vektorske svijeće + što gate trenutno blokira
+      try {
+        result.vecWeekly = await getBtcWeeklyVectorOverview();
       } catch {}
 
       // Wyckoff Spring/SOS/LPS detektor (22.08., samo BTC)

@@ -1398,6 +1398,96 @@ export function candleContext(candles, dir, entryPrice) {
   return { ctx, distAtr: Number.isFinite(d) ? +d.toFixed(2) : "" };
 }
 
+// ─── Vektorske svijeće (PVSRA) — 15.11., odluka vlasnika: "stavi vektorsku svijeću i neka odlučuje o ulazima" ───
+// Vektorska svijeća = svijeća s neuobičajeno velikim volumenom prema prethodnih VEC_LOOKBACK svijeća:
+//   ABOVE  — volumen >= 150 % prosjeka;
+//   CLIMAX — volumen >= 200 % prosjeka ILI najveći umnožak volumen × raspon u tih 10 svijeća.
+// Autor (TraderaEdge): tjedne vektorske svijeće se "po pravilu popune u cijelosti ili do 50 %", pa nepopunjenu koristi kao cilj.
+// "Popunjena" je ovdje kad se cijena kasnije vrati do OTVARANJA te svijeće (cijelo tijelo).
+// Dvije uloge, namjerno razdvojene (isti obrazac kao candle patterns):
+//  1) MJERENJE — `vectorContext` uz svaki ulaz upisuje u trade_log (NE u CSV) je li zadnja zatvorena svijeća vektorska i koliko je
+//     daleko najbliža nepopunjena u smjeru tradea / protiv njega. Ne utječe ni na jednu odluku.
+//  2) GATE — `weeklyVectorBlock` (niže, uz tjedni Supertrend): 1H trend i ULTRA-4H ulaz se preskače dok nepopunjena TJEDNA BTC
+//     vektorska svijeća "vuče" protiv smjera unutar VEC_WEEKLY_MAX_DIST_PCT. Gate samo blokira; ne dodaje ulaze i ne mijenja ulog.
+// Mjerenje prije uvođenja (replay 1H, 23 coina, 05/2023–11/2026, 34 235 ulaza): gate bi blokirao 3 % (H1) / 6 % (H2) ulaza; blokirani
+// +0,141R [−0,105, +0,371] u H1 i −0,102R [−0,270, +0,068] u H2 — NI DOKAZANO KORISNO NI ŠTETNO. Popunjavanje samo po sebi nije
+// posebnost vektorskih svijeća (tjedne: vektorske 89 % do pola, obične 94 %). Uvedeno na izričit zahtjev vlasnika, uz najmanji zahvat.
+// Vraćanje: `VEC_WEEKLY_GATE_ENABLED = false` (mjerenje ostaje).
+export const VEC_LOOKBACK = 10, VEC_ABOVE_MULT = 1.5, VEC_CLIMAX_MULT = 2.0;
+export const VEC_WEEKLY_GATE_ENABLED = true;
+export const VEC_WEEKLY_MAX_DIST_PCT = 10;   // nepopunjena tjedna svijeća dalja od ovoga ne blokira
+export const VEC_WEEKLY_SCAN = 104;          // koliko tjedana unatrag se traže nepopunjene
+
+// Je li svijeća `i` vektorska. Vraća { type: "CLIMAX" | "ABOVE" | "", bull: true | false | null, ratio }.
+export function vectorCandleAt(candles, i) {
+  const none = { type: "", bull: null, ratio: null };
+  if (!Array.isArray(candles) || !Number.isInteger(i) || i < VEC_LOOKBACK || i >= candles.length) return none;
+  const c = candles[i], v = Number(c?.volume);
+  if (!(v > 0) || !(c.high >= c.low)) return none;
+  let sum = 0, maxProd = 0;
+  for (let k = i - VEC_LOOKBACK; k < i; k++) {
+    const p = candles[k], pv = Number(p?.volume);
+    if (!(pv >= 0) || !(p.high >= p.low)) return none;
+    sum += pv;
+    const prod = pv * (p.high - p.low);
+    if (prod > maxProd) maxProd = prod;
+  }
+  const avg = sum / VEC_LOOKBACK;
+  if (!(avg > 0)) return none;
+  const ratio = +(v / avg).toFixed(2);
+  // umnožak mora biti STROGO veći: niz jednakih svijeća (nelikvidno, zastoj) inače bi cijeli bio "klimaks"
+  const type = (v >= VEC_CLIMAX_MULT * avg || (maxProd > 0 && v * (c.high - c.low) > maxProd)) ? "CLIMAX"
+             : v >= VEC_ABOVE_MULT * avg ? "ABOVE" : "";
+  if (!type || c.close === c.open) return { type: "", bull: null, ratio };
+  return { type, bull: c.close > c.open, ratio };
+}
+
+// Nepopunjene vektorske svijeće. `lastClosedIdx` = indeks zadnje ZATVORENE svijeće; kasnije svijeće (i ona u formiranju) služe samo
+// za provjeru popunjenja. Bikovska je popunjena kad kasniji low dođe do njenog otvaranja, medvjeđa kad kasniji high dođe do otvaranja.
+export function unfilledVectors(candles, lastClosedIdx, scan = 200) {
+  const out = [];
+  if (!Array.isArray(candles) || !Number.isInteger(lastClosedIdx)) return out;
+  const last = Math.min(lastClosedIdx, candles.length - 1);
+  for (let i = Math.max(VEC_LOOKBACK, last - scan + 1); i <= last; i++) {
+    const v = vectorCandleAt(candles, i);
+    if (!v.type) continue;
+    const open = candles[i].open;
+    let filled = false;
+    for (let k = i + 1; k < candles.length; k++) {
+      if (v.bull ? candles[k].low <= open : candles[k].high >= open) { filled = true; break; }
+    }
+    if (!filled) out.push({ time: candles[i].time, open, bull: v.bull, type: v.type });
+  }
+  return out;
+}
+
+// SAMO MJERENJE (trade_log): zadnja zatvorena svijeća + najbliža nepopunjena vektorska u smjeru tradea / protiv njega (u % od ulaza).
+// LONG: "u smjeru" = nepopunjena MEDVJEĐA iznad cijene (magnet gore), "protiv" = nepopunjena BIKOVSKA ispod. SHORT zrcalno.
+// Nikad ne baca — zove se uz gradnju ulaza, a kod ULTRA-4H to je NAKON naloga, pa iznimka ne smije prekinuti upis pozicije.
+export function vectorContext(candles, dir, entryPrice) {
+  const none = { vec: "", vecRatio: "", vecTargetPct: "", vecAgainstPct: "" };
+  try {
+    if (!Array.isArray(candles) || candles.length < VEC_LOOKBACK + 3 || !(entryPrice > 0) || (dir !== "LONG" && dir !== "SHORT")) return none;
+    const li = candles.length - 2;                 // n-1 se još formira
+    const v = vectorCandleAt(candles, li);
+    let toward = null, against = null;
+    for (const u of unfilledVectors(candles, li)) {
+      const d = (u.open - entryPrice) / entryPrice * 100;      // + = razina je iznad ulaza
+      const up = !u.bull && d > 0, down = u.bull && d < 0;
+      if (!up && !down) continue;
+      const dist = Math.abs(d), isToward = (dir === "LONG") === up;
+      if (isToward) toward = toward === null ? dist : Math.min(toward, dist);
+      else against = against === null ? dist : Math.min(against, dist);
+    }
+    return {
+      vec: v.type ? `${v.type}_${v.bull ? "BULL" : "BEAR"}` : "",
+      vecRatio: v.ratio ?? "",
+      vecTargetPct: toward === null ? "" : +toward.toFixed(2),
+      vecAgainstPct: against === null ? "" : +against.toFixed(2),
+    };
+  } catch { return none; }
+}
+
 // ─── Ishod trejda kao u nogometu: POBJEDA / NERIJEŠENO / PORAZ (07.10., na zahtjev vlasnika) ───
 // Dotad se "pobjedom" brojao svaki trade s Net P&L >= 0, pa je izlaz na +0.03 $ (break-even/ROE-protect scratch) držao WR na ~55-75% dok je
 // sustav gubio (4H od 23.9.: 68% "pobjeda", ali samo 7% trejdova >= 1R i 0% >= 2R). Prva ispravka (samo >=70% cilja = pobjeda, sve ostalo
@@ -1494,7 +1584,7 @@ export async function fetchBtcWeeklyCandles({ get = bitgetPublicGet, pages = WK_
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const d = await res.json();
     if (d.code !== "00000" || !Array.isArray(d.data) || !d.data.length) { if (p === 0) throw new Error(d.msg || "prazan odgovor"); break; }
-    const k = d.data.map(x => ({ time: +x[0], open: +x[1], high: +x[2], low: +x[3], close: +x[4] }));
+    const k = d.data.map(x => ({ time: +x[0], open: +x[1], high: +x[2], low: +x[3], close: +x[4], volume: +x[5] }));   // volume: za tjedne vektorske svijeće (15.11.)
     all.push(...k);
     const mn = Math.min(...k.map(x => x.time));
     if (mn >= end) break;
@@ -1503,10 +1593,13 @@ export async function fetchBtcWeeklyCandles({ get = bitgetPublicGet, pages = WK_
   return all;
 }
 let _wkBiasCache = { bias: "UNKNOWN", ts: 0 };
+let _wkCandlesCache = [];   // zadnje uspješno dohvaćene tjedne BTC svijeće (isti dohvat kao tjedni Supertrend; čita ih gate vektorske svijeće)
 export async function getBtcWeeklyBias() {
   if (Date.now() - _wkBiasCache.ts < WK_BIAS_TTL) return _wkBiasCache.bias;
   try {
-    const bias = weeklySupertrendBias(await fetchBtcWeeklyCandles());
+    const _wk = await fetchBtcWeeklyCandles();
+    _wkCandlesCache = _wk;
+    const bias = weeklySupertrendBias(_wk);
     if (bias === "UNKNOWN") throw new Error("premalo tjednih svijeca");
     if (bias !== _wkBiasCache.bias) console.log(`  📆 [WEEKLY ST] BTC tjedni Supertrend: ${bias}`);
     _wkBiasCache = { bias, ts: Date.now() };
@@ -1515,6 +1608,38 @@ export async function getBtcWeeklyBias() {
     _wkBiasCache = { bias: _wkBiasCache.bias, ts: Date.now() - WK_BIAS_TTL + WK_BIAS_RETRY };
   }
   return _wkBiasCache.bias;
+}
+
+// ─── Gate: nepopunjena TJEDNA BTC vektorska svijeća protiv smjera (15.11., odluka vlasnika; vidi "Vektorske svijeće" gore) ───
+// LONG se preskače dok postoji nepopunjena BIKOVSKA tjedna vektorska svijeća čije je otvaranje do VEC_WEEKLY_MAX_DIST_PCT ISPOD cijene
+// (autor: cijena se vraća popuniti je → vuče dolje). SHORT zrcalno: nepopunjena MEDVJEĐA s otvaranjem do toliko IZNAD cijene.
+// weekly: tjedne svijeće uzlazno, s volumenom; tjedan u formiranju se ne klasificira, ali se broji za popunjenje.
+// Vraća { level, distPct, time } najbliže takve svijeće ili null. Bez podataka (nema volumena, premalo tjedana, rupa u nizu) = null = bez blokade.
+export function weeklyVectorBlock(signal, btcPrice, weekly, nowMs = Date.now()) {
+  if (!VEC_WEEKLY_GATE_ENABLED || (signal !== "LONG" && signal !== "SHORT")) return null;
+  const sorted = [...new Map((weekly || []).map(c => [c.time, c])).values()].sort((a, b) => a.time - b.time);
+  let from = 0; for (let i = sorted.length - 1; i > 0; i--) if (sorted[i].time - sorted[i - 1].time !== WEEK_MS) { from = i; break; }   // samo neprekinut rep
+  const tail = sorted.slice(from);
+  let lastClosed = -1; for (let i = tail.length - 1; i >= 0; i--) if (tail[i].time + WEEK_MS <= nowMs) { lastClosed = i; break; }
+  if (lastClosed < VEC_LOOKBACK) return null;
+  const px = btcPrice > 0 ? btcPrice : tail[tail.length - 1].close;
+  if (!(px > 0)) return null;
+  let best = null;
+  for (const u of unfilledVectors(tail, lastClosed, VEC_WEEKLY_SCAN)) {
+    const d = (u.open - px) / px * 100;                        // + = razina iznad cijene
+    const hit = signal === "LONG" ? (u.bull && d < 0) : (!u.bull && d > 0);
+    if (!hit || Math.abs(d) > VEC_WEEKLY_MAX_DIST_PCT) continue;
+    if (!best || Math.abs(d) < best.distPct) best = { level: u.open, distPct: +Math.abs(d).toFixed(2), time: u.time };
+  }
+  return best;
+}
+// Koristi isti satni keš kao tjedni Supertrend (nema dodatnog dohvata). Nikad ne baca; greška = bez blokade.
+export async function getBtcWeeklyVectorBlock(signal, btcPrice) {
+  if (!VEC_WEEKLY_GATE_ENABLED) return null;
+  try {
+    await getBtcWeeklyBias();
+    return weeklyVectorBlock(signal, btcPrice, _wkCandlesCache);
+  } catch { return null; }
 }
 
 // ─── Deribit Put/Call Ratio ───────────────────────────────────────────────────
@@ -7078,6 +7203,12 @@ async function evaluateU4hGates({ symbol, candles, sig, btcRegime, liqScore = nu
     if (block(`BTC 4H režim ${btcRegime}`)) return done();
   }
 
+  // Nepopunjena tjedna BTC vektorska svijeća protiv smjera (15.11., odluka vlasnika) — vidi weeklyVectorBlock. Bez podataka ne blokira.
+  {
+    const vecBlk = await getBtcWeeklyVectorBlock(dir, _regime1hCache?.currentPrice);
+    if (vecBlk && block("tjedna vektorska", `  🧲 [ULTRA-4H][VEC-WEEKLY] ${symbol} — nepopunjena tjedna BTC vektorska svijeća @ $${vecBlk.level.toFixed(0)} (${vecBlk.distPct}% ${dir === "LONG" ? "ispod" : "iznad"} cijene) → ${dir} preskočen`)) return done();
+  }
+
   // Velocity kontra-signal gate — lagging signal protiv već obrnutog momentuma
   const velocity = checkVelocity(candles);
   if (velocity.sig !== 0 && ((dir === "LONG" && velocity.sig === -1) || (dir === "SHORT" && velocity.sig === 1))) {
@@ -7377,6 +7508,7 @@ export async function runUltra4hStrategy() {
         sigMask: sig.sigMask ?? null, btcRegime1h: _btcRegime1hLog, btcRegime4h: _btcRegime4,
         vipSlot: sig._vipSlot === true, candlePat: _candlePat4,
         ...(() => { const k = candleContext(candles, sig.signal, result.fillPrice ?? sig.price); return { candleCtx: k.ctx, entryDistAtr: k.distAtr }; })(),
+        ...vectorContext(candles, sig.signal, result.fillPrice ?? sig.price),   // samo mjerenje (trade_log); nikad ne baca
       };
       // nalaz #42: funding se dopisuje NAKON naloga (ovdje je i prije bio), nikad u literalu
       entry.fundingPct = await getFundingForLog(symbol);
@@ -7694,6 +7826,7 @@ async function runSupertrendEntries(ctx) {
         sigMask: null, entryMode: "ST", signalStrength: "normal", vipSlot: false,
         btcRegime1h, btcRegime4h, candlePat: detectCandlePattern(sig.candles1h).name,
         ...(() => { const k = candleContext(sig.candles1h, signal, price); return { candleCtx: k.ctx, entryDistAtr: k.distAtr }; })(),
+        ...vectorContext(sig.candles1h, signal, price),   // samo mjerenje (trade_log); gate vektorske svijeće ST NE gleda
       };
       console.log(`🎯 [${pDef.name}] NEW ${signal} ${symbol} @ ${fmtPrice(price)} | SL ${fmtPrice(sl)} | TP ${fmtPrice(tp)} | $${tradeSize.toFixed(0)} [SUPERTREND]`);
       if (!isLive) {
@@ -8756,6 +8889,17 @@ export async function run() {
             if (_wk.belowKey === true) console.log(`  ⚠️  [KEY-LVL] ${symbol} — BTC tjedni close < $${_wk.key} → SHORT režim potvrđen`);
           }
 
+          // Nepopunjena tjedna BTC vektorska svijeća protiv smjera (15.11., odluka vlasnika) — vidi weeklyVectorBlock.
+          // Isti opseg kao KEY-LVL: samo kripto trend ulazi, SWEEP/RANGE izuzeti. Samo blokira; bez podataka ne blokira.
+          if (!isStockSym(symbol) && !isMetalSym(symbol) && !_stratBypass) {
+            const _vecBlk = await getBtcWeeklyVectorBlock(signal, _regime1hCache?.currentPrice);
+            if (_vecBlk) {
+              console.log(`  🧲 [VEC-WEEKLY] ${symbol} — nepopunjena tjedna BTC vektorska svijeća @ $${_vecBlk.level.toFixed(0)} (${_vecBlk.distPct}% ${signal === "LONG" ? "ispod" : "iznad"} cijene) → ${signal} preskočen`);
+              _scanLogEntries.push({ symbol, signal: "SKIP", dir: signal, blocker: "VEC_WEEKLY", reason: `Nepopunjena tjedna BTC vektorska svijeća @ $${_vecBlk.level.toFixed(0)} (${_vecBlk.distPct}%) protiv ${signal} smjera` });
+              continue;
+            }
+          }
+
           // BTC daily EMA10 — globalni kripto filter: BTC ispod svog dEMA10 → alt LONG blokiran
           // (altovi prate BTC; per-simbol DEMA gate ovo ne hvata dok alt još nije probio svoju EMA)
           if (!isStockSym(symbol) && !isMetalSym(symbol) && symbol !== "BTCUSDT" && signal === "LONG" && !_stratBypass) {
@@ -9382,7 +9526,7 @@ export async function run() {
         const timestamp = new Date().toISOString();
         const orderId   = `${_isLive ? "LIVE" : "PAPER"}-${Date.now()}`;
         const mode      = _isLive ? (BITGET_DEMO ? "DEMO" : "LIVE") : "PAPER";
-        const entry = { symbol, signal, price, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode, sigMask: result.sigMask ?? null, entryMode: result._strategy ?? ((result.isMomentum ? "MOM" : "PBK") + (result._halfSize ? "-SOFT" : "")), signalStrength, vipSlot: result._vipSlot === true, btcRegime1h: _btcRegime1h, btcRegime4h: _btcRegime, candlePat: _candlePat1.name, ...(() => { const k = candleContext(candles, signal, price); return { candleCtx: k.ctx, entryDistAtr: k.distAtr }; })() };
+        const entry = { symbol, signal, price, sl, tp, tradeSize, margin, orderId, timestamp, strategy: pDef.strategy, timeframe: pDef.timeframe, slPct, tpPct, mode, sigMask: result.sigMask ?? null, entryMode: result._strategy ?? ((result.isMomentum ? "MOM" : "PBK") + (result._halfSize ? "-SOFT" : "")), signalStrength, vipSlot: result._vipSlot === true, btcRegime1h: _btcRegime1h, btcRegime4h: _btcRegime, candlePat: _candlePat1.name, ...(() => { const k = candleContext(candles, signal, price); return { candleCtx: k.ctx, entryDistAtr: k.distAtr }; })(), ...vectorContext(candles, signal, price) };
 
         const _strengthEmoji = signalStrength === "strong" ? "💪" : "📊";
         const _rrLabel = `RR 1:${(tpPct/slPct).toFixed(1)}`;

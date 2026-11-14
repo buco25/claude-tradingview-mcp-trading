@@ -559,3 +559,32 @@ mijenja se CSV/scan_log ni jedna odluka. Radi samo kad je Supabase bilježenje u
 granicu svijeće; iz njih se čitaju samo vrijednosti konstantne unutar dana (tekući tjedan OPEN, prethodni DOVRŠENI tjedan high/low, siječanjski open). **Dnevni dohvat je namjerno izvan keša**: iz njega
 se računa `dailyEma10/20` preko niza zatvaranja koji uključuje svijeću dana **koji se još formira** (isto `monthlyHigh/Low`), a DEMA je i score (TE_COMBO indeks 9) i obavezni gate — keš bi ga zamrznuo
 i mijenjao KOJE se tradeove uzima. Dodaješ li novi dohvat ovdje, prvo provjeri čita li vrijednost iz svijeće u formiranju.
+
+## Vektorske svijeće: mjerenje + gate na tjednoj BTC svijeći (15.11., odluka vlasnika)
+
+Vlasnik je 14./15.11. izričito tražio: „stavi vektorsku svijeću i neka odlučuje o ulazima". Vektorska svijeća (PVSRA, autor TraderaEdge je koristi na
+tjednom grafu) = volumen ≥ 150 % prosjeka prethodnih 10 svijeća (`ABOVE`), odnosno ≥ 200 % ili strogo najveći umnožak volumen × raspon u tih 10 (`CLIMAX`).
+„Popunjena" je kad se cijena kasnije vrati do njenog **otvaranja**. Sve je u `bot.js` uz candle patterns; dvije uloge, namjerno razdvojene:
+
+- **Mjerenje (`vectorContext`)** — uz svaki ulaz (1H, ULTRA-4H, Supertrend) u `trade_log.data` idu `vec` (oznaka zadnje zatvorene svijeće, npr.
+  `CLIMAX_BULL`), `vecRatio`, `vecTargetPct` (najbliža nepopunjena u smjeru tradea) i `vecAgainstPct` (protiv smjera). **Ne ide u CSV** (format CSV-a se ne
+  dira) i ne utječe ni na jednu odluku. Funkcija nikad ne baca: na 4H putu se zove NAKON naloga, pa iznimka ne smije prekinuti upis pozicije.
+- **Gate (`weeklyVectorBlock` / `getBtcWeeklyVectorBlock`)** — LONG se preskače dok postoji nepopunjena **bikovska tjedna BTC** vektorska svijeća čije je
+  otvaranje do `VEC_WEEKLY_MAX_DIST_PCT` (10 %) **ispod** cijene; SHORT zrcalno (medvjeđa, otvaranje do 10 % iznad). Vrijedi za 1H kripto trend ulaze
+  (odmah iza KEY-LVL, isti opseg: SWEEP/RANGE izuzeti; bloker `VEC_WEEKLY` u scan_log/signal_log) i za ULTRA-4H (`evaluateU4hGates`, bloker
+  „tjedna vektorska", vidi se i na dashboard badgeu). **Supertrend ga ne gleda** (filter smjera, ne zaštita izloženosti). Gate samo blokira: ne dodaje
+  ulaze i ne mijenja ulog.
+
+**Podaci:** isti satni keš tjednih BTC svijeća kao tjedni Supertrend (`fetchBtcWeeklyCandles` sad čuva i `volume`; `_wkCandlesCache`), dakle bez novog
+dohvata na putu ulaza. Bez podataka (nema volumena, manje od 11 zatvorenih tjedana, rupa u nizu, greška dohvata) gate **ne blokira**. Tjedan u formiranju
+se ne klasificira, ali se njegov low/high broji za popunjenje. Dashboard preview 4H gateova sad može sam okinuti taj tjedni dohvat (16 stranica, keš 1 h).
+
+**Dokaz je slab i to treba znati:** replay 1H (23 coina, 05/2023–11/2026, 34 235 ulaza) kaže da bi gate blokirao 3 % (H1) / 6 % (H2) ulaza; blokirani
++0,141R [−0,105, +0,371] u H1 i −0,102R [−0,270, +0,068] u H2 — ni korisno ni štetno. Samo „popunjavanje" nije posebnost vektorskih svijeća (tjedne:
+vektorske 89 % do pola u 26 tjedana, obične 94 %). Uvedeno jer je vlasnik tako odlučio, uz najmanji mogući zahvat. Stanje 15.11.: nepopunjena bikovska
+tjedna svijeća od 17.08.2026. (otvaranje oko 62 900) je oko 4 % ispod cijene, pa gate **trenutno blokira LONG-ove** dok se ne popuni ili cijena ne ode
+više od 10 % iznad nje.
+
+**Procjena:** nakon ~30 blokada u `signal_log` (`'VEC_WEEKLY' = any(blockers)`) i ~100 ulaza s poljima `vec*` u `trade_log`. Vraćanje gatea:
+`VEC_WEEKLY_GATE_ENABLED = false` (mjerenje ostaje). `test/vector-candle.mjs` čuva definiciju, popunjenje, prag, ponašanje bez podataka i to da
+Supertrend ne zove gate.

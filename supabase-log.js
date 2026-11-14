@@ -111,6 +111,8 @@ export function entryTradeRow(pid, entry) {
       tradeSize: num(entry.tradeSize), strategy: entry.strategy, entryMode: entry.entryMode || "PBK", sigMask: num(entry.sigMask),
       orderId: entry.orderId, btcRegime1h: entry.btcRegime1h, btcRegime4h: entry.btcRegime4h, candlePat: entry.candlePat,
       fundingPct: num(entry.fundingPct), ts: entry.timestamp,
+      // 15.11.: vektorska svijeća (samo mjerenje; prazno/nepoznato se izostavlja)
+      vec: entry.vec || null, vecRatio: num(entry.vecRatio), vecTargetPct: num(entry.vecTargetPct), vecAgainstPct: num(entry.vecAgainstPct),
     })),
   };
 }

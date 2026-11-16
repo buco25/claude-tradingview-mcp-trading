@@ -113,6 +113,7 @@ export function entryTradeRow(pid, entry) {
       fundingPct: num(entry.fundingPct), ts: entry.timestamp,
       // 15.11.: vektorska svijeća (samo mjerenje; prazno/nepoznato se izostavlja)
       vec: entry.vec || null, vecRatio: num(entry.vecRatio), vecTargetPct: num(entry.vecTargetPct), vecAgainstPct: num(entry.vecAgainstPct),
+      vecTarget: num(entry.vecTarget),   // 16.11.: cijena vektorske razine koja pali trail (null = nema upotrebljive)
     })),
   };
 }
@@ -124,6 +125,7 @@ export function exitTradeRow(pid, pos, exitPrice, reason, pnl, fee) {
       entryPrice: num(pos.entryPrice), exitPrice: num(exitPrice), sl: num(pos.sl), tp: num(pos.tp), quantity: num(pos.quantity),
       totalUSD: num(pos.totalUSD), pnl: num(pnl), fee: num(fee), net: num(pnl) != null && num(fee) != null ? num(pnl) - num(fee) : null,
       reason: txt(reason, 200), entryMode: pos.entryMode || "PBK", sigMask: num(pos.sigMask), orderId: pos.orderId,
+      vecTarget: num(pos.vecTarget), vecArmed: pos.vecArmed === true ? 1 : null,   // 16.11.: je li trail upaljen na vektorskoj razini
     })),
   };
 }

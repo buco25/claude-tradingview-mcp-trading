@@ -590,6 +590,17 @@ najbliže nepopunjene tjedne razine s udaljenošću. Podatke daje `getBtcWeeklyV
 `weeklyVectorBlock` kao gate, pa se prikaz i odluka ne mogu razići. Klijentski kod je između oznaka `VEC-CARD BEGIN/END` u `dashboard.js` i živi u
 template literalu (bez backticka, backslasha i dolar-vitice); test ga izvršava s lažnim `document`-om.
 
+**Vektorska razina pali trail (16.11., odluka vlasnika „prvi TP na vektorskoj svijeći, onda trail"; samo ULTRA-4H).** Pri ulazu
+`vectorTrailTarget(candles, dir, ulaz, slPct, tpPct)` nađe otvaranje najbliže nepopunjene vektorske svijeće **u smjeru tradea, na 4H svijećama
+samog simbola** (svaki coin svoje, ne BTC): LONG → medvjeđa iznad ulaza, SHORT → bikovska ispod. Koristi se samo ako je barem `VEC_TRAIL_MIN_R`
+(0,3) × rizik daleko i bliža od TP-a; sprema se u poziciju kao `vecTarget` (`addPosition`). Kad cijena dosegne tu razinu, `trailArmed` armira
+trail prije uobičajenih 95 % puta do TP-a (`pos.vecArmed = true`), a dalje radi nepromijenjeni `_applyTrailCore` (BE na +1R, ROE-zaštita 30/12,
+trail od +2,5 %). **Ništa se ne zatvara djelomično** (4H pozicije su na minimalnom notionalu). Stare pozicije nemaju `vecTarget` pa se ponašaju
+kao prije. `trade_log`: `vecTarget` na ulazu i izlazu, `vecArmed: 1` na izlazu kad je trail upaljen na razini. Mjerenje prije uvođenja (172
+stvarna 4H ulaza, 1m svijeće): meta postoji kod 55 % ulaza i dosegnuta je u 50 % njih (kao bilo koja razina na ~1R); očekivani R isti
+(+0,011R [−0,11, +0,13] prema sadašnjem), ali 38 % dobitnih umjesto 28 % i držanje 33 h umjesto 45 h — **drugačiji profil, ne prednost**.
+Vraćanje: `VEC_TRAIL_ARM_ENABLED = false`. 1H (`synapse_t`) namjerno nije uključen: nije mjeren, a ima vlastitu parcijalu na TP-u i time-stop.
+
 **Procjena:** nakon ~30 blokada u `signal_log` (`'VEC_WEEKLY' = any(blockers)`) i ~100 ulaza s poljima `vec*` u `trade_log`. Vraćanje gatea:
 `VEC_WEEKLY_GATE_ENABLED = false` (mjerenje ostaje). `test/vector-candle.mjs` čuva definiciju, popunjenje, prag, ponašanje bez podataka i to da
 Supertrend ne zove gate.

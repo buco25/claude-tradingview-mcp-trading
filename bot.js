@@ -1461,6 +1461,35 @@ export function unfilledVectors(candles, lastClosedIdx, scan = 200) {
   return out;
 }
 
+// ─── Vektorska razina pali trail (16.11., odluka vlasnika: "prvi TP na vektorskoj svijeći, onda trail") ───
+// Meta = OTVARANJE najbliže nepopunjene vektorske svijeće U SMJERU tradea, na vremenskom okviru i svijećama SAMOG simbola
+// (LONG: medvjeđa iznad ulaza; SHORT: bikovska ispod) — dakle vrijedi za svaki coin posebno, ne samo za BTC.
+// Upotrebljiva je samo ako je barem VEC_TRAIL_MIN_R × rizik daleko i BLIŽA od TP-a. Kad je cijena dosegne, trail se armira
+// (`trailArmed`) prije uobičajenih 95 % puta do TP-a; dalje radi isti `_applyTrailCore` (BE, ROE-zaštita, trail). Ništa se ne zatvara
+// djelomično — 4H pozicije su na minimalnom notionalu pa polovica nije pouzdano izvediva. Zasad samo strategije iz VEC_TRAIL_ARM_STRATEGIES.
+// Mjerenje prije uvođenja (172 stvarna 4H ulaza, 17.09.–09.11., 1m svijeće): meta postoji kod 55 % ulaza, dosegnuta u 50 % njih;
+// očekivani R isti kao bez toga (+0,011R [−0,11, +0,13]), ali dobitnih 38 % umjesto 28 % i držanje 33 h umjesto 45 h. NIJE prednost,
+// nego drugačiji profil — uvedeno jer je vlasnik tako odlučio. Vraćanje: `VEC_TRAIL_ARM_ENABLED = false`.
+export const VEC_TRAIL_ARM_ENABLED = true;
+export const VEC_TRAIL_ARM_STRATEGIES = ["ultra_4h"];
+export const VEC_TRAIL_MIN_R = 0.3;
+// Vraća cijenu mete ili null. Nikad ne baca (zove se uz gradnju ulaza NAKON naloga).
+export function vectorTrailTarget(candles, dir, entryPrice, slPct, tpPct) {
+  try {
+    if (!VEC_TRAIL_ARM_ENABLED || !Array.isArray(candles) || candles.length < VEC_LOOKBACK + 3) return null;
+    if (!(entryPrice > 0) || !(slPct > 0) || !(tpPct > 0) || (dir !== "LONG" && dir !== "SHORT")) return null;
+    let best = null, bestDist = Infinity;
+    for (const u of unfilledVectors(candles, candles.length - 2)) {
+      const d = (u.open - entryPrice) / entryPrice * 100;      // + = razina iznad ulaza
+      const toward = dir === "LONG" ? (!u.bull && d > 0) : (u.bull && d < 0);
+      const dist = Math.abs(d);
+      if (!toward || dist < VEC_TRAIL_MIN_R * slPct || dist >= tpPct) continue;
+      if (dist < bestDist) { bestDist = dist; best = u.open; }
+    }
+    return best;
+  } catch { return null; }
+}
+
 // SAMO MJERENJE (trade_log): zadnja zatvorena svijeća + najbliža nepopunjena vektorska u smjeru tradea / protiv njega (u % od ulaza).
 // LONG: "u smjeru" = nepopunjena MEDVJEĐA iznad cijene (magnet gore), "protiv" = nepopunjena BIKOVSKA ispod. SHORT zrcalno.
 // Nikad ne baca — zove se uz gradnju ulaza, a kod ULTRA-4H to je NAKON naloga, pa iznimka ne smije prekinuti upis pozicije.
@@ -4430,6 +4459,7 @@ function addPosition(pid, entry) {
     // korelacijskom capu (max 1 VIP adicija iznad MAX_SAME_DIR_CRYPTO) nikad ne vidi
     // da je VIP slot vec iskoristen, pa strop postaje efektivno neogranicen.
     vipSlot:    entry.vipSlot === true,
+    vecTarget:  entry.vecTarget > 0 ? entry.vecTarget : null,   // 16.11.: vektorska razina koja pali trail (vidi vectorTrailTarget)
     orderId:    entry.orderId,
     mode:       entry.mode || (PAPER_TRADING ? "PAPER" : BITGET_DEMO ? "DEMO" : "LIVE"),
     openedAt:   entry.timestamp,
@@ -4497,6 +4527,14 @@ function trailArmed(pos, price) {
   // pozicije koje su već u trail modu (stari kod ih je pomaknuo prije ove promjene) ostaju armirane
   if (pos.trailArmed || pos.trailPeak != null) return true;
   const entry = pos.entryPrice;
+  // 16.11. (odluka vlasnika): cijena je dosegla vektorsku razinu zapisanu pri ulazu → trail se armira ranije od 95 % TP-a
+  if (VEC_TRAIL_ARM_ENABLED && pos.vecTarget > 0 && VEC_TRAIL_ARM_STRATEGIES.includes(pos.strategy)
+      && (pos.side === "LONG" ? price >= pos.vecTarget : price <= pos.vecTarget)) {
+    pos.trailArmed = true;
+    pos.vecArmed = true;
+    console.log(`  🧲 [TRAIL-ARM] ${pos.symbol} ${pos.side} — cijena dosegla vektorsku razinu ${fmtPrice(pos.vecTarget)} → trail aktivan`);
+    return true;
+  }
   const tpPct = pos.origTpPct ?? Math.abs(pos.tp - entry) / entry * 100;
   if (!(tpPct > 0)) return false;
   const gainPct = pos.side === "LONG" ? (price - entry) / entry * 100 : (entry - price) / entry * 100;
@@ -7534,6 +7572,7 @@ export async function runUltra4hStrategy() {
         vipSlot: sig._vipSlot === true, candlePat: _candlePat4,
         ...(() => { const k = candleContext(candles, sig.signal, result.fillPrice ?? sig.price); return { candleCtx: k.ctx, entryDistAtr: k.distAtr }; })(),
         ...vectorContext(candles, sig.signal, result.fillPrice ?? sig.price),   // samo mjerenje (trade_log); nikad ne baca
+        vecTarget: vectorTrailTarget(candles, sig.signal, result.fillPrice ?? sig.price, sig.slPct, sig.tpPct),   // 16.11.: razina koja pali trail
       };
       // nalaz #42: funding se dopisuje NAKON naloga (ovdje je i prije bio), nikad u literalu
       entry.fundingPct = await getFundingForLog(symbol);

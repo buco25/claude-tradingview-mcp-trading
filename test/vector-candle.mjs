@@ -147,5 +147,38 @@ ok(VEC_WEEKLY_GATE_ENABLED === true, "gate je ukljucen (vracanje: VEC_WEEKLY_GAT
   let threw = false; try { run({}); run({ vecWeekly: null }); } catch { threw = true; }
   ok(!threw, "kartica: bez podataka ne baca (ostaje crtica)"); }
 
+// --- vectorTrailTarget + paljenje traila na vektorskoj razini (16.11.) ---
+{ const { vectorTrailTarget, applyTrailForTest: apply, VEC_TRAIL_ARM_ENABLED, VEC_TRAIL_ARM_STRATEGIES, VEC_TRAIL_MIN_R } = await import("../bot.js");
+  ok(VEC_TRAIL_ARM_ENABLED === true && VEC_TRAIL_ARM_STRATEGIES.join() === "ultra_4h" && VEC_TRAIL_MIN_R === 0.3, "paljenje traila na vektorskoj razini: ukljuceno, samo ultra_4h, najmanje 0,3R");
+  // medvjeda vektorska s otvaranjem 104 (pad na 100), cijena ostaje ispod -> za LONG s ulazom 100 meta je 104 (4 % iznad)
+  const c = [...base(12, 104), { open: 104, close: 100, high: 104.2, low: 99.5, volume: 300 }, { open: 100, close: 100.5, high: 101, low: 99.6, volume: 100 }, { open: 100.5, close: 100.2, high: 100.8, low: 100, volume: 10 }];
+  ok(vectorTrailTarget(c, "LONG", 100, 2, 6) === 104, "LONG: meta = otvaranje nepopunjene medvjede svijece iznad ulaza (4 %, izmedu 0,3R i TP-a)");
+  ok(vectorTrailTarget(c, "LONG", 100, 2, 3.5) === null, "meta dalja od TP-a (4 % >= 3,5 %) se ne koristi");
+  ok(vectorTrailTarget(c, "LONG", 100, 14, 30) === null, "meta bliza od 0,3R (4 % < 0,3 x 14 %) se ne koristi");
+  ok(vectorTrailTarget(c, "SHORT", 100, 2, 6) === null, "SHORT: medvjeda svijeca iznad nije meta u smjeru");
+  ok(vectorTrailTarget(null, "LONG", 100, 2, 6) === null && vectorTrailTarget(c, "LONG", NaN, 2, 6) === null && vectorTrailTarget(c, "X", 100, 2, 6) === null && vectorTrailTarget([{}, {}], "LONG", 100, 2, 6) === null, "los ulaz -> null, ne baca");
+  // paljenje: LONG ulaz 100, SL 98, TP 105 (5 %), vektorska razina 102 (2 % = 40 % puta do TP-a)
+  const mk = (strategy, vecTarget) => ({ symbol: "TESTUSDT", strategy, side: "LONG", entryPrice: 100, sl: 98, tp: 105, slPct: 2, tpPct: 5, quantity: 10, margin: 50, vecTarget });
+  let p = mk("ultra_4h", 102);
+  ok(apply(p, 101.9) === false && !p.trailArmed && p.sl === 98, "ispod vektorske razine: nista se ne mice");
+  ok(apply(p, 102.0) === true && p.trailArmed === true && p.vecArmed === true, "na vektorskoj razini: trail armiran i oznacen (vecArmed)");
+  ok(p.sl > 98, `nakon paljenja SL ide u korist pozicije (${p.sl})`);
+  p = mk("ultra_4h", null);
+  ok(apply(p, 102.5) === false && !p.trailArmed && p.sl === 98, "bez vektorske razine: ponasanje kao prije (trail tek na 95 % TP-a)");
+  ok(apply(p, 104.8) === true && p.trailArmed === true && !p.vecArmed, "bez razine: armira se na 96 % TP-a, bez oznake vecArmed");
+  p = mk("synapse_t", 102);
+  ok(apply(p, 102.5) === false && !p.trailArmed, "synapse_t (1H): vektorska razina NE pali trail");
+  const s = { symbol: "TESTUSDT", strategy: "ultra_4h", side: "SHORT", entryPrice: 100, sl: 102, tp: 95, slPct: 2, tpPct: 5, quantity: 10, margin: 50, vecTarget: 98 };
+  ok(apply(s, 98.1) === false && apply(s, 98.0) === true && s.vecArmed === true && s.sl < 102, "SHORT: pali se kad cijena PADNE do razine, SL se spusta");
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "bot.js"), "utf8").replace(/\r/g, "");
+  const a0 = src.indexOf("function addPosition(pid, entry)");
+  ok(a0 > 0 && /vecTarget:\s+entry\.vecTarget > 0 \? entry\.vecTarget : null/.test(src.slice(a0, a0 + 2500)), "addPosition sprema vecTarget u poziciju");
+  ok((src.match(/vecTarget: vectorTrailTarget\(/g) || []).length === 1, "vecTarget se racuna samo na ULTRA-4H ulazu");
+  const e = entryTradeRow("ultra_4h", { symbol: "BTCUSDT", signal: "LONG", price: 100, timestamp: 1, vecTarget: 102 });
+  const { exitTradeRow } = await import("../supabase-log.js");
+  const x = exitTradeRow("ultra_4h", { symbol: "BTCUSDT", side: "LONG", entryPrice: 100, vecTarget: 102, vecArmed: true }, 103, "Soft SL", 3, 0.1);
+  const x2 = exitTradeRow("ultra_4h", { symbol: "BTCUSDT", side: "LONG", entryPrice: 100 }, 103, "Soft SL", 3, 0.1);
+  ok(e.data.vecTarget === 102 && x.data.vecTarget === 102 && x.data.vecArmed === 1 && !("vecArmed" in x2.data) && !("vecTarget" in x2.data), "trade_log: vecTarget na ulazu i izlazu, vecArmed samo kad je trail upaljen na razini"); }
+
 console.log(fail ? `\n${fail} PALO` : "\nSVE PROSLO");
 process.exit(fail ? 1 : 0);
